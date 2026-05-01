@@ -1,0 +1,25 @@
+include_directories(
+	${CMAKE_SOURCE_DIR}
+	${CMAKE_SOURCE_DIR}/scribus
+)
+
+set(MESHDISTORTION_PLUGIN_SOURCES
+	meshdistortiondialog.cpp
+	meshdistortion.cpp
+)
+
+set(SCRIBUS_MESHDISTORTION_PLUGIN "meshdistortion")
+
+add_library(${SCRIBUS_MESHDISTORTION_PLUGIN} MODULE ${MESHDISTORTION_PLUGIN_SOURCES})
+
+target_link_libraries(${SCRIBUS_MESHDISTORTION_PLUGIN} ${EXE_NAME} ${SCRIBUS_2GEOM_LIB})
+
+if(WANT_PCH)
+	target_precompile_headers(${SCRIBUS_MESHDISTORTION_PLUGIN} PRIVATE "../../../plugins_pch.h")
+endif()
+
+install(TARGETS ${SCRIBUS_MESHDISTORTION_PLUGIN}
+	LIBRARY
+	DESTINATION ${PLUGINDIR}
+	PERMISSIONS ${PLUGIN_PERMISSIONS}
+)

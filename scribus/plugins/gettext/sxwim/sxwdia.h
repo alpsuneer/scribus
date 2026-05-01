@@ -1,0 +1,37 @@
+/*
+For general Scribus (>=1.3.2) copyright and licensing information please refer
+to the COPYING file provided with the program. Following this notice may exist
+a copyright and/or license notice that predates the release of Scribus 1.3.2
+for which a new license (GPL+exception) is in place.
+*/
+#ifndef SXWDIA_H
+#define SXWDIA_H
+
+#include "scconfig.h"
+
+#include <QDialog>
+class QCheckBox;
+class QPushButton;
+
+class SxwDialog : public QDialog
+{
+	Q_OBJECT
+
+public:
+	SxwDialog(bool update, bool prefix, bool pack);
+
+	bool shouldUpdate() const;
+	bool usePrefix() const;
+	bool askAgain() const;
+	bool packStyles() const;
+
+private:
+	QCheckBox* updateCheck { nullptr };
+	QCheckBox* prefixCheck { nullptr };
+	QCheckBox* doNotAskCheck { nullptr };
+	QCheckBox* packCheck { nullptr };
+	QPushButton* okButton { nullptr };
+	QPushButton* cancelButton { nullptr };
+};
+
+#endif // CSVDIA_H

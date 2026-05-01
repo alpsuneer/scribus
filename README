@@ -1,0 +1,14 @@
+=What’s New in Scribus 1.7.x ?=
+
+
+This is a cursory overview over the most important changes in Scribus compared to the stable version in 1.6.0 and previous SVN version 1.5.x.
+
+Also note that the 1.7.x series is not an officially stable version. Instead, all 1.7.x versions are development candidates of the future stable Scribus 1.8.0! We strongly recommend using version 1.6.0 after its release.
+
+==General==
+
+Qt 6: As of version 1.7.x, Scribus is built using version 6 of the Qt toolkit. Scribus 1.7.0 or higher requires at least Qt 6.4.
+
+
+
+

@@ -1,0 +1,127 @@
+/*
+For general Scribus (>=1.3.2) copyright and licensing information please refer
+to the COPYING file provided with the program. Following this notice may exist
+a copyright and/or license notice that predates the release of Scribus 1.3.2
+for which a new license (GPL+exception) is in place.
+*/
+#include <QApplication>
+#include <QDebug>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPalette>
+#include <QPixmap>
+#include <QRegularExpression>
+#include <QStyleHints>
+
+#include "scconfig.h"
+
+#include "api/api_application.h"
+#include "splash.h"
+#include "util.h"
+
+ScSplashScreen::ScSplashScreen(const QPixmap & pixmap, const QRect messageRect, Qt::WindowFlags f ) : QSplashScreen( pixmap, f)
+{
+#if defined _WIN32
+	QFont font("Lucida Sans Unicode", 9);
+#elif defined(__INNOTEK_LIBC__)
+	QFont font("WarpSans", 8);
+#elif defined(Q_OS_MACOS)
+	QFont font("Helvetica Regular", 11);
+#else
+	QFont font("DejaVu Sans", 8);
+	if (!font.exactMatch())
+		font.setFamily("Bitstream Vera Sans");
+#endif
+	setFont(font);
+	m_messageRect = messageRect;
+}
+
+void ScSplashScreen::setStatus( const QString &message )
+{
+	static QRegularExpression rx("&\\S*");
+	QString tmp(message);
+	qsizetype f = 0;
+	while (f != -1)
+	{
+		f = tmp.indexOf(rx);
+		if (f != -1)
+		{
+			tmp.remove(f, 1);
+			f = 0;
+		}
+	}
+
+	showMessage ( tmp, Qt::AlignRight | Qt::AlignAbsolute | Qt::AlignBottom, Qt::white );
+}
+
+void ScSplashScreen::drawContents(QPainter* painter)
+{
+	QFont f(font());
+	QRect messageRect = m_messageRect.isEmpty() ? rect() : m_messageRect;
+	QRect rM = messageRect.adjusted(0, 0, -15, -5);
+
+	// Unfortunately on Windows the palette information
+	// does not match Light/Dark theme immediately, so we
+	// force text color according to current colorScheme
+#if defined(Q_OS_WINDOWS)
+	QColor textColor;
+	switch (QApplication::styleHints()->colorScheme())
+	{
+	case Qt::ColorScheme::Dark:
+		textColor.setRgb(255, 255, 255);
+		break;
+	default:
+		textColor.setRgb(0, 0, 0);
+		break;
+	}
+#else
+	QColor textColor = palette().windowText().color();
+#endif
+
+	painter->setFont(f);
+	painter->setPen(textColor);
+	painter->drawText(rM, Qt::AlignRight | Qt::AlignAbsolute | Qt::AlignBottom, message());
+	QRect r = messageRect.adjusted(0, 0, -15, -60);
+
+	QFont lgf(font());
+#if defined _WIN32
+	lgf.setPointSize(30);
+#elif defined(__INNOTEK_LIBC__)
+	lgf.setPointSize(29);
+#elif defined(Q_OS_MACOS)
+	lgf.setPointSize(32);
+#else
+	lgf.setPointSize(29);
+#endif
+	painter->setFont(lgf);
+	painter->drawText(r,
+					  Qt::AlignRight | Qt::AlignAbsolute | Qt::AlignBottom,
+					  ScribusAPI::getVersion());
+
+	if (!ScribusAPI::isSVN())
+		return;
+
+	if (ScribusAPI::haveSVNRevision())
+	{
+		QString revText = QString("SVN Revision: %1").arg(ScribusAPI::getSVNRevision());
+		QRect r2 = messageRect.adjusted(10, 10, -15, -30);
+		painter->setFont(f);
+		painter->drawText(r2, Qt::AlignRight | Qt::AlignAbsolute | Qt::AlignBottom, revText);
+	}
+
+	QFont wf(font());
+#if defined _WIN32
+	wf.setPointSize(10);
+#elif defined(__INNOTEK_LIBC__)
+	wf.setPointSize(9);
+#elif defined(Q_OS_MACOS)
+	wf.setPointSize(12);
+#else
+	wf.setPointSize(9);
+#endif
+	painter->setFont(wf);
+	QString warningText("Development Version");
+	QRect r3 = messageRect.adjusted(10, 10, -15, -45);
+	painter->drawText(r3, Qt::AlignRight | Qt::AlignAbsolute | Qt::AlignBottom, warningText);
+}
+

@@ -1,0 +1,92 @@
+BUILDING SCRIBUS ON MICROSOFT WINDOWS WITH MICROSOFT VISUAL STUDIO
+==================================================================
+
+This documentation is minimal and assume you have a decent knowledge of 
+Microsoft Visual Studio. No help regarding use of Visual Studio and
+related tools will be provided.
+
+You will need:
+- Microsoft Windows 10 build 1809 or a more recent version
+- Microsoft Visual Studio 2019 or later (for 32/64bit build)
+- A recent Qt release built with corresponding Visual Studio version (minimum 6.2, recommended >= 6.2.3)
+- Scribus 17x libraries kit downloaded from https://sourceforge.net/projects/scribus/files/scribus-libs/
+
+Provided solutions have been tested with following Microsoft Visual Studion editions:
+- Microsoft Visual Studio 2019 Community and Professional
+- Microsoft Visual Studio 2022 Community and Professional
+
+GETTING DEPENDENCIES
+====================
+
+This is a quick and dirty set of notes that will be filled out once everything's
+verified as correct and working. It assumes that you'll be building all your
+dependencies at a single root such as C:\Developer. The root *MUST NOT* have spaces
+in its path.
+
+
+Building Qt:
+------------
+
+Due to the complexity involved in compiling Qt, it is suggested to download precompiled binaries. To do so, 
+get Qt Online installer at https://www.qt.io/download-qt-installer, execute installer and follow instructions.
+
+
+Building 3rd party libraries:
+-----------------------------
+
+Archives with ready-to-build solutions for scribus dependencies have been made available on Sourceforge: 
+https://sourceforge.net/projects/scribus/files/scribus-libs/
+
+Archives for Visual Studio 2019 and 2022 are provided. These archives can be used to compile  all dependencies 
+necessary for Scribus. These archives allows to build libraries for 32bit and 64bit platforms using default toolsets. 
+The default configuration  allows to build binaries compatible with Windows Vista and up.
+
+Download the scribus-17x-libs-msvc-YYYYMMDD.7z archive where YYYYMMDD represents the date when the archive has been prepared/uploaded to Sourceforge.
+This archive contains Scribus 1.7.x specific libraries used for current Scribus 1.7.x releases.
+
+Then follow these steps :
+- uncompress the downloaded archive in the directory of your choice. The path of this directory should be as short as possible as
+  Visual Studio compiler and linker cannot handle paths of more than about 250 characters
+- open the visual studio solution (*.sln) located in the scribus-1.7.x-libs-* directory
+- build debug and release configurations for all platforms (Win32 and/or x64) you plan to execute scribus on
+
+You can also use msbuild through the command line. To do so you can use the provided build-libs.bat script. 
+Execute the script and a menu will allow you to choose amongst the different supported Microsoft Visual Studio
+versions and platforms.
+
+BUILDING SCRIBUS
+====================
+
+After having compiled all dependencies, open the Scribus-build-props.props file located in Scribus\win32\msvc2019,
+or Scribus\win32\msvc2022 depending on the Visual Studio version you are using in a text editor. Update the dependency paths 
+to match your system.
+
+Open the Visual Studio solution located in same directory and start building. Note: if you built dependencies with a different 
+toolset than the default one, you should either modify toolset directly in all projects or build the solution through command 
+line using msbuild.
+
+After building completed, you will find executables in a Scribus-builds\scribus-$(configuration)-$(platform)-$(platformtoolset)\
+directory, located in same directory as Scribus sources. Those executables will not function yet. Scribus dependencies must be 
+copied to install directory first.
+
+INSTALLING RESOURCES AND DEPENDENCIES
+=====================================
+
+The provided Visual Studio solutions are configured in such a way that resources provided by Scribus source code will be copied
+to appropriate directories during the build process. Before being able to run Scribus, you will have however to copy dependency 
+dlls to build directories.
+
+To install Scribus dependency dlls:
+- open the scribus-1.7.x-libs-msvc directory where you uncompressed Scribus 1.7.x libs
+- open the copy-dlls-to-build-dir.bat file in a text editor
+- modify the SCRIBUS_BUILDS_DIR variable appropriately
+- execute batch file
+
+Finally copy Qt DLLs to build directory and Qt plugins directory to "qtplugins" directory.
+Scribus should now run.
+
+Crash problems at runtime? Verify that Scribus and all its dependencies use the same runtime, and that all were built 
+for debug or release configurations and not a mixture of the two. On Windows, it is strictly not recommended to mix 
+debug and release binaries. Doing so is not supported and will usually trigger unpredictable issues and crashes.
+
+You can use depends.exe to check that the runtimes match.

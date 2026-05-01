@@ -1,0 +1,25 @@
+include_directories(
+	${CMAKE_SOURCE_DIR}
+	${CMAKE_SOURCE_DIR}/scribus
+)
+
+set(LENSEFFECTS_PLUGIN_SOURCES
+	lensdialog.cpp
+	lenseffects.cpp
+)
+
+set(SCRIBUS_LENSEFFECTS_PLUGIN "lenseffects")
+
+add_library(${SCRIBUS_LENSEFFECTS_PLUGIN} MODULE ${LENSEFFECTS_PLUGIN_SOURCES})
+
+target_link_libraries(${SCRIBUS_LENSEFFECTS_PLUGIN} ${EXE_NAME})
+
+if(WANT_PCH)
+	target_precompile_headers(${SCRIBUS_LENSEFFECTS_PLUGIN} PRIVATE "../../plugins_pch.h")
+endif()
+
+install(TARGETS ${SCRIBUS_LENSEFFECTS_PLUGIN}
+	LIBRARY
+	DESTINATION ${PLUGINDIR}
+	PERMISSIONS ${PLUGIN_PERMISSIONS}
+)

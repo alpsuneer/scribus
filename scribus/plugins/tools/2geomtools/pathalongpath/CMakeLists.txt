@@ -1,0 +1,25 @@
+include_directories(
+	${CMAKE_SOURCE_DIR}
+	${CMAKE_SOURCE_DIR}/scribus
+)
+
+set(PATHALONGPATH_PLUGIN_SOURCES
+	pathdialog.cpp
+	pathalongpath.cpp
+)
+
+set(SCRIBUS_PATHALONGPATH_PLUGIN "pathalongpath")
+
+add_library(${SCRIBUS_PATHALONGPATH_PLUGIN} MODULE ${PATHALONGPATH_PLUGIN_SOURCES})
+
+target_link_libraries(${SCRIBUS_PATHALONGPATH_PLUGIN} ${EXE_NAME} ${SCRIBUS_2GEOM_LIB})
+
+if(WANT_PCH)
+	target_precompile_headers(${SCRIBUS_PATHALONGPATH_PLUGIN} PRIVATE "../../../plugins_pch.h")
+endif()
+
+install(TARGETS ${SCRIBUS_PATHALONGPATH_PLUGIN}
+	LIBRARY
+	DESTINATION ${PLUGINDIR}
+	PERMISSIONS ${PLUGIN_PERMISSIONS}
+)

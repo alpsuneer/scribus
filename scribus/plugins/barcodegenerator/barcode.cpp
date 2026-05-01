@@ -1,0 +1,141 @@
+/*
+For general Scribus (>=1.3.2) copyright and licensing information please refer
+to the COPYING file provided with the program. Following this notice may exist
+a copyright and/or license notice that predates the release of Scribus 1.3.2
+for which a new license (GPL+exception) is in place.
+*/
+
+#include "barcode.h"
+#include "barcodegenerator.h"
+#include "bwipp/postscriptbarcode.hpp"
+#include "scribus.h"
+#include "scribuscore.h"
+#include "scribusstructs.h"
+#include "scpaths.h"
+
+Barcode::Barcode()
+{
+	languageChange();
+}
+
+Barcode::~Barcode() = default;
+
+void Barcode::languageChange()
+{
+	m_actionInfo.name = "BarcodeGenerator";
+	m_actionInfo.text = tr("Barcode");
+	m_actionInfo.helpText = tr("Insert a barcode");
+	if (ScCore->haveGS())
+	{
+		m_actionInfo.menu = "Insert";
+		m_actionInfo.menuAfterName = "toolsInsertRenderFrame";
+		m_actionInfo.toolbar = "Tools";
+	}
+	m_actionInfo.iconPath1 = "tool-insert-barcode";
+	m_actionInfo.iconPath2 = "tool-insert-barcode";
+	m_actionInfo.enabledOnStartup = false;
+//	m_actionInfo.forAppMode.append(modeNormal);
+	m_actionInfo.needsNumObjects = -1;
+}
+
+QString Barcode::fullTrName() const
+{
+	return QObject::tr("Barcode Generator");
+}
+
+const ScActionPlugin::AboutData* Barcode::getAboutData() const
+{
+	AboutData* about = new AboutData;
+	Q_CHECK_PTR(about);
+
+	about->authors = QString::fromUtf8("Terry Burton - <tez@terryburton.co.uk>, Petr Van\xc4\x9bk <petr@scribus.info>");
+	about->shortDescription = tr("Scribus frontend for Barcode Writer in Pure PostScript");
+	about->description = "Barcode Writer in Pure PostScript generates all barcode formats entirely within PostScript hence this plugin requires Ghostscript to be installed on your system. https://bwipp.terryburton.co.uk";
+
+	// Extract the version information from BWIPP
+	QString barcodeFile = ScPaths::instance().shareDir() + QString("/plugins/barcode.ps");
+	try
+	{
+		bwipp::BWIPP ctx(bwipp::InitOpts{}.filename(barcodeFile.toLocal8Bit().constData()));
+		std::string ver = ctx.get_version();
+		about->version = !ver.empty() ? "Backend: " + QString::fromLatin1(ver.c_str()) : "Backend: Unknown";
+	}
+	catch (const std::exception &)
+	{
+		about->version = "Unable to open backend file";
+	}
+	// about->releaseDate
+	about->copyright = QString::fromUtf8("Backend: Copyright (c) 2004-2026 Terry Burton - tez@terryburton.co.uk\nFrontend: Copyright (c) 2005 Petr Van\xc4\x9bk - petr@scribus.info");
+	about->license = "Backend: MIT/X-Consortium, Frontend: GPL";
+	return about;
+}
+
+void Barcode::deleteAboutData(const AboutData* about) const
+{
+	Q_ASSERT(about);
+	delete about;
+}
+
+bool Barcode::run(ScribusDoc* doc, const QString& /*target*/ )
+{
+	if (!doc || !ScCore->haveGS())
+		return false;
+	BarcodeGenerator *bg = new BarcodeGenerator();
+	Q_CHECK_PTR(bg);
+	ScribusMainWindow* mw = doc->scMW();
+	if (mw->pluginEditSilent)
+	{
+		PageItem* item = mw->pluginEditItem;
+		QMap<QString, QString> params = mw->pluginEditParams;
+		mw->pluginEditItem = nullptr;
+		mw->pluginEditSilent = false;
+		mw->pluginEditParams.clear();
+
+		if (!params.isEmpty())
+		{
+			// Scripter path: params provided externally
+			double x = params.take("_scriptedX").toDouble();
+			double y = params.take("_scriptedY").toDouble();
+			bg->loadFromParams(params);
+			bg->generateBarcode(nullptr, x, y);
+		}
+		else if (item)
+		{
+			// Attribute-edit path: params on item
+			bg->loadFromItem(item);
+			bg->generateBarcode(item);
+		}
+
+		delete bg;
+		return true;
+	}
+
+	if (mw->pluginEditItem)
+	{
+		PageItem* item = mw->pluginEditItem;
+		mw->pluginEditItem = nullptr;
+		bg->loadFromItem(item);
+	}
+	bg->exec();
+	delete bg;
+	return true;
+}
+
+int barcodegenerator_getPluginAPIVersion()
+{
+	return PLUGIN_API_VERSION;
+}
+
+ScPlugin* barcodegenerator_getPlugin()
+{
+	Barcode* plug = new Barcode();
+	Q_CHECK_PTR(plug);
+	return plug;
+}
+
+void barcodegenerator_freePlugin(ScPlugin* plugin)
+{
+	Barcode* plug = qobject_cast<Barcode*>(plugin);
+	Q_ASSERT(plug);
+	delete plug;
+}

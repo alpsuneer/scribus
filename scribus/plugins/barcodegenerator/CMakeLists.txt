@@ -1,0 +1,44 @@
+include_directories(
+	${CMAKE_SOURCE_DIR}
+	${CMAKE_SOURCE_DIR}/scribus
+	${SCRIBUS_AUTOGEN_INCLUDE_PATH}
+	${CMAKE_CURRENT_SOURCE_DIR}/bwipp
+)
+
+set(BARCODEGENERATOR_PLUGIN_SOURCES
+	barcode.cpp
+	barcodegenerator.cpp
+	barcodegeneratorrenderthread.cpp
+	bwipp/postscriptbarcode.c
+)
+
+set(SCRIBUS_BARCODEGENERATOR_PLUGIN "barcodegenerator")
+
+add_library(${SCRIBUS_BARCODEGENERATOR_PLUGIN} MODULE ${BARCODEGENERATOR_PLUGIN_SOURCES})
+
+target_compile_definitions(${SCRIBUS_BARCODEGENERATOR_PLUGIN} PRIVATE BWIPP_API=)
+
+target_link_libraries(${SCRIBUS_BARCODEGENERATOR_PLUGIN} ${EXE_NAME})
+
+if(WANT_PCH)
+	target_precompile_headers(${SCRIBUS_BARCODEGENERATOR_PLUGIN} PRIVATE "../plugins_pch.h")
+endif()
+
+install(TARGETS ${SCRIBUS_BARCODEGENERATOR_PLUGIN}
+	LIBRARY
+	DESTINATION ${PLUGINDIR}
+	PERMISSIONS ${PLUGIN_PERMISSIONS}
+)
+
+install(FILES bwipp/barcode.ps.src
+	DESTINATION ${SHAREDIR}/plugins
+	RENAME barcode.ps
+)
+
+install(FILES barcode_ui.json
+	DESTINATION ${SHAREDIR}/plugins
+)
+
+add_dependencies(Plugins ${SCRIBUS_BARCODEGENERATOR_PLUGIN})
+
+# set_target_properties(${SCRIBUS_BARCODEGENERATOR_PLUGIN} PROPERTIES VERSION "0.0.0")
