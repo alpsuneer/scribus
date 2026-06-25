@@ -21,6 +21,7 @@ for which a new license (GPL+exception) is in place.
  *                                                                         *
  ***************************************************************************/
 
+#include <atomic>
 #include <cstdlib>
 #include <memory>
 #include <utility>
@@ -167,8 +168,12 @@ public:
 	void changed(PageItem* it, bool doLayout) override
 	{
 		it->invalidateLayout();
-		if (doLayout)
+		static std::atomic<int> s_docLayoutDepth{0};
+		if (doLayout && s_docLayoutDepth < 2) {
+			++s_docLayoutDepth;
 			it->layout();
+			--s_docLayoutDepth;
+		}
 		QTransform t = it->getTransform();
 		double w = it->visualWidth();
 		double h = it->visualHeight();
@@ -313,6 +318,8 @@ void ScribusDoc::init()
 	m_docPrefsData.itemToolPrefs.textFont = m_appPrefsData.itemToolPrefs.textFont;
 	m_docPrefsData.itemToolPrefs.textSize = m_appPrefsData.itemToolPrefs.textSize;
 	m_docPrefsData.itemToolPrefs.textTabFillChar = m_appPrefsData.itemToolPrefs.textTabFillChar;
+	m_docPrefsData.hyphPrefs.Automatic = m_appPrefsData.hyphPrefs.Automatic;
+	m_docPrefsData.hyphPrefs.AutoCheck = m_appPrefsData.hyphPrefs.AutoCheck;
 	m_docPrefsData.opToolPrefs.dispX = m_appPrefsData.opToolPrefs.dispX;
 	m_docPrefsData.opToolPrefs.dispY = m_appPrefsData.opToolPrefs.dispY;
 	m_docPrefsData.opToolPrefs.constrain = m_appPrefsData.opToolPrefs.constrain;
@@ -365,6 +372,7 @@ void ScribusDoc::init()
 	pstyle.setHasBullet(false);
 	pstyle.setHasNum(false);
 	pstyle.setHyphenConsecutiveLines(2);
+	pstyle.setHyphenationMode(ParagraphStyle::AutomaticHyphenation);
 	pstyle.setDropCapLines(2);
 	pstyle.setParEffectOffset(0);
 	pstyle.setBackgroundColor(CommonStrings::None);
@@ -14976,7 +14984,69 @@ bool ScribusDoc::sizeItem(double newW, double newH, PageItem *pi, bool fromMP, b
 			//			currItem->updateGradientVectors();
 		}
 
-		if (activeTransaction)
+		if (activeTransaction) { /* transaction */ }
+
+
+
+		// Sync caption frame width if image frame
+		if (currItem->isImageFrame())
+		{
+			currItem->adjustPictScale();
+
+			QString captName = QString("caption_%1").arg(currItem->itemName());
+
+			for (PageItem* pi : DocItems)
+			{
+				if (pi->itemName() == captName && pi->isTextFrame())
+				{
+					pi->setWidth(currItem->width());
+					pi->setXPos(currItem->xPos());
+					pi->setYPos(currItem->yPos() + currItem->height());
+
+					PageItem_TextFrame* tf = pi->asTextFrame();
+
+					if (tf)
+					{
+						double low = 10.0;
+						double high = 5000.0;
+
+						for (int iter = 0; iter < 25; ++iter)
+						{
+							double mid = (low + high) / 2.0;
+
+							tf->setHeight(mid);
+
+							tf->updateClip();
+							tf->layout();
+
+							if (tf->frameOverflows())
+								low = mid + 1.0;
+							else
+								high = mid;
+						}
+
+						tf->setHeight(high + 4);
+
+						tf->updateClip();
+						tf->layout();
+						tf->invalidateLayout();
+						tf->update();
+					}
+
+					pi->invalidateLayout();
+					pi->update();
+
+					break;
+				}
+			}
+
+			currItem->invalidateLayout();
+			currItem->updateClip();
+			currItem->update();
+
+			regionsChanged()->update(QRectF());
+		}
+
 		{
 			currItem->checkChanges();
 			activeTransaction.commit();
@@ -18866,4 +18936,44 @@ void ScribusDoc::ResetFormFields()
 
 	changed();
 	regionsChanged()->update(QRect());
+}
+
+void ScribusDoc::itemSelection_ImageScaleUp(Selection *customSelection)
+{
+	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
+	if (!itemSelection || itemSelection->count() == 0)
+		return;
+	for (int i = 0; i < itemSelection->count(); ++i)
+	{
+		PageItem *currItem = itemSelection->itemAt(i);
+		if (currItem && currItem->isImageFrame() && currItem->imageIsAvailable)
+		{
+			double newScale = currItem->imageXScale() * 1.05;
+			currItem->setImageXYScale(newScale, newScale);
+			currItem->update();
+		}
+	}
+	regionsChanged()->update(QRectF());
+	changed();
+	changedPagePreview();
+}
+
+void ScribusDoc::itemSelection_ImageScaleDown(Selection *customSelection)
+{
+	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
+	if (!itemSelection || itemSelection->count() == 0)
+		return;
+	for (int i = 0; i < itemSelection->count(); ++i)
+	{
+		PageItem *currItem = itemSelection->itemAt(i);
+		if (currItem && currItem->isImageFrame() && currItem->imageIsAvailable)
+		{
+			double newScale = currItem->imageXScale() * 0.95;
+			currItem->setImageXYScale(newScale, newScale);
+			currItem->update();
+		}
+	}
+	regionsChanged()->update(QRectF());
+	changed();
+	changedPagePreview();
 }

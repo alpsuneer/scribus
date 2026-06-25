@@ -203,7 +203,7 @@ void PrefsManager::initDefaults()
 	appPrefs.guidesPrefs.rulersShown = true;
 	appPrefs.guidesPrefs.showBleed = true;
 	appPrefs.guidesPrefs.rulerMode = true;
-	appPrefs.guidesPrefs.grabRadius = 4;
+	appPrefs.guidesPrefs.grabRadius = 12;
 	appPrefs.guidesPrefs.guideRad = 10;
 	appPrefs.guidesPrefs.minorGridSpacing = 20;
 	appPrefs.guidesPrefs.majorGridSpacing = 100;
@@ -334,7 +334,7 @@ void PrefsManager::initDefaults()
 	appPrefs.hyphPrefs.specialWords.clear();
 	appPrefs.hyphPrefs.ignoredWords.clear();
 	appPrefs.hyphPrefs.Automatic = true;
-	appPrefs.hyphPrefs.AutoCheck = false;
+	appPrefs.hyphPrefs.AutoCheck = true;
 	appPrefs.spellCheckPrefs.liveSpellCheckEnabled = true;
 	appPrefs.spellCheckPrefs.debounceDelay = 500;
 	appPrefs.spellCheckPrefs.maxSuggestions = 10;
@@ -545,6 +545,7 @@ void PrefsManager::initDefaults()
 
 	//Experimental Features
 	appPrefs.experimentalFeaturePrefs.notesEnabled = false;
+	appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = true;
 
 	initDefaultActionKeys();
 }
@@ -1935,6 +1936,7 @@ bool PrefsManager::writePref(const QString& filePath)
 	// experimental features
 	QDomElement experimentalElem = docu.createElement("ExperimentalFeatures");
 	experimentalElem.setAttribute("NotesEnabled", appPrefs.experimentalFeaturePrefs.notesEnabled);
+	experimentalElem.setAttribute("NewsBrowserEnabled", appPrefs.experimentalFeaturePrefs.newsBrowserEnabled);
 	elem.appendChild(experimentalElem);
 
 	QDomElement opticalMarginSets = docu.createElement("OpticalMarginSets");
@@ -2828,6 +2830,7 @@ bool PrefsManager::readPref(const QString& filePath)
 		if (dc.tagName() == "ExperimentalFeatures")
 		{
 			appPrefs.experimentalFeaturePrefs.notesEnabled = static_cast<bool>(dc.attribute("NotesEnabled", "0").toInt());
+			appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = static_cast<bool>(dc.attribute("NewsBrowserEnabled", "1").toInt());
 		}
 
 		// optical margin sets
