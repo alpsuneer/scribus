@@ -22,7 +22,12 @@ for which a new license (GPL+exception) is in place.
  ***************************************************************************/
 
 
+#include "DockWidget.h"
+#include "ui/ParagraphStylesPanel.h"
+#include "ui/suneercontrolbar.h"
+#include "ui/suneer_news_panel.h"
 #include <QAction>
+#include <QtGui/QShortcut>
 #include <QApplication>
 #include <QByteArray>
 #include <QCloseEvent>
@@ -49,6 +54,16 @@ for which a new license (GPL+exception) is in place.
 #include <QMdiArea>
 #include <QMdiSubWindow>
 #include <QMessageBox>
+
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QRadioButton>
+#include <QSpinBox>
+#include <QPushButton>
+#include <QListWidget>
+#include <QLabel>
+
 #include <QMouseEvent>
 #include <QMultiMap>
 #include <QPixmap>
@@ -345,7 +360,7 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 	m_doc->addPage(0);
 	m_doc->setGUI(false, this, nullptr);
 	CurrStED = nullptr;
-	QString scribusTitle(ScribusAPI::getVersionScribusTranslated());
+	QString scribusTitle = QString("Faircode Scribus %1 [Build: " __DATE__ " " __TIME__ "]").arg(ScribusAPI::getVersion());
 	if (ScribusAPI::isSVN() && ScribusAPI::haveSVNRevision())
 		scribusTitle.append(QString(" (r%1)").arg(ScribusAPI::getSVNRevision()));
 	setWindowTitle(scribusTitle);
@@ -755,6 +770,184 @@ void ScribusMainWindow::initPalettes()
 	connect( downloadsPalette, SIGNAL(paletteShown(bool)), scrActions["toolsDownloads"], SLOT(setChecked(bool)));
 	downloadsPalette->installEventFilter(this);
 	connect( scrActions["toolsMeasurements"], SIGNAL(toggledData(bool,int)) , this, SLOT(setAppModeByToggle(bool,int)) );
+
+	// Paragraph Styles Panel
+	paragraphStylesPanelTabs = new ParagraphStylesPanel(this);
+	m_suneerControlBar = new SuneerControlBar(this);
+	m_suneerControlBar->setMovable(true);
+	m_suneerControlBar->setFloatable(true);
+	addToolBar(Qt::TopToolBarArea, m_suneerControlBar);
+	m_suneerControlBar->show();
+	// News Browser Panel
+	m_suneerNewsPanel = new SuneerNewsPanel(this);
+	m_suneerNewsPanel->setVisible(false);  // ADS tab-ൽ widget use ചെയ്യും
+	scrActions["toolsNewsPanel"]->setCheckable(true);
+	if (!PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled) {
+		scrActions["toolsNewsPanel"]->setVisible(false);
+	}
+	paragraphStylesPanelTabs->setMainWindow(this);
+	CDockWidget* stylesDock = new CDockWidget(tr("Paragraph Styles"), this);
+	stylesDock->setWidget(paragraphStylesPanelTabs);
+	stylesDock->setToggleViewAction(scrActions["toolsParagraphStyles"]);
+	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
+	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
+	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
+	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
+		if (flag == reqTextStylesUpdate || flag == reqCharStylesUpdate || flag == 0)
+			m_suneerControlBar->updateFromSelection();
+	});
+	// HaveNewSel is a slot, not signal — handled directly in HaveNewSel()
+	connect(scrActions["suneerGetImage"], &QAction::triggered, this, &ScribusMainWindow::suneerGetImage);
+	connect(scrActions["suneerFocusFontCombo"], &QAction::triggered, this, [this]() { m_suneerControlBar->focusFontCombo(); });
+	connect(scrActions["suneerEnlargeImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeImageSize);
+	connect(scrActions["suneerReduceImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceImageSize);
+	connect(scrActions["suneerEnlargeTextFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeTextFrame);
+	connect(scrActions["suneerReduceTextFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceTextFrame);
+	connect(scrActions["suneerEnlargeTextSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeTextSize);
+	connect(scrActions["suneerReduceTextSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceTextSize);
+	connect(scrActions["suneerEnlargeLineSpacing"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeLineSpacing);
+	connect(scrActions["suneerReduceLineSpacing"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceLineSpacing);
+
+	// Ctrl+. / Ctrl+, — Image: scale, Text: font size
+	{
+		auto scaleUp = [this]() {
+			if (!doc || doc->m_Selection->isEmpty()) return;
+			PageItem* item = doc->m_Selection->itemAt(0);
+			if (!item) return;
+			if (item->isImageFrame() && item->imageIsAvailable)
+			{
+				if (doc->appMode == modeEdit)
+					item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+				else
+				{
+					double ox = item->imageXOffset() * 1.05;
+					double oy = item->imageYOffset() * 1.05;
+					doc->sizeItem(item->width() * 1.05, item->height() * 1.05, item);
+					item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+					item->setImageXYOffset(ox, oy);
+				}
+				item->update();
+				doc->regionsChanged()->update(QRectF());
+				doc->changed();
+			}
+			else if (item->isTextFrame())
+			{
+				if (doc->appMode == modeEdit)
+				{
+					if (item->itemText.hasSelection())
+					{
+						int curSz = qRound(item->itemText.charStyle(item->itemText.startOfSelection()).fontSize());
+						doc->itemSelection_SetFontSize(curSz + 10);
+					}
+					else
+					{
+						int pos = item->itemText.cursorPosition();
+						CharStyle cs = item->itemText.charStyle(pos);
+
+						int curSz = qRound(cs.fontSize());
+						cs.setFontSize(curSz + 10);
+
+						item->itemText.applyCharStyle(pos, 1, cs);
+
+						item->update();
+						doc->regionsChanged()->update(QRectF());
+						doc->changed();
+					}
+				}
+				else
+				{
+					int sz = qRound(item->itemText.defaultStyle().charStyle().fontSize()) + 10;
+					doc->itemSelection_SetFontSize(sz);
+				}
+			}
+		};
+
+		auto scaleDown = [this]() {
+			if (!doc || doc->m_Selection->isEmpty()) return;
+			PageItem* item = doc->m_Selection->itemAt(0);
+			if (!item) return;
+			if (item->isImageFrame() && item->imageIsAvailable)
+			{
+				if (doc->appMode == modeEdit)
+					item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+				else
+				{
+					double ox = item->imageXOffset() * 0.95;
+					double oy = item->imageYOffset() * 0.95;
+					doc->sizeItem(item->width() * 0.95, item->height() * 0.95, item);
+					item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+					item->setImageXYOffset(ox, oy);
+				}
+				item->update();
+				doc->regionsChanged()->update(QRectF());
+				doc->changed();
+			}
+			else if (item->isTextFrame())
+			{
+				if (doc->appMode == modeEdit)
+				{
+					if (item->itemText.hasSelection())
+					{
+						int curSz = qRound(item->itemText.charStyle(item->itemText.startOfSelection()).fontSize());
+						doc->itemSelection_SetFontSize(qMax(10, curSz - 10));
+					}
+					else
+					{
+						int pos = item->itemText.cursorPosition();
+						CharStyle cs = item->itemText.charStyle(pos);
+
+						int curSz = qRound(cs.fontSize());
+						cs.setFontSize(qMax(10, curSz - 10));
+
+						item->itemText.applyCharStyle(pos, 1, cs);
+
+						item->update();
+						doc->regionsChanged()->update(QRectF());
+						doc->changed();
+					}
+				}
+				else
+				{
+					int sz = qMax(10, qRound(item->itemText.defaultStyle().charStyle().fontSize()) - 10);
+					doc->itemSelection_SetFontSize(sz);
+				}
+			}
+		};
+
+		connect(scrActions["itemImageScaleUp"], &QAction::triggered, this, scaleUp);
+		connect(scrActions["itemImageScaleDown"], &QAction::triggered, this, scaleDown);
+	}
+
+	// Image + Frame scale shortcuts
+
+
+
+	auto* stylesArea = dockManager->addDockWidget(ads::CenterDockWidgetArea, stylesDock, dockManager->contentPalette->dockAreaWidget());
+
+	// ✅ News Panel — same tab area as Paragraph Styles
+	if (stylesArea && PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled) {
+		CDockWidget* newsDock = new CDockWidget(tr("News Browser"), this);
+		// SuneerNewsPanel-ന്റെ inner widget extract ചെയ്യൂ
+		QWidget* newsInnerWidget = m_suneerNewsPanel->widget();
+		if (!newsInnerWidget) {
+			newsInnerWidget = new QWidget();
+			QVBoxLayout* nl = new QVBoxLayout(newsInnerWidget);
+			nl->addWidget(new QLabel("News Browser"));
+		}
+		newsDock->setWidget(newsInnerWidget);
+		newsDock->setToggleViewAction(scrActions["toolsNewsPanel"]);
+		dockManager->addDockWidget(ads::CenterDockWidgetArea, newsDock, stylesArea);
+		connect(scrActions["toolsNewsPanel"], &QAction::triggered, newsDock, &CDockWidget::toggleView);
+	}
+	if (stylesArea)
+	{
+		for (auto* btn : stylesArea->findChildren<QAbstractButton*>())
+		{
+			const QString name = btn->objectName();
+			if (name == "dockAreaCloseButton" || name == "detachGroupButton")
+				btn->hide();
+		}
+	}
 
 	// Preflight
 	docCheckerPalette = new CheckDocument(this, false);
@@ -1314,6 +1507,9 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
+	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
+	scrMenuMgr->addMenuItemString("SRTools", "Extras");
+	scrMenuMgr->addMenuItemString("SRDuplicateContentCheck", "SRTools");
 //	Disabled for release as it does nothing useful
 //	scrMenuMgr->addMenuItemString("extrasTestQTQuick2_1", "Extras");
 
@@ -1364,6 +1560,9 @@ void ScribusMainWindow::createMenuBar()
 	menuBar()->addSeparator();
 	scrMenuMgr->addMenuStringToMenuBar("Help");
 	scrMenuMgr->addMenuItemStringsToMenuBar("Help", scrActions);
+	qDebug() << "SRTools exists =" << scrMenuMgr->menuExists("SRTools");
+	qDebug() << "SRDuplicate exists =" << scrMenuMgr->menuExists("SRDuplicate");
+
 	connect(scrMenuMgr->getLocalPopupMenu("Extras"), SIGNAL(aboutToShow()), this, SLOT(extrasMenuAboutToShow()));
 	connect(scrMenuMgr->getLocalPopupMenu("Windows"), SIGNAL(aboutToShow()), this, SLOT(windowsMenuAboutToShow()));
 
@@ -1379,6 +1578,8 @@ void ScribusMainWindow::addDefaultWindowMenuItems()
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Windows");
 	scrMenuMgr->addMenuItemString("toolsProperties", "Windows");
 	scrMenuMgr->addMenuItemString("toolsContent", "Windows");
+	scrMenuMgr->addMenuItemString("toolsParagraphStyles", "Windows");
+	scrMenuMgr->addMenuItemString("toolsNewsPanel", "Windows");
 	scrMenuMgr->addMenuItemString("toolsActionHistory", "Windows");
 	scrMenuMgr->addMenuItemString("toolsAlignDistribute", "Windows");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Windows");
@@ -1661,6 +1862,8 @@ void ScribusMainWindow::setTBvals(PageItem *currItem)
 	emit TextStyle(doc->currentStyle);
 	// to go: (av)
 	contentPalette->update(doc->currentStyle);
+	if (paragraphStylesPanelTabs)
+		paragraphStylesPanelTabs->syncCurrentStyle();
 	//check if mark in cursor place and enable editMark action
 	if (doc->appMode == modeEdit && item->itemText.cursorPosition() < item->itemText.length())
 	{
@@ -2391,6 +2594,136 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 	scrActions["extrasManageImages"]->setEnabled(enablePicManager);
 }
 
+
+void ScribusMainWindow::duplicateContentCheck()
+{
+	QDialog dlg(this);
+	dlg.setWindowTitle(tr("Duplicate Content Check"));
+	dlg.resize(700, 450);
+
+	QVBoxLayout* layout = new QVBoxLayout(&dlg);
+
+	QRadioButton* fullStory = new QRadioButton(tr("Full Story Check"));
+	QRadioButton* headlineOnly = new QRadioButton(tr("Headline Only"));
+	fullStory->setChecked(true);
+
+	layout->addWidget(fullStory);
+	layout->addWidget(headlineOnly);
+
+	QHBoxLayout* thresholdLayout = new QHBoxLayout();
+	thresholdLayout->addWidget(new QLabel(tr("Similarity Threshold (%)")));
+
+	QSpinBox* threshold = new QSpinBox();
+	threshold->setRange(1, 100);
+	threshold->setValue(80);
+
+	thresholdLayout->addWidget(threshold);
+	layout->addLayout(thresholdLayout);
+
+	QPushButton* checkBtn =
+		new QPushButton(tr("Check Current Document"));
+
+	layout->addWidget(checkBtn);
+
+	QListWidget* results = new QListWidget();
+	results->addItem("No scan performed yet.");
+	layout->addWidget(results);
+
+	QPushButton* closeBtn = new QPushButton(tr("Close"));
+	layout->addWidget(closeBtn);
+
+	QObject::connect(closeBtn, &QPushButton::clicked,
+	                 &dlg, &QDialog::accept);
+
+	QObject::connect(checkBtn, &QPushButton::clicked,
+	                 [this, results]()
+	{
+		results->clear();
+
+		if (!doc)
+		{
+			results->addItem("No document loaded.");
+			return;
+		}
+
+		int textFrames = 0;
+
+		QVector<QString> texts;
+		QVector<int> frameIds;
+
+		for (int i = 0; i < doc->Items->count(); ++i)
+		{
+			PageItem* item = doc->Items->at(i);
+
+			if (item && item->itemType() == PageItem::TextFrame)
+				++textFrames;
+		}
+
+		results->addItem(QString("Pages : %1").arg(doc->Pages->count()));
+		results->addItem(QString("Text Frames : %1").arg(textFrames));
+
+		for (int i = 0; i < doc->Items->count(); ++i)
+		{
+			PageItem* item = doc->Items->at(i);
+
+			if (!item)
+				continue;
+
+			if (item->itemType() != PageItem::TextFrame)
+				continue;
+
+			QString txt = item->itemText.text(0, item->itemText.length());
+
+			txt = txt.simplified();
+
+			texts.append(txt);
+			frameIds.append(i + 1);
+
+			if (txt.length() > 80)
+				txt = txt.left(80) + "...";
+
+			results->addItem(
+				QString("Frame %1 (%2 chars) : %3")
+				.arg(i + 1)
+				.arg(txt.length())
+				.arg(txt)
+			);
+
+			if (txt.contains("തിരുവനന്തപുരം"))
+			{
+				results->addItem(
+					QString("*** Duplicate Candidate : Frame %1 ***")
+					.arg(i + 1)
+				);
+			}
+
+		}
+		results->addItem("");
+		results->addItem("=== Duplicate Scan Results ===");
+
+		for (int a = 0; a < texts.count(); ++a)
+		{
+			for (int b = a + 1; b < texts.count(); ++b)
+			{
+				if (texts[a].isEmpty() || texts[b].isEmpty())
+					continue;
+
+				if (texts[a] == texts[b])
+				{
+					results->addItem(
+						QString("DUPLICATE : Frame %1 <-> Frame %2 (100%)")
+							.arg(frameIds[a])
+							.arg(frameIds[b])
+					);
+				}
+			}
+		}
+
+	});
+
+	dlg.exec();
+}
+
 void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 {
 	if (w == nullptr)
@@ -2575,6 +2908,7 @@ void ScribusMainWindow::SwitchWin()
 	updateActiveWindowCaption(doc->documentFileName());
 	propertiesPalette->setDoc(doc);
 	contentPalette->setDoc(doc);
+	if (paragraphStylesPanelTabs) paragraphStylesPanelTabs->setDocument(doc);
 	marksManager->setDoc(doc);
 	nsEditor->setDoc(doc);
 	pagePalette->setView(view);
@@ -2624,6 +2958,7 @@ void ScribusMainWindow::HaveNewDoc()
 	updateActiveWindowCaption(doc->documentFileName());
 	propertiesPalette->setDoc(doc);
 	contentPalette->setDoc(doc);
+	if (paragraphStylesPanelTabs) paragraphStylesPanelTabs->setDocument(doc);
 	nsEditor->setDoc(doc);
 
 	marksManager->setDoc(doc);
@@ -2657,6 +2992,7 @@ void ScribusMainWindow::HaveNewDoc()
 	connect(view, SIGNAL(DocChanged()), this, SLOT(slotDocCh()), Qt::UniqueConnection);
 	connect(view, SIGNAL(MousePos(double,double)), this, SLOT(setStatusBarMousePosition(double,double)), Qt::UniqueConnection);
 	connect(view, SIGNAL(ItemCharStyle(CharStyle)), contentPalette, SLOT(update(CharStyle)), Qt::UniqueConnection);
+	connect(view, SIGNAL(ItemCharStyle(CharStyle)), m_suneerControlBar, SLOT(updateFromSelection()), Qt::UniqueConnection);
 	connect(view, SIGNAL(ItemTextEffects(int)), this, SLOT(setStyleEffects(int)), Qt::UniqueConnection);
 	connect(view, SIGNAL(ItemTextAlign(int)), this, SLOT(setAlignmentValue(int)), Qt::UniqueConnection);
 	connect(view, SIGNAL(LoadElem(QString,double,double,bool,bool,ScribusDoc*,ScribusView*)), this, SLOT(slotElemRead(QString,double,double,bool,bool,ScribusDoc*,ScribusView*)), Qt::UniqueConnection);
@@ -2666,6 +3002,12 @@ void ScribusMainWindow::HaveNewDoc()
 
 void ScribusMainWindow::HaveNewSel()
 {
+	if (m_suneerControlBar)
+	{
+		m_suneerControlBar->setDocument(doc);
+		if (m_suneerNewsPanel) m_suneerNewsPanel->setDocument(doc);
+		m_suneerControlBar->updateFromSelection();
+	}
 	if (doc == nullptr)
 		return;
 	int selectedType = -1;
@@ -3699,6 +4041,20 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 		}
 		view->reformPages(false);
 		doc->setLoading(false);
+		if (doc->docHyphenator)
+		{
+			for (PageItem* item : *doc->Items)
+			{
+				if (item->isTextFrame() && !item->isNoteFrame() && item->itemText.length() > 0)
+					doc->docHyphenator->slotHyphenate(item);
+			}
+		}
+		for (PageItem* item : *doc->Items)
+		{
+			PageItem_TextFrame* tf = item->asTextFrame();
+			if (tf && !tf->isNoteFrame() && tf->nextInChain() == nullptr && tf->itemText.isNotEmpty())
+				tf->autoFitFrameHeight();
+		}
 		delete fileLoader;
 		view->updatesOn(true);
 		w->setUpdatesEnabled(true);
@@ -3767,6 +4123,33 @@ bool ScribusMainWindow::postLoadDoc()
 
 // This method was once named slotFileOpen(...) but it hasn't had anything to
 // do with file->open for a LONG time. It's used for get text / get picture.
+void ScribusMainWindow::suneerGetImage()
+{
+	if (!HaveDoc) return;
+	QString formatD(FormatsManager::instance()->fileDialogFormatList(FormatsManager::IMAGESIMGFRAME));
+	QString prefsDocDir = m_prefsManager.documentDir();
+	PrefsContext *dirsContext = m_prefsManager.prefsFile->getContext("dirs");
+	QString docDir = dirsContext->get("images", prefsDocDir.isEmpty() ? "." : prefsDocDir);
+	QStringList fileNames;
+	CustomFDialog *dia = new CustomFDialog(QApplication::activeWindow(), docDir, tr("Open"), formatD, fdShowPreview | fdExistingFilesI | fdDisableOk, contextImages);
+	if (dia->exec() == QDialog::Accepted)
+		fileNames = dia->selectedFiles();
+	delete dia;
+	if (fileNames.isEmpty()) return;
+	dirsContext->set("images", fileNames[0].left(fileNames[0].lastIndexOf("/")));
+	// Selection clear ചെയ്ത് import mode activate
+	view->deselectItems(true);
+	view->requestMode(modeImportImage);
+	QTimer::singleShot(150, this, [this, fileNames]() {
+		CanvasMode_ImageImport* cii = qobject_cast<CanvasMode_ImageImport*>(view->canvasMode());
+		if (cii) {
+			cii->setCreateCaption(true);
+			cii->setAutoWrap(true);
+			cii->setImageList(fileNames);
+		}
+	});
+}
+
 void ScribusMainWindow::slotGetContent()
 {
 	if (doc->m_Selection->isEmpty())
@@ -3792,8 +4175,11 @@ void ScribusMainWindow::slotGetContent()
 			dirsContext->set("images", fileNames[0].left(fileNames[0].lastIndexOf("/")));
 			view->requestMode(modeImportImage);
 			CanvasMode_ImageImport* cii = qobject_cast<CanvasMode_ImageImport*>(view->canvasMode());
-			if (cii)
+			if (cii) {
+				cii->setCreateCaption(false);
+				cii->setAutoWrap(false);
 				cii->setImageList(fileNames);
+			}
 		}
 	}
 	else if (currItem->isTextFrame())
@@ -4349,6 +4735,7 @@ void ScribusMainWindow::slotReallyPrint()
 				parsePagesString(printer->getPageString(), &doc->Print_Options.pageNumbers, doc->DocPages.count());
 		}
 		m_PrinterUsed = true;
+		doc->Print_Options.isProofPrint = printer->isProofPrint();
 		done = doPrint(doc->Print_Options, printError);
 		QApplication::restoreOverrideCursor();
 		if (!done)
@@ -4654,7 +5041,7 @@ void ScribusMainWindow::slotEditPaste(bool forcePlainText)
 				if (forcePlainText)
 					currItem->itemText.insertChars(story.text(0, story.length()));
 				else
-					currItem->itemText.insert(story);
+					currItem->itemText.insertChars(story.text(0, story.length()));
 			}
 		}
 		else if (ScMimeData::clipboardHasScribusElem() || ScMimeData::clipboardHasScribusFragment())
@@ -4800,7 +5187,11 @@ void ScribusMainWindow::slotEditPaste(bool forcePlainText)
 		if (doc->appMode == modeEditTable)
 			selItem->asTable()->update();
 		else
+		{
 			currItem->update();
+			if (doc->docHyphenator && currItem->isTextFrame())
+				doc->docHyphenator->slotHyphenate(currItem);
+		}
 	}
 	else if (ScMimeData::clipboardHasScribusElem() || ScMimeData::clipboardHasScribusFragment() || internalCopy)
 	{
@@ -4812,12 +5203,18 @@ void ScribusMainWindow::slotEditPaste(bool forcePlainText)
 		doc->SnapGrid = false;
 		doc->SnapGuides = false;
 		doc->SnapItems = false;
+		// ✅ Paste at cursor position
+		// Step 1: Normal paste (original page position)
 		if (internalCopy)
-			slotElemRead(internalCopyBuffer, doc->currentPage()->xOffset(), doc->currentPage()->yOffset(), false, true, doc, view);
+			slotElemRead(internalCopyBuffer,
+				doc->currentPage()->xOffset(),
+				doc->currentPage()->yOffset(), false, true, doc, view);
 		else
 		{
-			QString buffer  = ScMimeData::clipboardScribusElem();
-			slotElemRead(buffer, doc->currentPage()->xOffset(), doc->currentPage()->yOffset(), false, true, doc, view);
+			QString buffer = ScMimeData::clipboardScribusElem();
+			slotElemRead(buffer,
+				doc->currentPage()->xOffset(),
+				doc->currentPage()->yOffset(), false, true, doc, view);
 		}
 
 		doc->SnapGrid = savedAlignGrid;
@@ -4834,6 +5231,15 @@ void ScribusMainWindow::slotEditPaste(bool forcePlainText)
 		doc->m_Selection->delaySignalsOff();
 		if (doc->m_Selection->count() > 1)
 			doc->m_Selection->setGroupRect();
+
+		// ✅ Move to cursor (dragX/dragY = mouse position in doc)
+		double targetX = view->dragX;
+		double targetY = view->dragY;
+		if ((targetX > 0 || targetY > 0) && doc->m_Selection->count() > 0) {
+			double gx, gy, gw, gh;
+			doc->m_Selection->getGroupRect(&gx, &gy, &gw, &gh);
+			doc->moveGroup(targetX - gx, targetY - gy, doc->m_Selection);
+		}
 	}
 	else if (ScMimeData::clipboardHasKnownData())
 	{
@@ -4996,6 +5402,7 @@ void ScribusMainWindow::SelectAll(bool docWideSelect)
 		doc->m_Selection->delaySignalsOff();
 		if (doc->m_Selection->count() > 1)
 			doc->m_Selection->setGroupRect();
+
 	}
 	view->DrawNew();
 }
@@ -6229,6 +6636,24 @@ void ScribusMainWindow::setNewParStyle(const QString& name)
 {
 	if (!HaveDoc)
 		return;
+	// ✅ Clear direct char formatting — selected paragraph only
+	{
+		int savedMode = doc->appMode;
+		doc->appMode = modeEdit;
+		for (int i = 0; i < doc->m_Selection->count(); ++i)
+		{
+			PageItem* item = doc->m_Selection->itemAt(i);
+			if (!item || !item->isTextFrame()) continue;
+			StoryText& st = item->itemText;
+			int cursor = st.cursorPosition();
+			int parNum = st.nrOfParagraph(cursor);
+			int pStart = st.startOfParagraph(parNum);
+			int pEnd = st.endOfParagraph(parNum);
+			st.select(pStart, pEnd - pStart);
+		}
+		doc->itemSelection_EraseCharStyle();
+		doc->appMode = savedMode;
+	}
 	doc->itemSelection_SetNamedParagraphStyle(name);
 	PageItem *currItem = doc->m_Selection->itemAt(0);
 	setTBvals(currItem);
@@ -6468,6 +6893,12 @@ void ScribusMainWindow::slotPrefsOrg()
 	struct ApplicationPrefs newPrefs(prefsDialog.prefs());
 	m_prefsManager.setNewPrefs(newPrefs);
 	m_prefsManager.applyLoadedShortCuts();
+	// News Browser panel show/hide based on preference
+	if (m_suneerNewsPanel) {
+		bool newsBrowserEnabled = newPrefs.experimentalFeaturePrefs.newsBrowserEnabled;
+		m_suneerNewsPanel->setVisible(newsBrowserEnabled);
+		scrActions["toolsNewsPanel"]->setVisible(newsBrowserEnabled);
+	}
 
 	//TODO: and the other dirs?
 	if (oldPrefs.pathPrefs.documents != newPrefs.pathPrefs.documents)
@@ -7472,6 +7903,274 @@ void ScribusMainWindow::editSelectedSymbolStart()
 		editSymbolStart(doc->m_Selection->itemAt(0)->pattern());
 }
 
+void ScribusMainWindow::suneerEnlargeTextFrame()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	doc->sizeItem(item->width() * 1.05, item->height() * 1.05, item);
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
+void ScribusMainWindow::suneerReduceTextFrame()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	doc->sizeItem(item->width() * 0.95, item->height() * 0.95, item);
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+void ScribusMainWindow::suneerEnlargeTextSize()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	StoryText& text = item->itemText;
+	int start = 0, end = text.length();
+	if (doc->appMode == modeEdit)
+	{
+		if (text.endOfSelection() > text.startOfSelection())
+		{
+			start = text.startOfSelection();
+			end = text.endOfSelection();
+		}
+		else
+		{
+			int cursorPos = text.cursorPosition();
+			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+			end = text.endOfParagraph(text.nrOfParagraph(cursorPos));
+		}
+	}
+	// Font size change
+	for (int i = start; i < end; ++i)
+	{
+		CharStyle cs;
+		double currentSize = text.charStyle(i).fontSize() / 10.0;
+		cs.setFontSize(qRound(currentSize * 10) + 3);
+		text.applyCharStyle(i, 1, cs);
+	}
+	// Line spacing proportionally change
+	{
+		int paraNo = text.nrOfParagraph(start);
+		ParagraphStyle ps = text.paragraphStyle(start);
+		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
+		{
+			double currentLS = ps.lineSpacing();
+			ps.setLineSpacing(currentLS + 0.3);
+			text.applyStyle(start, ps);
+		}
+	}
+	item->invalidateLayout();
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	emit UpdateRequest(reqTextStylesUpdate);
+}
+void ScribusMainWindow::suneerReduceTextSize()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	StoryText& text = item->itemText;
+	int start = 0, end = text.length();
+	if (doc->appMode == modeEdit)
+	{
+		if (text.endOfSelection() > text.startOfSelection())
+		{
+			start = text.startOfSelection();
+			end = text.endOfSelection();
+		}
+		else
+		{
+			int cursorPos = text.cursorPosition();
+			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+			end = text.endOfParagraph(text.nrOfParagraph(cursorPos));
+		}
+	}
+	// Font size change
+	for (int i = start; i < end; ++i)
+	{
+		CharStyle cs;
+		double currentSize = text.charStyle(i).fontSize() / 10.0;
+		cs.setFontSize(qMax(10, qRound(currentSize * 10) - 3));
+		text.applyCharStyle(i, 1, cs);
+	}
+	// Line spacing proportionally change
+	{
+		ParagraphStyle ps = text.paragraphStyle(start);
+		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
+		{
+			double currentLS = ps.lineSpacing();
+			ps.setLineSpacing(qMax(1.0, currentLS - 0.3));
+			text.applyStyle(start, ps);
+		}
+	}
+	item->invalidateLayout();
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	emit UpdateRequest(reqTextStylesUpdate);
+}
+void ScribusMainWindow::suneerEnlargeLineSpacing()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	StoryText& text = item->itemText;
+	int start = 0;
+	if (doc->appMode == modeEdit)
+	{
+		if (text.endOfSelection() > text.startOfSelection())
+			start = text.startOfSelection();
+		else
+		{
+			int cursorPos = text.cursorPosition();
+			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+		}
+	}
+	ParagraphStyle ps = text.paragraphStyle(start);
+	double currentLS = ps.lineSpacing();
+	ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
+	ps.setLineSpacing(currentLS + 1.0);
+	text.applyStyle(start, ps);
+	item->invalidateLayout();
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	emit UpdateRequest(reqTextStylesUpdate);
+}
+void ScribusMainWindow::suneerReduceLineSpacing()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame()) return;
+	StoryText& text = item->itemText;
+	int start = 0;
+	if (doc->appMode == modeEdit)
+	{
+		if (text.endOfSelection() > text.startOfSelection())
+			start = text.startOfSelection();
+		else
+		{
+			int cursorPos = text.cursorPosition();
+			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+		}
+	}
+	ParagraphStyle ps = text.paragraphStyle(start);
+	double currentLS = ps.lineSpacing();
+	ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
+	ps.setLineSpacing(qMax(1.0, currentLS - 1.0));
+	text.applyStyle(start, ps);
+	item->invalidateLayout();
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	emit UpdateRequest(reqTextStylesUpdate);
+}
+void ScribusMainWindow::suneerEnlargeImageSize()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+	item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
+void ScribusMainWindow::suneerReduceImageSize()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+	item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
+void ScribusMainWindow::suneerScaleImageUp()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+	if (doc->appMode == modeEdit)
+	{
+		item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+	}
+	else
+	{
+		double newOffX = item->imageXOffset() * 1.05;
+		double newOffY = item->imageYOffset() * 1.05;
+		doc->sizeItem(item->width() * 1.05, item->height() * 1.05, item);
+		item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+		item->setImageXYOffset(newOffX, newOffY);
+	}
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
+void ScribusMainWindow::suneerScaleImageDown()
+{
+	if (!doc || doc->m_Selection->isEmpty()) return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+	if (doc->appMode == modeEdit)
+	{
+		item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+	}
+	else
+	{
+		double newOffX = item->imageXOffset() * 0.95;
+		double newOffY = item->imageYOffset() * 0.95;
+		doc->sizeItem(item->width() * 0.95, item->height() * 0.95, item);
+		item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+		item->setImageXYOffset(newOffX, newOffY);
+	}
+	item->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
+
+void ScribusMainWindow::suneerAutoFitHeight()
+{
+	if (!HaveDoc) return;
+	int count = doc->m_Selection->count();
+	if (count == 0) return;
+	for (int i = 0; i < count; ++i)
+	{
+		PageItem* item = doc->m_Selection->itemAt(i);
+		if (item && item->isTextFrame() && !item->asTextFrame()->isTableItem)
+		{
+			// Skip autoFit if frame has span columns + image wrap (causes infinite loop)
+			bool hasSpan = false;
+			PageItem_TextFrame* tf = item->asTextFrame();
+			for (int ci = 0; ci < tf->itemText.length(); ++ci)
+				if (tf->itemText.paragraphStyle(ci).spanColumns() != 0)
+					{ hasSpan = true; break; }
+			tf->autoFitFrameHeight();
+		}
+	}
+}
+
+void ScribusMainWindow::suneerFitImageToFrame(PageItem* item)
+{
+	if (!item || !item->isImageFrame()) return;
+	if (item->pixm.width() <= 0 || item->pixm.height() <= 0) return;
+	double scaleX = item->width()  / item->pixm.width();
+	double scaleY = item->height() / item->pixm.height();
+	item->setImageXYScale(scaleX, scaleY);
+	item->setImageXYOffset(0, 0);
+	item->updateClip();
+	item->update();
+}
+
 void ScribusMainWindow::editSymbolStart(const QString& temp)
 {
 	if (!HaveDoc || !doc->docPatterns.contains(temp))
@@ -8094,7 +8793,55 @@ void ScribusMainWindow::ModifyAnnot()
 
 void ScribusMainWindow::SetShortCut()
 {
-	const auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+	
+// Auto-load custom keyboard shortcuts
+{
+    QString keyFile = QDir::homePath() + "/.config/scribus/shortkey170626.xml";
+    if (QFile::exists(keyFile))
+        qDebug() << "Custom shortcut file found:" << keyFile;
+}
+
+
+QMap<QString, Keys>& keyActionsRef =
+    m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+
+QString keyFile = QDir::homePath() + "/.config/scribus/shortkey170626.xml";
+
+if (QFile::exists(keyFile))
+{
+    QDomDocument docXml("keymapentries");
+    QFile f(keyFile);
+
+    if (f.open(QIODevice::ReadOnly))
+    {
+        if (docXml.setContent(&f))
+        {
+            QDomElement root = docXml.documentElement();
+
+            if (root.tagName() == "shortcutset")
+            {
+                for (QDomNode n = root.firstChild(); !n.isNull(); n = n.nextSibling())
+                {
+                    QDomElement e = n.toElement();
+
+                    if (e.hasAttribute("name") && e.hasAttribute("shortcut"))
+                    {
+                        QString name = e.attribute("name");
+                        QString sc   = e.attribute("shortcut");
+
+                        if (keyActionsRef.contains(name))
+                            keyActionsRef[name].keySequence = QKeySequence(sc);
+                    }
+                }
+            }
+        }
+        f.close();
+    }
+}
+
+const auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+
+
 	for (auto it = keyActions.begin(); it != keyActions.end(); ++it )
 	{
 		if (!it.value().actionName.isEmpty())
