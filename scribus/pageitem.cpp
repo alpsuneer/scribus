@@ -4465,6 +4465,18 @@ void PageItem::togglePrintEnabled()
 	m_PrintEnabled=!m_PrintEnabled;
 }
 
+void PageItem::setWrapOffsets(double top, double bottom, double left, double right)
+{
+	m_wrapOffsetTop    = top;
+	m_wrapOffsetBottom = bottom;
+	m_wrapOffsetLeft   = left;
+	m_wrapOffsetRight  = right;
+	if (!m_Doc) return;
+	m_Doc->regionsChanged()->update(QRectF());
+	checkTextFlowInteractions(false);
+	m_Doc->changed();
+}
+
 void PageItem::setTextFlowMode(TextFlowMode mode)
 {
 	if (m_textFlowMode == mode)
@@ -9346,6 +9358,12 @@ QRectF PageItem::getBoundingRect() const
 {
 	double x, y, x2, y2;
 	getBoundingRect(&x, &y, &x2, &y2);
+	// Suneer: apply wrap offsets
+	if (m_wrapOffsetTop != 0 || m_wrapOffsetLeft != 0)
+		x  -= m_wrapOffsetLeft;
+	y  -= m_wrapOffsetTop;
+	x2 += m_wrapOffsetRight;
+	y2 += m_wrapOffsetBottom;
 	return QRectF(x, y, x2 - x, y2 - y);
 }
 
@@ -9370,6 +9388,11 @@ QRectF PageItem::getVisualBoundingRect() const
 {
 	double x, y, x2, y2;
 	getVisualBoundingRect(&x, &y, &x2, &y2);
+	// Suneer: apply wrap offsets
+	x  -= m_wrapOffsetLeft;
+	y  -= m_wrapOffsetTop;
+	x2 += m_wrapOffsetRight;
+	y2 += m_wrapOffsetBottom;
 	return QRectF(x, y, x2 - x, y2 - y);
 }
 
@@ -11194,8 +11217,34 @@ void PageItem::moveWelded(double dX, double dY, int weld)
 {
 	WeldingInfo wInf = weldList.at(weld);
 	PageItem *item = wInf.weldItem;
-	item->setXPos(item->xPos() + dX);
-	item->setYPos(item->yPos() + dY);
+	if (!item)
+		return;
+	double relX = item->xPos() - xPos();
+	double relY = item->yPos() - yPos();
+	if (qAbs(relX) <= qAbs(relY))
+	{
+		// BottomCaption or TopCaption
+		item->setWidth(width());
+		item->setXPos(xPos());
+		if (relY >= 0)
+			item->setYPos(yPos() + height());
+		else
+			item->setYPos(yPos() - item->height());
+		item->ContourLine = item->PoLine.copy();
+		item->imageClip = item->PoLine.copy();
+	}
+	else
+	{
+		// LeftCaption or RightCaption
+		item->setHeight(height());
+		item->setYPos(yPos());
+		if (relX >= 0)
+			item->setXPos(xPos() + width());
+		else
+			item->setXPos(xPos() - item->width());
+		item->ContourLine = item->PoLine.copy();
+		item->imageClip = item->PoLine.copy();
+	}
 	item->update();
 	item->moveWelded(dX, dY, this);
 }
