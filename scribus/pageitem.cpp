@@ -1403,7 +1403,7 @@ const CharStyle& PageItem::currentCharStyle() const
 		// Step back so the Properties Panel (and anything else reading this) sees the real
 		// override that would be inherited by newly typed text.
 		int refPos = cursorPosition;
-		if (refPos > 0 && itemText.text(refPos) == SpecialChars::PARSEP)
+		if (refPos > 0 && refPos < itemText.length() && itemText.text(refPos) == SpecialChars::PARSEP)
 			refPos = refPos - 1;
 		return itemText.charStyle(refPos);
 	}
@@ -1427,7 +1427,7 @@ void PageItem::currentTextProps(ParagraphStyle& parStyle) const
 		// set at paragraph level without using styles might get lost.
 		// Step back from PARSEP so manual overrides on the preceding character are included.
 		int refPos = position;
-		if (refPos > 0 && itemText.text(refPos) == SpecialChars::PARSEP)
+		if (refPos > 0 && refPos < itemText.length() && itemText.text(refPos) == SpecialChars::PARSEP)
 			refPos = refPos - 1;
 		parStyle.charStyle().applyCharStyle( itemText.charStyle(refPos) );
 	}
