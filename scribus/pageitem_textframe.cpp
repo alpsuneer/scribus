@@ -99,24 +99,8 @@ void PageItem_TextFrame::init()
 	connect(&itemText,SIGNAL(changed(int,int)), this, SLOT(slotInvalidateLayout(int,int)));
 }
 
-// 1.6.5 span heading support
-struct SpanInfo {
-	int startY{0};
-	int endY{0};
-	int col{0};
-};
-// spanInfoList is per-layout, cleared at start of each layout() call
-static thread_local QList<SpanInfo> s_spanInfoList;
-
 QRegion PageItem_TextFrame::calcAvailableRegion()
 {
-	// Recursion guard — span + wrap infinite loop prevention
-	static thread_local int calcDepth = 0;
-	if (calcDepth > 1)
-		return QRegion(this->Clip);
-	++calcDepth;
-	struct DepthGuard { ~DepthGuard() { --calcDepth; } } guard;
-
 	QRegion result(this->Clip);
 	if (isEmbedded && !isGroupChild())
 		return result;
@@ -210,12 +194,7 @@ QRegion PageItem_TextFrame::calcAvailableRegion()
 					if (docItem->textFlowAroundObject())
 					{
 						QRegion itemRgn = docItem->textInteractionRegion(0, 0);
-						QRegion mappedRgn = canvasToLocalMat.map(itemRgn);
-
-						result = result.subtracted(mappedRgn);
-
-
-						
+						result = result.subtracted( canvasToLocalMat.map(itemRgn) );
 					}
 				}
 			}
@@ -390,7 +369,6 @@ struct LineControl {
 	double   colRight;
 	int      column { 0 };
 	bool     startOfCol { true };
-	double   spanYBottom { -1.0 };
 	bool     hasDropCap;
 	bool     afterOverflow { false };
 	bool     addLine { false };
@@ -446,13 +424,7 @@ struct LineControl {
 		if (legacy)
 			colRight += lineCorr;
 		xPos = colLeft;
-		if (spanYBottom > 0.0)
-		{
-			yPos = spanYBottom;
-			startOfCol = false;
-		}
-		else
-			yPos = insets.top() + lineCorr;
+		yPos = insets.top() + lineCorr;
 		lineData.colLeft = colLeft;
 	}
 
@@ -572,11 +544,10 @@ struct LineControl {
 	bool isEndOfLine(double moreSpace = 0)
 	{
 		bool res;
-		double effectiveRight = colRight;
 		if (legacy)
-			res = ceil(xPos + lineCorr - maxShrink) + ceil(moreSpace) >= floor(effectiveRight);
+			res = ceil(xPos + lineCorr - maxShrink) + ceil(moreSpace) >= floor(colRight);
 		else
-			res = ceil(xPos - maxShrink)  + ceil(moreSpace) >= floor(effectiveRight);
+			res = ceil(xPos - maxShrink)  + ceil(moreSpace) >= floor(colRight);
 		return res;
 	}
 
@@ -652,9 +623,7 @@ struct LineControl {
 		QRect   pt(pt12, pt22);
 
 		double endX2 = startX;
-		/* BINARY SEARCH DISABLED FOR TEST */
-		double Interval = qMax(4.0, (maxX - endX2) / 100.0);
-		int endOfLineLimit = 0;
+		double Interval = 0.25;
 		do
 		{
 			int xP = static_cast<int>(ceil(endX2 + morespace));
@@ -662,9 +631,6 @@ struct LineControl {
 			if (!regionContainsRect(shape, pt))
 				break;
 			endX2 += Interval;
-			if ((endOfLineLimit % 100) == 0)
-                
-            if (++endOfLineLimit >= 500) break;
 		}
 		while ((endX2 < maxX) && regionContainsRect(shape, pt));
 
@@ -1069,10 +1035,6 @@ static double findRealOverflowEnd(const QRegion& shape, QRect pt, double maxX)
 	if (pt.right() >= maxX)
 		return maxX;
 	return pt.left() + 0.5;
-
-	if (pt.right() >= maxX)
-		return maxX;
-	return pt.left() + 0.5;
 }
 
 static double adjustToBaselineGrid (const LineControl &control, PageItem *item, int OwnPage)
@@ -1197,6 +1159,7 @@ void PageItem_TextFrame::adjustParagraphEndings ()
 
 		if (pull)
 		{
+			qDebug() << "pulling" << pull << "lines";
 			// push this paragraph to the next frame
 			for (int i = 0; i < pull; ++i)
 				textLayout.removeLastLine();
@@ -1210,7 +1173,6 @@ void PageItem_TextFrame::adjustParagraphEndings ()
 void PageItem_TextFrame::layout()
 {
 //	qDebug() << "==Layout==" << itemName() ;
-
 // 	printBacktrace(24);
 	if (m_backBox != nullptr)
 	{
@@ -1224,8 +1186,7 @@ void PageItem_TextFrame::layout()
 			prevInChain = dynamic_cast<PageItem_TextFrame*>(prevInChain->m_backBox);
 		}
 		PageItem_TextFrame* nextInChain = firstInvalid;
-		int chainGuard = 0;
-		while (nextInChain && (nextInChain != this) && ++chainGuard < 1000)
+		while (nextInChain && (nextInChain != this))
 		{
 			nextInChain->layout();
 			nextInChain = dynamic_cast<PageItem_TextFrame*>(nextInChain->m_nextBox);
@@ -1246,8 +1207,6 @@ void PageItem_TextFrame::layout()
 	QRect pt;
 	double chs, chsd = 0;
 	double EndX, OFs;
-	// spanSafeRegion: used in span columns to avoid image wrap infinite loop
-	QRegion spanSafeRegion;
 	ParagraphStyle style;
 	int opticalMargins = ParagraphStyle::OM_None;
 
@@ -1332,17 +1291,8 @@ void PageItem_TextFrame::layout()
 
 	if (itLen != 0)
 	{
-		// determine layout area — skip during drag for performance
-		if (m_Doc->view() && m_Doc->view()->m_canvas &&
-		    m_Doc->view()->m_canvas->isItemMoving())
-		{
-			// Skip full layout during drag — avoids infinite loop with Span+ImageWrap
-			invalid = false;
-			return;
-		}
+		// determine layout area
 		m_availableRegion = calcAvailableRegion();
-		// spanSafeRegion: simple clip for span columns (avoids image wrap infinite loop)
-		spanSafeRegion = (m_availableRegion.rectCount() > 1) ? QRegion(this->Clip) : m_availableRegion;
 		if (m_availableRegion.isEmpty())
 		{
 			m_maxChars = firstInFrame();
@@ -1383,10 +1333,6 @@ void PageItem_TextFrame::layout()
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();
-		double spanYBottom = -1.0;
-		
-		bool prevFullSpan = false;
-		
 
 		//automatic line spacing factor (calculated once)
 		double autoLS = static_cast<double>(context->typographicPrefs().autoLineSpacing) / 100.0;
@@ -1444,11 +1390,8 @@ void PageItem_TextFrame::layout()
 		int regionMinY = 0, regionMaxY= 0;
 
 		double autoLeftIndent = 0.0;
-		int layoutSafetyCounter = 0;
-		const int layoutMaxIterations = itLen * 10 + 1000; // reduced for performance
 		for (int i = 0; shapedText.haveMoreText(i, glyphClusters); ++i)
 		{
-			if (++layoutSafetyCounter > layoutMaxIterations) { m_maxChars = i; goto NoRoom; }
 			int currentIndex = i - current.lineData.firstCluster;
 			GlyphCluster newRun = glyphClusters[i];
 			if (currentIndex >= current.glyphs.count())
@@ -1467,8 +1410,8 @@ void PageItem_TextFrame::layout()
 				currentObjectBox = currentObject->getVisualBoundingRect();
 
 			bool HasMark = itemText.hasMark(a);
-			/* SPAN SKIP DISABLED FOR TEST */
-if (HasMark)
+
+			if (HasMark)
 			{
 				Mark* mark = itemText.mark(a);
 				//store mark pointer and position in text
@@ -1490,56 +1433,6 @@ if (HasMark)
 					autoLeftIndent = 0.0;
 				}
 				style = itemText.paragraphStyle(a);
-
-				// ✅ Span Columns
-				if (m_columns > 1 && current.isEmpty && itemText.isBlockStart(a))
-				{
-					
-					
-					int spanVal = style.spanColumns();
-					if (spanVal != 0)
-					{
-						int spanCols = (spanVal == -1) ? m_columns : qMin(spanVal, m_columns);
-						double spanWidth = spanCols * columnWidth() + (spanCols - 1) * m_columnGap;
-						current.column = 0;
-						current.colLeft = m_textDistanceMargins.left() + lineCorr;
-						current.colWidth = spanWidth;
-						current.colRight = current.colLeft + spanWidth;
-						current.mustLineEnd = current.colRight;
-						current.xPos = current.colLeft;
-						// Create spanInfo entry
-						if (!prevFullSpan) {
-							SpanInfo sI;
-							sI.startY = static_cast<int>(qMax(0.0, current.yPos - current.lineData.ascent - style.gapBefore()));
-							sI.endY = static_cast<int>(current.yPos);
-							sI.col = current.column;
-							
-							prevFullSpan = true;
-						} else {
-							if (false)
-								s_spanInfoList.last().endY = static_cast<int>(current.yPos + style.gapAfter());
-						}
-					}
-					else if (a > 0)
-					{
-						ParagraphStyle prevStyle = itemText.paragraphStyle(a - 1);
-						if (prevStyle.spanColumns() == 0)
-							prevFullSpan = false;
-
-						if (prevStyle.spanColumns() != 0)
-						{
-							if (false)
-								s_spanInfoList.last().endY += style.lineSpacing();
-
-							prevFullSpan = false;
-
-							current.colWidth = columnWidth();
-							current.colRight = current.colLeft + current.colWidth;
-							current.mustLineEnd = current.colRight;
-						}
-					}
-				}
-
 				if (style.hasBullet() || style.hasNum())
 				{
 					BulNumMode = true;
@@ -1632,8 +1525,7 @@ if (HasMark)
 				// more about par gap and dropcaps
 				if ((a > firstInFrame() && itemText.isBlockStart(a)) || (a == 0 && m_backBox == nullptr && current.startOfCol))
 				{
-					if (!current.afterOverflow && current.recalculateY && !current.startOfCol
-							&& !(current.spanYBottom > 0.0 && current.yPos <= current.spanYBottom + 1.0))
+					if (!current.afterOverflow && current.recalculateY && !current.startOfCol)
 						current.yPos += style.gapBefore();
 					DropCapDrop = 0;
 					if (!itemText.isBlockStart(a + 1))
@@ -1946,7 +1838,6 @@ if (HasMark)
 			regionMinY = static_cast<int>(floor(maxYAsc));
 			regionMaxY = static_cast<int>(floor(maxYDesc));
 
-			// Span column + image wrap: if image blocks entire line, skip yPos
 			if (current.isEmpty && !current.afterOverflow)
 			{
 				//start a new line
@@ -1974,8 +1865,7 @@ if (HasMark)
 				if ((style.firstIndent() < 0) && !addIndent2overflow)
 					addFirstIndent2overflow = false;
 
-				int doneGuard = 0;
-				while (!done && ++doneGuard < 10)
+				while (!done)
 				{
 					Xpos = current.xPos + (addIndent2overflow ? 0 : current.leftIndent);
 					Xend = current.xPos + current.leftIndent;
@@ -1990,18 +1880,13 @@ if (HasMark)
 							//for first paragraph`s line - if first line offset should be added
 							if ( addFirstIndent2overflow && itemText.isBlockStart(a))
 								Xend += style.firstIndent();
-							// Break if overflow end reached colRight
-							if (Xpos >= current.colRight)
-								break;
 						}
 						else
 							Xpos++;
 					}
 					current.xPos = Xend;
 					done = true;
-					// If overflow scan reached colRight with no valid position, force line advance
-					bool forceNewLine = (realEnd >= current.colRight && Xpos >= current.colRight);
-					if (forceNewLine || current.isEndOfLine((style.minGlyphExtension() * wide) + current.rightMargin))
+					if (current.isEndOfLine((style.minGlyphExtension() * wide) + current.rightMargin))
 					{
 						// new line
 						current.xPos = qMax(current.colLeft, maxDX);
@@ -2038,7 +1923,6 @@ if (HasMark)
 						regionMaxY = static_cast<int>(floor(maxYDesc));
 
 						pt.moveTopLeft(QPoint(static_cast<int>(floor(current.xPos)), regionMinY));
-
 						done = false;
 					}
 					if (current.isEndOfCol(realDesc))
@@ -2381,8 +2265,7 @@ if (HasMark)
 					//check if after overflow text can be placed
 					overflowWidth = realEnd - (current.xPos - current.maxShrink);
 					double newXAdd = overflowWidth - style.rightMargin() + style.minGlyphExtension() * wide + hyphWidth;
-					if (current.isEndOfLine(newXAdd) || current.xPos + newXAdd >= current.colRight || realEnd >= current.mustLineEnd
-					    || (!regionContainsRect(m_availableRegion, pt) && current.column != 0))
+					if (current.isEndOfLine(newXAdd) || current.xPos + newXAdd >= current.colRight || realEnd >= current.mustLineEnd)
 					{
 						if (!current.afterOverflow)
 						{
@@ -2568,7 +2451,8 @@ if (HasMark)
 									 itemText.text(a) == SpecialChars::COLBREAK)
 								&&  (current.lineData.lastCluster - 1 >= 0)
 								&&  !itemText.text(glyphClusters[current.lineData.lastCluster - 1].lastChar()).isSpace()))
-						{							current.justifyLine(style);
+						{
+							current.justifyLine(style);
 						}
 						else
 						{
@@ -2789,7 +2673,6 @@ if (HasMark)
 					current.startOfCol = false;
 					current.restartX = current.xPos = qMax(maxDX, current.colLeft);
 					lastLineY = current.rowDesc;
-
 					if (current.hasDropCap)
 					{
 						++DropLinesCount;
@@ -2801,26 +2684,13 @@ if (HasMark)
 						}
 					}
 					lastLineY = current.rowDesc;
-					// Track span paragraph bottom — update after each line commit
-					if (m_columns > 1 && style.spanColumns() != 0)
-					{
-						/* spanYBottom updated only at paragraph end */
-					}
 					current.mustLineEnd = current.colRight;
 					current.restartRowIndex = current.restartIndex;
 				}
 				if ( SpecialChars::isBreak(itemText.text(a)) )
 				{
 					if (itemText.isBlockStart(a + 1))
-					{
 						current.yPos += style.gapAfter();
-						// Update spanYBottom AFTER gapAfter — col 1 exact alignment
-												if (m_columns > 1 && style.spanColumns() != 0)
-						{
-							spanYBottom = current.yPos;
-							current.spanYBottom = current.yPos;
-						}
-					}
 					current.hyphenCount = 0;
 				}
 				if (inOverflow)
@@ -3162,14 +3032,13 @@ void PageItem_TextFrame::invalidateLayout(bool wholeChain)
 
 void PageItem_TextFrame::invalidateLayout(int firstChar)
 {
-
 	int storyLen = itemText.length();
 	slotInvalidateLayout(firstChar, storyLen);
 }
 
 void PageItem_TextFrame::slotInvalidateLayout(int firstItem, int /*endItem*/)
 {
-PageItem* firstFrame = firstInChain();
+	PageItem* firstFrame = firstInChain();
 	firstItem = itemText.prevParagraph(firstItem);
 
 	PageItem_TextFrame* firstInvalid = dynamic_cast<PageItem_TextFrame*>(firstFrame);
@@ -4099,23 +3968,7 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 						undoManager->action(undoTarget, ss);
 					}
 				}
-				{
-					// When cursor is just before a PARSEP, insertChars with applyNeighbourStyle
-					// inherits from the PARSEP which returns the paragraph default, discarding
-					// any manual per-character override (e.g. a manually set font size).
-					// Save the preceding character's style and re-apply it after insertion.
-					int preCursor = itemText.cursorPosition();
-					bool fixStyle = (QChar(conv) != SpecialChars::PARSEP
-					                 && preCursor > 0
-					                 && preCursor < itemText.length()
-					                 && itemText.text(preCursor) == SpecialChars::PARSEP);
-					CharStyle prevStyle;
-					if (fixStyle)
-						prevStyle = itemText.charStyle(preCursor - 1);
-					itemText.insertChars(QString(QChar(conv)), true);
-					if (fixStyle)
-						itemText.applyCharStyle(preCursor, 1, prevStyle);
-				}
+				itemText.insertChars(QString(QChar(conv)), true);
 				if (trans)
 					trans.commit();
 //				Tinput = true;
@@ -4572,7 +4425,6 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		}
 		else if ((as > 31) || (as == 13) || (as == 30))
 		{
-			qDebug() << "INSERT as:" << as << "kk:" << kk << "uc:" << uc;
 			if (UndoManager::undoEnabled())
 			{
 				ScItemState<ParagraphStyle> *ip = nullptr;
@@ -4610,23 +4462,7 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 					undoManager->action(undoTarget, ss);
 				}
 			}
-			{
-				// When cursor is just before a PARSEP, insertChars with applyNeighbourStyle
-				// inherits from the PARSEP which returns the paragraph default, discarding
-				// any manual per-character override (e.g. a manually set font size).
-				// Save the preceding character's style and re-apply it after insertion.
-				int preCursor = itemText.cursorPosition();
-				bool fixStyle = (uc[0] != SpecialChars::PARSEP
-				                 && preCursor > 0
-				                 && preCursor < itemText.length()
-				                 && itemText.text(preCursor) == SpecialChars::PARSEP);
-				CharStyle prevStyle;
-				if (fixStyle)
-					prevStyle = itemText.charStyle(preCursor - 1);
-				itemText.insertChars(uc, true);
-				if (fixStyle)
-					itemText.applyCharStyle(preCursor, uc.length(), prevStyle);
-			}
+			itemText.insertChars(uc, true);
 			if ((m_Doc->docHyphenator->autoCheck()) && (itemText.cursorPosition() > 1))
 			{
 				Twort = "";
@@ -6180,58 +6016,6 @@ void PageItem_TextFrame::setTextFrameHeight()
 		undoTransaction.commit();
 
 	invalid = true;
-	m_Doc->changed();
-	m_Doc->regionsChanged()->update(QRect());
-	m_Doc->changedPagePreview();
-}
-
-void PageItem_TextFrame::autoFitFrameHeight()
-{
-	if (!itemText.isNotEmpty()) return;
-	if (m_nextBox != nullptr) return;
-
-	UndoTransaction undoTransaction;
-	if (UndoManager::undoEnabled())
-	{
-		QString unitSuffix = unitGetStrFromIndex(m_Doc->unitIndex());
-		int unitPrecision  = unitGetPrecisionFromIndex(m_Doc->unitIndex());
-		double unitRatio   = m_Doc->unitRatio();
-		QString owString = QString::number(oldWidth  * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString ohString = QString::number(oldHeight * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nwString = QString::number(m_width   * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nhString = QString::number(m_height  * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString tooltip  = QString(Um::ResizeFromTo).arg(owString, ohString, nwString, nhString);
-		undoTransaction  = undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize, tooltip, Um::IResize);
-	}
-
-	// Binary search with original columns
-	double low  = 1.0;
-	double high = 20000.0;
-
-	while (low < high)
-	{
-		double mid = (low + high) / 2.0;
-		setHeight(mid);
-		updateClip();
-		invalid = true;
-		layout();
-		if (frameOverflows())
-			low = mid + 0.5;
-		else
-			high = mid;
-	}
-
-	// high = minimum height where no overflow
-	// Add top + bottom margins
-	double newH = high + m_textDistanceMargins.bottom();
-	setHeight(newH);
-	updateClip();
-	invalid = true;
-	layout();
-
-	if (undoTransaction)
-		undoTransaction.commit();
-
 	m_Doc->changed();
 	m_Doc->regionsChanged()->update(QRect());
 	m_Doc->changedPagePreview();
