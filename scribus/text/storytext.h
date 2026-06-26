@@ -207,8 +207,6 @@ public:
 	void setCharStyle(int pos, uint len, const CharStyle& style) override;
 	void setStyle(int pos, const ParagraphStyle& style) override;
 	void applyCharStyle(int pos, uint len, const CharStyle& style);
-	// Apply style to one character without emitting changed() — use only immediately after insertChars()
-	void applyCharStyleAt(int pos, const CharStyle& style);
 	void applyStyle(int pos, const ParagraphStyle& style, bool rmDirectFormatting = false);
 	void eraseCharStyle(int pos, uint len, const CharStyle& style);
 	void eraseStyle(int pos, const ParagraphStyle& style);
