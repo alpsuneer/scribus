@@ -4099,7 +4099,19 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 						undoManager->action(undoTarget, ss);
 					}
 				}
-				itemText.insertChars(QString(QChar(conv)), true);
+				{
+					int insertAt = itemText.cursorPosition();
+					bool fixCharStyle = (conv != static_cast<uint>(SpecialChars::PARSEP.unicode())
+					                     && insertAt > 0
+					                     && insertAt < itemText.length()
+					                     && itemText.text(insertAt) == SpecialChars::PARSEP);
+					CharStyle priorStyle;
+					if (fixCharStyle)
+						priorStyle = itemText.charStyle(insertAt - 1);
+					itemText.insertChars(QString(QChar(conv)), true);
+					if (fixCharStyle)
+						itemText.applyCharStyleAt(insertAt, priorStyle);
+				}
 				if (trans)
 					trans.commit();
 //				Tinput = true;
@@ -4594,7 +4606,22 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 					undoManager->action(undoTarget, ss);
 				}
 			}
-			itemText.insertChars(uc, true);
+			{
+				int insertAt = itemText.cursorPosition();
+				bool fixCharStyle = (!uc.isEmpty()
+				                     && uc[0] != SpecialChars::PARSEP
+				                     && insertAt > 0
+				                     && insertAt < itemText.length()
+				                     && itemText.text(insertAt) == SpecialChars::PARSEP);
+				CharStyle priorStyle;
+				if (fixCharStyle)
+					priorStyle = itemText.charStyle(insertAt - 1);
+				itemText.insertChars(uc, true);
+				if (fixCharStyle) {
+					for (int k = 0; k < uc.length(); ++k)
+						itemText.applyCharStyleAt(insertAt + k, priorStyle);
+				}
+			}
 			if ((m_Doc->docHyphenator->autoCheck()) && (itemText.cursorPosition() > 1))
 			{
 				Twort = "";

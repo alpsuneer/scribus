@@ -1485,7 +1485,12 @@ void StoryText::applyCharStyle(int pos, uint len, const CharStyle& style )
 	invalidate(pos, pos + len);
 }
 
-
+void StoryText::applyCharStyleAt(int pos, const CharStyle& style)
+{
+	assert(pos >= 0);
+	assert(pos < length());
+	d->at(pos)->applyCharStyle(style);
+}
 
 void StoryText::eraseCharStyle(int pos, uint len, const CharStyle& style )
 {
