@@ -706,12 +706,6 @@ void StoryText::insertChars(int pos, const QString& txt, bool applyNeighbourStyl
 	if (applyNeighbourStyle)
 	{
 		int referenceChar = qMax(0, qMin(pos, length()-1));
-		// When referenceChar lands on PARSEP, charStyle() falls back to the paragraph-level
-		// default and discards any manual per-character overrides (e.g. a manually changed
-		// font size on the preceding character).  Step back so the new character inherits
-		// from the real last typed character instead.
-		if (referenceChar > 0 && text(referenceChar) == SpecialChars::PARSEP)
-			referenceChar = referenceChar - 1;
 		clone.applyCharStyle(charStyle(referenceChar));
 		clone.setEffects(ScStyle_Default);
 	}
@@ -755,14 +749,12 @@ void StoryText::insertCharsWithSoftHyphens(int pos, const QString& txt, bool app
 	if (applyNeighbourStyle)
 	{
 		int referenceChar = qMax(0, qMin(pos, length() - 1));
-		if (referenceChar > 0 && text(referenceChar) == SpecialChars::PARSEP)
-			referenceChar = referenceChar - 1;
 		clone.applyCharStyle(charStyle(referenceChar));
 		clone.setEffects(ScStyle_Default);
 	}
 
 	int inserted = 0;
-	for (int i = 0; i < txt.length(); ++i)
+	for (int i = 0; i < txt.length(); ++i) 
 	{
 		QChar ch = txt.at(i);
 		int  index  = pos + inserted;

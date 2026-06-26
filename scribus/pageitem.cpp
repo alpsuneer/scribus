@@ -1397,16 +1397,7 @@ const CharStyle& PageItem::currentCharStyle() const
 	}
 	// Note: cursor position can be past last characters, don't use frameDisplays() here
 	if (cursorPosition >= 0 && cursorPosition <= itemText.length())
-	{
-		// When cursor sits just before a PARSEP, charStyle() returns the paragraph-level
-		// default, discarding any manual per-character overrides on the preceding character.
-		// Step back so the Properties Panel (and anything else reading this) sees the real
-		// override that would be inherited by newly typed text.
-		int refPos = cursorPosition;
-		if (refPos > 0 && refPos < itemText.length() && itemText.text(refPos) == SpecialChars::PARSEP)
-			refPos = refPos - 1;
-		return itemText.charStyle(refPos);
-	}
+		return itemText.charStyle(cursorPosition);
 	return itemText.defaultStyle().charStyle();
 }
 
@@ -1424,12 +1415,8 @@ void PageItem::currentTextProps(ParagraphStyle& parStyle) const
 	if (position >= 0 && position <= itemText.length())
 	{
 		// Do not use setStyle here otherwise char style properties explicitly
-		// set at paragraph level without using styles might get lost.
-		// Step back from PARSEP so manual overrides on the preceding character are included.
-		int refPos = position;
-		if (refPos > 0 && refPos < itemText.length() && itemText.text(refPos) == SpecialChars::PARSEP)
-			refPos = refPos - 1;
-		parStyle.charStyle().applyCharStyle( itemText.charStyle(refPos) );
+		// set at paragraph level without using styles might get lost
+		parStyle.charStyle().applyCharStyle( itemText.charStyle(position) );
 	}
 	else
 		parStyle.charStyle().setStyle( itemText.defaultStyle().charStyle() );
@@ -4476,18 +4463,6 @@ void PageItem::togglePrintEnabled()
 		undoManager->action(this, ss);
 	}
 	m_PrintEnabled=!m_PrintEnabled;
-}
-
-void PageItem::setWrapOffsets(double top, double bottom, double left, double right)
-{
-	m_wrapOffsetTop    = top;
-	m_wrapOffsetBottom = bottom;
-	m_wrapOffsetLeft   = left;
-	m_wrapOffsetRight  = right;
-	if (!m_Doc) return;
-	m_Doc->regionsChanged()->update(QRectF());
-	checkTextFlowInteractions(false);
-	m_Doc->changed();
 }
 
 void PageItem::setTextFlowMode(TextFlowMode mode)
@@ -9371,12 +9346,6 @@ QRectF PageItem::getBoundingRect() const
 {
 	double x, y, x2, y2;
 	getBoundingRect(&x, &y, &x2, &y2);
-	// Suneer: apply wrap offsets
-	if (m_wrapOffsetTop != 0 || m_wrapOffsetLeft != 0)
-		x  -= m_wrapOffsetLeft;
-	y  -= m_wrapOffsetTop;
-	x2 += m_wrapOffsetRight;
-	y2 += m_wrapOffsetBottom;
 	return QRectF(x, y, x2 - x, y2 - y);
 }
 
@@ -9401,11 +9370,6 @@ QRectF PageItem::getVisualBoundingRect() const
 {
 	double x, y, x2, y2;
 	getVisualBoundingRect(&x, &y, &x2, &y2);
-	// Suneer: apply wrap offsets
-	x  -= m_wrapOffsetLeft;
-	y  -= m_wrapOffsetTop;
-	x2 += m_wrapOffsetRight;
-	y2 += m_wrapOffsetBottom;
 	return QRectF(x, y, x2 - x, y2 - y);
 }
 
@@ -11230,34 +11194,8 @@ void PageItem::moveWelded(double dX, double dY, int weld)
 {
 	WeldingInfo wInf = weldList.at(weld);
 	PageItem *item = wInf.weldItem;
-	if (!item)
-		return;
-	double relX = item->xPos() - xPos();
-	double relY = item->yPos() - yPos();
-	if (qAbs(relX) <= qAbs(relY))
-	{
-		// BottomCaption or TopCaption
-		item->setWidth(width());
-		item->setXPos(xPos());
-		if (relY >= 0)
-			item->setYPos(yPos() + height());
-		else
-			item->setYPos(yPos() - item->height());
-		item->ContourLine = item->PoLine.copy();
-		item->imageClip = item->PoLine.copy();
-	}
-	else
-	{
-		// LeftCaption or RightCaption
-		item->setHeight(height());
-		item->setYPos(yPos());
-		if (relX >= 0)
-			item->setXPos(xPos() + width());
-		else
-			item->setXPos(xPos() - item->width());
-		item->ContourLine = item->PoLine.copy();
-		item->imageClip = item->PoLine.copy();
-	}
+	item->setXPos(item->xPos() + dX);
+	item->setYPos(item->yPos() + dY);
 	item->update();
 	item->moveWelded(dX, dY, this);
 }
