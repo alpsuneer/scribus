@@ -44,7 +44,7 @@ SMPStyleWidget::SMPStyleWidget(ScribusDoc* doc, StyleSet<CharStyle> *cstyles) :
 	lineSpacingMode->addItem( tr("Fixed"));
 	lineSpacingMode->addItem( tr("Automatic"));
 	lineSpacingMode->addItem( tr("Baseline"));
-	connect(lineSpacingMode, SIGNAL(currentIndexChanged(int)), this, SLOT(slotLineSpacingModeChanged(int)));
+	connect(lineSpacingMode, SIGNAL(highlighted(int)), this, SLOT(slotLineSpacingModeChanged(int)));
 
 	lineSpacing->setSuffix(unitGetSuffixFromIndex(0));
 	spaceAbove->setSuffix(unitGetSuffixFromIndex(0));
@@ -122,7 +122,6 @@ void SMPStyleWidget::iconSetChange()
 	parEffectCharStyleComboLabel->setPixmap(iconManager.loadPixmap("character-style"));
 	peLabel->setPixmap(iconManager.loadPixmap("paragraph-effects-style"));
 	parentParEffectsButton->setIcon(iconManager.loadIcon("reset-style-changes"));
-	backgroundColor->setPixmap(iconManager.loadPixmap("color-fill"));
 }
 
 void SMPStyleWidget::languageChange()
@@ -279,6 +278,7 @@ void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles
 		keepLinesEnd->setValue (pstyle->keepLinesEnd(), pstyle->isInhKeepLinesEnd());
 		keepTogether->setChecked (pstyle->keepTogether(), pstyle->isInhKeepTogether());
 		keepWithNext->setChecked (pstyle->keepWithNext(), pstyle->isInhKeepWithNext());
+		spanColumnsCombo->setCurrentIndex(pstyle->spanColumns() < 0 ? 1 : pstyle->spanColumns() == 0 ? 0 : pstyle->spanColumns() - 1);
 		keepLinesStart->setParentValue (parent->keepLinesStart());
 		keepLinesEnd->setParentValue (parent->keepLinesEnd());
 		keepTogether->setParentValue (parent->keepTogether());
@@ -396,6 +396,7 @@ void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles
 		keepLinesEnd->setValue (pstyle->keepLinesEnd());
 		keepTogether->setChecked (pstyle->keepTogether());
 		keepWithNext->setChecked (pstyle->keepWithNext());
+		spanColumnsCombo->setCurrentIndex(pstyle->spanColumns() < 0 ? 1 : pstyle->spanColumns() == 0 ? 0 : pstyle->spanColumns() - 1);
 		backgroundColor->setColor(pstyle->backgroundColor(), qRound(pstyle->backgroundShade()));
 
 	}

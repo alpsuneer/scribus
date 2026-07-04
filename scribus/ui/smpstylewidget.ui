@@ -919,6 +919,38 @@ A value of 0 means unlimited hyphenations.</string>
              </widget>
             </item>
             <item>
+             <widget class="QComboBox" name="spanColumnsCombo">
+              <property name="toolTip">
+               <string>Span paragraph across columns</string>
+              </property>
+              <item>
+               <property name="text">
+                <string>None</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Span All</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Span 2</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Span 3</string>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>Span 4</string>
+               </property>
+              </item>
+             </widget>
+            </item>
+            <item>
              <spacer name="verticalSpacer_4">
               <property name="orientation">
                <enum>Qt::Orientation::Vertical</enum>

@@ -331,6 +331,11 @@ void ActionManager::initStyleMenuActions()
 //	(*scrActions)["alignBlock"]->setToggleAction(true);
 //	(*scrActions)["alignForced"]->setToggleAction(true);
 
+	(*scrActions)["alignLeft"]->setTexts(tr("Align Text Left"));
+	(*scrActions)["alignCenter"]->setTexts(tr("Align Text Center"));
+	(*scrActions)["alignRight"]->setTexts(tr("Align Text Right"));
+	(*scrActions)["alignBlock"]->setTexts(tr("Align Text Justified"));
+	(*scrActions)["alignForced"]->setTexts(tr("Align Text Force Justified"));
 	connect( (*scrActions)["alignLeft"], SIGNAL(triggeredData(int)), mainWindow, SLOT(setNewAlignment(int)));
 	connect( (*scrActions)["alignCenter"], SIGNAL(triggeredData(int)), mainWindow, SLOT(setNewAlignment(int)));
 	connect( (*scrActions)["alignRight"], SIGNAL(triggeredData(int)), mainWindow, SLOT(setNewAlignment(int)));
@@ -824,6 +829,42 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="toolsContent";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="toolsParagraphStyles";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="toolsNewsPanel";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerApplyChain";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerAutoFitHeight";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerGetImage";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerFocusFontCombo";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="itemImageScaleUp";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="itemImageScaleDown";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerEnlargeImageSize";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerReduceImageSize";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerEnlargeTextFrame";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerReduceTextFrame";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerEnlargeTextSize";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerReduceTextSize";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerEnlargeLineSpacing";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerReduceLineSpacing";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerScaleUp";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerScaleDown";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "toolsOutline";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "toolsScrapbook";
@@ -932,9 +973,30 @@ void ActionManager::initToolsMenuActions()
 #endif
 	//Set the application wide palette shortcuts
 	(*scrActions)["toolsProperties"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemImageScaleUp"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemImageScaleDown"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerScaleUp"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerScaleDown"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsContent"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsScrapbook"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsLayers"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemRaiseToTop"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemLowerToBottom"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemRaise"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["itemLower"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerFocusFontCombo"]->setTexts(tr("Focus Font Family"));
+	(*scrActions)["suneerFocusFontCombo"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerAutoFitHeight"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerGetImage"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerEnlargeImageSize"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerReduceImageSize"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerEnlargeTextFrame"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerReduceTextFrame"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerEnlargeTextSize"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerReduceTextSize"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerEnlargeLineSpacing"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerReduceLineSpacing"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerApplyChain"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsPages"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsBookmarks"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsDownloads"]->setShortcutContext(Qt::ApplicationShortcut);
@@ -990,9 +1052,13 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasUpdateDocument";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+
+	name = "SRDuplicateContentCheck";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
+	connect( (*scrActions)["SRDuplicateContentCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateContentCheck()) );
 }
 
 
@@ -1258,6 +1324,8 @@ void ActionManager::disconnectNewDocActions()
 	(*scrActions)["tableAdjustTableToFrame"]->disconnect();
 	(*scrActions)["itemAdjustFrameHeightToText"]->disconnect();
 	(*scrActions)["itemAdjustFrameToImage"]->disconnect();
+	(*scrActions)["itemImageScaleUp"]->disconnect();
+	(*scrActions)["itemImageScaleDown"]->disconnect();
 	(*scrActions)["itemAdjustImageToFrame"]->disconnect();
 	(*scrActions)["itemLock"]->disconnect();
 	(*scrActions)["itemLockSize"]->disconnect();
@@ -1318,6 +1386,8 @@ void ActionManager::connectNewDocActions(ScribusDoc *currDoc)
 	connect( (*scrActions)["itemAdjustFrameHeightToText"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_AdjustFrameHeightToText()) );
 	connect( (*scrActions)["itemAdjustFrameToImage"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_AdjustFrametoImageSize()) );
 	connect( (*scrActions)["itemAdjustImageToFrame"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_AdjustImagetoFrameSize()) );
+	connect((*scrActions)["itemImageScaleUp"], &QAction::triggered, ScCore->primaryMainWindow(), &ScribusMainWindow::suneerScaleImageUp);
+	connect((*scrActions)["itemImageScaleDown"], &QAction::triggered, ScCore->primaryMainWindow(), &ScribusMainWindow::suneerScaleImageDown);
 	connect( (*scrActions)["itemsUnWeld"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_UnWeld()) );
 	connect( (*scrActions)["itemWeld"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_Weld()) );
 	connect( (*scrActions)["itemEditWeld"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_EditWeld()) );
@@ -1622,10 +1692,10 @@ void ActionManager::languageChange()
 	(*scrActions)["itemPrintingEnabled"]->setTexts( tr("&Printing Enabled"));
 	(*scrActions)["itemFlipH"]->setTexts( tr("&Flip Horizontally"));
 	(*scrActions)["itemFlipV"]->setTexts( tr("&Flip Vertically"));
-	(*scrActions)["itemLowerToBottom"]->setTexts( tr("Lower to &Bottom"));
-	(*scrActions)["itemRaiseToTop"]->setTexts( tr("Raise to &Top"));
-	(*scrActions)["itemLower"]->setTexts( tr("&Lower"));
-	(*scrActions)["itemRaise"]->setTexts( tr("&Raise"));
+	(*scrActions)["itemLowerToBottom"]->setTexts( tr("Move to Back"));
+	(*scrActions)["itemRaiseToTop"]->setTexts( tr("Move to Front"));
+	(*scrActions)["itemLower"]->setTexts( tr("Move One Level Down"));
+	(*scrActions)["itemRaise"]->setTexts( tr("Move One Level Up"));
 	(*scrActions)["itemSendToPattern"]->setTexts( tr("Patterns"));
 	(*scrActions)["itemSendToInline"]->setTexts( tr("Inline Items"));
 	(*scrActions)["itemAttributes"]->setTexts( tr("&Attributes..."));
@@ -1735,6 +1805,23 @@ void ActionManager::languageChange()
 	//Tool menu
 	(*scrActions)["toolsProperties"]->setTexts( tr("&Properties"));
 	(*scrActions)["toolsContent"]->setTexts( tr("Content Properties"));
+	(*scrActions)["toolsParagraphStyles"]->setTexts( tr("Paragraph Styles"));
+	(*scrActions)["toolsNewsPanel"]->setTexts( tr("News Browser"));
+	(*scrActions)["suneerApplyChain"]->setTexts( tr("Apply Chain Style"));
+	(*scrActions)["suneerAutoFitHeight"]->setTexts( tr("Auto Fit Frame Height"));
+	(*scrActions)["suneerGetImage"]->setTexts( tr("Get Image"));
+	(*scrActions)["suneerScaleUp"]->setTexts( tr("Scale Up / Font Size Up"));
+	(*scrActions)["suneerScaleDown"]->setTexts( tr("Scale Down / Font Size Down"));
+	(*scrActions)["itemImageScaleUp"]->setTexts( tr("Enlarge Image Frame Size"));
+	(*scrActions)["suneerEnlargeImageSize"]->setTexts( tr("Enlarge Image Size"));
+	(*scrActions)["suneerReduceImageSize"]->setTexts( tr("Reduce Image Size"));
+	(*scrActions)["suneerEnlargeTextFrame"]->setTexts( tr("Enlarge Text Frame Size"));
+	(*scrActions)["suneerReduceTextFrame"]->setTexts( tr("Reduce Text Frame Size"));
+	(*scrActions)["suneerEnlargeTextSize"]->setTexts( tr("Enlarge Text Size"));
+	(*scrActions)["suneerReduceTextSize"]->setTexts( tr("Reduce Text Size"));
+	(*scrActions)["suneerEnlargeLineSpacing"]->setTexts( tr("Enlarge Line Spacing"));
+	(*scrActions)["suneerReduceLineSpacing"]->setTexts( tr("Reduce Line Spacing"));
+	(*scrActions)["itemImageScaleDown"]->setTexts( tr("Reduce Image Frame Size"));
 	(*scrActions)["toolsOutline"]->setTexts( tr("&Outline", "Document Outline Palette"));
 	(*scrActions)["toolsScrapbook"]->setTexts( tr("&Scrapbook"));
 	(*scrActions)["toolsLayers"]->setTexts( tr("&Layers"));
@@ -1798,6 +1885,7 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasDeHyphenateText"]->setTexts( tr("Dehyphenate Text"));
 	(*scrActions)["extrasGenerateTableOfContents"]->setTexts( tr("&Generate Table Of Contents and Indexes"));
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
+	(*scrActions)["SRDuplicateContentCheck"]->setTexts( tr("Duplicate Content Check"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -1956,112 +2044,134 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.clear();
 
 	defKeys.insert("fileNew", QKeySequence::New);
-	defKeys.insert("fileNewFromTemplate", Qt::CTRL | Qt::ALT | Qt::Key_N);
+	// Suneer: Text alignment shortcuts
+	defKeys.insert("alignLeft", QKeySequence(Qt::CTRL | Qt::Key_L));
+	defKeys.insert("alignCenter", QKeySequence(Qt::CTRL | Qt::Key_E));
+	defKeys.insert("alignRight", QKeySequence(Qt::CTRL | Qt::Key_R));
+	defKeys.insert("alignBlock", QKeySequence(Qt::CTRL | Qt::Key_J));
+	defKeys.insert("alignForced", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_J));
+	defKeys.insert("fileNewFromTemplate", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_N));
 	defKeys.insert("fileOpen", QKeySequence::Open);
 	defKeys.insert("fileClose", QKeySequence::Close);
 	defKeys.insert("fileSave", QKeySequence::Save);
-	defKeys.insert("fileSaveAs", Qt::CTRL | Qt::SHIFT | Qt::Key_S);
-	defKeys.insert("fileImportText", Qt::CTRL | Qt::Key_I);
-	defKeys.insert("fileImportImage", Qt::CTRL | Qt::Key_I);
+	defKeys.insert("fileSaveAs", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+	defKeys.insert("fileImportText", QKeySequence());
+	defKeys.insert("fileImportImage", QKeySequence());
 	defKeys.insert("filePrint", QKeySequence::Print);
-	defKeys.insert("fileExportAsPDF", Qt::CTRL | Qt::SHIFT | Qt::Key_P);
-	defKeys.insert("fileQuit", Qt::CTRL | Qt::Key_Q);
+	defKeys.insert("fileExportAsPDF", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+	defKeys.insert("fileQuit", QKeySequence(Qt::CTRL | Qt::Key_Q));
 	//Edit Menu
 	defKeys.insert("editUndoAction", QKeySequence::Undo);
 	defKeys.insert("editRedoAction", QKeySequence::Redo);
 	defKeys.insert("editCut", QKeySequence::Cut);
 	defKeys.insert("editCopy", QKeySequence::Copy);
 	defKeys.insert("editPaste", QKeySequence::Paste);
-	defKeys.insert("editPastePlainText", Qt::CTRL | Qt::SHIFT | Qt::Key_V);
-	defKeys.insert("editClearContents", Qt::CTRL | Qt::SHIFT | Qt::Key_Delete);
-	defKeys.insert("editCopyContents", Qt::CTRL | Qt::SHIFT | Qt::Key_C);
-	defKeys.insert("editPasteContents", Qt::CTRL | Qt::ALT | Qt::Key_V);
-	defKeys.insert("editPasteContentsAbs", Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_V);
-	defKeys.insert("editSelectAll", Qt::CTRL | Qt::Key_A);
-	defKeys.insert("editSelectAllOnLayer", Qt::CTRL | Qt::ALT | Qt::Key_A);
-	defKeys.insert("editDeselectAll", Qt::CTRL | Qt::SHIFT | Qt::Key_A);
-	defKeys.insert("editSearchReplace", Qt::CTRL | Qt::Key_F);
+	defKeys.insert("editPastePlainText", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+	defKeys.insert("editClearContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Delete));
+	defKeys.insert("editCopyContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+	defKeys.insert("editPasteContents", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_V));
+	defKeys.insert("editPasteContentsAbs", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_V));
+	defKeys.insert("editSelectAll", QKeySequence(Qt::CTRL | Qt::Key_A));
+	defKeys.insert("editSelectAllOnLayer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
+	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
+	defKeys.insert("editSearchReplace", QKeySequence(Qt::CTRL | Qt::Key_F));
 	defKeys.insert("editStyles", QKeySequence(Qt::Key_F4));
-	defKeys.insert("styleImageEffects", Qt::CTRL | Qt::Key_E);
+	defKeys.insert("styleImageEffects", QKeySequence(Qt::CTRL | Qt::Key_E));
 
 	//Item Menu
-	defKeys.insert("itemDuplicate", Qt::CTRL | Qt::Key_D);
-	defKeys.insert("itemMulDuplicate", Qt::CTRL | Qt::SHIFT | Qt::Key_D);
+	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
+	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
 	defKeys.insert("itemDelete", QKeySequence::Delete);
-	defKeys.insert("itemGroup", Qt::CTRL | Qt::Key_G);
-	defKeys.insert("itemUngroup", Qt::CTRL | Qt::SHIFT | Qt::Key_G);
-	defKeys.insert("itemLock", Qt::CTRL | Qt::Key_L);
-	defKeys.insert("itemLockSize", Qt::CTRL | Qt::SHIFT | Qt::Key_L);
-	defKeys.insert("itemLowerToBottom", Qt::Key_End);
-	defKeys.insert("itemRaiseToTop", Qt::Key_Home);
-	defKeys.insert("itemLower", Qt::CTRL | Qt::Key_End);
-	defKeys.insert("itemRaise", Qt::CTRL | Qt::Key_Home);
-	defKeys.insert("itemStyleSearch", Qt::SHIFT | Qt::Key_Escape);
+	defKeys.insert("itemGroup", QKeySequence(Qt::CTRL | Qt::Key_G));
+	defKeys.insert("itemUngroup", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_G));
+	defKeys.insert("itemLock", QKeySequence(Qt::CTRL | Qt::Key_L));
+	defKeys.insert("itemLockSize", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+	defKeys.insert("itemLowerToBottom", QKeySequence("End"));
+	defKeys.insert("itemRaiseToTop", QKeySequence("Home"));
+	defKeys.insert("itemLower", QKeySequence("Ctrl+End"));
+	defKeys.insert("itemRaise", QKeySequence("Ctrl+Home"));
+	defKeys.insert("itemStyleSearch", QKeySequence("Shift+Esc"));
 
 	//Insert Menu
 	//Page menu
 	//View Menu
-	defKeys.insert("viewFitInWindow", Qt::CTRL | Qt::Key_0);
-	defKeys.insert("viewFit100", Qt::CTRL | Qt::Key_1);
-	defKeys.insert("viewPreviewMode", Qt::CTRL | Qt::ALT | Qt::Key_P);
-	defKeys.insert("viewShowRulers", Qt::CTRL | Qt::SHIFT | Qt::Key_R);
+	defKeys.insert("viewFitInWindow", QKeySequence(Qt::CTRL | Qt::Key_0));
+	defKeys.insert("viewFit100", QKeySequence(Qt::CTRL | Qt::Key_1));
+	defKeys.insert("viewPreviewMode", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+	defKeys.insert("viewShowRulers", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
 	defKeys.insert("viewShowContextMenu", Qt::Key_Menu); //Context menu key on Windows. Do we have one to use on Linux/OSX? Super_L ?
 
 	//Tool menu
-	defKeys.insert("toolsProperties", Qt::Key_F2);
-	defKeys.insert("toolsContent", Qt::Key_F3);
-	defKeys.insert("toolsLayers", Qt::Key_F6);
+	defKeys.insert("toolsProperties", QKeySequence(Qt::Key_F2));
+	defKeys.insert("toolsContent", QKeySequence(Qt::Key_F3));
+	defKeys.insert("toolsParagraphStyles", QKeySequence(Qt::Key_F8));
+	defKeys.insert("toolsNewsPanel", QKeySequence());
+	defKeys.insert("suneerApplyChain", QKeySequence());
+	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
+	defKeys.insert("suneerGetImage", QKeySequence(Qt::CTRL | Qt::Key_I));
+	defKeys.insert("suneerFocusFontCombo", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F));
+	defKeys.insert("suneerEnlargeImageSize", QKeySequence());
+	defKeys.insert("suneerReduceImageSize", QKeySequence());
+	defKeys.insert("suneerEnlargeTextFrame", QKeySequence());
+	defKeys.insert("suneerReduceTextFrame", QKeySequence());
+	defKeys.insert("suneerEnlargeTextSize", QKeySequence());
+	defKeys.insert("suneerReduceTextSize", QKeySequence());
+	defKeys.insert("suneerEnlargeLineSpacing", QKeySequence(Qt::SHIFT | Qt::Key_Greater));
+	defKeys.insert("suneerReduceLineSpacing", QKeySequence("Shift+&lt;"));
+	defKeys.insert("itemImageScaleUp", QKeySequence(Qt::CTRL | Qt::Key_Period));
+	defKeys.insert("itemImageScaleDown", QKeySequence(Qt::CTRL | Qt::Key_Comma));
+	defKeys.insert("toolsLayers", QKeySequence(Qt::Key_F6));
 
 	//toolbar only items
-	defKeys.insert("toolsSelect", Qt::Key_C);
+	defKeys.insert("toolsSelect", QKeySequence(Qt::Key_C));
 	defKeys.insert("toolsInsertTextFrame", QKeySequence(Qt::Key_T));
-	defKeys.insert("toolsInsertImageFrame", Qt::Key_I);
-	defKeys.insert("toolsInsertTable", Qt::Key_A);
-	defKeys.insert("toolsInsertShape", Qt::Key_S);
-	defKeys.insert("toolsInsertPolygon", Qt::Key_P);
-	defKeys.insert("toolsInsertLine", Qt::Key_L);
-	defKeys.insert("toolsInsertBezier", Qt::Key_B);
-	defKeys.insert("toolsInsertFreehandLine", Qt::Key_F);
+	defKeys.insert("toolsInsertImageFrame", QKeySequence(Qt::Key_I));
+	defKeys.insert("toolsInsertTable", QKeySequence(Qt::Key_A));
+	defKeys.insert("toolsInsertShape", QKeySequence(Qt::Key_S));
+	defKeys.insert("toolsInsertPolygon", QKeySequence(Qt::Key_P));
+	defKeys.insert("toolsInsertLine", QKeySequence(Qt::Key_L));
+	defKeys.insert("toolsInsertBezier", QKeySequence(Qt::Key_B));
+	defKeys.insert("toolsInsertFreehandLine", QKeySequence(Qt::Key_F));
 	
 	defKeys.insert("toolsInsertRenderFrame", Qt::Key_D); //TODO: First free key. Select a meaningful
-	defKeys.insert("toolsRotate", Qt::Key_R);
-	defKeys.insert("toolsZoom", Qt::Key_Z);
-	defKeys.insert("toolsZoomIn", Qt::CTRL | Qt::Key_Plus);
-	defKeys.insert("toolsZoomOut", Qt::CTRL | Qt::Key_Minus);
-	defKeys.insert("toolsEditContents", Qt::Key_E);
-	defKeys.insert("toolsEditWithStoryEditor", Qt::CTRL | Qt::Key_T);
-	defKeys.insert("toolsLinkTextFrame", Qt::Key_N);
-	defKeys.insert("toolsUnlinkTextFrame", Qt::Key_U);
-	defKeys.insert("toolsEyeDropper", Qt::Key_Y);
+	defKeys.insert("toolsRotate", QKeySequence(Qt::Key_R));
+	defKeys.insert("toolsZoom", QKeySequence(Qt::Key_Z));
+	defKeys.insert("toolsZoomIn", QKeySequence("Ctrl++"));
+	defKeys.insert("toolsZoomOut", QKeySequence(Qt::CTRL | Qt::Key_Minus));
+	defKeys.insert("toolsEditContents", QKeySequence(Qt::Key_E));
+	defKeys.insert("toolsEditWithStoryEditor", QKeySequence(Qt::CTRL | Qt::Key_T));
+	defKeys.insert("toolsLinkTextFrame", QKeySequence(Qt::Key_N));
+	defKeys.insert("toolsUnlinkTextFrame", QKeySequence(Qt::Key_U));
+	defKeys.insert("toolsEyeDropper", QKeySequence(Qt::Key_Y));
 
 	//PDF items
 	//Extras Menu
 	//Windows Menu
-	defKeys.insert("specialToggleAllPalettes", Qt::Key_F12);
+	defKeys.insert("specialToggleAllPalettes", QKeySequence("F12"));
 
 	//Help Menu
-	defKeys.insert("helpActionSearch", Qt::CTRL | Qt::Key_Slash);
-	defKeys.insert("helpManual", Qt::Key_F1);
+	defKeys.insert("helpActionSearch", QKeySequence(Qt::CTRL | Qt::Key_Slash));
+	defKeys.insert("helpManual", QKeySequence(Qt::Key_F1));
 
 	//GUI and specials
-	defKeys.insert("specialToggleAllGuides", Qt::Key_F11);
-	defKeys.insert("specialUnicodeSequenceBegin", Qt::CTRL | Qt::SHIFT | Qt::Key_U);
+	defKeys.insert("specialToggleAllGuides", QKeySequence("F11"));
+	defKeys.insert("specialUnicodeSequenceBegin", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_U));
 
 	//typography
-	defKeys.insert("unicodeFrameBreak", Qt::CTRL | Qt::Key_Return);
-	defKeys.insert("unicodeColumnBreak", Qt::CTRL | Qt::SHIFT | Qt::Key_Return);
+	defKeys.insert("unicodeFrameBreak", QKeySequence(Qt::CTRL | Qt::Key_Return));
+	defKeys.insert("unicodeColumnBreak", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Return));
 
-	defKeys.insert("unicodeSoftHyphen", Qt::CTRL | Qt::SHIFT | Qt::Key_Minus);
-	defKeys.insert("unicodeNonBreakingHyphen", Qt::CTRL | Qt::ALT | Qt::Key_Minus);
-	defKeys.insert("unicodeNonBreakingSpace", Qt::CTRL | Qt::Key_Space);
-	defKeys.insert("unicodeNarrowNoBreakSpace", Qt::CTRL | Qt::ALT | Qt::Key_Space);
-	defKeys.insert("unicodePageNumber", Qt::CTRL | Qt::SHIFT | Qt::ALT | Qt::Key_P);
-	defKeys.insert("unicodeNewLine", Qt::SHIFT | Qt::Key_Return);
+	defKeys.insert("unicodeSoftHyphen", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Minus));
+	defKeys.insert("unicodeNonBreakingHyphen", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Minus));
+	defKeys.insert("unicodeNonBreakingSpace", QKeySequence(Qt::CTRL | Qt::Key_Space));
+	defKeys.insert("unicodeNarrowNoBreakSpace", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Space));
+	defKeys.insert("unicodePageNumber", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_P));
+	defKeys.insert("unicodeNewLine", QKeySequence(Qt::SHIFT | Qt::Key_Return));
 
 	//Plugins
-	defKeys.insert("ExportAsImage", Qt::CTRL | Qt::SHIFT | Qt::Key_E);
-	defKeys.insert("NewFromDocumentTemplate", Qt::CTRL | Qt::ALT | Qt::Key_N);
-	defKeys.insert("SaveAsDocumentTemplate", Qt::CTRL | Qt::ALT | Qt::Key_S);
+	defKeys.insert("ExportAsImage", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E));
+	defKeys.insert("NewFromDocumentTemplate", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_N));
+	defKeys.insert("SaveAsDocumentTemplate", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
 }
 
 void ActionManager::createDefaultMenuNames()
@@ -2225,10 +2335,6 @@ void ActionManager::createDefaultMenus()
 		<< "itemPreviewFull" 
 		<< "itemPreviewNormal" 
 		<< "itemPreviewLow" 
-		<< "itemRaise" 
-		<< "itemLower" 
-		<< "itemRaiseToTop" 
-		<< "itemLowerToBottom" 
 		<< "itemSendToPattern" 
 		<< "itemSendToInline"
 		<< "itemAttributes" 
@@ -2431,6 +2537,7 @@ void ActionManager::createDefaultMenus()
 		<< "specialToggleAllPalettes"
 		<< "toolsProperties"
 		<< "toolsContent"
+		<< "toolsParagraphStyles"
 		<< "toolsOutline"
 		<< "toolsScrapbook"
 		<< "toolsLayers"
@@ -2475,6 +2582,8 @@ void ActionManager::createDefaultNonMenuNames()
 	defNonMenuNames.append(QPair<QString, QStringList>("Plugin Menu Items", QStringList()));
 	defNonMenuNames.append(QPair<QString, QStringList>("Others", QStringList()));
 	defNonMenuNames.append(QPair<QString, QStringList>("Unicode Characters", QStringList()));
+	defNonMenuNames.append(QPair<QString, QStringList>("Sr shortcuts", QStringList()));
+	defNonMenuNames.append(QPair<QString, QStringList>("Sr Image text", QStringList()));
 
 	QVector< QPair<QString, QStringList> >::Iterator itNonMenuNames = defNonMenuNames.begin();
 	itNonMenuNames->second << tr("Plugin Menu Items") << "Plugin Menu Items" << tr("Plugin Menu Items");
@@ -2482,6 +2591,10 @@ void ActionManager::createDefaultNonMenuNames()
 	itNonMenuNames->second << tr("Others") << "Others" << tr("Others");
 	++itNonMenuNames;
 	itNonMenuNames->second << tr("Unicode Characters") << "Unicode Characters" << tr("Unicode Characters");
+	++itNonMenuNames;
+	itNonMenuNames->second << tr("Sr shortcuts") << "Sr shortcuts" << tr("Sr shortcuts");
+	++itNonMenuNames;
+	itNonMenuNames->second << tr("Sr Image text") << "Sr Image text" << tr("Sr Image text");
 	++itNonMenuNames;
 }
 
@@ -2501,6 +2614,8 @@ void ActionManager::createDefaultNonMenuActions()
 	defNonMenuActions.append(QPair<QString, QStringList>("Plugin Menu Items", QStringList()));
 	defNonMenuActions.append(QPair<QString, QStringList>("Others", QStringList()));
 	defNonMenuActions.append(QPair<QString, QStringList>("Unicode Characters", QStringList()));
+	defNonMenuActions.append(QPair<QString, QStringList>("Sr shortcuts", QStringList()));
+	defNonMenuActions.append(QPair<QString, QStringList>("Sr Image text", QStringList()));
 */
 
 	QVector< QPair<QString, QStringList> >::Iterator itnmenua = defNonMenuActions.begin();
@@ -2531,6 +2646,8 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "toolsPDFAnnotLink";
 #ifdef HAVE_OSG
 	itnmenua->second << "toolsPDFAnnot3D";
+
+
 #endif
 	itnmenua->second << "specialToggleAllGuides";
 	itnmenua->second << "specialUnicodeSequenceBegin";
@@ -2604,6 +2721,35 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "unicodeLigature_ffl";
 	itnmenua->second << "unicodeLigature_ft";
 	itnmenua->second << "unicodeLigature_st";
+	// Suneer section
+	++itnmenua;
+	itnmenua->second << "itemRaiseToTop";
+	itnmenua->second << "itemLowerToBottom";
+	itnmenua->second << "itemRaise";
+	itnmenua->second << "itemLower";
+	itnmenua->second << "suneerFocusFontCombo";
+	itnmenua->second << "suneerApplyChain";
+	itnmenua->second << "suneerAutoFitHeight";
+	itnmenua->second << "suneerGetImage";
+	itnmenua->second << "alignLeft";
+	itnmenua->second << "alignCenter";
+	itnmenua->second << "alignRight";
+	itnmenua->second << "alignBlock";
+	itnmenua->second << "alignForced";
+	itnmenua->second << "suneerEnlargeLineSpacing";
+	itnmenua->second << "suneerReduceLineSpacing";
+	// Suneer Image section
+	++itnmenua;
+	itnmenua->second << "itemImageScaleUp";
+	itnmenua->second << "itemImageScaleDown";
+	itnmenua->second << "suneerEnlargeImageSize";
+	itnmenua->second << "suneerReduceImageSize";
+	itnmenua->second << "suneerEnlargeTextFrame";
+	itnmenua->second << "suneerReduceTextFrame";
+	itnmenua->second << "suneerEnlargeTextSize";
+	itnmenua->second << "suneerReduceTextSize";
+
+
 }
 
 void ActionManager::handleMultipleSelections()

@@ -95,6 +95,16 @@ void FloatingWindow::keyPressEvent(QKeyEvent *event)
 		hide();
 }
 
+void FloatingWindow::changeEvent(QEvent *event)
+{
+	// Outside click → window loses activation → hide
+	if (event->type() == QEvent::ActivationChange) {
+		if (!isActiveWindow())
+			hide();
+	}
+	QWidget::changeEvent(event);
+}
+
 void FloatingWindow::hideEvent(QHideEvent *event)
 {
 	emit closed();

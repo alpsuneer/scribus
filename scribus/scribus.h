@@ -76,6 +76,9 @@ class DockManager;
 class DocumentLogManager;
 class DocumentLogViewer;
 class DownloadsPalette;
+class ParagraphStylesPanel;
+class SuneerControlBar;
+class SuneerNewsPanel;
 class EditToolBar;
 class FileToolBar;
 class FontCombo;
@@ -263,6 +266,10 @@ public:
 	PagePalette *pagePalette {nullptr};
 	BookPalette *bookmarkPalette {nullptr};
 	DownloadsPalette *downloadsPalette {nullptr};
+	ParagraphStylesPanel *paragraphStylesPanelTabs {nullptr};
+	SuneerControlBar *m_suneerControlBar {nullptr};
+	SuneerControlBar* suneerControlBar() { return m_suneerControlBar; }
+	SuneerNewsPanel *m_suneerNewsPanel {nullptr};
 	SymbolPalette *symbolPalette {nullptr};
 	InlinePalette *inlinePalette {nullptr};
 	Measurements* measurementPalette {nullptr};
@@ -326,6 +333,7 @@ public slots:
 	void windowsMenuAboutToShow();
 	//! \brief Handle the Extras menu for its items availability.
 	void extrasMenuAboutToShow();
+	void duplicateContentCheck();
 	void newActWin(QMdiSubWindow *w);
 	void closeActiveWindowMasterPageEditor();
 	void updateActiveWindowCaption(const QString &newCaption);
@@ -342,6 +350,19 @@ public slots:
 	void setCurrentPage(int p);
 	void ManageJava();
 	void editSelectedSymbolStart();
+	void suneerAutoFitHeight();
+	void suneerFitImageToFrame(PageItem* item);
+	void suneerGetImage();
+	void suneerScaleImageUp();
+	void suneerScaleImageDown();
+	void suneerEnlargeImageSize();
+	void suneerReduceImageSize();
+	void suneerEnlargeTextFrame();
+	void suneerReduceTextFrame();
+	void suneerEnlargeTextSize();
+	void suneerReduceTextSize();
+	void suneerEnlargeLineSpacing();
+	void suneerReduceLineSpacing();
 	void editSymbolStart(const QString& temp);
 	void editSymbolEnd();
 	void editInlineStart(int id);

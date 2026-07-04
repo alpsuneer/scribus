@@ -74,6 +74,10 @@ bool ScLcms2ColorProfileImpl::isSuitableForOutput() const
 	if (cmsIsMatrixShaper(m_profileHandle))
 		return true;
 
+	// CMYK printer profiles allowed
+	if (cmsGetColorSpace(m_profileHandle) == cmsSigCmykData)
+		return true;
+
 	cmsUInt32Number defaultIntent = cmsGetHeaderRenderingIntent(m_profileHandle);
 	return (cmsIsCLUT(m_profileHandle, defaultIntent, LCMS_USED_AS_INPUT) &&
 			cmsIsCLUT(m_profileHandle, defaultIntent, LCMS_USED_AS_OUTPUT));

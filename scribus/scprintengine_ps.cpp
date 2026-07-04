@@ -75,6 +75,20 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 		cmd += "'";
 		if (options.copies > 1)
 			cmd += " -#" + cc.setNum(options.copies);
+		// Page size
+		double pw = m_doc.pageWidth()  / 2.8346456693;
+		double ph = m_doc.pageHeight() / 2.8346456693;
+		cmd += " -o media=Custom.";
+		cmd += QByteArray::number((int)pw);
+		cmd += "x";
+		cmd += QByteArray::number((int)ph);
+		cmd += "mm";
+		cmd += " -o fit-to-page=true";
+		if (options.isProofPrint)
+		{
+			cmd += " -o print-quality=draft";
+			cmd += " -o Resolution=150dpi";
+		}
 		cmd += options.printerOptions.toLocal8Bit();
 		cmd += " ";
 		cmd += "\"" + filename.toLocal8Bit() + "\"";

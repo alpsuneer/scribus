@@ -361,7 +361,7 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 		hb_buffer_set_direction(hbBuffer, hbDirection);
 		hb_buffer_set_script(hbBuffer, hbScript);
 		hb_buffer_set_language(hbBuffer, hbLanguage);
-		hb_buffer_set_cluster_level(hbBuffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
+		hb_buffer_set_cluster_level(hbBuffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
 
 		QVector<hb_feature_t> hbFeatures;
 		const QList<FeaturesRun> featuresRuns = itemizeFeatures(textRun);

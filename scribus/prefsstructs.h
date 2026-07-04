@@ -489,6 +489,7 @@ struct ImageCachePrefs
 struct ExperimentalFeaturePrefs
 {
 	bool notesEnabled; //!< Enable Notes
+	bool newsBrowserEnabled {true}; //!< Enable News Browser
 };
 
 struct ApplicationPrefs

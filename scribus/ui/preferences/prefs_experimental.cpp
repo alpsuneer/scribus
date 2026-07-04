@@ -15,7 +15,7 @@ Prefs_Experimental::Prefs_Experimental(QWidget* parent, ScribusDoc* /*doc*/)
 	setupUi(this);
 	languageChange();
 
-	m_caption = tr("Experimental");
+	m_caption = tr("SR Menu");
 	m_icon = "pref-experimental";
 }
 
@@ -29,10 +29,12 @@ void Prefs_Experimental::languageChange()
 void Prefs_Experimental::restoreDefaults(struct ApplicationPrefs *prefsData)
 {
 	enableNotesCheckBox->setChecked(prefsData->experimentalFeaturePrefs.notesEnabled);
+	enableNewsBrowserCheckBox->setChecked(prefsData->experimentalFeaturePrefs.newsBrowserEnabled);
 }
 
 void Prefs_Experimental::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 {
 	prefsData->experimentalFeaturePrefs.notesEnabled = enableNotesCheckBox->isChecked();
+	prefsData->experimentalFeaturePrefs.newsBrowserEnabled = enableNewsBrowserCheckBox->isChecked();
 }
 

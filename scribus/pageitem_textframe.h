@@ -45,10 +45,13 @@ double calculateLineSpacing (const ParagraphStyle &style, PageItem *item);
 
 class SCRIBUS_API PageItem_TextFrame : public PageItem
 {
+    bool m_layoutInProgress = false;
+    int m_layoutDepth = 0;
 	Q_OBJECT
 
 public:
 	PageItem_TextFrame(ScribusDoc *pa, double x, double y, double w, double h, double w2, const QString& fill, const QString& outline);
+	double m_spanYBottom = -1.0; ///< Bottom Y of span heading area (public for image push-down)
 	PageItem_TextFrame(const PageItem & p);
 	~PageItem_TextFrame();
 
@@ -169,6 +172,7 @@ protected:
 
 public:
 	void setTextFrameHeight();
+	void autoFitFrameHeight();
 };
 
 #endif

@@ -1116,6 +1116,17 @@ public: // Start public functions
 	 */
 	TextFlowMode textFlowMode() const { return m_textFlowMode; }
 
+	// Suneer: Text wrap offsets (distance between wrapped text and this item)
+	double wrapOffsetTop()    const { return m_wrapOffsetTop; }
+	double wrapOffsetBottom() const { return m_wrapOffsetBottom; }
+	double wrapOffsetLeft()   const { return m_wrapOffsetLeft; }
+	double wrapOffsetRight()  const { return m_wrapOffsetRight; }
+	void setWrapOffsetTop(double v)    { m_wrapOffsetTop    = v; checkTextFlowInteractions(); }
+	void setWrapOffsetBottom(double v) { m_wrapOffsetBottom = v; checkTextFlowInteractions(); }
+	void setWrapOffsetLeft(double v)   { m_wrapOffsetLeft   = v; checkTextFlowInteractions(); }
+	void setWrapOffsetRight(double v)  { m_wrapOffsetRight  = v; checkTextFlowInteractions(); }
+	void setWrapOffsets(double top, double bottom, double left, double right);
+
 	/**
 	 * @brief Changes the way text flows around this item
 	 * @param mode true if text is wanted to flow around this object or false if not
@@ -1376,6 +1387,10 @@ public:	// Start public variables
 	bool OverrideCompressionQuality {false};
 	int CompressionQualityIndex {0};
 	bool imageIsAvailable {false}; ///< Flag to hold image file availability
+	bool imageCropMode {false}; ///< Photoshop-style crop mode
+	bool imageCropDragging {false};
+	int  activeCropHandle {-1};
+	QRectF imageCropRect;
 	int OrigW {0};
 	int OrigH {0};
 	double BBoxX {0.0}; ///< Bounding Box-X
@@ -1858,6 +1873,11 @@ protected: // Start protected variables
 	 * @sa PageItem::textFlowMode(), PateItem::setTextFlowMode()
 	 */
 	TextFlowMode m_textFlowMode {TextFlowDisabled};
+	// Suneer: wrap offsets
+	double m_wrapOffsetTop    {0.0};
+	double m_wrapOffsetBottom {0.0};
+	double m_wrapOffsetLeft   {0.0};
+	double m_wrapOffsetRight  {0.0};
 
 	/**
 	 * @brief Stores the attributes of the pageitem (NOT properties, the user defined ATTRIBUTES)

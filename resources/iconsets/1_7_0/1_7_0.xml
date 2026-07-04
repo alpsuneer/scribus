@@ -83,6 +83,8 @@ On Dark:  #e580ff; rgb(229, 128, 255); hsl(288, 100, 75)
 		<icon id="fill-rule-nonzero" file="16/fill-nonzero.svg" />
 		<icon id="find" file="16/tool-zoom.svg" /><!-- Help browser-->
 		<icon id="flip-object-horizontal" file="16/object-flip-horizontal.svg" />
+		<icon id="rembg" file="rembg.png" />
+		<icon id="suneer-knife" file="suneer-knife.png" />
 		<icon id="flip-object-vertical" file="16/object-flip-vertical.svg" />
 		<icon id="frame-no-resize" file="16/object-frame-lock.svg" />
 		<icon id="frame-resize" file="16/object-frame-unlock.svg" />
@@ -635,5 +637,7 @@ On Dark:  #e580ff; rgb(229, 128, 255); hsl(288, 100, 75)
 		<icon id="ff-preview-unic" file="images/ff-unic.svg" />
 		<icon id="ff-preview-zero" file="images/ff-zero.svg" />
 
+		<icon id="fether" file="fether.png" />
+		<icon id="corner-radius" file="corner-radius.png" />
 	</icons>
 </iconset>

@@ -74,6 +74,13 @@
         <number>0</number>
        </property>
        <item>
+        <widget class="QCheckBox" name="enableNewsBrowserCheckBox">
+         <property name="text">
+          <string>Enable News Browser Panel</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QCheckBox" name="enableNotesCheckBox">
          <property name="text">
           <string>Enable Notes, Marks and other related features</string>

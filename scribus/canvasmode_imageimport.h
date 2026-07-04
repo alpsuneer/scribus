@@ -50,6 +50,8 @@ public:
 	void drawControls(QPainter* p) override;
 
 	void setImageList(QStringList l);
+	void setCreateCaption(bool v) { m_createCaption = v; }
+	void setAutoWrap(bool v) { m_autoWrap = v; }
 	void setImage(PageItem* item);
 	void updateList();
 
@@ -57,6 +59,8 @@ private:
 	bool m_keyRepeat {false};
 	QString m_tipText;
 	QStringList m_imageList;
+	bool m_createCaption {false};
+	bool m_autoWrap {false};
 	ScribusMainWindow *m_ScMW {nullptr};
 	double m_Mx {0.0};
 	double m_My {0.0};

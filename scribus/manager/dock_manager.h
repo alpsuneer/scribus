@@ -37,6 +37,7 @@ class PagePalette;
 class OutlinePalette;
 class PropertiesPalette;
 class ContentPalette;
+class ParagraphStylesPanel;
 class LayerPalette;
 class AlignDistributePalette;
 class InlinePalette;
@@ -88,6 +89,7 @@ public:
 	OutlinePalette *outlinePalette {nullptr};
 	PropertiesPalette *propertiesPalette {nullptr};
 	ContentPalette *contentPalette {nullptr};
+	ParagraphStylesPanel *paragraphStylesPalette {nullptr};
 	LayerPalette *layerPalette {nullptr};
 	AlignDistributePalette *alignDistributePalette {nullptr};
 	InlinePalette *inlinePalette {nullptr};

@@ -21,6 +21,32 @@ using namespace icu;
 int GroupBox::pointToPosition(const QPointF& coord, const StoryText &story) const
 {
 	QPointF rel = coord - QPointF(m_x, m_y);
+	// Span columns: check FIRST before column loop
+	if (!m_boxes.isEmpty() && m_direction == D_Horizontal)
+	{
+		const GroupBox* col0 = dynamic_cast<const GroupBox*>(m_boxes.first());
+		if (col0)
+		{
+			for (const Box* lineBox : col0->boxes())
+			{
+				const LineBox* line = dynamic_cast<const LineBox*>(lineBox);
+				if (!line) continue;
+				int fc = line->firstChar();
+				if (fc < 0 || fc >= story.length()) continue;
+				if (story.paragraphStyle(fc).spanColumns() == 0) continue;
+				double lineTop = line->y();
+				double lineBot = lineTop + line->naturalHeight();
+				if (rel.y() >= lineTop && rel.y() <= lineBot)
+				{
+					QPointF adj(rel.x() - col0->x(), rel.y());
+					int result = line->pointToPosition(adj, story);
+					if (result >= 0)
+						return result;
+					return line->lastChar();
+				}
+			}
+		}
+	}
 	for (const Box *box : boxes())
 	{
 		if (box->containsPoint(rel))
@@ -30,18 +56,15 @@ int GroupBox::pointToPosition(const QPointF& coord, const StoryText &story) cons
 				return result;
 		}
 	}
-
 	if (containsPoint(coord) && (m_boxes.count() > 0))
 	{
 		const LineBox* firstLine = dynamic_cast<LineBox*>(m_boxes.first());
 		if (firstLine && (coord.y() < firstLine->y()))
 			return firstLine->firstChar();
-
 		const LineBox* lastLine = dynamic_cast<LineBox*>(m_boxes.last());
 		if (lastLine && (coord.y() > lastLine->y() + lastLine->naturalHeight()))
 			return lastLine->lastChar() + 1;
 	}
-
 	return -1;
 }
 

@@ -1227,6 +1227,17 @@ void CanvasMode_Normal::mouseReleaseEvent(QMouseEvent *m)
 	m_canvas->m_viewMode.operItemResizing = false;
 	m_view->MidButt = false;
 	m_shiftSelItems = false;
+	// Auto fit text frame on click only (not after drag/move)
+	{
+		bool wasDrag = (fabs(m_mousePressPoint.x() - m_mouseCurrentPoint.x()) > 3.0 ||
+		                fabs(m_mousePressPoint.y() - m_mouseCurrentPoint.y()) > 3.0);
+		if (!wasDrag) {
+			// suneerAutoFitHeight disabled — causes infinite loop with Span+ImageWrap
+			// PageItem* clickedItem = nullptr;
+			// if (GetItem(&clickedItem) && clickedItem && clickedItem->isTextFrame())
+			// 	if (m_ScMW) m_ScMW->suneerAutoFitHeight();
+		}
+	}
 	if (m_view->groupTransactionStarted())
 	{
 		for (int i = 0; i < m_doc->m_Selection->count(); ++i)

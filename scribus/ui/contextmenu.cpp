@@ -338,6 +338,8 @@ void ContextMenu::createMenuItems_Selection()
 			addAction(m_ScMW->scrActions["tableAdjustTableToFrame"]);
 		if (m_actionList.contains("itemAdjustFrameHeightToText"))
 			addAction(m_ScMW->scrActions["itemAdjustFrameHeightToText"]);
+		m_ScMW->scrActions["suneerAutoFitHeight"]->setEnabled(true);
+		addAction(m_ScMW->scrActions["suneerAutoFitHeight"]);
 
 		
 		if (m_actionList.contains("itemPreviewLow"))

@@ -197,15 +197,16 @@ void DockAreaTitleBarPrivate::createButtons()
 		SLOT(onTabsMenuActionTriggered(QAction*)));
 
 	// Undock button
-	UndockButton = new CTitleBarButton(testConfigFlag(CDockManager::DockAreaHasUndockButton),
+	UndockButton = new CTitleBarButton(false,
 		true, TitleBarButtonUndock);
 	UndockButton->setObjectName("detachGroupButton");
 	UndockButton->setAutoRaise(true);
 	internal::setToolTip(UndockButton, QObject::tr("Detach Group"));
 	internal::setButtonIcon(UndockButton, QStyle::SP_TitleBarNormalButton, ads::DockAreaUndockIcon);
 	UndockButton->setSizePolicy(ButtonSizePolicy);
-	Layout->addWidget(UndockButton, 0);
+
 	_this->connect(UndockButton, SIGNAL(clicked()), SLOT(onUndockButtonClicked()));
+	UndockButton->setShowInTitleBar(false);
 
 	// AutoHide Button
 	const auto autoHideEnabled = testAutoHideConfigFlag(CDockManager::AutoHideFeatureEnabled);
@@ -234,7 +235,7 @@ void DockAreaTitleBarPrivate::createButtons()
 	_this->connect(MinimizeButton, SIGNAL(clicked()), SLOT(minimizeAutoHideContainer()));
 
 	// Close button
-	CloseButton = new CTitleBarButton(testConfigFlag(CDockManager::DockAreaHasCloseButton),
+	CloseButton = new CTitleBarButton(false,
 		true, TitleBarButtonClose);
 	CloseButton->setObjectName("dockAreaCloseButton");
 	CloseButton->setAutoRaise(true);
@@ -242,8 +243,8 @@ void DockAreaTitleBarPrivate::createButtons()
     internal::setToolTip(CloseButton, _this->titleBarButtonToolTip(TitleBarButtonClose));
 	CloseButton->setSizePolicy(ButtonSizePolicy);
 	CloseButton->setIconSize(QSize(16, 16));
-	Layout->addWidget(CloseButton, 0);
 	_this->connect(CloseButton, SIGNAL(clicked()), SLOT(onCloseButtonClicked()));
+	CloseButton->setShowInTitleBar(false);
 }
 
 

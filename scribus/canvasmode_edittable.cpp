@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
 #include "pageitem_table.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "ui/suneercontrolbar.h"
 #include "scribusview.h"
 #include "selection.h"
 #include "tablehandle.h"
@@ -142,11 +143,108 @@ void CanvasMode_EditTable::keyPressEvent(QKeyEvent* event)
 		}
 	}
 
+	// Ctrl+A → select all text in all cells
+	if (event->key() == Qt::Key_A && (event->modifiers() & Qt::ControlModifier))
+	{
+		for (int r = 0; r < m_table->rows(); r++) {
+			for (int c = 0; c < m_table->columns(); c++) {
+				TableCell cell = m_table->cellAt(r, c);
+				PageItem_TextFrame* tf = cell.textFrame();
+				if (tf && tf->itemText.length() > 0) {
+					tf->itemText.selectAll();
+					tf->HasSel = true;
+				}
+			}
+		}
+		updateCanvas(true);
+		return;
+	}
+
+	// Tab key → move to next cell (LibreOffice style)
+	if (event->key() == Qt::Key_Tab && !(event->modifiers() & Qt::ShiftModifier))
+	{
+		int curCol = m_table->activeCell().column();
+		int curRow = m_table->activeCell().row();
+		int cols = m_table->columns();
+		int rows = m_table->rows();
+		if (curCol < cols - 1) {
+			// Move to next column
+			m_table->moveRight();
+		} else if (curRow < rows - 1) {
+			// End of row → go to first cell of next row
+			m_table->moveDown();
+			for (int i = 0; i < curCol; i++)
+				m_table->moveLeft();
+		} else {
+			// Last cell → add new row
+			double defaultRowH = m_table->rowHeight(curRow);
+			m_table->insertRows(rows, 1);
+			// Resize new row same as previous row
+			m_table->resizeRow(rows, defaultRowH);
+			// Grow frame by one row height
+			m_table->setHeight(m_table->height() + defaultRowH);
+			// Same as manual resize — adjustFrameToTable
+			m_doc->dontResize = true;
+			m_table->adjustFrameToTable();
+			m_doc->dontResize = false;
+			m_table->moveDown();
+			for (int i = 0; i < curCol; i++)
+				m_table->moveLeft();
+			m_table->update();
+			m_doc->changed();
+			m_doc->regionsChanged()->update(QRectF());
+			updateCanvas(true);
+		}
+		makeLongTextCursorBlink();
+		updateCanvas(true);
+		return;
+	}
+	// Shift+Tab → move to previous cell
+	if (event->key() == Qt::Key_Tab && (event->modifiers() & Qt::ShiftModifier))
+	{
+		int curCol = m_table->activeCell().column();
+		int curRow = m_table->activeCell().row();
+		int cols = m_table->columns();
+		if (curCol > 0) {
+			m_table->moveLeft();
+		} else if (curRow > 0) {
+			m_table->moveUp();
+			for (int i = 0; i < cols - 1; i++)
+				m_table->moveRight();
+		}
+		makeLongTextCursorBlink();
+		updateCanvas(true);
+		return;
+	}
 	// Pass all other keys to text frame of active cell.
 	if (!m_table->hasSelection())
 	{
 		bool repeat;
 		m_table->activeCell().textFrame()->handleModeEditKey(event, repeat);
+		// Auto-grow: only when text needs a new line
+		PageItem_TextFrame* tf = m_table->activeCell().textFrame();
+		if (tf) {
+			tf->layout();
+			if (tf->frameOverflows()) {
+				int row = m_table->activeCell().row();
+				// Calculate exact height needed
+				double lineH = 14.0;
+				if (tf->itemText.length() > 0) {
+					double fs = tf->itemText.charStyle(0).fontSize() / 10.0;
+					const ParagraphStyle& ps = tf->itemText.paragraphStyle(0);
+					if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
+						lineH = ps.lineSpacing();
+					else
+						lineH = fs * 1.2;
+				}
+				// Add exactly one line height
+				double currentH = m_table->rowHeight(row);
+				m_table->resizeRow(row, currentH + lineH);
+				tf->layout();
+				tf->update();
+				m_doc->changed();
+			}
+		}
 	}
 	updateCanvas(true);
 }
@@ -269,6 +367,9 @@ void CanvasMode_EditTable::mousePressEvent(QMouseEvent* event)
 				m_view->slotSetCurs(globalPos.x(), globalPos.y());
 				m_lastCursorPos = m_table->activeCell().textFrame()->itemText.cursorPosition();
 				m_view->m_ScMW->setTBvals(m_table->activeCell().textFrame());
+				// Update SuneerControlBar
+				if (m_view->m_ScMW->m_suneerControlBar)
+					m_view->m_ScMW->m_suneerControlBar->updateFromSelection();
 				makeLongTextCursorBlink();
 				updateCanvas(true);
 				break;

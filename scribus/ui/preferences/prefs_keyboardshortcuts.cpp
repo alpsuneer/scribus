@@ -527,7 +527,9 @@ void Prefs_KeyboardShortcuts::keyPressEvent(QKeyEvent *k)
 			if (selectedLVI)
 			{
 				QString actionName = lviToActionMap[selectedLVI];
-				if (checkKey(keyCode))
+				// Suneer group-ൽ same shortcut allow ചെയ്യുന്നു
+				bool isSuneerAction = actionName.startsWith("suneer") || actionName.startsWith("itemImageScale");
+				if (checkKey(keyCode) && !isSuneerAction)
 				{
 					ScMessageBox::information(this, CommonStrings::trWarning, tr("The %1 key sequence is already in use by \"%2\"").arg(getTrKeyText(keyCode),getAction(keyCode)));
 					selectedLVI->setText(1,keyMap[actionName].keySequence.toString(QKeySequence::NativeText));

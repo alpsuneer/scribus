@@ -19,6 +19,7 @@
 #include <cmath>
 
 // #include <QDebug>
+#include <QLineF>
 #include <QToolTip>
 #include <QWidget>
 
@@ -89,6 +90,9 @@ Canvas::Canvas(ScribusDoc* doc, ScribusView* parent) : QWidget(parent), m_doc(do
 	setAutoFillBackground(true);
 	setAttribute(Qt::WA_OpaquePaintEvent, true);
 	setAttribute(Qt::WA_NoSystemBackground, true);
+	setAttribute(Qt::WA_InputMethodEnabled, true);
+	setInputMethodHints(Qt::ImhNone);
+	setFocusPolicy(Qt::StrongFocus);
 	m_buffer = QPixmap();
 	m_bufferRect = QRect();
 	m_renderMode = RENDER_NORMAL;
@@ -2448,4 +2452,38 @@ void Canvas::setupEditHRuler(PageItem * item, bool forceAndReset)
 	rulerDumbHash = controlHash;
 	m_view->horizRuler->setItem(item);
 	m_view->horizRuler->update();
+}
+
+void Canvas::focusInEvent(QFocusEvent* e)
+{
+    QWidget::focusInEvent(e);
+}
+
+void Canvas::inputMethodEvent(QInputMethodEvent* event)
+{
+    if (m_view)
+        m_view->inputMethodEvent(event);
+}
+
+QVariant Canvas::inputMethodQuery(Qt::InputMethodQuery query) const
+{
+    if (query == Qt::ImEnabled)
+        return QVariant(true);
+    if (query == Qt::ImCursorRectangle && m_doc) {
+        PageItem* currItem = m_doc->m_Selection->itemAt(0);
+        if (currItem && currItem->isTextFrame()) {
+            PageItem_TextFrame* tf = currItem->asTextFrame();
+            int curPos = tf->itemText.cursorPosition();
+            QLineF cursorLine = tf->textLayout.positionToPoint(curPos);
+            QTransform t = tf->getTransform();
+            QPoint lp1 = canvasToLocal(t.map(cursorLine.p1()));
+            QPoint lp2 = canvasToLocal(t.map(cursorLine.p2()));
+            int h = qAbs(lp2.y() - lp1.y());
+            if (h == 0) h = 12;
+            return QRect(lp1.x(), qMin(lp1.y(), lp2.y()), 1, h);
+        }
+    }
+    if (m_view)
+        return m_view->inputMethodQuery(query);
+    return QVariant();
 }

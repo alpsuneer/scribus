@@ -671,3 +671,17 @@ endif()
 
 # Output everything we've found
 #feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES)
+
+# Create wrapper script after install
+install(CODE "
+    file(RENAME \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\" \"\${CMAKE_INSTALL_PREFIX}/bin/scribus.bin\")
+    file(WRITE \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\"
+\"#!/bin/bash
+export QT_IM_MODULE=fcitx
+export GTK_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export QT_QPA_PLATFORM=xcb
+exec \${CMAKE_INSTALL_PREFIX}/bin/scribus.bin \\\"\\$@\\\"
+\")
+    execute_process(COMMAND chmod +x \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\")
+")

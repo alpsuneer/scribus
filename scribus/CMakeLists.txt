@@ -151,6 +151,12 @@ if(HAVE_OSG)
 	add_executable(${EXE_NAME}
 		${SCRIBUS_MAIN_CPP}
 		${SCRIBUS_SOURCES}
+		ui/ParagraphStylesPanel.cpp
+		ui/suneercontrolbar.cpp
+		util/suneeralphawrap.cpp
+		ui/suneer_news_panel.cpp
+		canvasmode_suneercontour.cpp
+		canvasmode_suneercrop.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -165,6 +171,12 @@ else()
 	add_executable(${EXE_NAME}
 		${SCRIBUS_MAIN_CPP}
 		${SCRIBUS_SOURCES}
+		ui/ParagraphStylesPanel.cpp
+		ui/suneercontrolbar.cpp
+		util/suneeralphawrap.cpp
+		ui/suneer_news_panel.cpp
+		canvasmode_suneercontour.cpp
+		canvasmode_suneercrop.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}

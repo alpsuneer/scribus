@@ -434,6 +434,7 @@ struct PrintOptions
 	bool useSpotColors { true };
 	bool useColor { true };
 	bool mirrorH { false };
+	bool isProofPrint { false };
 	bool mirrorV { false };
 	bool doGCR { false };
 	bool doClip { false };

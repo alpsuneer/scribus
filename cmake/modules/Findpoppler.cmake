@@ -7,15 +7,14 @@ endif(poppler_FOUND)
  
 find_path(poppler_INCLUDE_DIR
 	NAMES poppler-document.h poppler-config.h
-	PATHS ${PKG_poppler_INCLUDE_DIRS} ${poppler_INCLUDE_DIRS} /usr/local/include /usr/include
+	PATHS ${PKG_poppler_INCLUDE_DIRS} ${poppler_INCLUDE_DIRS} /usr/local/include /usr/include /usr/include/poppler
 	PATH_SUFFIXES poppler poppler/cpp poppler/glib
 	)
 
 find_path(poppler_cpp_INCLUDE_DIR
 	NAMES poppler-version.h
 	PATHS ${PKG_poppler_cpp_INCLUDE_DIRS} ${poppler_cpp_INCLUDE_DIRS} /usr/local/include /usr/include
-	PATH_SUFFIXES poppler
-	NO_DEFAULT_PATH
+	PATH_SUFFIXES poppler poppler/cpp poppler/glib
 	)
 
 find_library(poppler_LIBRARY

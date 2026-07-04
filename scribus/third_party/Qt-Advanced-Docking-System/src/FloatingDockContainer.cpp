@@ -706,13 +706,13 @@ CFloatingDockContainer::CFloatingDockContainer(CDockManager *DockManager) :
 	if (native_window)
 	{
 		setTitleBarWidget(new QWidget());
-		setWindowFlags(Qt::Window | Qt::WindowMaximizeButtonHint | Qt::CustomizeWindowHint | Qt::WindowCloseButtonHint);
+		setWindowFlags(Qt::Tool | Qt::WindowMaximizeButtonHint | Qt::CustomizeWindowHint | Qt::WindowCloseButtonHint);
 	}
 	else
 	{
 		d->TitleBar = new CFloatingWidgetTitleBar(this);
 		setTitleBarWidget(d->TitleBar);
-		setWindowFlags(Qt::Window | Qt::WindowMinMaxButtonsHint | Qt::FramelessWindowHint);
+		setWindowFlags(Qt::Tool | Qt::WindowMinMaxButtonsHint | Qt::FramelessWindowHint);
 		d->TitleBar->enableCloseButton(isClosable());
 		connect(d->TitleBar, SIGNAL(closeRequested()), SLOT(close()));
 		connect(d->TitleBar, &CFloatingWidgetTitleBar::maximizeRequested,
@@ -720,7 +720,7 @@ CFloatingDockContainer::CFloatingDockContainer(CDockManager *DockManager) :
 	}
 #else
 	setWindowFlags(
-	    Qt::Window | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
+	    Qt::Tool | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
 	QBoxLayout *l = new QBoxLayout(QBoxLayout::TopToBottom);
 	l->setContentsMargins(0, 0, 0, 0);
 	l->setSpacing(0);

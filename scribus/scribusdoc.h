@@ -1655,6 +1655,8 @@ public slots:
 	 */
 	void itemSelection_AdjustImagetoFrameSize(Selection* customSelection = nullptr);
 	void itemSelection_AdjustFrameHeightToText( Selection *customSelection = nullptr);
+	void itemSelection_ImageScaleUp(Selection *customSelection = nullptr);
+	void itemSelection_ImageScaleDown(Selection *customSelection = nullptr);
 	//! @brief startArrowID or endArrowID of -1 mean not applying a selection at this point.
 	void itemSelection_ApplyArrowHead(int startArrowID=-1, int endArrowID=-1, Selection* customSelection = nullptr);
 	void itemSelection_ApplyArrowScale(int startArrowSc, int endArrowSc, Selection* customSelection);

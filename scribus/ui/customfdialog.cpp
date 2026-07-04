@@ -315,7 +315,7 @@ CustomFDialog::CustomFDialog(QWidget *parent, const QString &wDir, const QString
 	showPreview = new QCheckBox(this);
 	showPreview->setText( tr("Show Preview"));
 	showPreview->setToolTip( tr("Show a preview and information for the selected file"));
-	showPreview->setChecked(true);
+	showPreview->setChecked(false);
 	hboxLayout1->addWidget(showPreview);
 	QSpacerItem *spacerItem = new QSpacerItem(2, 2, QSizePolicy::Expanding, QSizePolicy::Minimum);
 	hboxLayout1->addItem(spacerItem);

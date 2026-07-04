@@ -21,6 +21,7 @@ public slots:
 protected:
 	bool eventFilter(QObject *obj, QEvent *event) override;
 	void keyPressEvent(QKeyEvent *event) override;
+	void changeEvent(QEvent *event) override;
 	void hideEvent(QHideEvent *event) override;
 
 private:

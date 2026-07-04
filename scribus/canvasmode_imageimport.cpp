@@ -1,3 +1,4 @@
+#include <QTimer>
 /*
  For general Scribus (>=1.3.2) copyright and licensing information please refer
  to the COPYING file provided with the program. Following this notice may exist
@@ -15,6 +16,7 @@
 
 
 
+#include "ui/suneercontrolbar.h"
 #include <QApplication>
 #include <QBuffer>
 #include <QCursor>
@@ -45,7 +47,8 @@ void CanvasMode_ImageImport::setImageList(QStringList l)
 	m_imageList = l;
 	if (l.size()==1)
 	{
-		while (!(m_doc->m_Selection->itemAt(0)->isImageFrame()))
+		// Safe: check selection not empty before accessing itemAt(0)
+		while (m_doc->m_Selection->isNotEmpty() && !m_doc->m_Selection->itemAt(0)->isImageFrame())
 			m_doc->m_Selection->removeFirst();
 		if (m_doc->m_Selection->isNotEmpty())
 		{
@@ -197,6 +200,9 @@ void CanvasMode_ImageImport::mousePressEvent(QMouseEvent *m)
 			PageItem_ImageFrame *currItem;
 			if ((currItem = item->asImageFrame()) != nullptr)
 				setImage(currItem);
+			else
+				// Non-image frame — create new frame at this position
+				view()->ImageAfterDraw = true;
 		}
 		else
 			view()->ImageAfterDraw = true;
@@ -235,9 +241,67 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 	currItem->ImageIntent = m_doc->cmsSettings().DefaultIntentImages;
 	qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 	m_doc->loadPict(fileName, currItem, false, true);
+	// Create caption frame only when loading via file dialog (fileName not empty)
+	QString captName = QString("caption_%1").arg(currItem->itemName());
+	bool captExists = false;
+	for (PageItem* pi : m_doc->DocItems) {
+		if (pi->itemName() == captName) { captExists = true; break; }
+	}
+	if (!captExists && !fileName.isEmpty() && m_createCaption) {
+		const double MM2PT = 2.8346;
+		double captH = 10.0 * MM2PT;
+		PageItem* captFrame = m_doc->createPageItem(
+			PageItem::TextFrame, PageItem::Rectangle,
+			currItem->xPos(), currItem->yPos() + currItem->height(),
+			currItem->width(), captH,
+			0, CommonStrings::None, CommonStrings::None);
+		if (captFrame) {
+			captFrame->setItemName(captName);
+			captFrame->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
+
+			// ✅ Text distance: 1.5mm top + bottom
+			const double textDist = 1.5 * MM2PT;
+			captFrame->setTextToFrameDist(0.0, 0.0, textDist, textDist);
+
+			// ✅ Caption frame border
+			captFrame->setLineWidth(0.5);
+			captFrame->setLineColor(CommonStrings::None);
+			captFrame->setFillColor(CommonStrings::None);
+
+			m_doc->DocItems.append(captFrame);
+			// Weld caption to image frame
+			currItem->weldTo(captFrame);
+		}
+	}
+	// Update caption frame with delay (after image fit)
+	{
+		PageItem* captItemRef = currItem;
+		ScribusMainWindow* scmwRef = m_ScMW;
+		QTimer::singleShot(200, [captItemRef, scmwRef]() {
+			if (scmwRef && scmwRef->suneerControlBar())
+				scmwRef->suneerControlBar()->updateCaptionFrame(captItemRef);
+		});
+	}
 	// Call to showScaleAndOffset() is now very likely unnecessary
 	// due to mechanisms used to update properties in PP in 1.5.x+
 	// m_ScMW->contentPalette->update(currItem->isImageFrame());
+	// ✅ Image frame: no border (original)
+	currItem->setLineWidth(0.5);
+	currItem->setLineColor(CommonStrings::None);
+	currItem->setFillColor(CommonStrings::None);
+
+	// Text wrap — only if m_autoWrap is set (Ctrl+i)
+	if (m_autoWrap) {
+		const double MM2PT = 2.8346;
+		const double gap = 3.0 * MM2PT;
+		currItem->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
+		currItem->setTextToFrameDistLeft(gap);
+		currItem->setTextToFrameDistRight(gap);
+		currItem->setTextToFrameDistTop(gap);
+		currItem->setTextToFrameDistBottom(gap);
+	} else {
+		currItem->setTextFlowMode(PageItem::TextFlowDisabled);
+	}
 	m_ScMW->repaint();
 	qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 	m_view->DrawNew();

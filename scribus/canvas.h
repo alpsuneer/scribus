@@ -30,6 +30,7 @@ scribusview.h  -  description
 #include <QRect>
 #include <QRectF>
 #include <QWidget>
+#include <QInputMethodEvent>
 
 #include "scribusapi.h"
 
@@ -191,6 +192,7 @@ public:
 	bool isForcedRedraw() const { return m_viewMode.forceRedraw; }
 	void setPreviewMode(bool on) { m_viewMode.previewMode = on; }
 	bool isPreviewMode() const { return m_viewMode.previewMode || m_viewMode.viewAsPreview; }
+	bool isItemMoving() const { return m_viewMode.operItemMoving; }
 	bool usePreviewVisual() const { return m_viewMode.viewAsPreview && m_viewMode.previewVisual != 0; }
 	int previewVisual() const { return m_viewMode.previewVisual; }
 	void setPreviewVisual(int mode);
@@ -199,6 +201,9 @@ public:
 	//notesFramesPass determine if notes frames are drawn or not
 	void DrawPageItems(ScPainter *painter, const ScLayer& layer, QRect clip, bool notesFramesPass);
 	void paintEvent ( QPaintEvent * p ) override;
+	void focusInEvent(QFocusEvent* e) override;
+	void inputMethodEvent(QInputMethodEvent* event) override;
+	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 
 	void displayXYHUD(QPointF m);
 	void displayCorrectedXYHUD(QPointF m, double x, double y);

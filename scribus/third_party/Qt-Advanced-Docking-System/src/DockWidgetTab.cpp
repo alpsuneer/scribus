@@ -144,7 +144,7 @@ struct DockWidgetTabPrivate
 		bool ActiveTabHasCloseButton = testConfigFlag(CDockManager::ActiveTabHasCloseButton);
 		bool AllTabsHaveCloseButton = testConfigFlag(CDockManager::AllTabsHaveCloseButton);
 		bool TabHasCloseButton = (ActiveTabHasCloseButton && active) | AllTabsHaveCloseButton;
-		CloseButton->setVisible(DockWidgetClosable && TabHasCloseButton);
+		CloseButton->setVisible(false);
 	}
 
 	/**

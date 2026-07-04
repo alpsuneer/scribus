@@ -2,6 +2,7 @@ include_directories(
 	${CMAKE_SOURCE_DIR}
 	${CMAKE_SOURCE_DIR}/scribus
 	${poppler_INCLUDE_DIR}
+	/usr/include/poppler
 	${poppler_CPP_INCLUDE_DIR}
 	${SCRIBUS_AUTOGEN_INCLUDE_PATH}
 )

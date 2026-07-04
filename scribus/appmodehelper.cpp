@@ -467,6 +467,17 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["editEditWithImageEditor"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->isRaster);
 	(*a_scrActions)["editEditRenderSource"]->setEnabled(isImageFrame && currItem && (currItem->isLatexFrame() || currItem->isOSGFrame()));
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(SelectedType == PageItem::TextFrame && currItem->itemText.isNotEmpty());
+	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
+	(*a_scrActions)["suneerApplyChain"]->setEnabled(true);
+	(*a_scrActions)["itemImageScaleUp"]->setEnabled(SelectedType == PageItem::ImageFrame && currItem->imageIsAvailable);
+	(*a_scrActions)["itemImageScaleDown"]->setEnabled(SelectedType == PageItem::ImageFrame && currItem->imageIsAvailable);
+	(*a_scrActions)["suneerEnlargeImageSize"]->setEnabled(SelectedType == PageItem::ImageFrame && currItem->imageIsAvailable);
+	(*a_scrActions)["suneerReduceImageSize"]->setEnabled(SelectedType == PageItem::ImageFrame && currItem->imageIsAvailable);
+	(*a_scrActions)["suneerEnlargeTextFrame"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["suneerReduceTextFrame"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["suneerEnlargeTextSize"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["suneerReduceTextSize"]->setEnabled(SelectedType == PageItem::TextFrame);
 	if (!isImageFrame)
 	{
 		(*a_scrActions)["itemImageIsVisible"]->setChecked(false);
@@ -1820,6 +1831,8 @@ void AppModeHelper::enableTextActions(bool enabled, const QString& fontName)
 {
 	(*a_scrActions)["insertGlyph"]->setEnabled(enabled);
 
+	(*a_scrActions)["suneerEnlargeTextSize"]->setEnabled(enabled);
+	(*a_scrActions)["suneerReduceTextSize"]->setEnabled(enabled);
 	a_actMgr->enableUnicodeActions(a_scrActions, enabled, fontName);
 	if (!enabled)
 	{
@@ -1944,6 +1957,8 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemSendToPattern"]->setEnabled(false);
 	(*a_scrActions)["itemSendToInline"]->setEnabled(false);
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(false);
+	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(false);
+	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
 	(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(false);
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(false);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(false);

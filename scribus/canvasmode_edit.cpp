@@ -1,3 +1,6 @@
+#include <QGuiApplication>
+#include <QInputMethod>
+#include "scraction.h"
 /*
  For general Scribus (>=1.3.2) copyright and licensing information please refer
  to the COPYING file provided with the program. Following this notice may exist
@@ -87,8 +90,60 @@ void CanvasMode_Edit::keyPressEvent(QKeyEvent *e)
 	if (m_keyRepeat)
 		return;
 	m_keyRepeat = true;
+	// Check ApplicationShortcut actions before consuming event
+	{
+		QKeySequence pressed(e->key() | int(e->modifiers()));
+		const auto& actions = m_ScMW->scrActions;
+		for (auto it = actions.constBegin(); it != actions.constEnd(); ++it)
+		{
+			if (it.value() && it.value()->shortcut() == pressed &&
+			    it.value()->shortcutContext() == Qt::ApplicationShortcut &&
+			    it.value()->isEnabled())
+			{
+				it.value()->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+		}
+	}
 	e->accept();
-
+	// Suneer text size shortcuts — text frame only
+	{
+		PageItem* suneerItem = nullptr;
+		GetItem(&suneerItem);
+		QKeySequence pressed(e->key() | int(e->modifiers()));
+		if (suneerItem && suneerItem->isTextFrame())
+		{
+			if (pressed == QKeySequence(Qt::CTRL | Qt::Key_Period))
+			{
+				qDebug() << "Ctrl+Period in edit mode!";
+				m_ScMW->scrActions["suneerEnlargeTextSize"]->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+			if (pressed == QKeySequence(Qt::CTRL | Qt::Key_Comma))
+			{
+				qDebug() << "Ctrl+Comma in edit mode!";
+				m_ScMW->scrActions["suneerReduceTextSize"]->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+			if (pressed == QKeySequence(Qt::SHIFT | Qt::Key_Greater))
+			{
+				qDebug() << "Shift+> in edit mode!";
+				m_ScMW->scrActions["suneerEnlargeLineSpacing"]->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+			if (pressed == QKeySequence(Qt::SHIFT | Qt::Key_Less))
+			{
+				qDebug() << "Shift+< in edit mode!";
+				m_ScMW->scrActions["suneerReduceLineSpacing"]->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+		}
+	}
 	if (e->key() == Qt::Key_Escape)
 	{
 		// Go back to normal mode.
@@ -224,6 +279,45 @@ void CanvasMode_Edit::drawControls(QPainter* p)
 		}
 		else if (currItem->isImageFrame())
 		{
+			// Photoshop-style crop overlay
+			if (currItem->imageCropMode) {
+				p->save();
+				p->setRenderHint(QPainter::Antialiasing);
+				QTransform mm = currItem->getTransform();
+				// Frame rect in canvas coords
+				QRectF frameRect(0, 0, currItem->width(), currItem->height());
+				p->setTransform(mm, true);
+				// Dark overlay outside crop rect
+				QRectF cropLocal(
+					currItem->imageCropRect.x() - currItem->xPos(),
+					currItem->imageCropRect.y() - currItem->yPos(),
+					currItem->imageCropRect.width(),
+					currItem->imageCropRect.height());
+				QPainterPath outside;
+				outside.addRect(frameRect);
+				QPainterPath inside;
+				inside.addRect(cropLocal);
+				p->fillPath(outside.subtracted(inside), QColor(0, 0, 0, 140));
+				// Crop border
+				p->setPen(QPen(Qt::white, 2.0 / m_canvas->scale()));
+				p->setBrush(Qt::NoBrush);
+				p->drawRect(cropLocal);
+				// Draw handles
+				double hs = 8.0 / m_canvas->scale();
+				QList<QPointF> handles = {
+					cropLocal.topLeft(), cropLocal.topRight(),
+					cropLocal.bottomLeft(), cropLocal.bottomRight(),
+					QPointF(cropLocal.center().x(), cropLocal.top()),
+					QPointF(cropLocal.center().x(), cropLocal.bottom()),
+					QPointF(cropLocal.left(), cropLocal.center().y()),
+					QPointF(cropLocal.right(), cropLocal.center().y())
+				};
+				p->setBrush(Qt::white);
+				p->setPen(QPen(Qt::black, 1.0 / m_canvas->scale()));
+				for (auto& pt : handles)
+					p->drawRect(QRectF(pt.x()-hs/2, pt.y()-hs/2, hs, hs));
+				p->restore();
+			}
 			QTransform mm = currItem->getTransform();
 			p->save();
 			p->setTransform(mm, true);
@@ -290,6 +384,17 @@ void CanvasMode_Edit::leaveEvent(QEvent *e)
 void CanvasMode_Edit::activate(bool fromGesture)
 {
 	CanvasMode::activate(fromGesture);
+	// Force canvas focus for IME input
+	if (m_canvas) {
+		m_canvas->setFocus(Qt::OtherFocusReason);
+		m_canvas->setAttribute(Qt::WA_InputMethodEnabled, true);
+	}
+	// Reset IME/IBus when entering edit mode
+	QInputMethod* im = QGuiApplication::inputMethod();
+	if (im) {
+		im->reset();
+		im->update(Qt::ImQueryAll);
+	}
 
 	m_canvas->m_viewMode.m_MouseButtonPressed = false;
 	m_canvas->resetRenderMode();
@@ -329,6 +434,19 @@ void CanvasMode_Edit::activate(bool fromGesture)
 
 void CanvasMode_Edit::deactivate(bool forGesture)
 {
+	// Clean up any pending preedit text before leaving edit mode
+	if (!m_preeditText.isEmpty()) {
+		PageItem* currItem = m_doc->m_Selection->itemAt(0);
+		if (currItem && currItem->isTextFrame() && m_preeditPos >= 0) {
+			currItem->itemText.removeChars(m_preeditPos, m_preeditText.length());
+			currItem->itemText.setCursorPosition(m_preeditPos);
+			currItem->invalidateLayout();
+			currItem->update();
+		}
+		m_preeditText.clear();
+		m_preeditPos = -1;
+	}
+
 	//<<TSC
 	PageItem* it(nullptr);
 	if (GetItem(&it))
@@ -352,6 +470,7 @@ void CanvasMode_Edit::mouseDoubleClickEvent(QMouseEvent *m)
 	m_canvas->m_viewMode.m_MouseButtonPressed = false;
 	m_canvas->resetRenderMode();
 	PageItem *currItem = nullptr;
+
 	if (GetItem(&currItem) && (m_doc->appMode == modeEdit) && currItem->isTextFrame())
 	{
 		//CB if annotation, open the annotation dialog
@@ -1121,3 +1240,52 @@ void CanvasMode_Edit::createContextMenu(PageItem* currItem, double mx, double my
 	m_view->setGlobalUndoMode();
 	delete cmen;
 }
+
+void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
+{
+	PageItem* currItem = m_doc->m_Selection->itemAt(0);
+	if (!currItem || !currItem->isTextFrame()) {
+		event->accept();
+		return;
+	}
+
+	// Remove previously inserted preedit text from the document
+	if (!m_preeditText.isEmpty() && m_preeditPos >= 0) {
+		currItem->itemText.removeChars(m_preeditPos, m_preeditText.length());
+		currItem->itemText.setCursorPosition(m_preeditPos);
+		m_preeditText.clear();
+		m_preeditPos = -1;
+	}
+
+	// Replace selected text if IME specifies a replacement range
+	if (event->replacementLength() > 0) {
+		int pos = currItem->itemText.cursorPosition() + event->replacementStart();
+		if (pos >= 0 && pos + event->replacementLength() <= currItem->itemText.length()) {
+			currItem->itemText.removeChars(pos, event->replacementLength());
+			currItem->itemText.setCursorPosition(pos);
+		}
+	}
+
+	// Insert committed text permanently
+	if (!event->commitString().isEmpty()) {
+		int pos = currItem->itemText.cursorPosition();
+		currItem->itemText.insertChars(pos, event->commitString());
+		currItem->itemText.setCursorPosition(pos + event->commitString().length());
+	}
+
+	// Insert preedit text temporarily so it appears visually in the frame;
+	// it will be removed/replaced on the next inputMethodEvent call.
+	if (!event->preeditString().isEmpty()) {
+		m_preeditPos = currItem->itemText.cursorPosition();
+		m_preeditText = event->preeditString();
+		currItem->itemText.insertChars(m_preeditPos, m_preeditText);
+		currItem->itemText.setCursorPosition(m_preeditPos + m_preeditText.length());
+	}
+
+	currItem->invalidateLayout();
+	currItem->update();
+	m_doc->regionsChanged()->update(QRectF());
+	QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+	event->accept();
+}
+

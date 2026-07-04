@@ -45,6 +45,8 @@ public:
 
 	bool isSymetricMove() { return SymMove->isChecked(); };
 
+public slots:
+	void ToggleContourMode();
 private slots:
 	void AddN();
 	void DelN();
@@ -70,7 +72,6 @@ private slots:
 	void ShearL();
 	void ShearU();
 	void ShearD();
-	void ToggleContourMode();
 	void TogglePreview();
 	void changePosOrigin(int index);
 

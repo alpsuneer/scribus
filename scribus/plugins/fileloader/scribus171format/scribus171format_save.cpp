@@ -887,6 +887,10 @@ void Scribus171Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 		docu.writeAttribute("KeepLinesEnd", style.keepLinesEnd());
 	if (!style.isInhKeepWithNext())
 		docu.writeAttribute("KeepWithNext", style.keepWithNext());
+	if (!style.isInhSpanColumns())
+		docu.writeAttribute("SpanColumns", style.spanColumns());
+	if (!style.nextStyle().isEmpty())
+		docu.writeAttribute("NextStyle", style.nextStyle());
 	if (!style.isInhKeepTogether())
 		docu.writeAttribute("KeepTogether", style.keepTogether());
 	if (!style.isInhBackgroundColor())

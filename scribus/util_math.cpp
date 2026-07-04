@@ -320,6 +320,7 @@ FPoint projectPointOnLine(FPoint p, QPointF lineStart, QPointF lineEnd)
 
 bool regionContainsRect(const QRegion& shape, QRect rect)
 {
+
 	/*bool oldResult = QRegion(rect).subtracted(shape).isEmpty();*/
 
 	// Code adapted from Qt RectInRegion (cf. qregion.cpp) to detect

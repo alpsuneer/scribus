@@ -345,7 +345,7 @@ void TabPDFOptions::restoreDefaults(const PDFOptions & Optionen,
 	MirrorH->setChecked(Opts.MirrorH);
 	MirrorV->setChecked(Opts.MirrorV);
 	ClipMarg->setChecked(Opts.doClip);
-	bool cmsUse = (ScCore->haveCMS() && m_Doc->HasCMS);
+	bool cmsUse = ScCore->haveCMS(); // Use CMS when available regardless of doc setting
 	if (!cmsUse)
 		PDFVersionCombo->setVersion(PDFVersion::PDF_14);
 	PDFVersionCombo->setVersion(Opts.Version);
@@ -534,6 +534,13 @@ void TabPDFOptions::restoreDefaults(const PDFOptions & Optionen,
 		if (cmsUse && itp.key() == tp)
 			SolidPr->setCurrentIndex(SolidPr->count() - 1);
 	}
+	// Add CMYK profiles
+	for (auto itp = ScCore->InputProfilesCMYK.cbegin(); itp != ScCore->InputProfilesCMYK.cend(); ++itp)
+	{
+		SolidPr->addItem(itp.key());
+		if (cmsUse && itp.key() == tp)
+			SolidPr->setCurrentIndex(SolidPr->count() - 1);
+	}
 	if (cmsUse)
 		IntendS->setCurrentIndex(Opts.Intent);
 
@@ -549,6 +556,13 @@ void TabPDFOptions::restoreDefaults(const PDFOptions & Optionen,
 		if (cmsUse && itp2.key() == tp1)
 			ImageP->setCurrentIndex(ImageP->count() - 1);
 	}
+	// Add CMYK profiles
+	for (auto itp2 = ScCore->InputProfilesCMYK.cbegin(); itp2 != ScCore->InputProfilesCMYK.cend(); ++itp2)
+	{
+		ImageP->addItem(itp2.key());
+		if (cmsUse && itp2.key() == tp1)
+			ImageP->setCurrentIndex(ImageP->count() - 1);
+	}
 	if (cmsUse)
 		IntendI->setCurrentIndex(Opts.Intent2);
 
@@ -556,6 +570,11 @@ void TabPDFOptions::restoreDefaults(const PDFOptions & Optionen,
 	{
 		solidsProfileGroup->hide();
 		imageProfileGroup->hide();
+	}
+	else
+	{
+		solidsProfileGroup->show();
+		imageProfileGroup->show();
 	}
 
 	QString tp3 = Opts.PrintProf;

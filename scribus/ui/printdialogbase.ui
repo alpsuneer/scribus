@@ -397,6 +397,16 @@ a range of pages or a single page number</string>
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="proofPrint">
+            <property name="toolTip">
+             <string>&lt;qt&gt;Proof Print: Fast draft quality print for proofreading. Uses 150 DPI and draft mode to save ink and time.&lt;/qt&gt;</string>
+            </property>
+            <property name="text">
+             <string>Proof Print (Draft Quality)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <spacer>
             <property name="orientation">
              <enum>Qt::Orientation::Vertical</enum>

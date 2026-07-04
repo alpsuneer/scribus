@@ -38,6 +38,7 @@ enum AppMode
 	modeInsertPDF3DAnnotation,
 	modeEditMeshGradient,
 	modeDrawCalligraphicLine,
+	modeSuneerContourDraw,
 	modeDrawArc,
 	modeEditArc,
 	modeEditPolygon,
@@ -46,7 +47,8 @@ enum AppMode
 	modeEditTable,
 	modeEditMeshPatch,
 	modeEditWeldPoint,
-	modeInsertPDFRadioButton
+	modeInsertPDFRadioButton,
+	modeSuneerImageCrop
 };
 
 #endif // APPMODES_H

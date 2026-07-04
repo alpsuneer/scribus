@@ -3753,6 +3753,13 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	static const QString KeepTogether("KeepTogether");
 	if (attrs.hasAttribute(KeepTogether))
 		newStyle.setKeepTogether(attrs.valueAsInt(KeepTogether));
+
+	static const QString SpanColumns("SpanColumns");
+	if (attrs.hasAttribute(SpanColumns))
+		newStyle.setSpanColumns(attrs.valueAsInt(SpanColumns));
+	static const QString NextStyle("NextStyle");
+	if (attrs.hasAttribute(NextStyle))
+		newStyle.setNextStyle(attrs.valueAsString(NextStyle));
 	//Remove uppercase in 1.8 format
 	if (attrs.hasAttribute("BCOLOR"))
 		newStyle.setBackgroundColor(attrs.valueAsString("BCOLOR", CommonStrings::None));

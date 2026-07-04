@@ -412,7 +412,12 @@ void CreateMode::mouseReleaseEvent(QMouseEvent *m)
 		m_createTransaction.cancel();
 		m_createTransaction.reset();
 	}
-	if (!PrefsManager::instance().appPrefs.uiPrefs.stickyTools)
+	if (currItem && currItem->isTextFrame())
+	{
+		// Auto enter edit mode for text frames
+		m_view->requestMode(modeEdit);
+	}
+	else if (!PrefsManager::instance().appPrefs.uiPrefs.stickyTools)
 	{
 		m_view->requestMode(modeNormal);
 	}
@@ -824,6 +829,11 @@ PageItem* CreateMode::doCreateNewObject()
 		newObject = m_doc->Items->at(z);
 		newObject->ContourLine = newObject->PoLine.copy();
 		m_doc->setRedrawBounding(newObject);
+		// Auto edit mode for text frames
+		if (createObjectMode == modeDrawText && newObject->isTextFrame())
+		{
+			m_view->requestMode(modeEdit);
+		}
 	}
 	return newObject;
 }

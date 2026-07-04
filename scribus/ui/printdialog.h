@@ -32,6 +32,7 @@ public:
 	QString outputFileName() const;
 	bool outputToFile() const;
 	int numCopies() const;
+	bool isProofPrint() const;
 	bool outputSeparations() const;
 	QString separationName() const;
 	QStringList allSeparations() const;

@@ -621,6 +621,11 @@ bool PrintDialog::outputToFile() const
 	return (PrintDest->currentText() == CommonStrings::trFile);
 }
 
+bool PrintDialog::isProofPrint() const
+{
+	return proofPrint->isChecked();
+}
+
 int PrintDialog::numCopies() const
 {
 	return Copies->value();

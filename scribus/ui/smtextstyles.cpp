@@ -530,6 +530,7 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->keepLinesEnd, SIGNAL(valueChanged(int)), this, SLOT(handleKeepLinesEnd()));
 	connect(m_pwidget->keepTogether, SIGNAL(stateChanged(int)), this, SLOT(handleKeepTogether()));
 	connect(m_pwidget->keepWithNext, SIGNAL(stateChanged(int)), this, SLOT(handleKeepWithNext()));
+	connect(m_pwidget->spanColumnsCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(handleSpanColumns(int)));
 
 	connect(m_pwidget->tabList, SIGNAL(tabsChanged()), this, SLOT(slotTabRuler()));
 	connect(m_pwidget->tabList, SIGNAL(mouseReleased()), this, SLOT(slotTabRuler()));
@@ -627,6 +628,7 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->keepLinesEnd, SIGNAL(valueChanged(int)), this, SLOT(handleKeepLinesEnd()));
 	disconnect(m_pwidget->keepTogether, SIGNAL(stateChanged(int)), this, SLOT(handleKeepTogether()));
 	disconnect(m_pwidget->keepWithNext, SIGNAL(stateChanged(int)), this, SLOT(handleKeepWithNext()));
+	disconnect(m_pwidget->spanColumnsCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(handleSpanColumns(int)));
 
 	disconnect(m_pwidget->tabList, SIGNAL(tabsChanged()), this, SLOT(slotTabRuler()));
 	disconnect(m_pwidget->tabList->leftIndentSpin, SIGNAL(valueChanged(double)), this, SLOT(slotLeftIndent()));
@@ -1250,6 +1252,17 @@ void SMParagraphStyle::handleKeepWithNext()
 			m_selection[i]->setKeepWithNext (value);
 	}
 	
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::handleSpanColumns(int index)
+{
+	int value = 0;
+	if (index == 0) value = 0;
+	else if (index == 1) value = -1;
+	else value = index;
+	for (int i = 0; i < m_selection.count(); ++i)
+		m_selection[i]->setSpanColumns(value);
 	slotSelectionDirty();
 }
 

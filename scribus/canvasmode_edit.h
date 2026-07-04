@@ -52,6 +52,7 @@ public:
 	
 	void keyPressEvent(QKeyEvent *e) override;
 	void keyReleaseEvent(QKeyEvent *e) override;
+	void inputMethodEvent(QInputMethodEvent *event) override;
 
 	void drawControls(QPainter* p) override;
 
@@ -70,6 +71,8 @@ private:
 	bool m_cursorVisible {false};
 	bool m_keyRepeat {false};
 	bool m_longCursorTime {false};
+	QString m_preeditText;
+	int m_preeditPos {-1};
 	double Dxp {-1};
 	double Dyp {-1};
 	double Mxp {-1};

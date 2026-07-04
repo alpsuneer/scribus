@@ -161,7 +161,16 @@ void TextLayout::renderBackground(TextLayoutPainter *p) const
 
 			if (backColor != CommonStrings::None)
 			{
-				QRectF rect(colBBox.x(), box->y(), colBBox.width(), box->height());
+				double bgX = colBBox.x();
+				double bgW = colBBox.width();
+
+				if (style.spanColumns() != 0)
+				{
+					bgX = 0.0;
+					bgW = m_box->width();
+				}
+
+				QRectF rect(bgX, box->y(), bgW, box->height());
 				lastRect |= rect;
 			}
 
@@ -200,7 +209,11 @@ void TextLayout::addColumn(double colLeft, double colWidth)
 	newBox->moveTo(colLeft, 0.0);
 	newBox->setWidth(colWidth);
 	newBox->setAscent(m_frame->height());
-	m_box->addBox(newBox);
+	// Prevent duplicate columns
+	for (const Box* b : m_box->boxes()) {
+		if (qAbs(b->x() - colLeft) < 0.1) { delete newBox; return; }
+	}
+	m_box->boxes().append(newBox); // suppress update() to prevent layout loop
 
 	// Update the box width and height, any better place to do this?
 	m_box->setAscent(m_frame->height());

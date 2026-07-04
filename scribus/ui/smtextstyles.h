@@ -105,6 +105,7 @@ private slots:
 	void handleKeepLinesEnd();
 	void handleKeepTogether();
 	void handleKeepWithNext();
+	void handleSpanColumns(int index);
 	void slotTabRuler();
 	void slotLeftIndent();
 	void slotRightIndent();

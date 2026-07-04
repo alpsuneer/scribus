@@ -24,6 +24,8 @@
 #include "canvasmode_create.h"
 #include "canvasmode_drawbezier.h"
 #include "canvasmode_drawfreehand.h"
+#include "canvasmode_suneercontour.h"
+#include "canvasmode_suneercrop.h"
 #include "canvasmode_drawcalligraphic.h"
 #include "canvasmode_edit.h"
 #include "canvasmode_editarc.h"
@@ -120,6 +122,12 @@ CanvasMode* CanvasMode::createForAppMode(ScribusView* view, int appMode)
 			break;
 		case modeDrawFreehandLine:
 			result = new FreehandMode(view);
+			break;
+		case modeSuneerImageCrop:
+			result = new CanvasMode_SuneerCrop(view);
+			break;
+		case modeSuneerContourDraw:
+			result = new SuneerContourMode(view);
 			break;
 		case modeDrawCalligraphicLine:
 			result = new CalligraphicMode(view);
@@ -736,19 +744,19 @@ void CanvasMode::setResizeCursor(int how, double rot)
 	{
 		case 1:
 		case 2:
-			m_view->setCursor(ScResizeCursor(135 + rot));// Qt::SizeFDiagCursor
+			m_view->setCursor(QCursor(Qt::SizeFDiagCursor));
 			break;
 		case 3:
 		case 4:
-			m_view->setCursor(ScResizeCursor(45 + rot));// Qt::SizeBDiagCursor
+			m_view->setCursor(QCursor(Qt::SizeBDiagCursor));
 			break;
 		case 5:
 		case 8:
-			m_view->setCursor(ScResizeCursor(0 + rot));// Qt::SizeVerCursor
+			m_view->setCursor(QCursor(Qt::SizeVerCursor));
 			break;
 		case 6:
 		case 7:
-			m_view->setCursor(ScResizeCursor(90 + rot));// Qt::SizeHorCursor
+			m_view->setCursor(QCursor(Qt::SizeHorCursor));
 			break;
 		default:
 			m_view->setCursor(QCursor(Qt::SizeAllCursor));
@@ -830,6 +838,27 @@ void CanvasMode::commonkeyPressEvent_Default(QKeyEvent *e)
 	if (m_keyRepeat)
 		return;
 	m_keyRepeat = true;
+	// Check ApplicationShortcut actions
+	{
+		QKeySequence pressed(kk | int(buttonModifiers));
+
+		for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
+		{
+			if (!it.value()) continue;
+			if (it.value()->shortcutContext() != Qt::ApplicationShortcut) continue;
+			if (!it.value()->isEnabled()) continue;
+			QKeySequence sc = it.value()->shortcut();
+			if (sc.isEmpty()) continue;
+			qDebug() << "SC_CHECK:" << it.key() << sc.toString() << "pressed:" << pressed.toString();
+			if (sc.matches(pressed) == QKeySequence::ExactMatch ||
+			    pressed.matches(sc) == QKeySequence::ExactMatch)
+			{
+				it.value()->trigger();
+				m_keyRepeat = false;
+				return;
+			}
+		}
+	}
 
 	//User presses escape and we have a doc open, and we have an item selected
 	if (kk == Qt::Key_Escape)
@@ -1060,6 +1089,46 @@ void CanvasMode::commonkeyPressEvent_NormalNodeEdit(QKeyEvent *e)
 		scrActions["toolsZoomIn"]->trigger();
 	if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, e->modifiers(), "toolsZoomOut"))
 		scrActions["toolsZoomOut"]->trigger();
+	if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, e->modifiers(), "suneerAutoFitHeight"))
+		scrActions["suneerAutoFitHeight"]->trigger();
+	if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, e->modifiers(), "suneerGetImage"))
+		scrActions["suneerGetImage"]->trigger();
+	if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, e->modifiers(), "itemImageScaleUp"))
+	{
+		PageItem* currItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
+		if (currItem && currItem->isTextFrame())
+		{
+			if (m_doc->appMode == modeEdit)
+				scrActions["suneerEnlargeTextSize"]->trigger();
+			else
+				scrActions["suneerEnlargeTextSize"]->trigger();
+		}
+		else if (currItem && currItem->isImageFrame())
+		{
+			if (m_doc->appMode == modeEdit)
+				scrActions["suneerEnlargeImageSize"]->trigger();
+			else
+				scrActions["itemImageScaleUp"]->trigger();
+		}
+	}
+	if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, e->modifiers(), "itemImageScaleDown"))
+	{
+		PageItem* currItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
+		if (currItem && currItem->isTextFrame())
+		{
+			if (m_doc->appMode == modeEdit)
+				scrActions["suneerReduceTextSize"]->trigger();
+			else
+				scrActions["suneerReduceTextSize"]->trigger();
+		}
+		else if (currItem && currItem->isImageFrame())
+		{
+			if (m_doc->appMode == modeEdit)
+				scrActions["suneerReduceImageSize"]->trigger();
+			else
+				scrActions["itemImageScaleDown"]->trigger();
+		}
+	}
 	/**If we have a doc and we are not changing the page or zoom level in the status bar */
 	if ((!m_view->m_ScMW->zoomSpinBox->hasFocus()) && (!m_view->m_ScMW->pageSelector->hasFocus()))
 	{

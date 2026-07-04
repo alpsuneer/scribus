@@ -23,6 +23,8 @@ for which a new license (GPL+exception) is in place.
 
 #include "scribusview.h"
 
+#include "scribus.h"
+
 #include "scconfig.h"
 #include "sclimits.h"
 
@@ -1481,6 +1483,8 @@ void ScribusView::TransformPoly(int mode, int rot, double scaling)
 	m_doc->setRedrawBounding(currItem);
 	m_doc->regionsChanged()->update(QRect());
 	currItem->update();
+			m_doc->regionsChanged()->update(QRectF());
+			m_doc->regionsChanged()->update(QRectF());
 	currItem->FrameType = 3;
 	undoManager->setUndoEnabled(true);
 	if (UndoManager::undoEnabled())
@@ -1559,6 +1563,7 @@ bool ScribusView::slotSetCurs(int x, int y)
 		}
 		*/
 		textFrame->itemText.setCursorPosition(textPosition);
+		m_ScMW->setTBvals(textFrame);
 		if (textFrame->itemText.isNotEmpty())
 		{
 			int pos = qMax(0, qMin(textFrame->itemText.cursorPosition(), textFrame->itemText.length()));
@@ -3185,21 +3190,17 @@ void ScribusView::keyReleaseEvent(QKeyEvent *k)
 
 void ScribusView::inputMethodEvent(QInputMethodEvent * event)
 {
-	//qDebug() << "IME" << event->commitString() << event->preeditString() << "attributes:" << event->attributes().count();
-	// #9682 : Avoid parameter type ambiguity in QKeyEvent constructor with Qt3Support enabled Qt builds
-	Qt::KeyboardModifiers modifiers = Qt::NoModifier;
-
-	const QString& commitString = event->commitString();
-	for (int i = 0; i < commitString.length(); ++i)
-	{
-		QKeyEvent ev(QEvent::KeyPress, 0, modifiers, commitString.mid(i, 1));
-		keyPressEvent(&ev);
-	}
+	if (m_canvasMode)
+		m_canvasMode->inputMethodEvent(event);
 }
 
 QVariant ScribusView::inputMethodQuery(Qt::InputMethodQuery query) const
 {
-	//	qDebug() << "IMQ" << query;
+	//qDebug() << "IMQ" << query;
+	if (query == Qt::ImEnabled)
+		return QVariant(true);
+	if (query == Qt::ImHints)
+		return QVariant(int(Qt::ImhNone));
 	return QVariant();
 }
 
@@ -3315,6 +3316,9 @@ bool ScribusView::eventFilter(QObject *obj, QEvent *event)
 		auto* m = dynamic_cast<QMouseEvent*> (event);
 		m_mousePointDoc = m_canvas->globalToCanvas(m->globalPosition());
 		FPoint p = m_canvas->localToCanvas(QPoint(m->position().x(),m->position().y()));
+		// ✅ Update dragX/dragY for Ctrl+V paste position
+		dragX = p.x();
+		dragY = p.y();
 		emit MousePos(p.x(),p.y());
 		horizRuler->draw(m->position().x() + qRound(m_doc->minCanvasCoordinate.x() * m_canvas->scale()));
 		vertRuler->draw(m->position().y() + qRound(m_doc->minCanvasCoordinate.y() * m_canvas->scale()));

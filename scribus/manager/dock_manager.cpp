@@ -24,6 +24,7 @@ to the COPYING file provided with the program.
 
 
 #include "dock_manager.h"
+#include "../ui/ParagraphStylesPanel.h"
 
 #include <QMenu>
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
@@ -277,6 +278,7 @@ void DockManager::createDefaultWorkspace()
 	// Right Panel
 	auto *areaRight = addDockWidget(RightDockWidgetArea, propertiesPalette, areaCenter);
 	addDockWidget(CenterDockWidgetArea, contentPalette, areaRight);
+	// ParagraphStylesPanel added separately
 
 	// Top Panel
 	//    auto * areaTop = addDockWidget(TopDockWidgetArea, dockToolProperties);
@@ -301,6 +303,7 @@ void DockManager::createDefaultWorkspace()
 	layerPalette->closeDockWidget();
 	undoPalette->closeDockWidget();
 	outlinePalette->closeDockWidget();
+
 
 	// active palettes
 	areaLeft->setCurrentDockWidget(pagePalette);
