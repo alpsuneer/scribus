@@ -76,5 +76,6 @@ private:
 	QMap<QString, QString> m_nextStyles; // styleName → nextStyleName
 	QTimer* m_syncTimer = nullptr;
 	QString m_lastHighlightedStyle;
+	bool m_userInteracting = false; // true while pointer is pressed on the styles list
 };
 #endif

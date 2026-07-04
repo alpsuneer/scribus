@@ -777,8 +777,19 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 
 bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
 {
+	// While the pointer is pressed on the list, suppress the background sync
+	// timer / docChanged rebuilds so they can't reselect or scroll the list
+	// out from under the click (which would make itemAt(pos) resolve to the
+	// wrong row). Qt grabs the mouse on press, so the matching release is
+	// always delivered to this viewport and the flag is cleared reliably.
+	if (obj == m_stylesList->viewport() && event->type() == QEvent::MouseButtonPress)
+		m_userInteracting = true;
+
 	if (obj == m_stylesList->viewport() && event->type() == QEvent::MouseButtonRelease)
 	{
+		// Clear before applying: the apply below emits docChanged, and we
+		// want the resulting updateStylesList() rebuild to run normally.
+		m_userInteracting = false;
 		QMouseEvent* me = static_cast<QMouseEvent*>(event);
 		QListWidgetItem* item = m_stylesList->itemAt(me->pos());
 		if (item)
@@ -850,6 +861,11 @@ void ParagraphStylesPanel::setDocument(ScribusDoc* doc)
 
 void ParagraphStylesPanel::syncCurrentStyle()
 {
+	// Don't reselect/scroll the list while the user is clicking in it —
+	// doing so moves rows under the pointer and breaks the click's
+	// itemAt(pos) lookup (wrong-style-on-first-click bug).
+	if (m_userInteracting)
+		return;
 	if (!m_doc || (m_doc->appMode != modeEdit && m_doc->appMode != modeEditTable))
 		return;
 	if (m_doc->m_Selection->isEmpty())
@@ -897,6 +913,12 @@ void ParagraphStylesPanel::setMainWindow(ScribusMainWindow* mw)
 
 void ParagraphStylesPanel::updateStylesList()
 {
+	// Skip the clear()+rebuild while the user is pressing on the list: a
+	// docChanged fired mid-click would otherwise delete the row being
+	// clicked. The post-release apply clears the flag first, so the list
+	// is still rebuilt right after the click completes.
+	if (m_userInteracting)
+		return;
 	m_stylesList->clear();
 	if (!m_doc)
 	{
