@@ -793,8 +793,16 @@ bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
 			}
 			else
 			{
+				// Apply the style captured directly from the clicked item
+				// (styleName, from item->data(UserRole) above) instead of
+				// re-reading m_stylesList->currentItem() via applyStyle().
+				// applyStyle() derives the name from the list's "current"
+				// state, which the 150ms sync timer can mutate between the
+				// click and the apply — the source of the wrong-style-on-
+				// first-click bug. Keep setCurrentItem for immediate visual
+				// highlight (applyStyleByName does not update it directly).
 				m_stylesList->setCurrentItem(item);
-				applyStyle();
+				applyStyleByName(styleName);
 				return true;
 			}
 		}
