@@ -803,6 +803,7 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerReduceImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceImageSize);
 	connect(scrActions["suneerEnlargeTextFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeTextFrame);
 	connect(scrActions["suneerReduceTextFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceTextFrame);
+	connect(scrActions["suneerTextToTable"], &QAction::triggered, this, &ScribusMainWindow::suneerTextToTable);
 	connect(scrActions["suneerEnlargeTextSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeTextSize);
 	connect(scrActions["suneerReduceTextSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceTextSize);
 	connect(scrActions["suneerEnlargeLineSpacing"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeLineSpacing);
@@ -7924,6 +7925,111 @@ void ScribusMainWindow::suneerReduceTextFrame()
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
 }
+
+// Convert the selected text frame into a table. Paragraphs (PARSEP) become rows,
+// tab-separated fields become columns. The column count is taken from the row with
+// the most fields. The table is created at the same position/size as the frame.
+void ScribusMainWindow::suneerTextToTable()
+{
+	if (!doc || doc->m_Selection->isEmpty())
+		return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame())
+		return;
+
+	// 1. Extract the raw story text, preserving TAB and PARSEP characters.
+	int len = item->itemText.length();
+	if (len <= 0)
+	{
+		ScMessageBox::information(this, tr("Convert to Table"), tr("The selected text frame is empty."));
+		return;
+	}
+	QString raw = item->itemText.text(0, len);
+
+	// 2. Split into paragraphs -> rows.
+	QStringList rows = raw.split(SpecialChars::PARSEP);
+	// Drop a trailing empty paragraph (common when text ends with a paragraph break).
+	while (rows.size() > 1 && rows.last().isEmpty())
+		rows.removeLast();
+	if (rows.isEmpty())
+		return;
+
+	// 3. Split each row by TAB -> columns, and find the maximum column count.
+	QList<QStringList> grid;
+	grid.reserve(rows.size());
+	int numColumns = 0;
+	for (const QString& row : rows)
+	{
+		QStringList cols = row.split(SpecialChars::TAB);
+		numColumns = qMax(numColumns, static_cast<int>(cols.size()));
+		grid.append(cols);
+	}
+	int numRows = grid.size();
+	if (numRows < 1 || numColumns < 1)
+		return;
+
+	// 4. Remember the frame geometry and layer.
+	double x = item->xPos();
+	double y = item->yPos();
+	double w = item->width();
+	double h = item->height();
+	int layerID = item->m_layerID;
+
+	UndoTransaction trans;
+	if (UndoManager::undoEnabled())
+		trans = m_undoManager->beginTransaction(Um::SelectionGroup, Um::ITable, tr("Convert Text to Table"), QString(), Um::ITable);
+
+	// 5. Create the table at the same position/size.
+	doc->dontResize = true;
+	int z = doc->itemAdd(PageItem::Table, PageItem::Unspecified, x, y, w, h, 0, CommonStrings::None, CommonStrings::None);
+	PageItem_Table* table = doc->Items->at(z)->asTable();
+	table->setLayer(layerID);
+	table->insertRows(0, numRows - 1);
+	table->insertColumns(0, numColumns - 1);
+	table->adjustTableToFrame();
+	table->adjustFrameToTable();
+	doc->dontResize = false;
+
+	// 6. Fill each cell with its corresponding text.
+	for (int r = 0; r < numRows; ++r)
+	{
+		const QStringList& cols = grid.at(r);
+		for (int c = 0; c < cols.size() && c < numColumns; ++c)
+		{
+			const QString& cellText = cols.at(c);
+			if (cellText.isEmpty())
+				continue;
+			TableCell cell = table->cellAt(r, c);
+			if (cell.isValid() && cell.textFrame())
+				cell.textFrame()->itemText.insertChars(cellText);
+		}
+	}
+	table->adjustFrameToTable();
+
+	// 7. Optionally delete the original text frame.
+	QMessageBox::StandardButton ret = ScMessageBox::question(this, tr("Convert to Table"),
+			tr("Delete the original text frame?"),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+
+	// Drop the original frame from the current selection before touching it.
+	doc->m_Selection->clear();
+
+	if (ret == QMessageBox::Yes)
+	{
+		Selection tmpSelection(this, false);
+		tmpSelection.addItem(item);
+		doc->itemSelection_DeleteItem(&tmpSelection);
+	}
+
+	if (trans)
+		trans.commit();
+
+	doc->m_Selection->addItem(table);
+	table->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+}
+
 void ScribusMainWindow::suneerEnlargeTextSize()
 {
 	if (!doc || doc->m_Selection->isEmpty()) return;

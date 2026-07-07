@@ -359,6 +359,7 @@ public slots:
 	void suneerReduceImageSize();
 	void suneerEnlargeTextFrame();
 	void suneerReduceTextFrame();
+	void suneerTextToTable();
 	void suneerEnlargeTextSize();
 	void suneerReduceTextSize();
 	void suneerEnlargeLineSpacing();

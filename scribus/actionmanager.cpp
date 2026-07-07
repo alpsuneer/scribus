@@ -853,6 +853,8 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerReduceTextFrame";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerTextToTable";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerEnlargeTextSize";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerReduceTextSize";
@@ -992,6 +994,7 @@ void ActionManager::initToolsMenuActions()
 	(*scrActions)["suneerReduceImageSize"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerEnlargeTextFrame"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerReduceTextFrame"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerTextToTable"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerEnlargeTextSize"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerReduceTextSize"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerEnlargeLineSpacing"]->setShortcutContext(Qt::ApplicationShortcut);
@@ -1817,6 +1820,7 @@ void ActionManager::languageChange()
 	(*scrActions)["suneerReduceImageSize"]->setTexts( tr("Reduce Image Size"));
 	(*scrActions)["suneerEnlargeTextFrame"]->setTexts( tr("Enlarge Text Frame Size"));
 	(*scrActions)["suneerReduceTextFrame"]->setTexts( tr("Reduce Text Frame Size"));
+	(*scrActions)["suneerTextToTable"]->setTexts( tr("Convert Text Frame to Table"));
 	(*scrActions)["suneerEnlargeTextSize"]->setTexts( tr("Enlarge Text Size"));
 	(*scrActions)["suneerReduceTextSize"]->setTexts( tr("Reduce Text Size"));
 	(*scrActions)["suneerEnlargeLineSpacing"]->setTexts( tr("Enlarge Line Spacing"));
@@ -2114,6 +2118,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("suneerReduceImageSize", QKeySequence());
 	defKeys.insert("suneerEnlargeTextFrame", QKeySequence());
 	defKeys.insert("suneerReduceTextFrame", QKeySequence());
+	defKeys.insert("suneerTextToTable", QKeySequence());
 	defKeys.insert("suneerEnlargeTextSize", QKeySequence());
 	defKeys.insert("suneerReduceTextSize", QKeySequence());
 	defKeys.insert("suneerEnlargeLineSpacing", QKeySequence(Qt::SHIFT | Qt::Key_Greater));
@@ -2746,6 +2751,7 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "suneerReduceImageSize";
 	itnmenua->second << "suneerEnlargeTextFrame";
 	itnmenua->second << "suneerReduceTextFrame";
+	itnmenua->second << "suneerTextToTable";
 	itnmenua->second << "suneerEnlargeTextSize";
 	itnmenua->second << "suneerReduceTextSize";
 
