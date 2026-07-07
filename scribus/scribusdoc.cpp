@@ -9776,11 +9776,42 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 		QPixmap* targetPixmap = (selectedItemCount > 1) ? Um::IGroup : currItem->getUPixmap();
 		activeTransaction = m_undoManager->beginTransaction(targetName, targetPixmap, Um::ApplyTextStyle, newStyle.asString(), Um::IFont);
 	}
+	// suneer: table-wide selection + formatting
+	// Build the flat list of text frames to format across the whole selection.
+	// A table in edit mode with a multi-cell selection contributes every selected
+	// cell's text frame (whole cell text is formatted); other items contribute the
+	// item itself, or the active cell for a plain single-cell table edit.
+	QList<PageItem*> targetFrames;
+	QSet<PageItem*> wholeTextFrames;
 	for (uint aa = 0; aa < selectedItemCount; ++aa)
 	{
-		PageItem *currItem = itemSelection->itemAt(aa);
-		if (currItem->isTable() && appMode == modeEditTable)
-			currItem = currItem->asTable()->activeCell().textFrame();
+		PageItem *selItem = itemSelection->itemAt(aa);
+		if (selItem->isTable() && appMode == modeEditTable)
+		{
+			PageItem_Table* table = selItem->asTable();
+			if (table->hasSelection())
+			{
+				const QSet<TableCell>& cells = table->selectedCells();
+				for (const TableCell& cell : cells)
+				{
+					PageItem_TextFrame* cellFrame = cell.textFrame();
+					if (cellFrame)
+					{
+						targetFrames.append(cellFrame);
+						wholeTextFrames.insert(cellFrame);
+					}
+				}
+			}
+			else
+				targetFrames.append(table->activeCell().textFrame());
+		}
+		else
+			targetFrames.append(selItem);
+	}
+
+	for (PageItem* currItem : targetFrames)
+	{
+		bool applyWholeText = wholeTextFrames.contains(currItem);
 		int currItemTextCount = currItem->itemText.length();
 		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable)))
 		{
@@ -9788,7 +9819,13 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 			int length = currItem->lastInFrame() - start + 1;
 			if ((appMode == modeEdit) || (appMode == modeEditTable))
 			{
-				if (currItem->itemText.hasSelection())
+				// suneer: table-wide selection + formatting — style the whole cell text
+				if (applyWholeText)
+				{
+					start = 0;
+					length = currItem->itemText.length();
+				}
+				else if (currItem->itemText.hasSelection())
 				{
 					start = currItem->itemText.startOfSelection();
 					length = currItem->itemText.endOfSelection() - start;
