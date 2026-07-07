@@ -5362,7 +5362,43 @@ void ScribusMainWindow::SelectAll(bool docWideSelect)
 	{
 		PageItem *currItem = doc->m_Selection->itemAt(0);
 		if (doc->appMode == modeEditTable)
-			currItem = currItem->asTable()->activeCell().textFrame();
+		{
+			// suneer: Ctrl+A selects all cells in table (two-level, Word/LibreOffice style).
+			// 1st Ctrl+A selects the active cell's text; when that text is already fully
+			// selected (or cells are already selected), a 2nd Ctrl+A selects every cell.
+			PageItem_Table* table = currItem->asTable();
+			PageItem_TextFrame* cellFrame = table->activeCell().textFrame();
+			bool cellTextFullySelected =
+				(cellFrame->itemText.length() == 0) ||
+				(cellFrame->itemText.hasSelection() &&
+				 cellFrame->itemText.startOfSelection() == 0 &&
+				 cellFrame->itemText.endOfSelection() == cellFrame->itemText.length());
+			if (table->hasSelection() || cellTextFullySelected)
+			{
+				cellFrame->itemText.deselectAll();
+				cellFrame->HasSel = false;
+				table->selectCells(0, 0, table->rows() - 1, table->columns() - 1);
+				// suneer: Ctrl+A also selects text inside all cells for uniform formatting
+				for (int r = 0; r < table->rows(); r++)
+				{
+					for (int c = 0; c < table->columns(); c++)
+					{
+						PageItem_TextFrame* tf = table->cellAt(r, c).textFrame();
+						if (tf && tf->itemText.length() > 0)
+						{
+							tf->itemText.selectAll();
+							tf->HasSel = true;
+							tf->update();
+						}
+					}
+				}
+				table->update();
+				setCopyCutEnabled(true);
+				view->DrawNew();
+				return;
+			}
+			currItem = cellFrame;
+		}
 		PageItem *nextItem = currItem;
 		nextItem->itemText.selectAll();
 		while (nextItem != nullptr)
