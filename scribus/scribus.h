@@ -434,6 +434,8 @@ public slots:
 	void slotEditPaste(bool forcePlainText = false);
 	void slotEditPastePlainText();
 	void slotEditCopyContents();
+	//! \brief Suneer: autoflow an overflowing text frame onto new pages (linked frames, same master/layout)
+	void suneerAutoflowToNewPages();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor

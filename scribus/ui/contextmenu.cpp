@@ -18,7 +18,9 @@
 #include <QApplication>
 #include <QFrame>
 #include <QGridLayout>
+#include <QImage>
 #include <QLabel>
+#include <QPointer>
 #include <QTextEdit>
 #include <QWidget>
 #include <QWidgetAction>
@@ -26,7 +28,9 @@
 #include "appmodes.h"
 #include "canvas.h"
 #include "canvasmode.h"
+#include "pageitem_imageframe.h"
 #include "pageitem_textframe.h"
+#include "ui/scimageeditor.h"
 #include "scmimedata.h"
 #include "scraction.h"
 #include "scribus.h"
@@ -367,6 +371,25 @@ void ContextMenu::createMenuItems_Selection()
 		
 		if (m_actionList.contains("styleImageEffects"))
 			menuImage->addAction(m_ScMW->scrActions["styleImageEffects"]);
+		// Built-in Scribus Image Editor — shown above the external "Edit Image..." action
+		if (selectedItemCount == 1 && currItem->isImageFrame() && currItem->imageIsAvailable)
+		{
+			QAction* editInScribus = menuImage->addAction(tr("Edit in Scribus Image Editor"));
+			QPointer<PageItem_ImageFrame> imgFrame = currItem->asImageFrame();
+			QWidget* parentWin = m_ScMW;
+			connect(editInScribus, &QAction::triggered, m_ScMW, [imgFrame, parentWin]() {
+				if (!imgFrame || imgFrame->Pfile.isEmpty())
+					return;
+				QImage img(imgFrame->Pfile);
+				if (img.isNull())
+					img = imgFrame->pixm.qImage();
+				if (img.isNull())
+					return;
+				ScImageEditor* editor = new ScImageEditor(img, imgFrame.data(), parentWin);
+				editor->setAttribute(Qt::WA_DeleteOnClose);
+				editor->show();
+			});
+		}
 		if (m_actionList.contains("editEditWithImageEditor"))
 			menuImage->addAction(m_ScMW->scrActions["editEditWithImageEditor"]);
 		if (selectedItemCount == 1 && currItem->isImageFrame())
@@ -413,6 +436,12 @@ void ContextMenu::createMenuItems_Selection()
 		{
 			if (currItem->itemText.isNotEmpty())
 				m_ScMW->scrActions["itemAdjustFrameHeightToText"]->setEnabled(true);
+			// Suneer: autoflow entry, only when this frame overflows and isn't already forward-linked
+			if (currItem->nextInChain() == nullptr && currItem->frameOverflows())
+			{
+				m_ScMW->scrActions["extrasAutoflowToNewPages"]->setEnabled(true);
+				addAction(m_ScMW->scrActions["extrasAutoflowToNewPages"]);
+			}
 		}
 	}
 	//-->
@@ -479,6 +508,7 @@ void ContextMenu::createMenuItems_Selection()
 	{
 		if (m_Sel.objectsLayer() != -1)
 			addAction(m_ScMW->scrActions["itemGroup"]);
+		addAction(m_ScMW->scrActions["itemsAutoArrange"]);
 	}
 	if (selectedItemCount > 0 && m_doc->m_Selection->containsItemType(PageItem::Group))
 	{

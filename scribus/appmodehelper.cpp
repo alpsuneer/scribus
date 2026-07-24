@@ -468,6 +468,7 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["editEditRenderSource"]->setEnabled(isImageFrame && currItem && (currItem->isLatexFrame() || currItem->isOSGFrame()));
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(SelectedType == PageItem::TextFrame && currItem->itemText.isNotEmpty());
 	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["extrasAutoflowToNewPages"]->setEnabled(SelectedType == PageItem::TextFrame && currItem && currItem->nextInChain() == nullptr && currItem->frameOverflows());
 	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
 	(*a_scrActions)["suneerApplyChain"]->setEnabled(true);
 	(*a_scrActions)["itemImageScaleUp"]->setEnabled(SelectedType == PageItem::ImageFrame && currItem->imageIsAvailable);

@@ -1074,10 +1074,13 @@ void ActionManager::initExtrasMenuActions()
 
 	name = "SRDuplicateContentCheck";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasAutoflowToNewPages";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
 	connect( (*scrActions)["SRDuplicateContentCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateContentCheck()) );
+	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
 }
 
 
@@ -1910,6 +1913,7 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasGenerateTableOfContents"]->setTexts( tr("&Generate Table Of Contents and Indexes"));
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
 	(*scrActions)["SRDuplicateContentCheck"]->setTexts( tr("Duplicate Content Check"));
+	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2563,7 +2567,8 @@ void ActionManager::createDefaultMenus()
 		<< "extrasHyphenateText"
 		<< "extrasDeHyphenateText"
 		<< "extrasGenerateTableOfContents"
-		<< "extrasUpdateDocument";
+		<< "extrasUpdateDocument"
+		<< "extrasAutoflowToNewPages";
 	//Windows
 	++itmenu;
 	itmenu->second

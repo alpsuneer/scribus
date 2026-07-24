@@ -1518,6 +1518,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
+	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
 	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
 	scrMenuMgr->addMenuItemString("SRTools", "Extras");
@@ -2602,6 +2603,17 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 		}
 	}
 	scrActions["extrasManageImages"]->setEnabled(enablePicManager);
+
+	// Autoflow: only when a single, not-yet-forward-linked text frame that overflows is selected.
+	bool enableAutoflow = false;
+	if (HaveDoc && doc->m_Selection->count() == 1)
+	{
+		const PageItem* currItem = doc->m_Selection->itemAt(0);
+		enableAutoflow = currItem && currItem->isTextFrame()
+		              && currItem->nextInChain() == nullptr
+		              && currItem->frameOverflows();
+	}
+	scrActions["extrasAutoflowToNewPages"]->setEnabled(enableAutoflow);
 }
 
 
@@ -8692,6 +8704,129 @@ void ScribusMainWindow::suneerAutoFitHeight()
 			tf->autoFitFrameHeight();
 		}
 	}
+}
+
+void ScribusMainWindow::suneerAutoflowToNewPages()
+{
+	if (!HaveDoc)
+		return;
+	if (doc->m_Selection->count() != 1)
+		return;
+	PageItem* srcItem = doc->m_Selection->itemAt(0);
+	if (!srcItem || !srcItem->isTextFrame())
+		return;
+	PageItem_TextFrame* src = srcItem->asTextFrame();
+
+	// R2: do not silently reroute an existing chain.
+	if (src->nextInChain() != nullptr)
+	{
+		setStatusBarInfoText( tr("Frame is already linked to another frame. Break the chain first."));
+		return;
+	}
+	// Nothing to do unless it actually overflows.
+	if (!src->frameOverflows() || src->OwnPage < 0)
+		return;
+
+	// Snapshot the source frame's layout (reuse the styled-copy snapshot getters).
+	SuneerFrameSnapshot snap;
+	snap.valid        = true;
+	snap.width        = src->width();
+	snap.height       = src->height();
+	snap.columns      = src->columns();
+	snap.columnGap    = src->columnGap();
+	snap.distL        = src->textToFrameDistLeft();
+	snap.distR        = src->textToFrameDistRight();
+	snap.distT        = src->textToFrameDistTop();
+	snap.distB        = src->textToFrameDistBottom();
+	snap.wrapT        = src->wrapOffsetTop();
+	snap.wrapB        = src->wrapOffsetBottom();
+	snap.wrapL        = src->wrapOffsetLeft();
+	snap.wrapR        = src->wrapOffsetRight();
+	snap.textFlowMode = static_cast<int>(src->textFlowMode());
+
+	ScPage* srcPage = doc->DocPages.at(src->OwnPage);
+	const QString masterName = srcPage->masterPageName();
+	// Position of the source frame relative to its page's top-left, so each new frame lands at
+	// the same spot on its (same-master) page.
+	const double relX = src->xPos() - srcPage->xOffset();
+	const double relY = src->yPos() - srcPage->yOffset();
+
+	// Prevent addPage()'s auto-text-frame from double-firing while we create/link our own frames.
+	const bool savedAutoFrames = doc->usesAutomaticTextFrames();
+	doc->setUsesAutomaticTextFrames(false);
+
+	// R6: one undo transaction wraps every page-add, frame-add and link.
+	UndoTransaction trans;
+	if (UndoManager::undoEnabled())
+		trans = m_undoManager->beginTransaction(doc->getUName(), Um::IDocument, Um::InsertFrame, tr("Autoflow to New Pages"), Um::ICreate);
+
+	const int kSafetyCap = 500;   // R5
+	int created = 0;
+	PageItem_TextFrame* prev = src;
+	QStringList masterList;
+	masterList << masterName;
+
+	while (prev->frameOverflows() && created < kSafetyCap)
+	{
+		const int newPageIndex = prev->OwnPage + 1;
+
+		// Add a page immediately after prev's page using prev's master (records ADD_PAGE undo,
+		// reflows page geometry). addNewPages restores the current page to the original afterwards.
+		addNewPages(newPageIndex, 1, 1,
+		            doc->pageHeight(), doc->pageWidth(), doc->pageOrientation(), doc->pageSize(),
+		            false, &masterList);
+
+		ScPage* newPage = doc->DocPages.at(newPageIndex);
+		doc->setCurrentPage(newPage);   // itemAdd assigns OwnPage from the current page
+
+		const double newX = newPage->xOffset() + relX;
+		const double newY = newPage->yOffset() + relY;
+		int z = doc->itemAdd(PageItem::TextFrame, PageItem::Unspecified,
+		                     newX, newY, snap.width, snap.height,
+		                     doc->itemToolPrefs().shapeLineWidth, CommonStrings::None,
+		                     doc->itemToolPrefs().textFont);   // records CREATE_ITEM undo
+		if (z < 0)
+			break;
+		PageItem_TextFrame* nf = doc->Items->at(z)->asTextFrame();
+		if (!nf)
+			break;
+
+		// Replicate source layout (width/height already set at itemAdd; each setter records undo).
+		nf->setColumns(snap.columns);
+		nf->setColumnGap(snap.columnGap);
+		nf->setTextToFrameDist(snap.distL, snap.distR, snap.distT, snap.distB);
+		nf->setTextFlowMode(static_cast<PageItem::TextFlowMode>(snap.textFlowMode));
+		nf->setWrapOffsets(snap.wrapT, snap.wrapB, snap.wrapL, snap.wrapR);
+
+		if (!prev->canBeLinkedTo(nf))
+			break;
+		prev->link(nf);   // shares the StoryText into nf, records LINK_TEXT_FRAME undo
+
+		// R8: reflow prev then nf so the NEXT overflow check reads accurate (not stale) state.
+		prev->layout();
+		nf->layout();
+
+		++created;
+		prev = nf;
+	}
+
+	if (trans)
+		trans.commit();
+
+	doc->setUsesAutomaticTextFrames(savedAutoFrames);
+
+	// Refresh view / page palette.
+	doc->changed();
+	doc->regionsChanged()->update(QRectF());
+	updateGUIAfterPagesChanged();
+	view->DrawNew();
+	slotDocCh(false);
+
+	const bool cappedStillOverflowing = (created >= kSafetyCap) && prev->frameOverflows();
+	if (cappedStillOverflowing)
+		setStatusBarInfoText( tr("Autoflow stopped at 500 pages — text may still overflow. Check content."));
+	else
+		setStatusBarInfoText( tr("Autoflow: created %1 new pages").arg(created));
 }
 
 void ScribusMainWindow::suneerFitImageToFrame(PageItem* item)
