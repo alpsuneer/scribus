@@ -489,7 +489,8 @@ struct ImageCachePrefs
 struct ExperimentalFeaturePrefs
 {
 	bool notesEnabled; //!< Enable Notes
-	bool newsBrowserEnabled {true}; //!< Enable News Browser
+	bool newsBrowserEnabled {false}; //!< Enable News Browser (default off)
+	bool srMenuDefaultsMigrated {true}; //!< SR Menu one-time defaults reset applied (a from-scratch prefs needs no migration)
 };
 
 struct ApplicationPrefs

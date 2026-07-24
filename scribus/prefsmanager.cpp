@@ -545,7 +545,8 @@ void PrefsManager::initDefaults()
 
 	//Experimental Features
 	appPrefs.experimentalFeaturePrefs.notesEnabled = false;
-	appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = true;
+	appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = false;
+	appPrefs.experimentalFeaturePrefs.srMenuDefaultsMigrated = true;
 
 	initDefaultActionKeys();
 }
@@ -1937,6 +1938,7 @@ bool PrefsManager::writePref(const QString& filePath)
 	QDomElement experimentalElem = docu.createElement("ExperimentalFeatures");
 	experimentalElem.setAttribute("NotesEnabled", appPrefs.experimentalFeaturePrefs.notesEnabled);
 	experimentalElem.setAttribute("NewsBrowserEnabled", appPrefs.experimentalFeaturePrefs.newsBrowserEnabled);
+	experimentalElem.setAttribute("SrMenuDefaultsMigrated", appPrefs.experimentalFeaturePrefs.srMenuDefaultsMigrated);
 	elem.appendChild(experimentalElem);
 
 	QDomElement opticalMarginSets = docu.createElement("OpticalMarginSets");
@@ -2830,7 +2832,14 @@ bool PrefsManager::readPref(const QString& filePath)
 		if (dc.tagName() == "ExperimentalFeatures")
 		{
 			appPrefs.experimentalFeaturePrefs.notesEnabled = static_cast<bool>(dc.attribute("NotesEnabled", "0").toInt());
-			appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = static_cast<bool>(dc.attribute("NewsBrowserEnabled", "1").toInt());
+			appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = static_cast<bool>(dc.attribute("NewsBrowserEnabled", "0").toInt());
+			appPrefs.experimentalFeaturePrefs.srMenuDefaultsMigrated = static_cast<bool>(dc.attribute("SrMenuDefaultsMigrated", "0").toInt());
+			if (!appPrefs.experimentalFeaturePrefs.srMenuDefaultsMigrated)
+			{
+				// One-time reset: default disabled for all users, per project decision.
+				appPrefs.experimentalFeaturePrefs.newsBrowserEnabled = false;
+				appPrefs.experimentalFeaturePrefs.srMenuDefaultsMigrated = true;
+			}
 		}
 
 		// optical margin sets
