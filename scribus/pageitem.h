@@ -1127,6 +1127,10 @@ public: // Start public functions
 	void setWrapOffsetRight(double v)  { m_wrapOffsetRight  = v; checkTextFlowInteractions(); }
 	void setWrapOffsets(double top, double bottom, double left, double right);
 
+	//! \brief Suneer: copy frame layout properties (columns, gap, padding, wrap, textFlow) from
+	//! another frame. Width/height are NOT copied (callers set geometry separately).
+	void suneerCopyFrameLayoutFrom(const PageItem* src);
+
 	/**
 	 * @brief Changes the way text flows around this item
 	 * @param mode true if text is wanted to flow around this object or false if not

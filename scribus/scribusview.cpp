@@ -28,6 +28,7 @@ for which a new license (GPL+exception) is in place.
 #include "scconfig.h"
 #include "sclimits.h"
 
+#include <QApplication>
 #include <QColor>
 #include <QCursor>
 #include <QDebug>
@@ -3328,6 +3329,11 @@ bool ScribusView::eventFilter(QObject *obj, QEvent *event)
 	if (obj == widget() && event->type() == QEvent::MouseButtonRelease)
 	{
 		auto* m = dynamic_cast<QMouseEvent*> (event);
+		// Suneer: wrap the link-mode draw-create + geometry fixup + link into ONE undo transaction
+		// so a single Ctrl+Z reverts the whole placement.
+		UndoTransaction linkDrawTrans;
+		if (linkAfterDraw && UndoManager::undoEnabled())
+			linkDrawTrans = undoManager->beginTransaction(Um::TextFrame, Um::ITextFrame, Um::LinkTextFrame, "", Um::ICreate);
 		m_canvasMode->mouseReleaseEvent(m);
 		m_canvas->m_viewMode.m_MouseButtonPressed = false;
 		if (linkAfterDraw)
@@ -3336,12 +3342,33 @@ bool ScribusView::eventFilter(QObject *obj, QEvent *event)
 			PageItem * secondFrame = m_doc->m_Selection->itemAt(0);
 			if (secondFrame && firstFrame)
 			{
+				// Suneer: a plain CLICK (no drag) on an empty area should inherit the source frame's
+				// dimensions and page-relative position (a single-page variant of autoflow), instead
+				// of the small default frame. A DRAG keeps the drawn rectangle (unchanged behavior).
+				const bool wasClick = ((m->globalPosition() - m_linkDrawPressPos).manhattanLength() < QApplication::startDragDistance());
+				if (wasClick && firstFrame->OwnPage >= 0 && secondFrame->OwnPage >= 0
+					&& firstFrame->OwnPage < m_doc->DocPages.count()
+					&& secondFrame->OwnPage < m_doc->DocPages.count())
+				{
+					ScPage* srcPage = m_doc->DocPages.at(firstFrame->OwnPage);
+					ScPage* dstPage = m_doc->DocPages.at(secondFrame->OwnPage);
+					// Same page-relative position as the source, on the clicked page (R2/R5).
+					const double newX = dstPage->xOffset() + (firstFrame->xPos() - srcPage->xOffset());
+					const double newY = dstPage->yOffset() + (firstFrame->yPos() - srcPage->yOffset());
+					secondFrame->setXYPos(newX, newY);
+					secondFrame->setWidthHeight(firstFrame->width(), firstFrame->height());
+					secondFrame->checkChanges(true);   // record the move + resize undo
+					secondFrame->updateClip();
+					secondFrame->suneerCopyFrameLayoutFrom(firstFrame);   // columns/gap/padding/wrap/textFlow
+				}
 				firstFrame->link(secondFrame);
 				firstFrame = nullptr;
 				secondFrame->emitAllToGUI();
 			}
 			linkAfterDraw = false;
 		}
+		if (linkDrawTrans)
+			linkDrawTrans.commit();
 		if (ImageAfterDraw)
 		{
 			//user creates new frame using linking tool
@@ -3375,6 +3402,9 @@ bool ScribusView::eventFilter(QObject *obj, QEvent *event)
 		{
 			//switch to drawing new text frame
 			linkAfterDraw = true;
+			// Suneer: remember where the press happened so we can tell a plain click (create a
+			// source-sized frame) from a drag (create at the drag rect) on release.
+			m_linkDrawPressPos = m->globalPosition();
 			requestMode(modeDrawText);
 			m_canvasMode->mousePressEvent(m);
 		}

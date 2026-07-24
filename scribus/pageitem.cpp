@@ -4492,6 +4492,24 @@ void PageItem::togglePrintEnabled()
 	m_PrintEnabled=!m_PrintEnabled;
 }
 
+void PageItem::suneerCopyFrameLayoutFrom(const PageItem* src)
+{
+	// TODO(follow-up): autoflow (extrasAutoflowToNewPages) duplicates this property-copy logic
+	//   inline. Consolidate when touching either path next.
+	// Copies the same frame-level layout properties that autoflow's SuneerFrameSnapshot carries,
+	// excluding width/height (the caller sets geometry from the source). Keep this list in parity
+	// with SuneerFrameSnapshot: columns, columnGap, textToFrameDist, textFlowMode, wrapOffsets.
+	if (!src)
+		return;
+	setColumns(src->columns());
+	setColumnGap(src->columnGap());
+	setTextToFrameDist(src->textToFrameDistLeft(), src->textToFrameDistRight(),
+	                   src->textToFrameDistTop(), src->textToFrameDistBottom());
+	setTextFlowMode(src->textFlowMode());
+	setWrapOffsets(src->wrapOffsetTop(), src->wrapOffsetBottom(),
+	               src->wrapOffsetLeft(), src->wrapOffsetRight());
+}
+
 void PageItem::setWrapOffsets(double top, double bottom, double left, double right)
 {
 	m_wrapOffsetTop    = top;

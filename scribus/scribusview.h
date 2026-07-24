@@ -300,6 +300,9 @@ private:
 	bool m_isGlobalMode { true };
 	bool linkAfterDraw { false };
 	bool ImageAfterDraw { false };
+	//! \brief Suneer: global mouse-press position captured when a link-mode empty-area draw begins,
+	//! used to tell a click from a drag on release (see eventFilter).
+	QPointF m_linkDrawPressPos;
 	QStack<ViewState> m_viewStates;
 
 private slots:
