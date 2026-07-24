@@ -92,17 +92,26 @@ void CanvasMode_Edit::keyPressEvent(QKeyEvent *e)
 	m_keyRepeat = true;
 	// Check ApplicationShortcut actions before consuming event
 	{
-		QKeySequence pressed(e->key() | int(e->modifiers()));
-		const auto& actions = m_ScMW->scrActions;
-		for (auto it = actions.constBegin(); it != actions.constEnd(); ++it)
+		const int k = e->key();
+		// Ignore modifier-only key events (Shift/Ctrl/Alt/Meta pressed alone): they are not
+		// a completed chord, and building a QKeySequence from them yields bogus values like
+		// "Ctrl+Shift+Shift" that never match a real shortcut.
+		const bool modifierOnly = (k == Qt::Key_Shift || k == Qt::Key_Control ||
+		                           k == Qt::Key_Alt   || k == Qt::Key_Meta);
+		if (!modifierOnly)
 		{
-			if (it.value() && it.value()->shortcut() == pressed &&
-			    it.value()->shortcutContext() == Qt::ApplicationShortcut &&
-			    it.value()->isEnabled())
+			QKeySequence pressed(int(e->modifiers()) | k);
+			const auto& actions = m_ScMW->scrActions;
+			for (auto it = actions.constBegin(); it != actions.constEnd(); ++it)
 			{
-				it.value()->trigger();
-				m_keyRepeat = false;
-				return;
+				if (it.value() && it.value()->shortcut() == pressed &&
+				    it.value()->shortcutContext() == Qt::ApplicationShortcut &&
+				    it.value()->isEnabled())
+				{
+					it.value()->trigger();
+					m_keyRepeat = false;
+					return;
+				}
 			}
 		}
 	}
@@ -1269,7 +1278,17 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 	// Insert committed text permanently
 	if (!event->commitString().isEmpty()) {
 		int pos = currItem->itemText.cursorPosition();
+		CharStyle prevStyle;
+		bool hasPrev = (pos > 0 && currItem->itemText.charStyle(pos - 1).fontSize() != currItem->itemText.paragraphStyle(pos).charStyle().fontSize());
+		if (hasPrev)
+			prevStyle = currItem->itemText.charStyle(pos - 1);
 		currItem->itemText.insertChars(pos, event->commitString());
+		if (hasPrev)
+		{
+			CharStyle cs;
+			cs.setFontSize(prevStyle.fontSize());
+			currItem->itemText.applyCharStyle(pos, event->commitString().length(), cs);
+		}
 		currItem->itemText.setCursorPosition(pos + event->commitString().length());
 	}
 

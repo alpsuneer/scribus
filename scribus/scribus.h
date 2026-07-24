@@ -434,6 +434,10 @@ public slots:
 	void slotEditPaste(bool forcePlainText = false);
 	void slotEditPastePlainText();
 	void slotEditCopyContents();
+	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
+	void slotEditStyledCopy();
+	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor
+	void slotEditStyledPaste();
 	void slotEditPasteContents(int absolute=0);
 	void SelectAll(bool docWideSelect = false);
 	void SelectAllOnLayer();
@@ -579,6 +583,12 @@ public slots:
 	void SearchText();
 	/*! \brief call gimp and wait upon completion */
 	void callImageEditor();
+	/*! \brief open the built-in Scribus Image Editor for the selected image frame */
+	void slotOpenScImageEditor();
+	/*! \brief Apply a keyset .xml file to the live actions (name/shortcut pairs). */
+	void applyKeySetFromFile(const QString& path);
+	/*! \brief One-time opt-in prompt to activate the Malayalam DTP shortcut set. */
+	void checkMalayalamDtpFirstRun();
 	void docCheckToggle(bool visible);
 	//! \brief Scan a document for errors, return true on errors found
 	bool scanDocument();
@@ -597,6 +607,8 @@ public slots:
 	void slotInsertFrame();
 	//! \brief Transform an item
 	void slotItemTransform();
+	//! \brief Auto-arrange frames into a newspaper-style layout
+	void slotAutoArrangeFrames();
 	//! \brief manages paints
 	void manageColorsAndFills();
 	//! \brief drawnew, call palettes to update for new page layout
@@ -657,6 +669,10 @@ private:
 	void setStyleSheet(); //set stylesheet for app
 	void initDefaultValues();
 	void initKeyboardShortcuts();
+	//! \brief Suneer: make editStyledCopy/editStyledPaste the unambiguous owners of
+	//! Ctrl+Shift+C/V by clearing those combos from any other action (self-heals on every
+	//! shortcut (re)load). Prevents Qt "Ambiguous shortcut overload".
+	void enforceStyledClipboardShortcuts();
 	void initPalettes();
 	void initScrapbook();
 	void updateColorMenu(QProgressBar* progressBar = nullptr);

@@ -33,7 +33,7 @@
     <function name="editClearContents" shortcut="Ctrl+Shift+Del"/>
     <function name="editColorsAndFills" shortcut=""/>
     <function name="editCopy" shortcut="Ctrl+C"/>
-    <function name="editCopyContents" shortcut="Ctrl+Shift+C"/>
+    <function name="editCopyContents" shortcut=""/>
     <function name="editCut" shortcut="Ctrl+X"/>
     <function name="editDeselectAll" shortcut="Ctrl+Shift+A"/>
     <function name="editEditRenderSource" shortcut=""/>
@@ -44,10 +44,12 @@
     <function name="editMasterPages" shortcut=""/>
     <function name="editNotesStyles" shortcut=""/>
     <function name="editPaste" shortcut="Ctrl+V"/>
-    <function name="editPastePlainText" shortcut="Ctrl+Shift+V"/>
+    <function name="editPastePlainText" shortcut=""/>
     <function name="editPasteContents" shortcut="Ctrl+Alt+V"/>
     <function name="editPasteContentsAbs" shortcut="Ctrl+Alt+Shift+V"/>
     <function name="editPasteImageFromClipboard" shortcut=""/>
+    <function name="editStyledCopy" shortcut="Ctrl+Shift+C"/>
+    <function name="editStyledPaste" shortcut="Ctrl+Shift+V"/>
     <function name="editRedoAction" shortcut="Ctrl+Shift+Z"/>
     <function name="editReplaceColors" shortcut=""/>
     <function name="editSearchReplace" shortcut="Ctrl+F"/>

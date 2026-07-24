@@ -234,6 +234,10 @@ void ActionManager::initEditMenuActions()
 	scrActions->insert(name, new ScrAction(ScrAction::DataInt, "edit-paste", QString(), "", defaultKey(name), mainWindow, 1));
 	name = "editPasteImageFromClipboard";
 	scrActions->insert(name, new ScrAction("edit-paste", "edit-paste", "", defaultKey(name), mainWindow));
+	name = "editStyledCopy";
+	scrActions->insert(name, new ScrAction("edit-copy", "edit-copy", "", defaultKey(name), mainWindow));
+	name = "editStyledPaste";
+	scrActions->insert(name, new ScrAction("edit-paste", "edit-paste", "", defaultKey(name), mainWindow));
 	name = "editClearContents";
 	scrActions->insert(name, new ScrAction("edit-delete", "edit-delete", "", defaultKey(name), mainWindow));
 	name = "editTruncateContents";
@@ -247,6 +251,8 @@ void ActionManager::initEditMenuActions()
 	name = "editSearchReplace";
 	scrActions->insert(name, new ScrAction("edit-find-replace", "edit-find-replace", "", defaultKey(name), mainWindow));
 	name = "editEditWithImageEditor";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "imageEditor";   // built-in Scribus Image Editor (Malayalam DTP)
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "editEditRenderSource";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
@@ -280,11 +286,14 @@ void ActionManager::initEditMenuActions()
 	connect( (*scrActions)["editPasteContents"], SIGNAL(triggeredData(int)), mainWindow, SLOT(slotEditPasteContents(int)) );
 	connect( (*scrActions)["editPasteContentsAbs"], SIGNAL(triggeredData(int)), mainWindow, SLOT(slotEditPasteContents(int)) );
 	connect( (*scrActions)["editPasteImageFromClipboard"], SIGNAL(triggered()), mainWindow, SLOT(slotGetClipboardImage()) );
+	connect( (*scrActions)["editStyledCopy"], SIGNAL(triggered()), mainWindow, SLOT(slotEditStyledCopy()) );
+	connect( (*scrActions)["editStyledPaste"], SIGNAL(triggered()), mainWindow, SLOT(slotEditStyledPaste()) );
 	connect( (*scrActions)["editSelectAll"], SIGNAL(triggered()), mainWindow, SLOT(SelectAll()) );
 	connect( (*scrActions)["editSelectAllOnLayer"], SIGNAL(triggered()), mainWindow, SLOT(SelectAllOnLayer()) );
 	connect( (*scrActions)["editDeselectAll"], SIGNAL(triggered()), mainWindow, SLOT(deselectAll()) );
 	connect( (*scrActions)["editSearchReplace"], SIGNAL(triggered()), mainWindow, SLOT(SearchText()) );
 	connect( (*scrActions)["editEditWithImageEditor"], SIGNAL(triggered()), mainWindow, SLOT(callImageEditor()) );
+	connect( (*scrActions)["imageEditor"], SIGNAL(triggered()), mainWindow, SLOT(slotOpenScImageEditor()) );
 	connect( (*scrActions)["editEditRenderSource"], SIGNAL(triggered()), mainWindow, SLOT(callImageEditor()) );
 	connect( (*scrActions)["editColorsAndFills"], SIGNAL(triggered()), mainWindow, SLOT(manageColorsAndFills()) );
 	connect( (*scrActions)["editReplaceColors"], SIGNAL(triggered()), mainWindow, SLOT(slotReplaceColors()) );
@@ -461,6 +470,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAttributes";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemsAutoArrange";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemImageIsVisible";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemUpdateImage";
@@ -559,6 +570,7 @@ void ActionManager::initItemMenuActions()
 	connect( (*scrActions)["itemSendToInline"], SIGNAL(triggered()), mainWindow, SLOT(PutToInline()) );
 	connect( (*scrActions)["itemConvertToSymbolFrame"], SIGNAL(triggered()), mainWindow, SLOT(ConvertToSymbol()) );
 	connect( (*scrActions)["itemAttributes"], SIGNAL(triggered()), mainWindow, SLOT(objectAttributes()) );
+	connect( (*scrActions)["itemsAutoArrange"], SIGNAL(triggered()), mainWindow, SLOT(slotAutoArrangeFrames()) );
 	connect( (*scrActions)["itemShapeEdit"], SIGNAL(triggered()), mainWindow, SLOT(toggleNodeEdit()) );
 	connect( (*scrActions)["itemImageInfo"], SIGNAL(triggered()), mainWindow, SLOT(getImageInfo()) );
 	connect( (*scrActions)["itemToggleInlineImage"], SIGNAL(triggered()), mainWindow, SLOT(toogleInlineState()) );
@@ -1000,6 +1012,10 @@ void ActionManager::initToolsMenuActions()
 	(*scrActions)["suneerEnlargeLineSpacing"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerReduceLineSpacing"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["suneerApplyChain"]->setShortcutContext(Qt::ApplicationShortcut);
+	// Suneer styled copy/paste must fire while editing text: the edit-mode key
+	// handler only auto-triggers ApplicationShortcut actions before consuming the event.
+	(*scrActions)["editStyledCopy"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["editStyledPaste"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsPages"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsBookmarks"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsDownloads"]->setShortcutContext(Qt::ApplicationShortcut);
@@ -1635,6 +1651,8 @@ void ActionManager::languageChange()
 	(*scrActions)["editPasteContents"]->setTexts( tr("&Paste"));
 	(*scrActions)["editPasteContentsAbs"]->setTexts( tr("Paste (&Absolute)"));
 	(*scrActions)["editPasteImageFromClipboard"]->setTexts( tr("Paste Image from Clipboard"));
+	(*scrActions)["editStyledCopy"]->setTexts( tr("Styled Cop&y"));
+	(*scrActions)["editStyledPaste"]->setTexts( tr("St&yled Paste"));
 	(*scrActions)["editClearContents"]->setTexts( tr("C&lear"));
 	(*scrActions)["editTruncateContents"]->setTexts( tr("T&runcate"));
 	(*scrActions)["editSelectAll"]->setTexts( tr("Select &All"));
@@ -1642,6 +1660,7 @@ void ActionManager::languageChange()
 	(*scrActions)["editDeselectAll"]->setTexts( tr("&Deselect All"));
 	(*scrActions)["editSearchReplace"]->setTexts( tr("&Search/Replace..."));
 	(*scrActions)["editEditWithImageEditor"]->setTexts( tr("Edit Image..."));
+	(*scrActions)["imageEditor"]->setTexts( tr("Edit in Image Editor..."));
 	(*scrActions)["editEditRenderSource"]->setTexts( tr("Edit Source..."));
 	(*scrActions)["editColorsAndFills"]->setTexts( tr("Colors and Fills..."));
 	(*scrActions)["editReplaceColors"]->setTexts( tr("Replace Colors..."));
@@ -1702,6 +1721,7 @@ void ActionManager::languageChange()
 	(*scrActions)["itemSendToPattern"]->setTexts( tr("Patterns"));
 	(*scrActions)["itemSendToInline"]->setTexts( tr("Inline Items"));
 	(*scrActions)["itemAttributes"]->setTexts( tr("&Attributes..."));
+	(*scrActions)["itemsAutoArrange"]->setTexts( tr("&Auto Arrange Frames..."));
 	(*scrActions)["itemImageInfo"]->setTexts( tr("More Info..."));
 	(*scrActions)["itemImageIsVisible"]->setTexts( tr("I&mage Visible"));
 	(*scrActions)["itemUpdateImage"]->setTexts( tr("&Update Image"));
@@ -2070,11 +2090,16 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editCut", QKeySequence::Cut);
 	defKeys.insert("editCopy", QKeySequence::Copy);
 	defKeys.insert("editPaste", QKeySequence::Paste);
-	defKeys.insert("editPastePlainText", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+	// Ctrl+Shift+V repurposed for editStyledPaste (see below); Paste Plain Text keeps its menu entry, no default shortcut
+	defKeys.insert("editPastePlainText", QKeySequence());
 	defKeys.insert("editClearContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Delete));
-	defKeys.insert("editCopyContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+	// Ctrl+Shift+C repurposed for editStyledCopy (see below); Copy Contents keeps its menu entry, no default shortcut
+	defKeys.insert("editCopyContents", QKeySequence());
 	defKeys.insert("editPasteContents", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_V));
 	defKeys.insert("editPasteContentsAbs", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_V));
+	// Suneer: styled (formatting-preserving) copy/paste
+	defKeys.insert("editStyledCopy", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+	defKeys.insert("editStyledPaste", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
 	defKeys.insert("editSelectAll", QKeySequence(Qt::CTRL | Qt::Key_A));
 	defKeys.insert("editSelectAllOnLayer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
 	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
@@ -2085,6 +2110,8 @@ void ActionManager::createDefaultShortcuts()
 	//Item Menu
 	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
 	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
+	// Ctrl+Shift+A is already Edit > Deselect All, so Auto Arrange uses Ctrl+Shift+F ("Frames").
+	defKeys.insert("itemsAutoArrange", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
 	defKeys.insert("itemDelete", QKeySequence::Delete);
 	defKeys.insert("itemGroup", QKeySequence(Qt::CTRL | Qt::Key_G));
 	defKeys.insert("itemUngroup", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_G));
@@ -2273,6 +2300,8 @@ void ActionManager::createDefaultMenus()
 		<< "editPasteContents"
 		<< "editPasteContentsAbs"
 		<< "editPasteImageFromClipboard"
+		<< "editStyledCopy"
+		<< "editStyledPaste"
 		<< "editClearContents"
 		<< "editTruncateContents"
 		<< "editSelectAll"
@@ -2342,8 +2371,9 @@ void ActionManager::createDefaultMenus()
 		<< "itemPreviewLow" 
 		<< "itemSendToPattern" 
 		<< "itemSendToInline"
-		<< "itemAttributes" 
-		<< "itemPDFIsAnnotation" 
+		<< "itemAttributes"
+		<< "itemsAutoArrange"
+		<< "itemPDFIsAnnotation"
 		<< "itemPDFIsBookmark" 
 		<< "itemPDFAnnotationProps" 
 		<< "itemPDFFieldProps" 

@@ -1435,6 +1435,10 @@ public:	// Start public variables
 	bool RightLine {false};
 	bool TopLine {false};
 	bool BottomLine {false};
+	// Per-side frame border (uses lineColor/lineWidth). When any is set, the frame
+	// strokes only the selected edges instead of the whole outline.
+	bool hasSideBorders() const { return TopLine || BottomLine || LeftLine || RightLine; }
+	FPointArray sideBorderPath() const;
 	bool isTableItem {false};
 
 	/* end deprecated vars */
@@ -1574,6 +1578,8 @@ protected: // Start protected functions
 	void restoreClearImage(UndoState *state, bool isUndo);
 	void restoreColumns(SimpleState *state, bool isUndo);
 	void restoreColumnsGap(SimpleState *state, bool isUndo);
+	//! \brief Suneer: undo/redo of external wrap offsets (setWrapOffsets records no undo itself)
+	void restoreWrapOffsets(SimpleState *state, bool isUndo);
 	void restoreConnectPath(SimpleState *state, bool isUndo);
 	void restoreContourLine(SimpleState *state, bool isUndo);
 	void restoreCornerRadius(SimpleState *state, bool isUndo);

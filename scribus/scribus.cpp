@@ -71,6 +71,7 @@ for which a new license (GPL+exception) is in place.
 #include <QPushButton>
 #include <QScopedPointer>
 #include <QScreen>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QStyleFactory>
 #include <QStyleHints>
@@ -133,6 +134,7 @@ for which a new license (GPL+exception) is in place.
 #include "notesstyles.h"
 #include "pageitem_group.h"
 #include "pageitem_imageframe.h"
+#include "ui/scimageeditor.h"
 #include "pageitem_latexframe.h"
 #include "pageitem_table.h"
 #include "pageitem_textframe.h"
@@ -254,6 +256,8 @@ for which a new license (GPL+exception) is in place.
 #include "ui/symbolpalette.h"
 #include "ui/tabmanager.h"
 #include "ui/transformdialog.h"
+#include "ui/dialogs/autoarrangedialog.h"
+#include "autoarrangeengine.h"
 #include "ui/viewtoolbar.h"
 #include "ui/factories/scribusproxystyle.h"
 #include "undogui.h"
@@ -407,6 +411,7 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 		ScCore->setSplashStatus( tr("Applying User Shortcuts") );
 	m_prefsManager.applyLoadedShortCuts();
 	initKeyboardShortcuts();
+	enforceStyledClipboardShortcuts();
 	resize(800, 600);
 	connect(mdiArea, SIGNAL(subWindowActivated(QMdiSubWindow*)), this, SLOT(newActWin(QMdiSubWindow*)));
 	//Connect windows cascade and tile actions to the workspace after its created. Only depends on mdiArea created.
@@ -485,6 +490,8 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 		setStyleSheet();
 	});
 #endif
+
+	checkMalayalamDtpFirstRun();
 
 	return retVal;
 }
@@ -1163,6 +1170,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editCopy", "Edit");
 	scrMenuMgr->addMenuItemString("editPaste", "Edit");
 	scrMenuMgr->addMenuItemString("editPastePlainText", "Edit");
+	scrMenuMgr->addMenuItemString("editStyledCopy", "Edit");
+	scrMenuMgr->addMenuItemString("editStyledPaste", "Edit");
 	scrMenuMgr->createMenu("EditPasteRecent", tr("Paste Recent"), "Edit", false, true);
 	scrMenuMgr->addMenuItemString("itemDelete", "Edit");
 	scrMenuMgr->createMenu("EditContents", tr("Contents"), "Edit", false, true);
@@ -1180,6 +1189,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editSearchReplace", "Edit");
 	scrMenuMgr->addMenuItemString("toolsEditWithStoryEditor", "Edit");
 	scrMenuMgr->addMenuItemString("editEditWithImageEditor", "Edit");
+	scrMenuMgr->addMenuItemString("imageEditor", "Edit");
 	scrMenuMgr->addMenuItemString("editEditRenderSource", "Edit");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Edit");
 	scrMenuMgr->addMenuItemString("editColorsAndFills", "Edit");
@@ -1310,6 +1320,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editMark", "Marks");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Item");
 	scrMenuMgr->addMenuItemString("itemAttributes", "Item");
+	scrMenuMgr->addMenuItemString("itemsAutoArrange", "Item");
 
 	scrActions["itemPrintingEnabled"]->setEnabled(false);
 	scrMenuMgr->setMenuEnabled("ItemConvertTo", false);
@@ -1561,8 +1572,6 @@ void ScribusMainWindow::createMenuBar()
 	menuBar()->addSeparator();
 	scrMenuMgr->addMenuStringToMenuBar("Help");
 	scrMenuMgr->addMenuItemStringsToMenuBar("Help", scrActions);
-	qDebug() << "SRTools exists =" << scrMenuMgr->menuExists("SRTools");
-	qDebug() << "SRDuplicate exists =" << scrMenuMgr->menuExists("SRDuplicate");
 
 	connect(scrMenuMgr->getLocalPopupMenu("Extras"), SIGNAL(aboutToShow()), this, SLOT(extrasMenuAboutToShow()));
 	connect(scrMenuMgr->getLocalPopupMenu("Windows"), SIGNAL(aboutToShow()), this, SLOT(windowsMenuAboutToShow()));
@@ -4907,6 +4916,364 @@ void ScribusMainWindow::slotEditCut()
 		activeTransaction.commit();
 }
 
+// Suneer: in-memory styled copy/paste buffer.
+// Holds one serialized StoryText fragment (SLA XML). Process lifetime, in-memory
+// only (never persisted, never on the system clipboard). Survives selection changes,
+// document switches and document closes because it is plain bytes re-parsed into the
+// target document on paste; cross-document paste therefore works.
+static QByteArray s_suneerStyledClip;
+
+// Suneer: snapshot of the source text frame's geometry/layout properties, captured
+// alongside the styled text on Ctrl+Shift+C and re-applied to the target frame on
+// Ctrl+Shift+V (keeping the target's top-left position and PageItem identity).
+namespace {
+struct SuneerFrameSnapshot
+{
+	bool   valid = false;
+	double width = 0.0, height = 0.0;
+	int    columns = 1;
+	double columnGap = 0.0;
+	double distL = 0.0, distR = 0.0, distT = 0.0, distB = 0.0;   // internal padding
+	double wrapT = 0.0, wrapB = 0.0, wrapL = 0.0, wrapR = 0.0;   // external wrap offsets
+	int    textFlowMode = 0;                                     // PageItem::TextFlowMode
+};
+}
+static SuneerFrameSnapshot s_suneerFrameSnap;
+
+// Suneer: flatten a CharStyle into fully self-contained direct formatting.
+// Every attribute is read through its getter (which validates against the source
+// document's style context and returns the RESOLVED/effective value) and written
+// back as a direct override with no named parent, so the result stays visually
+// identical when pasted into a document with no matching style names.
+static CharStyle suneerFlattenCharStyle(const CharStyle& src)
+{
+	CharStyle flat;
+	flat.setParent(QString());
+#define ATTRDEF(attr_TYPE, attr_GETTER, attr_NAME, attr_DEFAULT, attr_BREAKSHAPING) \
+	flat.set##attr_NAME(src.attr_GETTER());
+#include "styles/charstyle.attrdefs.cxx"
+#undef ATTRDEF
+	return flat;
+}
+
+// Suneer: flatten a ParagraphStyle (and its embedded char style) into resolved
+// direct formatting, dropping the named-parent link. Name references to other
+// styles that this style may carry (next style, numbering, paragraph-effect char
+// style) are copied verbatim; since every visible attribute is now a direct
+// override, a missing/mismatched parent in the target document is harmless.
+static ParagraphStyle suneerFlattenParagraphStyle(const ParagraphStyle& src)
+{
+	ParagraphStyle flat;
+	flat.setParent(QString());
+#define ATTRDEF(attr_TYPE, attr_GETTER, attr_NAME, attr_DEFAULT) \
+	flat.set##attr_NAME(src.attr_GETTER());
+#include "styles/paragraphstyle.attrdefs.cxx"
+#undef ATTRDEF
+	flat.charStyle() = suneerFlattenCharStyle(src.charStyle());
+	return flat;
+}
+
+// Suneer: bake fully-resolved direct formatting into every character run and paragraph of
+// `clip`. The resolved values are read from the LIVE SOURCE story (`src`) at the matching
+// positions, NOT from `clip` itself: a freshly copied clip keeps inherited attributes
+// (e.g. font size taken from a paragraph/named style) which resolve against the clip's own
+// context and wrongly fall back to the document default (18pt). `clip` was produced by
+// `clip.insert(0, src, onlySelection=true)`, which copies the selected range contiguously,
+// so clip position i maps to source position `srcOffset + i` (srcOffset = start of selection).
+static void suneerFlattenStoryText(StoryText& clip, const StoryText& src, int srcOffset)
+{
+	const int len = clip.length();
+	for (int i = 0; i < len; ++i)
+		clip.setCharStyle(i, 1, suneerFlattenCharStyle(src.charStyle(srcOffset + i)));
+
+	int pos = 0;
+	while (true)
+	{
+		clip.setStyle(pos, suneerFlattenParagraphStyle(src.paragraphStyle(srcOffset + pos)));
+		int e = pos;
+		while (e < len && clip.text(e) != SpecialChars::PARSEP)
+			++e;
+		if (e >= len)
+			break; // last (trailing) paragraph already flattened above
+		pos = e + 1;
+	}
+}
+
+void ScribusMainWindow::enforceStyledClipboardShortcuts()
+{
+	const QKeySequence copySeq(Qt::CTRL | Qt::SHIFT | Qt::Key_C);
+	const QKeySequence pasteSeq(Qt::CTRL | Qt::SHIFT | Qt::Key_V);
+	auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+
+	// A user's saved keymap (or a loaded keyset) can bind Ctrl+Shift+C/V to other actions
+	// (e.g. alignCenter, editPastePlainText), which collides with the styled clipboard
+	// actions and makes Qt fire neither ("Ambiguous shortcut overload"). Clear those combos
+	// from every other action so the styled ones are the sole owners.
+	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
+	{
+		const QString& name = it.key();
+		ScrAction* a = it.value();
+		if (!a)
+			continue;
+		if (name == "editStyledCopy" || name == "editStyledPaste")
+			continue;
+		if (a->shortcut() == copySeq || a->shortcut() == pasteSeq)
+		{
+			a->setShortcut(QKeySequence());
+			if (keyActions.contains(name))
+				keyActions[name].keySequence = QKeySequence();
+		}
+	}
+	// Re-assert the styled shortcuts in case a keyset cleared or changed them.
+	if (ScrAction* c = scrActions.value("editStyledCopy"))
+		c->setShortcut(copySeq);
+	if (ScrAction* v = scrActions.value("editStyledPaste"))
+		v->setShortcut(pasteSeq);
+	if (keyActions.contains("editStyledCopy"))
+		keyActions["editStyledCopy"].keySequence = copySeq;
+	if (keyActions.contains("editStyledPaste"))
+		keyActions["editStyledPaste"].keySequence = pasteSeq;
+}
+
+void ScribusMainWindow::slotEditStyledCopy()
+{
+	if (!HaveDoc)
+		return;
+	if (doc->appMode == modeEditClip)
+		view->requestMode(submodeEndNodeEdit);
+	if (doc->m_Selection->isEmpty())
+		return;
+	PageItem *currItem = doc->m_Selection->itemAt(0);
+	// R4: only meaningful inside a text frame / table cell being edited
+	if (!(((doc->appMode == modeEdit) || (doc->appMode == modeEditTable)) && (currItem->isTextFrame() || currItem->isTable())))
+		return;
+
+	PageItem_TextFrame *cItem;
+	if (doc->appMode == modeEditTable)
+		cItem = currItem->asTable()->activeCell().textFrame();
+	else
+		cItem = currItem->asTextFrame();
+	// R1/R2: nothing selected -> do nothing, no dialog, no state mutation (buffer + snapshot kept).
+	if (!cItem || !cItem->HasSel)
+	{
+		setStatusBarInfoText( tr("Nothing selected to copy"));
+		return;
+	}
+
+	// Extract the styled selection into a private StoryText.
+	StoryText itemText(doc);
+	itemText.setDefaultStyle(cItem->itemText.defaultStyle());
+	itemText.insert(0, cItem->itemText, true);
+
+	// Bake resolved formatting so the buffer is self-contained across documents. Read the
+	// resolved values from the live source frame (its style context resolves correctly),
+	// not from the freshly-copied clip (whose inherited attributes fall back to the document
+	// default). Selection is copied contiguously, so clip[i] == source[startOfSelection()+i].
+	suneerFlattenStoryText(itemText, cItem->itemText, cItem->itemText.startOfSelection());
+
+	// Snapshot the source frame's geometry/layout properties (R1: single snapshot from the
+	// source frame, regardless of selection size). Read-only on the source (R9).
+	SuneerFrameSnapshot snap;
+	snap.valid        = true;
+	snap.width        = currItem->width();
+	snap.height       = currItem->height();
+	snap.columns      = currItem->columns();
+	snap.columnGap    = currItem->columnGap();
+	snap.distL        = currItem->textToFrameDistLeft();
+	snap.distR        = currItem->textToFrameDistRight();
+	snap.distT        = currItem->textToFrameDistTop();
+	snap.distB        = currItem->textToFrameDistBottom();
+	snap.wrapT        = currItem->wrapOffsetTop();
+	snap.wrapB        = currItem->wrapOffsetBottom();
+	snap.wrapL        = currItem->wrapOffsetLeft();
+	snap.wrapR        = currItem->wrapOffsetRight();
+	snap.textFlowMode = static_cast<int>(currItem->textFlowMode());
+
+	// Serialize to the in-memory buffer (not the system clipboard). Text + snapshot are
+	// committed together so they never get out of sync.
+	QByteArray storyData;
+	QScopedPointer<StoryLoader> storyLoader(new StoryLoader());
+	if (storyLoader->saveStory(storyData, *doc, itemText))
+	{
+		s_suneerStyledClip = storyData;
+		s_suneerFrameSnap  = snap;
+		scrActions["editStyledPaste"]->setEnabled(true);
+		setStatusBarInfoText( tr("Styled text and frame properties copied"));
+	}
+}
+
+void ScribusMainWindow::slotEditStyledPaste()
+{
+	if (!HaveDoc)
+		return;
+	// R6: empty buffer -> do nothing, no error
+	if (s_suneerStyledClip.isEmpty())
+		return;
+	if (doc->appMode == modeEditClip)
+		view->requestMode(submodeEndNodeEdit);
+
+	// Two context-sensitive modes:
+	//   CASE 2 (edit mode, cursor inside a text frame / table cell): insert the styled text at
+	//          the cursor as standalone paragraph(s); no frame geometry is touched.
+	//   CASE 1 (a text frame merely selected in normal mode): apply the source frame's layout
+	//          (except width), overwrite the content, and auto-fit the height.
+	const bool editMode = (doc->appMode == modeEdit || doc->appMode == modeEditTable);
+
+	// R3/R5: the target must be a text frame (the edited frame / active cell, or the selected item).
+	PageItem *selItem = doc->m_Selection->itemAt(0);
+	PageItem_TextFrame *currItem = nullptr;
+	if (selItem)
+	{
+		if (doc->appMode == modeEditTable && selItem->isTable())
+			currItem = selItem->asTable()->activeCell().textFrame();
+		else if (selItem->isTextFrame())
+			currItem = selItem->asTextFrame();
+	}
+	if (!currItem)
+		return;
+
+	// Re-parse the buffer into the *target* document so styles bind to the
+	// target's context (this is what makes cross-document paste safe).
+	StoryText story(doc);
+	QScopedPointer<StoryLoader> storyLoader(new StoryLoader());
+	if (!storyLoader->loadStory(s_suneerStyledClip, *doc, story, currItem))
+		return;
+	if (story.length() == 0)
+		return;
+
+	// Avoid pasting note marks into notes frames (mirror standard paste).
+	if (currItem->isNoteFrame())
+	{
+		for (int pos = story.length() - 1; pos >= 0; --pos)
+		{
+			if (story.hasMark(pos) && (story.mark(pos)->isNoteType()))
+				story.removeChars(pos, 1);
+		}
+	}
+
+	// R7: wrap the whole operation in ONE undo transaction (both cases).
+	UndoTransaction activeTransaction;
+	if (UndoManager::undoEnabled())
+		activeTransaction = m_undoManager->beginTransaction(doc->currentPage()->getUName(), nullptr, Um::Paste, QString(), Um::IPaste);
+
+	if (editMode)
+	{
+		// ---- CASE 2: insert at cursor as standalone paragraph(s); frame geometry untouched (R3). ----
+		if (currItem->HasSel)
+			currItem->deleteSelectedTextFromFrame();
+
+		int start = currItem->itemText.cursorPosition();
+		const int len = currItem->itemText.length();
+		// Bracket the pasted block so it forms its own paragraph(s) without restyling neighbours:
+		//  - a leading break if the cursor is not already at the start of a paragraph;
+		//  - a trailing break (unless the story already ends in one) if the cursor is not at a
+		//    paragraph end, so the remainder of the split paragraph continues on its own.
+		const bool atParaStart  = (start == 0) || (currItem->itemText.text(start - 1) == SpecialChars::PARSEP);
+		const bool atParaEnd    = (start >= len) || (currItem->itemText.text(start) == SpecialChars::PARSEP);
+		const bool storyEndsPar = (story.text(story.length() - 1) == SpecialChars::PARSEP);
+		// Style kept by the "before" half of the split (= the target paragraph's own style).
+		ParagraphStyle keepPStyle(currItem->itemText.paragraphStyle(start));
+		// Style of the pasted block's last paragraph (so it keeps its OWN style, not the target's).
+		ParagraphStyle storyLastPStyle(story.paragraphStyle(story.length()));
+
+		// Build the exact block to insert as ONE contiguous StoryText, so the single PASTE_TEXT
+		// undo record covers it precisely (one Ctrl+Z reverts the whole insertion).
+		StoryText ins(doc);
+		ins.setDefaultStyle(story.defaultStyle());
+		int p = 0;
+		if (!atParaStart)
+		{
+			// Leading break terminates the "before" text -> carries the target paragraph style.
+			ins.insertChars(p, SpecialChars::PARSEP);
+			ins.applyStyle(p, keepPStyle);
+			++p;
+		}
+		ins.insert(p, story);
+		const int contentEnd = ins.length();   // cursor should land here (end of the pasted text)
+		if (!storyEndsPar && !atParaEnd)
+		{
+			// Trailing break terminates the pasted block -> carries the block's OWN last-para style;
+			// the "after" remainder then continues under the target paragraph style.
+			ins.insertChars(ins.length(), SpecialChars::PARSEP);
+			ins.applyStyle(contentEnd, storyLastPStyle);
+		}
+
+		if (UndoManager::undoEnabled())
+		{
+			auto *is = new ScItemState<StoryText>(Um::Paste);
+			is->set("PASTE_TEXT");
+			is->set("START", start);
+			is->setItem(ins);
+			m_undoManager->action(currItem, is);
+		}
+		currItem->itemText.insert(start, ins);
+		currItem->itemText.setCursorPosition(start + contentEnd);
+	}
+	else
+	{
+		// ---- CASE 1: apply source frame layout (keep drawn width), overwrite content, autofit. ----
+		const SuneerFrameSnapshot& snap = s_suneerFrameSnap;
+		if (snap.valid)
+		{
+			// Wrap offsets have no built-in undo action; record one explicitly so Ctrl+Z restores them.
+			if (UndoManager::undoEnabled())
+			{
+				auto *ws = new SimpleState(Um::TextFrame, QString(), Um::ITextFrame);
+				ws->set("SUNEER_WRAPOFFSETS");
+				ws->set("OLD_WT", currItem->wrapOffsetTop());
+				ws->set("OLD_WB", currItem->wrapOffsetBottom());
+				ws->set("OLD_WL", currItem->wrapOffsetLeft());
+				ws->set("OLD_WR", currItem->wrapOffsetRight());
+				ws->set("NEW_WT", snap.wrapT);
+				ws->set("NEW_WB", snap.wrapB);
+				ws->set("NEW_WL", snap.wrapL);
+				ws->set("NEW_WR", snap.wrapR);
+				m_undoManager->action(currItem, ws);
+			}
+
+			// R2: keep the target's top-left AND its drawn WIDTH; take everything else from source.
+			currItem->setColumns(snap.columns);
+			currItem->setColumnGap(snap.columnGap);
+			currItem->setTextToFrameDist(snap.distL, snap.distR, snap.distT, snap.distB);
+			currItem->setTextFlowMode(static_cast<PageItem::TextFlowMode>(snap.textFlowMode));
+			currItem->setWrapOffsets(snap.wrapT, snap.wrapB, snap.wrapL, snap.wrapR);
+		}
+
+		// R5: full content overwrite (records DELETE_FRAMETEXT + PASTE_TEXT in the transaction).
+		currItem->itemText.selectAll();
+		currItem->deleteSelectedTextFromFrame();
+		currItem->itemText.setCursorPosition(0);
+		if (UndoManager::undoEnabled())
+		{
+			auto *is = new ScItemState<StoryText>(Um::Paste);
+			is->set("PASTE_TEXT");
+			is->set("START", 0);
+			is->setItem(story);
+			m_undoManager->action(currItem, is);
+		}
+		currItem->itemText.insert(0, story);
+		currItem->itemText.setCursorPosition(story.length());
+
+		// Auto-fit the height to the new content at the kept width (nests its own resize undo).
+		currItem->updateClip();
+		currItem->invalidateLayout();
+		currItem->autoFitFrameHeight();
+	}
+
+	if (activeTransaction)
+		activeTransaction.commit();
+
+	// Refresh: relayout the frame and repaint.
+	currItem->invalidateLayout();
+	currItem->updateClip();
+	currItem->update();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	view->DrawNew();
+	slotDocCh(false);
+	slotPreviewCh();
+}
+
 void ScribusMainWindow::slotEditCopy()
 {
 	if (!HaveDoc)
@@ -5484,12 +5851,19 @@ void ScribusMainWindow::ClipChange()
 	}
 	scrActions["editPaste"]->setEnabled(HaveDoc && (hasScribusData || textFrameEditMode || tableEditMode || hasExternalData));
 	scrActions["editPastePlainText"]->setEnabled(HaveDoc && (hasScribusData || textFrameEditMode || tableEditMode || hasExternalData));
+	// Suneer: styled paste is available whenever a document is open and the styled buffer
+	// has content. The edit-mode key handler only triggers *enabled* actions, so we must not
+	// gate this on edit mode here; the slot itself no-ops outside a text context (R4).
+	scrActions["editStyledPaste"]->setEnabled(HaveDoc && !s_suneerStyledClip.isEmpty());
 }
 
 void ScribusMainWindow::setCopyCutEnabled(bool b)
 {
 	scrActions["editCut"]->setEnabled(b);
 	scrActions["editCopy"]->setEnabled(b);
+	// Suneer: leave editStyledCopy always enabled so the ApplicationShortcut edit-mode
+	// key handler (which only triggers *enabled* actions) always reaches the slot; the
+	// slot itself no-ops when there is no selection (R1) or no text context (R4).
 }
 
 void ScribusMainWindow::slotHelpAbout()
@@ -6930,6 +7304,7 @@ void ScribusMainWindow::slotPrefsOrg()
 	struct ApplicationPrefs newPrefs(prefsDialog.prefs());
 	m_prefsManager.setNewPrefs(newPrefs);
 	m_prefsManager.applyLoadedShortCuts();
+	enforceStyledClipboardShortcuts();
 	// News Browser panel show/hide based on preference
 	if (m_suneerNewsPanel) {
 		bool newsBrowserEnabled = newPrefs.experimentalFeaturePrefs.newsBrowserEnabled;
@@ -7918,6 +8293,8 @@ void ScribusMainWindow::slotChangeUnit(int unitIndex, bool draw)
 	contentPalette->unitChange();
 	nodePalette->unitChange();
 	alignDistributePalette->unitChange();
+	if (m_suneerControlBar)
+		m_suneerControlBar->unitChange();
 	guidePalette->setupPage();
 	m_styleManager->unitChange();
 	m_widgetManager.unitChange();
@@ -8159,59 +8536,75 @@ void ScribusMainWindow::suneerReduceTextSize()
 }
 void ScribusMainWindow::suneerEnlargeLineSpacing()
 {
-	if (!doc || doc->m_Selection->isEmpty()) return;
-	PageItem* item = doc->m_Selection->itemAt(0);
-	if (!item || !item->isTextFrame()) return;
-	StoryText& text = item->itemText;
-	int start = 0;
-	if (doc->appMode == modeEdit)
-	{
-		if (text.endOfSelection() > text.startOfSelection())
-			start = text.startOfSelection();
-		else
-		{
-			int cursorPos = text.cursorPosition();
-			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
-		}
-	}
-	ParagraphStyle ps = text.paragraphStyle(start);
-	double currentLS = ps.lineSpacing();
-	ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
-	ps.setLineSpacing(currentLS + 1.0);
-	text.applyStyle(start, ps);
-	item->invalidateLayout();
-	item->update();
-	doc->regionsChanged()->update(QRectF());
-	doc->changed();
-	emit UpdateRequest(reqTextStylesUpdate);
+    if (!doc || doc->m_Selection->isEmpty()) return;
+    PageItem* item = doc->m_Selection->itemAt(0);
+    if (!item || !item->isTextFrame()) return;
+    StoryText& text = item->itemText;
+    int start = 0;
+    int end = 0;
+    if (doc->appMode == modeEdit && text.endOfSelection() > text.startOfSelection())
+    {
+        start = text.startOfSelection();
+        end = text.endOfSelection();
+    }
+    else
+    {
+        int cursorPos = text.cursorPosition();
+        start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+        end = start + 1;
+    }
+    int startPara = text.nrOfParagraph(start);
+    int endPara = text.nrOfParagraph(qMax(start, end - 1));
+    for (int para = startPara; para <= endPara; para++)
+    {
+        int paraStart = text.startOfParagraph(para);
+        ParagraphStyle ps = text.paragraphStyle(paraStart);
+        double currentLS = ps.lineSpacing();
+        ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
+        ps.setLineSpacing(currentLS + 1.0);
+        text.applyStyle(paraStart, ps);
+    }
+    item->invalidateLayout();
+    item->update();
+    doc->regionsChanged()->update(QRectF());
+    doc->changed();
+    emit UpdateRequest(reqTextStylesUpdate);
 }
 void ScribusMainWindow::suneerReduceLineSpacing()
 {
-	if (!doc || doc->m_Selection->isEmpty()) return;
-	PageItem* item = doc->m_Selection->itemAt(0);
-	if (!item || !item->isTextFrame()) return;
-	StoryText& text = item->itemText;
-	int start = 0;
-	if (doc->appMode == modeEdit)
-	{
-		if (text.endOfSelection() > text.startOfSelection())
-			start = text.startOfSelection();
-		else
-		{
-			int cursorPos = text.cursorPosition();
-			start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
-		}
-	}
-	ParagraphStyle ps = text.paragraphStyle(start);
-	double currentLS = ps.lineSpacing();
-	ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
-	ps.setLineSpacing(qMax(1.0, currentLS - 1.0));
-	text.applyStyle(start, ps);
-	item->invalidateLayout();
-	item->update();
-	doc->regionsChanged()->update(QRectF());
-	doc->changed();
-	emit UpdateRequest(reqTextStylesUpdate);
+    if (!doc || doc->m_Selection->isEmpty()) return;
+    PageItem* item = doc->m_Selection->itemAt(0);
+    if (!item || !item->isTextFrame()) return;
+    StoryText& text = item->itemText;
+    int start = 0;
+    int end = 0;
+    if (doc->appMode == modeEdit && text.endOfSelection() > text.startOfSelection())
+    {
+        start = text.startOfSelection();
+        end = text.endOfSelection();
+    }
+    else
+    {
+        int cursorPos = text.cursorPosition();
+        start = text.startOfParagraph(text.nrOfParagraph(cursorPos));
+        end = start + 1;
+    }
+    int startPara = text.nrOfParagraph(start);
+    int endPara = text.nrOfParagraph(qMax(start, end - 1));
+    for (int para = startPara; para <= endPara; para++)
+    {
+        int paraStart = text.startOfParagraph(para);
+        ParagraphStyle ps = text.paragraphStyle(paraStart);
+        double currentLS = ps.lineSpacing();
+        ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
+        ps.setLineSpacing(qMax(1.0, currentLS - 1.0));
+        text.applyStyle(paraStart, ps);
+    }
+    item->invalidateLayout();
+    item->update();
+    doc->regionsChanged()->update(QRectF());
+    doc->changed();
+    emit UpdateRequest(reqTextStylesUpdate);
 }
 void ScribusMainWindow::suneerEnlargeImageSize()
 {
@@ -8933,16 +9326,64 @@ void ScribusMainWindow::ModifyAnnot()
 	currItem->update();
 }
 
-void ScribusMainWindow::SetShortCut()
+void ScribusMainWindow::applyKeySetFromFile(const QString& path)
 {
-	
-// Auto-load custom keyboard shortcuts
-{
-    QString keyFile = QDir::homePath() + "/.config/scribus/shortkey170626.xml";
-    if (QFile::exists(keyFile))
-        qDebug() << "Custom shortcut file found:" << keyFile;
+	QMap<QString, Keys>& keyActionsRef = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly))
+		return;
+	QDomDocument docXml("keymapentries");
+	if (docXml.setContent(&f))
+	{
+		QDomElement root = docXml.documentElement();
+		if (root.tagName() == "shortcutset")
+		{
+			for (QDomNode n = root.firstChild(); !n.isNull(); n = n.nextSibling())
+			{
+				QDomElement e = n.toElement();
+				if (e.hasAttribute("name") && e.hasAttribute("shortcut"))
+				{
+					QString name = e.attribute("name");
+					if (keyActionsRef.contains(name))
+						keyActionsRef[name].keySequence = QKeySequence(e.attribute("shortcut"));
+				}
+			}
+		}
+	}
+	f.close();
+	// Push the (possibly changed) shortcuts onto the live actions.
+	for (auto it = keyActionsRef.begin(); it != keyActionsRef.end(); ++it)
+	{
+		if (!it.value().actionName.isEmpty() && scrActions[it.value().actionName])
+			scrActions[it.value().actionName]->setShortcut(it.value().keySequence);
+	}
+	// Keep the styled clipboard actions as the sole owners of Ctrl+Shift+C/V.
+	enforceStyledClipboardShortcuts();
 }
 
+void ScribusMainWindow::checkMalayalamDtpFirstRun()
+{
+	QSettings settings;
+	if (settings.contains(QStringLiteral("malayalamDtpFirstRun")))
+		return;   // already prompted — never overwrite an established config
+
+	QMessageBox box(this);
+	box.setWindowTitle(tr("Welcome to Scribus (Malayalam DTP Edition)"));
+	box.setIcon(QMessageBox::Information);
+	box.setText(tr("Default keyboard shortcuts are set to Photoshop-compatible for an easier workflow.\n\n"
+	               "You can change them anytime via:\n"
+	               "File → Preferences → Keyboard Shortcuts"));
+	QPushButton* keepBtn = box.addButton(tr("Keep Malayalam DTP defaults"), QMessageBox::AcceptRole);
+	box.addButton(tr("Use standard Scribus defaults"), QMessageBox::RejectRole);
+	box.exec();
+	if (box.clickedButton() == keepBtn)
+		applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
+
+	settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
+}
+
+void ScribusMainWindow::SetShortCut()
+{
 
 QMap<QString, Keys>& keyActionsRef =
     m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
@@ -9232,6 +9673,26 @@ void ScribusMainWindow::SearchText()
 }
 
 /* call gimp and wait upon completion */
+void ScribusMainWindow::slotOpenScImageEditor()
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+		return;
+	PageItem* currItem = doc->m_Selection->itemAt(0);
+	if (!currItem || !currItem->isImageFrame())
+		return;
+	PageItem_ImageFrame* imgFrame = currItem->asImageFrame();
+	if (!imgFrame || imgFrame->Pfile.isEmpty())
+		return;
+	QImage img(imgFrame->Pfile);
+	if (img.isNull())
+		img = imgFrame->pixm.qImage();
+	if (img.isNull())
+		return;
+	ScImageEditor* editor = new ScImageEditor(img, imgFrame, this);
+	editor->setAttribute(Qt::WA_DeleteOnClose);
+	editor->show();
+}
+
 void ScribusMainWindow::callImageEditor()
 {
 	if (doc->m_Selection->isEmpty())
@@ -9719,6 +10180,47 @@ void ScribusMainWindow::slotItemTransform()
 	if (trans)
 	{
 		trans.commit();
+	}
+}
+
+void ScribusMainWindow::slotAutoArrangeFrames()
+{
+	if (!HaveDoc)
+		return;
+
+	AutoArrangeDialog dlg(doc, this);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+
+	const ArrangeOptions opts = dlg.options();
+	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+	const ArrangeResult res = AutoArrangeEngine::arrange(doc, opts);
+	QApplication::restoreOverrideCursor();
+
+	if (opts.dryRun)
+	{
+		ScMessageBox::information(this, tr("Auto Arrange Frames"),
+			tr("Dry run complete — nothing was changed.\n\n"
+			   "Detected %1 column(s); %2 frame(s) would be arranged.\n"
+			   "See the console/terminal for the full plan.")
+			.arg(res.columnsFound).arg(res.framesArranged));
+	}
+	else if (res.columnsFound == 0)
+	{
+		ScMessageBox::warning(this, tr("Auto Arrange Frames"),
+			tr("No column guides were found on the page.\n"
+			   "Add vertical guides (Page → Manage Guides) to define columns, then try again."));
+	}
+	else if (res.framesArranged == 0 && res.framesOverflowed == 0)
+	{
+		ScMessageBox::information(this, tr("Auto Arrange Frames"),
+			tr("No arrangeable frames were found in the columns.\n"
+			   "(Master-page items, locked frames, and frames on locked layers are never moved.)"));
+	}
+	else if (res.framesOverflowed > 0)
+	{
+		ScMessageBox::information(this, tr("Auto Arrange Frames"),
+			tr("%1 frame(s) overflowed their column and were left in place.").arg(res.framesOverflowed));
 	}
 }
 

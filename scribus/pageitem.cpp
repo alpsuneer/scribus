@@ -1804,6 +1804,25 @@ void PageItem::DrawObj_Pre(ScPainter *p)
 		p->setMaskMode(0);
 }
 
+FPointArray PageItem::sideBorderPath() const
+{
+	FPointArray path;
+	const double w = width();
+	const double h = height();
+	bool first = true;
+	auto edge = [&](double x1, double y1, double x2, double y2) {
+		if (!first)
+			path.setMarker();
+		path.addQuadPoint(x1, y1, x1, y1, x2, y2, x2, y2);
+		first = false;
+	};
+	if (TopLine)    edge(0.0, 0.0, w,   0.0);
+	if (RightLine)  edge(w,   0.0, w,   h);
+	if (BottomLine) edge(w,   h,   0.0, h);
+	if (LeftLine)   edge(0.0, 0.0, 0.0, h);
+	return path;
+}
+
 void PageItem::DrawObj_Post(ScPainter *p)
 {
 	bool doStroke = true;
@@ -1918,6 +1937,11 @@ void PageItem::DrawObj_Post(ScPainter *p)
 						p->setPen(m_strokeQColor, lwCorr, PLineArt, PLineEnd, PLineJoin);
 						if (DashValues.count() != 0)
 							p->setDash(DashValues, DashOffset);
+						if (hasSideBorders())
+						{
+							FPointArray sb = sideBorderPath();
+							p->setupPolygon(&sb, false);   // stroke only the selected edges
+						}
 						p->strokePath();
 					}
 					else
@@ -4916,6 +4940,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreColumns(ss, isUndo);
 		else if (ss->contains("COLUMNSGAP"))
 			restoreColumnsGap(ss, isUndo);
+		else if (ss->contains("SUNEER_WRAPOFFSETS"))
+			restoreWrapOffsets(ss, isUndo);
 		else if (ss->contains("LINE_SHADE"))
 			restoreLineShade(ss, isUndo);
 		else if (ss->contains("DELETE_FRAMETEXT"))
@@ -6925,6 +6951,18 @@ void PageItem::restoreColumnsGap(SimpleState *ss, bool isUndo)
 	else
 		m_columnGap = ss->getDouble("NEW_COLUMNS");
 	update();
+}
+
+void PageItem::restoreWrapOffsets(SimpleState *ss, bool isUndo)
+{
+	// Suneer: setWrapOffsets() records no undo of its own, so the styled-paste operation
+	// stores the old/new offsets in this state. top, bottom, left, right.
+	if (isUndo)
+		setWrapOffsets(ss->getDouble("OLD_WT"), ss->getDouble("OLD_WB"),
+		               ss->getDouble("OLD_WL"), ss->getDouble("OLD_WR"));
+	else
+		setWrapOffsets(ss->getDouble("NEW_WT"), ss->getDouble("NEW_WB"),
+		               ss->getDouble("NEW_WL"), ss->getDouble("NEW_WR"));
 }
 
 void PageItem::restoreLeftTextFrameDist(SimpleState *ss, bool isUndo)
@@ -9824,6 +9862,27 @@ QRegion PageItem::textInteractionRegion(double xOffset, double yOffset) const
 		else
 			res = QRegion(pp.map(Clip));
 	}
+
+	// Suneer: inflate the wrap region by the item's wrap offsets so image
+	// frame padding pushes the text-flow boundary outward in FrameShape,
+	// ContourLine and ImageClipping modes too. BoundingBox mode is skipped
+	// because getVisualBoundingRect() already folds the offsets into bb.
+	// Inflating by an axis-aligned rectangle is a Minkowski dilation, which
+	// distributes over union, so adjusting each sub-rect of the region is
+	// exact (also for concave contours) and honours asymmetric L/R/T/B.
+	// Offsets are left unclamped to match the BoundingBox path (negative
+	// values pull the boundary inward, as getVisualBoundingRect() allows).
+	if (!textFlowUsesBoundingBox() &&
+		(m_wrapOffsetLeft != 0.0 || m_wrapOffsetRight  != 0.0 ||
+		 m_wrapOffsetTop  != 0.0 || m_wrapOffsetBottom != 0.0))
+	{
+		QRegion inflated;
+		for (const QRect& r : res)
+			inflated += r.adjusted(-qRound(m_wrapOffsetLeft),  -qRound(m_wrapOffsetTop),
+			                        qRound(m_wrapOffsetRight),  qRound(m_wrapOffsetBottom));
+		res = inflated;
+	}
+
 	return  res;
 }
 
