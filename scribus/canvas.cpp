@@ -305,13 +305,44 @@ Canvas::FrameHandle Canvas::frameHitTest(QPointF canvasPoint, PageItem* item) co
 //		extraS = (item->lineWidth() / -2.0);
 	if (item->isTextFrame() && (m_doc->appMode == modeEdit) && !item->asTextFrame()->availableRegion().contains(item->getTransform().inverted().map(canvasPoint.toPoint())))
 		return OUTSIDE;
-	QRectF visualRect = item->isLine() ? QRectF(0, extraS, item->visualWidth(), item->visualHeight()) 
+	QRectF visualRect = item->isLine() ? QRectF(0, extraS, item->visualWidth(), item->visualHeight())
 		                               : QRectF(extraS, extraS, item->visualWidth(), item->visualHeight());
-	Canvas::FrameHandle result = frameHitTest(item->getTransform().inverted().map(canvasPoint), visualRect);
-//	qDebug() << "frameHitTest for item" << item->ItemNr 
-//		<< item->getTransform().inverted().map(canvasPoint) 
-//		<< item->getTransform().inverted() 
+	QPointF localPoint = item->getTransform().inverted().map(canvasPoint);
+	Canvas::FrameHandle result = frameHitTest(localPoint, visualRect);
+//	qDebug() << "frameHitTest for item" << item->ItemNr
+//		<< item->getTransform().inverted().map(canvasPoint)
+//		<< item->getTransform().inverted()
 //		<< QRectF(0, 0, item->width(), item->height());
+
+	// Suneer: for a text frame in normal mode, treat a ~2 mm band along the edges as the resize
+	// zone (not just the 8 discrete handle points). This keeps the move/pan ("hand") cursor from
+	// appearing right up to the border and lets the user grab any edge to resize. Only applies to
+	// the frame interior (result == INSIDE); handle points already return a handle above.
+	if (result == INSIDE && item->isTextFrame() && !item->isLine() && (m_doc->appMode == modeNormal))
+	{
+		const double twoMM = 2.0 * 72.0 / 25.4;                 // 2 mm in document points
+		double band = qMax(twoMM, m_doc->guidesPrefs().grabRadius / m_viewMode.scale);
+		// Never let the band swallow the frame interior: cap it to a quarter of each dimension so
+		// a small frame (especially at low zoom) still has a central move zone.
+		const double bandX = qMin(band, visualRect.width()  / 4.0);
+		const double bandY = qMin(band, visualRect.height() / 4.0);
+		const double dl = localPoint.x() - visualRect.left();
+		const double dr = visualRect.right()  - localPoint.x();
+		const double dt = localPoint.y() - visualRect.top();
+		const double db = visualRect.bottom() - localPoint.y();
+		const bool nearL = (dl >= 0.0 && dl <= bandX);
+		const bool nearR = (dr >= 0.0 && dr <= bandX);
+		const bool nearT = (dt >= 0.0 && dt <= bandY);
+		const bool nearB = (db >= 0.0 && db <= bandY);
+		if      (nearT && nearL) result = NORTHWEST;
+		else if (nearT && nearR) result = NORTHEAST;
+		else if (nearB && nearL) result = SOUTHWEST;
+		else if (nearB && nearR) result = SOUTHEAST;
+		else if (nearT)          result = NORTH;
+		else if (nearB)          result = SOUTH;
+		else if (nearL)          result = WEST;
+		else if (nearR)          result = EAST;
+	}
 	return result;
 }
 
@@ -529,9 +560,12 @@ bool Canvas::cursorOverTextFrameControl(QPointF globalPos, const PageItem* frame
 {
 	FPoint mp = globalToCanvas(globalPos);
 	qreal sideLength = 10 / qMax(m_viewMode.scale, 1.0);
+	// Suneer: must match PageItem::drawOverflowMarker — the icon is shifted UP from the corner by
+	// its own height + a small gap so it clears the corner resize handle. Keep this in sync.
+	qreal gap = 4 / qMax(m_viewMode.scale, 1.0);
 	qreal left  = frame->xPos() + frame->width() - sideLength;
 	qreal right = left + sideLength;
-	qreal top   = frame->yPos() + frame->height() - sideLength;
+	qreal top   = frame->yPos() + frame->height() - 2*sideLength - gap;
 	qreal bottom = top + sideLength;
 	return mp.x() > left && mp.x() < right && mp.y() > top && mp.y() < bottom;
 }

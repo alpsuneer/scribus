@@ -1064,9 +1064,12 @@ void PageItem::drawOverflowMarker(ScPainter *p)
 {
 	qreal sideLength = 10 / qMax(p->zoomFactor(), 1.0);
 	qreal offset = 1 / qMax(p->zoomFactor(), 1.0);
+	// Suneer: shift the marker UP from the very corner (by its own height + a small gap) so it
+	// no longer overlaps the corner resize handle's hit zone; stays anchored to the right edge.
+	qreal gap = 4 / qMax(p->zoomFactor(), 1.0);
 	qreal left = m_width - sideLength-offset;// / 2;
 	qreal right = left + sideLength;
-	qreal top = m_height - sideLength-offset;// * 1.5;
+	qreal top = m_height - 2*sideLength-offset-gap;
 	qreal bottom = top + sideLength;
 
 	QColor color(PrefsManager::instance().appPrefs.displayPrefs.frameNormColor);
