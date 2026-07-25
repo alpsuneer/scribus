@@ -2694,6 +2694,14 @@ void Scribus150Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 			docu.writeAttribute("PLINEEND", item->PLineEnd);
 		if (item->PLineJoin != 0)
 			docu.writeAttribute("PLINEJOIN", item->PLineJoin);
+		if (item->TopLine)
+			docu.writeAttribute("TopLine", 1);
+		if (item->LeftLine)
+			docu.writeAttribute("LeftLine", 1);
+		if (item->RightLine)
+			docu.writeAttribute("RightLine", 1);
+		if (item->BottomLine)
+			docu.writeAttribute("BottomLine", 1);
 	}
 	//write weld parameter
 	if (item->isWelded())
