@@ -1016,6 +1016,8 @@ void ActionManager::initToolsMenuActions()
 	// handler only auto-triggers ApplicationShortcut actions before consuming the event.
 	(*scrActions)["editStyledCopy"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["editStyledPaste"]->setShortcutContext(Qt::ApplicationShortcut);
+	// NOTE: suneerAutoStyleNews / suneerHeadlineSizeUp/Down are created later in
+	// initExtrasMenuActions(), so their ApplicationShortcut context is set there (not here).
 	(*scrActions)["toolsPages"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsBookmarks"]->setShortcutContext(Qt::ApplicationShortcut);
 	(*scrActions)["toolsDownloads"]->setShortcutContext(Qt::ApplicationShortcut);
@@ -1076,11 +1078,24 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasAutoflowToNewPages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerAutoStyleNews";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerHeadlineSizeUp";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerHeadlineSizeDown";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
 	connect( (*scrActions)["SRDuplicateContentCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateContentCheck()) );
 	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
+	connect( (*scrActions)["suneerAutoStyleNews"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoStyleNews()) );
+	connect( (*scrActions)["suneerHeadlineSizeUp"], SIGNAL(triggered()), mainWindow, SLOT(suneerHeadlineSizeUp()) );
+	connect( (*scrActions)["suneerHeadlineSizeDown"], SIGNAL(triggered()), mainWindow, SLOT(suneerHeadlineSizeDown()) );
+	// Must fire while editing text (edit-mode key handler only auto-triggers ApplicationShortcut actions).
+	(*scrActions)["suneerAutoStyleNews"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerHeadlineSizeUp"]->setShortcutContext(Qt::ApplicationShortcut);
+	(*scrActions)["suneerHeadlineSizeDown"]->setShortcutContext(Qt::ApplicationShortcut);
 }
 
 
@@ -1914,6 +1929,9 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
 	(*scrActions)["SRDuplicateContentCheck"]->setTexts( tr("Duplicate Content Check"));
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
+	(*scrActions)["suneerAutoStyleNews"]->setTexts( tr("Auto-Style News Article"));
+	(*scrActions)["suneerHeadlineSizeUp"]->setTexts( tr("Headline Size Up"));
+	(*scrActions)["suneerHeadlineSizeDown"]->setTexts( tr("Headline Size Down"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2106,7 +2124,8 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editStyledPaste", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
 	defKeys.insert("editSelectAll", QKeySequence(Qt::CTRL | Qt::Key_A));
 	defKeys.insert("editSelectAllOnLayer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
-	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
+	// Ctrl+Shift+A repurposed for suneerAutoStyleNews; Deselect All keeps its menu entry, no default key
+	defKeys.insert("editDeselectAll", QKeySequence());
 	defKeys.insert("editSearchReplace", QKeySequence(Qt::CTRL | Qt::Key_F));
 	defKeys.insert("editStyles", QKeySequence(Qt::Key_F4));
 	defKeys.insert("styleImageEffects", QKeySequence(Qt::CTRL | Qt::Key_E));
@@ -2143,6 +2162,10 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsNewsPanel", QKeySequence());
 	defKeys.insert("suneerApplyChain", QKeySequence());
 	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
+	// Suneer: news auto-styling (reclaims Ctrl+Shift+A from Deselect All) + headline size cycle
+	defKeys.insert("suneerAutoStyleNews", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
+	defKeys.insert("suneerHeadlineSizeUp", QKeySequence(Qt::ALT | Qt::Key_Up));
+	defKeys.insert("suneerHeadlineSizeDown", QKeySequence(Qt::ALT | Qt::Key_Down));
 	defKeys.insert("suneerGetImage", QKeySequence(Qt::CTRL | Qt::Key_I));
 	defKeys.insert("suneerFocusFontCombo", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F));
 	defKeys.insert("suneerEnlargeImageSize", QKeySequence());
@@ -2568,7 +2591,10 @@ void ActionManager::createDefaultMenus()
 		<< "extrasDeHyphenateText"
 		<< "extrasGenerateTableOfContents"
 		<< "extrasUpdateDocument"
-		<< "extrasAutoflowToNewPages";
+		<< "extrasAutoflowToNewPages"
+		<< "suneerAutoStyleNews"
+		<< "suneerHeadlineSizeUp"
+		<< "suneerHeadlineSizeDown";
 	//Windows
 	++itmenu;
 	itmenu->second

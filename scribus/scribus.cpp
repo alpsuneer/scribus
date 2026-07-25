@@ -1519,6 +1519,9 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
+	scrMenuMgr->addMenuItemString("suneerAutoStyleNews", "Extras");
+	scrMenuMgr->addMenuItemString("suneerHeadlineSizeUp", "Extras");
+	scrMenuMgr->addMenuItemString("suneerHeadlineSizeDown", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
 	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
 	scrMenuMgr->addMenuItemString("SRTools", "Extras");
@@ -5013,38 +5016,41 @@ static void suneerFlattenStoryText(StoryText& clip, const StoryText& src, int sr
 
 void ScribusMainWindow::enforceStyledClipboardShortcuts()
 {
-	const QKeySequence copySeq(Qt::CTRL | Qt::SHIFT | Qt::Key_C);
-	const QKeySequence pasteSeq(Qt::CTRL | Qt::SHIFT | Qt::Key_V);
 	auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
 
-	// A user's saved keymap (or a loaded keyset) can bind Ctrl+Shift+C/V to other actions
-	// (e.g. alignCenter, editPastePlainText), which collides with the styled clipboard
-	// actions and makes Qt fire neither ("Ambiguous shortcut overload"). Clear those combos
-	// from every other action so the styled ones are the sole owners.
-	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
+	// Reserved Suneer shortcuts: each must be the SOLE owner of its key sequence. A user's saved
+	// keymap or a loaded keyset can bind the same combo to another action (e.g. alignCenter,
+	// editPastePlainText, editDeselectAll), which makes Qt fire neither ("Ambiguous shortcut
+	// overload"). Clear the combo from every OTHER action, then re-assert it on the owner.
+	struct Reserved { const char* action; QKeySequence seq; };
+	const Reserved reserved[] = {
+		{ "editStyledCopy",         QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C) },
+		{ "editStyledPaste",        QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V) },
+		{ "suneerAutoStyleNews",    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A) },
+		{ "suneerHeadlineSizeUp",   QKeySequence(Qt::ALT | Qt::Key_Up) },
+		{ "suneerHeadlineSizeDown", QKeySequence(Qt::ALT | Qt::Key_Down) },
+	};
+
+	for (const Reserved& r : reserved)
 	{
-		const QString& name = it.key();
-		ScrAction* a = it.value();
-		if (!a)
-			continue;
-		if (name == "editStyledCopy" || name == "editStyledPaste")
-			continue;
-		if (a->shortcut() == copySeq || a->shortcut() == pasteSeq)
+		for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
 		{
-			a->setShortcut(QKeySequence());
-			if (keyActions.contains(name))
-				keyActions[name].keySequence = QKeySequence();
+			const QString& name = it.key();
+			ScrAction* a = it.value();
+			if (!a || name == QLatin1String(r.action))
+				continue;
+			if (a->shortcut() == r.seq)
+			{
+				a->setShortcut(QKeySequence());
+				if (keyActions.contains(name))
+					keyActions[name].keySequence = QKeySequence();
+			}
 		}
+		if (ScrAction* owner = scrActions.value(r.action))
+			owner->setShortcut(r.seq);
+		if (keyActions.contains(QLatin1String(r.action)))
+			keyActions[QLatin1String(r.action)].keySequence = r.seq;
 	}
-	// Re-assert the styled shortcuts in case a keyset cleared or changed them.
-	if (ScrAction* c = scrActions.value("editStyledCopy"))
-		c->setShortcut(copySeq);
-	if (ScrAction* v = scrActions.value("editStyledPaste"))
-		v->setShortcut(pasteSeq);
-	if (keyActions.contains("editStyledCopy"))
-		keyActions["editStyledCopy"].keySequence = copySeq;
-	if (keyActions.contains("editStyledPaste"))
-		keyActions["editStyledPaste"].keySequence = pasteSeq;
 }
 
 void ScribusMainWindow::slotEditStyledCopy()
@@ -8828,6 +8834,178 @@ void ScribusMainWindow::suneerAutoflowToNewPages()
 	else
 		setStatusBarInfoText( tr("Autoflow: created %1 new pages").arg(created));
 }
+
+// Suneer: news auto-styling — "Label: text" paragraph labels mapped to paragraph styles from
+// sample.sla, plus a headline size cycle.
+namespace {
+struct SuneerNewsLabel { const char* label; const char* style; };
+static const SuneerNewsLabel kSuneerNewsLabels[] = {
+	{ "Kicker",       "12 Kicker" },
+	{ "Headline",     "32 M" },
+	{ "Byline",       "07 Byline" },
+	{ "Dateline",     "01 Dateline" },
+	{ "Lead",         "11 Kicker Lead" },
+	{ "BodyNoIndent", "03 BodyNoInd" },
+	{ "Body",         "02 BodyText" },
+	{ "Highlights",   "08 Blurb" },
+};
+static const char* const kSuneerBodyStyle = "02 BodyText";
+// Headline size cycle, smallest -> largest (from sample.sla numeric M/B styles).
+static const char* const kSuneerHeadlineCycle[] = {
+	"10 M","11 M","12 M","13 M","14 M","16 M","18 M","20 M","22 M","24 M","28 M",
+	"32 M","36 M","40 M","44 M","48 M","52 M","56 M","60 M","64 M","68 B","72 B","80 B"
+};
+
+// Match a paragraph's leading "Label: " (case-sensitive on the label word, but tolerant of leading
+// whitespace before it — spaces, tabs, non-breaking spaces, e.g. from first-line indent or export
+// artifacts). Returns the mapped style name and sets stripLen to (leading whitespace + "Label: ")
+// so both are removed. Unlabeled paragraphs return the Body style with stripLen 0 (their leading
+// whitespace is preserved).
+static QString suneerMatchNewsLabel(const QString& paraText, int& stripLen)
+{
+	int leadingWS = 0;
+	while (leadingWS < paraText.length() && paraText.at(leadingWS).isSpace())
+		++leadingWS;
+	const QString candidate = paraText.mid(leadingWS);
+	for (const auto& m : kSuneerNewsLabels)
+	{
+		const QString prefix = QString::fromLatin1(m.label) + ": ";
+		if (candidate.startsWith(prefix))
+		{
+			stripLen = leadingWS + prefix.length();
+			return QString::fromLatin1(m.style);
+		}
+	}
+	stripLen = 0;
+	return QString::fromLatin1(kSuneerBodyStyle);
+}
+
+static void suneerHeadlineStep(ScribusMainWindow* mw, int dir)
+{
+	if (!mw->HaveDoc || mw->doc->appMode != modeEdit)
+		return;
+	ScribusDoc* doc = mw->doc;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame())
+		return;
+	PageItem_TextFrame* tf = item->asTextFrame();
+	StoryText& t = tf->itemText;
+	const int pos = t.cursorPosition();
+	const QString cur = t.paragraphStyle(pos).parent();   // applied named style name
+	const int n = int(sizeof(kSuneerHeadlineCycle) / sizeof(kSuneerHeadlineCycle[0]));
+	int idx = -1;
+	for (int i = 0; i < n; ++i)
+		if (cur == QString::fromLatin1(kSuneerHeadlineCycle[i])) { idx = i; break; }
+	if (idx < 0)          // R7: not a headline paragraph -> no-op
+		return;
+	const int ni = idx + dir;
+	if (ni < 0 || ni >= n)   // R7: clamp at the ends, no wrap
+		return;
+	const QString newName = QString::fromLatin1(kSuneerHeadlineCycle[ni]);
+	if (!doc->paragraphStyles().contains(newName))
+	{
+		mw->setStatusBarInfoText(ScribusMainWindow::tr("Missing style '%1' — import styles first.").arg(newName));
+		return;
+	}
+	// Apply to the current paragraph (this call wraps its own undo transaction => one undo step).
+	t.select(t.startOfParagraph(t.nrOfParagraph(pos)), 1);
+	doc->itemSelection_SetNamedParagraphStyle(newName);
+	t.deselectAll();
+	t.setCursorPosition(pos);
+	tf->invalidateLayout();
+	tf->update();
+	mw->view->DrawNew();
+	mw->slotDocCh(false);
+}
+} // namespace
+
+void ScribusMainWindow::suneerAutoStyleNews()
+{
+	// R1/R3: only in text-frame edit mode with a selection.
+	if (!HaveDoc || doc->appMode != modeEdit)
+		return;
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame())
+		return;
+	PageItem_TextFrame* tf = item->asTextFrame();
+	StoryText& t = tf->itemText;
+	if (!t.hasSelection())
+		return;
+
+	const int selStart = t.startOfSelection();
+	const int selEnd   = t.endOfSelection();
+	if (selStart >= selEnd)
+		return;
+	const int firstPara = t.nrOfParagraph(selStart);
+	const int lastPara  = t.nrOfParagraph(qMax(selStart, selEnd - 1));
+
+	// Pass 1: collect the styles we will need and verify they ALL exist (R4: no partial application).
+	{
+		QSet<QString> needed;
+		for (int p = firstPara; p <= lastPara; ++p)
+		{
+			int pStart = t.startOfParagraph(p);
+			int pEnd   = t.endOfParagraph(p);
+			int stripLen = 0;
+			needed.insert(suneerMatchNewsLabel(t.text(pStart, qMax(0, pEnd - pStart)), stripLen));
+		}
+		QStringList missing;
+		for (const QString& s : needed)
+			if (!doc->paragraphStyles().contains(s))
+				missing.append(s);
+		if (!missing.isEmpty())
+		{
+			missing.sort();
+			setStatusBarInfoText( tr("Missing styles: %1. Open a document with these styles (e.g. sample.sla) or use File → Import → Styles.").arg(missing.join(", ")));
+			return;
+		}
+	}
+
+	// Pass 2: strip labels + apply styles, back-to-front so stripping a later paragraph never
+	// shifts the positions of earlier (not-yet-processed) paragraphs. One undo transaction (R5).
+	UndoTransaction trans;
+	if (UndoManager::undoEnabled())
+		trans = m_undoManager->beginTransaction(item->getUName(), nullptr, Um::ApplyTextStyle, tr("Auto-style news article"), Um::IFont);
+
+	int styledCount = 0, unlabeledCount = 0;
+	for (int p = lastPara; p >= firstPara; --p)
+	{
+		int pStart = t.startOfParagraph(p);
+		int pEnd   = t.endOfParagraph(p);
+		int stripLen = 0;
+		const QString styleName = suneerMatchNewsLabel(t.text(pStart, qMax(0, pEnd - pStart)), stripLen);
+		if (stripLen == 0)
+			++unlabeledCount;
+
+		// R3: strip exactly "Label: " (undoable delete).
+		if (stripLen > 0)
+		{
+			t.select(pStart, stripLen);
+			tf->deleteSelectedTextFromFrame();
+		}
+		// Apply the mapped paragraph style to this paragraph (by name).
+		t.select(pStart, 1);
+		doc->itemSelection_SetNamedParagraphStyle(styleName);
+		++styledCount;
+	}
+
+	t.deselectAll();
+	t.setCursorPosition(selStart);
+
+	if (trans)
+		trans.commit();
+
+	tf->invalidateLayout();
+	tf->update();
+	view->DrawNew();
+	slotDocCh(false);
+
+	// R6: status summary.
+	setStatusBarInfoText( tr("Auto-styled %1 paragraphs (%2 unlabeled defaulted to Body).").arg(styledCount).arg(unlabeledCount));
+}
+
+void ScribusMainWindow::suneerHeadlineSizeUp()   { suneerHeadlineStep(this, +1); }
+void ScribusMainWindow::suneerHeadlineSizeDown() { suneerHeadlineStep(this, -1); }
 
 void ScribusMainWindow::suneerFitImageToFrame(PageItem* item)
 {

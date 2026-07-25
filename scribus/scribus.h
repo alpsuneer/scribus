@@ -436,6 +436,12 @@ public slots:
 	void slotEditCopyContents();
 	//! \brief Suneer: autoflow an overflowing text frame onto new pages (linked frames, same master/layout)
 	void suneerAutoflowToNewPages();
+	//! \brief Suneer: auto-detect "Label: text" paragraphs in the selection and apply mapped paragraph styles
+	void suneerAutoStyleNews();
+	//! \brief Suneer: step the current headline paragraph to the next larger size in the headline cycle
+	void suneerHeadlineSizeUp();
+	//! \brief Suneer: step the current headline paragraph to the next smaller size in the headline cycle
+	void suneerHeadlineSizeDown();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor
