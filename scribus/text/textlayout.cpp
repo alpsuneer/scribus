@@ -196,6 +196,241 @@ void TextLayout::renderBackground(TextLayoutPainter *p) const
 	p->restore();
 }
 
+namespace
+{
+	/** Everything needed to paint one paragraph rule, with the "(Text Color)"
+	    sentinel already resolved against the paragraph's first character. */
+	struct ResolvedRule
+	{
+		double weight { 1.0 };
+		TextLayoutColor color;
+		TextLayoutColor gapColor;
+		bool hasGapColor { false };
+		bool overprint { false };
+		bool gapOverprint { false };
+		ParagraphStyle::RuleType type { ParagraphStyle::RuleSolid };
+		ParagraphStyle::RuleWidthType widthType { ParagraphStyle::RuleWidthColumn };
+		double offset { 0.0 };
+		double leftIndent { 0.0 };
+		double rightIndent { 0.0 };
+		bool keepInFrame { true };
+	};
+
+	void fillRuleBand(TextLayoutPainter* p, const QRectF& band, const TextLayoutColor& color, bool overprint)
+	{
+		if (band.width() <= 0.0 || band.height() <= 0.0)
+			return;
+		if (color.color.isEmpty() || color.color == CommonStrings::None)
+			return;
+		p->save();
+		p->setOverprint(overprint);
+		p->setFillColor(color);
+		p->setStrokeColor(color);
+		p->drawRect(band);
+		p->restore();
+	}
+
+	/** Paints a dashed or dotted band as a run of solid segments. Doing the dash
+	    geometry here rather than in the painters keeps every output backend
+	    (screen, PDF, PS, XPS, SVG) pixel-identical, none of them has to know
+	    about dash patterns. */
+	void fillDashedBand(TextLayoutPainter* p, const QRectF& band, const TextLayoutColor& color, bool overprint, double dashLen, double gapLen)
+	{
+		if (dashLen <= 0.0 || gapLen <= 0.0)
+		{
+			fillRuleBand(p, band, color, overprint);
+			return;
+		}
+		const double right = band.x() + band.width();
+		for (double x = band.x(); x < right; x += dashLen + gapLen)
+			fillRuleBand(p, QRectF(x, band.y(), qMin(dashLen, right - x), band.height()), color, overprint);
+	}
+
+	/** Paints one rule, occupying [yTop, yTop + weight] over [x, x + width]. */
+	void paintRule(TextLayoutPainter* p, const ResolvedRule& rule, double x, double width, double yTop)
+	{
+		const QRectF full(x, yTop, width, rule.weight);
+
+		switch (rule.type)
+		{
+		case ParagraphStyle::RuleDashed:
+		case ParagraphStyle::RuleDotted:
+			if (rule.hasGapColor)
+				fillRuleBand(p, full, rule.gapColor, rule.gapOverprint);
+			if (rule.type == ParagraphStyle::RuleDotted)
+				fillDashedBand(p, full, rule.color, rule.overprint, rule.weight, rule.weight * 2.0);
+			else
+				fillDashedBand(p, full, rule.color, rule.overprint, rule.weight * 4.0, rule.weight * 2.0);
+			break;
+		case ParagraphStyle::RuleDouble:
+		{
+			const double part = rule.weight / 3.0;
+			if (rule.hasGapColor)
+				fillRuleBand(p, QRectF(x, yTop + part, width, part), rule.gapColor, rule.gapOverprint);
+			fillRuleBand(p, QRectF(x, yTop, width, part), rule.color, rule.overprint);
+			fillRuleBand(p, QRectF(x, yTop + 2.0 * part, width, part), rule.color, rule.overprint);
+			break;
+		}
+		case ParagraphStyle::RuleThickThin:
+		case ParagraphStyle::RuleThinThick:
+		{
+			const double thick = rule.weight * 0.5;
+			const double thin  = rule.weight * 0.25;
+			const double gap   = rule.weight * 0.25;
+			const double first  = (rule.type == ParagraphStyle::RuleThickThin) ? thick : thin;
+			const double second = (rule.type == ParagraphStyle::RuleThickThin) ? thin : thick;
+			if (rule.hasGapColor)
+				fillRuleBand(p, QRectF(x, yTop + first, width, gap), rule.gapColor, rule.gapOverprint);
+			fillRuleBand(p, QRectF(x, yTop, width, first), rule.color, rule.overprint);
+			fillRuleBand(p, QRectF(x, yTop + first + gap, width, second), rule.color, rule.overprint);
+			break;
+		}
+		case ParagraphStyle::RuleSolid:
+		default:
+			fillRuleBand(p, full, rule.color, rule.overprint);
+			break;
+		}
+	}
+}
+
+/**
+ Draws the paragraph rules (rule above / rule below) of every paragraph that
+ begins resp. ends inside this frame. Called by every output backend right
+ after renderBackground(), so canvas, print, PDF, PS, XPS and SVG all get the
+ same geometry from the same code.
+ */
+void TextLayout::renderParagraphRules(TextLayoutPainter *p) const
+{
+	if (!m_story || !m_box || m_box->boxes().isEmpty())
+		return;
+
+	const int storyLength = m_story->length();
+	if (storyLength <= 0)
+		return;
+
+	// The painter is translated by the layout box origin below, so the frame
+	// edges live at these coordinates in the drawing space.
+	const double frameTop = -m_box->y();
+	const double frameBottom = frameTop + (m_frame ? m_frame->height() : 0.0);
+
+	p->save();
+	p->translate(m_box->x(), m_box->y());
+
+	for (const Box* column : m_box->boxes())
+	{
+		const QRectF colBBox = column->bbox();
+
+		for (const Box* box : column->boxes())
+		{
+			// Text on a path has no column to hang a rule on.
+			if (box->type() == Box::T_PathLine)
+				continue;
+
+			const int firstChar = box->firstChar();
+			const int lastChar = box->lastChar();
+			if (firstChar > lastChar || firstChar >= storyLength)
+				continue;
+
+			const ParagraphStyle& style = m_story->paragraphStyle(firstChar);
+			if (!style.ruleAboveOn() && !style.ruleBelowOn())
+				continue;
+
+			// A paragraph can be split over several columns or over several
+			// linked frames. The rule above belongs to its very first line and
+			// the rule below to its very last one, so a paragraph that merely
+			// passes through this frame or column gets no rule at all (R8).
+			const bool isParaFirstLine = (firstChar == 0) || (m_story->text(firstChar - 1) == SpecialChars::PARSEP);
+			const bool isParaLastLine = (lastChar >= storyLength - 1) || (m_story->text(lastChar) == SpecialChars::PARSEP);
+			if (!isParaFirstLine && !isParaLastLine)
+				continue;
+
+			// An empty paragraph has no text extent, so a text-width rule has
+			// nothing to span; a column-width rule is still drawn.
+			const bool isEmptyParagraph = (firstChar == lastChar) && (m_story->text(firstChar) == SpecialChars::PARSEP);
+
+			for (int side = 0; side < 2; ++side)
+			{
+				const bool above = (side == 0);
+				if (above ? (!style.ruleAboveOn() || !isParaFirstLine) : (!style.ruleBelowOn() || !isParaLastLine))
+					continue;
+
+				ResolvedRule rule;
+				rule.weight       = above ? style.ruleAboveWeight() : style.ruleBelowWeight();
+				rule.overprint    = above ? style.ruleAboveOverprint() : style.ruleBelowOverprint();
+				rule.gapOverprint = above ? style.ruleAboveGapOverprint() : style.ruleBelowGapOverprint();
+				rule.type         = above ? style.ruleAboveType() : style.ruleBelowType();
+				rule.widthType    = above ? style.ruleAboveWidthType() : style.ruleBelowWidthType();
+				rule.offset       = above ? style.ruleAboveOffset() : style.ruleBelowOffset();
+				rule.leftIndent   = above ? style.ruleAboveLeftIndent() : style.ruleBelowLeftIndent();
+				rule.rightIndent  = above ? style.ruleAboveRightIndent() : style.ruleBelowRightIndent();
+				rule.keepInFrame  = above ? style.ruleAboveKeepInFrame() : style.ruleBelowKeepInFrame();
+
+				if (rule.weight <= 0.0)
+					continue;
+
+				// "(Text Color)" means the fill colour of the paragraph's first
+				// character, resolved at paint time so it follows the text.
+				QString colorName = above ? style.ruleAboveColor() : style.ruleBelowColor();
+				QString gapColorName = above ? style.ruleAboveGapColor() : style.ruleBelowGapColor();
+				if (colorName == ParagraphStyle::RuleTextColor)
+					colorName = m_story->charStyle(firstChar).fillColor();
+				if (gapColorName == ParagraphStyle::RuleTextColor)
+					gapColorName = m_story->charStyle(firstChar).fillColor();
+				rule.color = TextLayoutColor(colorName, above ? style.ruleAboveTint() : style.ruleBelowTint());
+				rule.gapColor = TextLayoutColor(gapColorName, above ? style.ruleAboveGapTint() : style.ruleBelowGapTint());
+				rule.hasGapColor = !gapColorName.isEmpty() && gapColorName != CommonStrings::None;
+
+				if (rule.color.color.isEmpty() || rule.color.color == CommonStrings::None)
+					continue;
+
+				double ruleX = 0.0;
+				double ruleWidth = 0.0;
+				if (rule.widthType == ParagraphStyle::RuleWidthText)
+				{
+					if (isEmptyParagraph)
+						continue;
+					ruleX = colBBox.x() + box->x();
+					ruleWidth = box->naturalWidth();
+				}
+				else if (style.spanColumns() != 0)
+				{
+					ruleX = 0.0;
+					ruleWidth = m_box->width();
+				}
+				else
+				{
+					ruleX = colBBox.x();
+					ruleWidth = colBBox.width();
+				}
+
+				ruleX += rule.leftIndent;
+				ruleWidth -= (rule.leftIndent + rule.rightIndent);
+				if (ruleWidth <= 0.0)
+					continue;
+
+				// A positive offset pushes the rule away from the paragraph:
+				// upwards above it, downwards below it (InDesign convention).
+				double yTop = above ? (box->y() - rule.offset - rule.weight)
+				                    : (box->y() + box->height() + rule.offset);
+
+				// Keep In Frame pulls a rule that would fall outside the frame
+				// back against the nearest edge rather than letting it draw
+				// outside or be cut in half.
+				if (rule.keepInFrame)
+				{
+					if ((frameBottom - frameTop) < rule.weight)
+						continue; // frame too short to hold the rule at all
+					yTop = qBound(frameTop, yTop, frameBottom - rule.weight);
+				}
+
+				paintRule(p, rule, ruleX, ruleWidth, yTop);
+			}
+		}
+	}
+
+	p->restore();
+}
+
 void TextLayout::render(TextLayoutPainter *p) const
 {
 	p->save();

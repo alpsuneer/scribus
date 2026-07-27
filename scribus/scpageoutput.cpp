@@ -1485,6 +1485,7 @@ void ScPageOutput::drawItem_Text(PageItem* item, ScPainterExBase* painter, const
 
 	ScPageOutputPainter p(item, painter, this);
 	item->textLayout.renderBackground(&p);
+	item->textLayout.renderParagraphRules(&p);
 	item->textLayout.render(&p);
 
 	painter->restore();

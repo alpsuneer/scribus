@@ -512,6 +512,7 @@ set(SCRIBUS_SOURCES
 	ui/smlinestylewidget.cpp
 	ui/smnumformatcombo.cpp
 	ui/smopticalmarginswidget.cpp
+	ui/smprulewidget.cpp
 	ui/smpstylewidget.cpp
 	ui/smradiobutton.cpp
 	ui/smreplacedia.cpp

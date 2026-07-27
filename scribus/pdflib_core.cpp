@@ -178,6 +178,7 @@ class PdfPainter: public TextLayoutPainter
 	QByteArray m_glyphBuffer;
 	QByteArray m_pathBuffer;
 	QMap<QString, PdfFont>  m_UsedFontsP;
+	QByteArray m_overprintGState;
 	PDFLibCore *m_pdf { nullptr };
 	uint m_PNr { 0 };
 	const ScPage* m_page { nullptr };
@@ -526,6 +527,19 @@ public:
 		double rectX = x() + rect.x();
 		double rectY = -y() - rect.y();
 		m_backBuffer += "q\n";
+		if (overprint() && !m_pdf->Options.UseRGB)
+		{
+			// One overprint graphics state is enough for the whole frame.
+			if (m_overprintGState.isEmpty())
+			{
+				m_overprintGState = m_pdf->ResNam + Pdf::toPdf(m_pdf->ResCount);
+				m_pdf->ResCount++;
+				m_pdf->Transpar[m_overprintGState] = m_pdf->writeGState("/OP true\n"
+																		"/op true\n"
+																		"/OPM 1\n");
+			}
+			m_backBuffer += Pdf::toName(m_overprintGState) + " gs\n";
+		}
 		m_backBuffer += transformToStr(transform) + " cm\n";
 		m_backBuffer += "n\n";
 		m_backBuffer += m_pdf->putColor(fillColor().color, fillColor().shade, true);
@@ -5803,6 +5817,7 @@ QByteArray PDFLibCore::setTextSt(PageItem *ite, uint PNr, const ScPage* pag)
 	
 	PdfPainter p(this, PNr, pag);
 	ite->textLayout.renderBackground(&p);
+	ite->textLayout.renderParagraphRules(&p);
 	ite->textLayout.render(&p);
 	return p.getBuffer();
 }

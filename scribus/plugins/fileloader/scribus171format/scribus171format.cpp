@@ -3771,6 +3771,64 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	else if (attrs.hasAttribute("ParagraphBackgroundColorShade"))
 		newStyle.setBackgroundShade(attrs.valueAsInt("ParagraphBackgroundColorShade", 100));
 
+	if (attrs.hasAttribute("RuleAboveOn"))
+		newStyle.setRuleAboveOn(static_cast<bool>(attrs.valueAsInt("RuleAboveOn", 0)));
+	if (attrs.hasAttribute("RuleAboveWeight"))
+		newStyle.setRuleAboveWeight(attrs.valueAsDouble("RuleAboveWeight", 1.0));
+	if (attrs.hasAttribute("RuleAboveColor"))
+		newStyle.setRuleAboveColor(attrs.valueAsString("RuleAboveColor", "Black"));
+	if (attrs.hasAttribute("RuleAboveOverprint"))
+		newStyle.setRuleAboveOverprint(static_cast<bool>(attrs.valueAsInt("RuleAboveOverprint", 0)));
+	if (attrs.hasAttribute("RuleAboveGapColor"))
+		newStyle.setRuleAboveGapColor(attrs.valueAsString("RuleAboveGapColor", CommonStrings::None));
+	if (attrs.hasAttribute("RuleAboveGapOverprint"))
+		newStyle.setRuleAboveGapOverprint(static_cast<bool>(attrs.valueAsInt("RuleAboveGapOverprint", 0)));
+	if (attrs.hasAttribute("RuleAboveType"))
+		newStyle.setRuleAboveType(static_cast<ParagraphStyle::RuleType>(attrs.valueAsInt("RuleAboveType", 0)));
+	if (attrs.hasAttribute("RuleAboveTint"))
+		newStyle.setRuleAboveTint(attrs.valueAsInt("RuleAboveTint", 100));
+	if (attrs.hasAttribute("RuleAboveGapTint"))
+		newStyle.setRuleAboveGapTint(attrs.valueAsInt("RuleAboveGapTint", 100));
+	if (attrs.hasAttribute("RuleAboveWidthType"))
+		newStyle.setRuleAboveWidthType(static_cast<ParagraphStyle::RuleWidthType>(attrs.valueAsInt("RuleAboveWidthType", 0)));
+	if (attrs.hasAttribute("RuleAboveOffset"))
+		newStyle.setRuleAboveOffset(attrs.valueAsDouble("RuleAboveOffset", 0.0));
+	if (attrs.hasAttribute("RuleAboveLeftIndent"))
+		newStyle.setRuleAboveLeftIndent(attrs.valueAsDouble("RuleAboveLeftIndent", 0.0));
+	if (attrs.hasAttribute("RuleAboveRightIndent"))
+		newStyle.setRuleAboveRightIndent(attrs.valueAsDouble("RuleAboveRightIndent", 0.0));
+	if (attrs.hasAttribute("RuleAboveKeepInFrame"))
+		newStyle.setRuleAboveKeepInFrame(static_cast<bool>(attrs.valueAsInt("RuleAboveKeepInFrame", 1)));
+
+	if (attrs.hasAttribute("RuleBelowOn"))
+		newStyle.setRuleBelowOn(static_cast<bool>(attrs.valueAsInt("RuleBelowOn", 0)));
+	if (attrs.hasAttribute("RuleBelowWeight"))
+		newStyle.setRuleBelowWeight(attrs.valueAsDouble("RuleBelowWeight", 1.0));
+	if (attrs.hasAttribute("RuleBelowColor"))
+		newStyle.setRuleBelowColor(attrs.valueAsString("RuleBelowColor", "Black"));
+	if (attrs.hasAttribute("RuleBelowOverprint"))
+		newStyle.setRuleBelowOverprint(static_cast<bool>(attrs.valueAsInt("RuleBelowOverprint", 0)));
+	if (attrs.hasAttribute("RuleBelowGapColor"))
+		newStyle.setRuleBelowGapColor(attrs.valueAsString("RuleBelowGapColor", CommonStrings::None));
+	if (attrs.hasAttribute("RuleBelowGapOverprint"))
+		newStyle.setRuleBelowGapOverprint(static_cast<bool>(attrs.valueAsInt("RuleBelowGapOverprint", 0)));
+	if (attrs.hasAttribute("RuleBelowType"))
+		newStyle.setRuleBelowType(static_cast<ParagraphStyle::RuleType>(attrs.valueAsInt("RuleBelowType", 0)));
+	if (attrs.hasAttribute("RuleBelowTint"))
+		newStyle.setRuleBelowTint(attrs.valueAsInt("RuleBelowTint", 100));
+	if (attrs.hasAttribute("RuleBelowGapTint"))
+		newStyle.setRuleBelowGapTint(attrs.valueAsInt("RuleBelowGapTint", 100));
+	if (attrs.hasAttribute("RuleBelowWidthType"))
+		newStyle.setRuleBelowWidthType(static_cast<ParagraphStyle::RuleWidthType>(attrs.valueAsInt("RuleBelowWidthType", 0)));
+	if (attrs.hasAttribute("RuleBelowOffset"))
+		newStyle.setRuleBelowOffset(attrs.valueAsDouble("RuleBelowOffset", 0.0));
+	if (attrs.hasAttribute("RuleBelowLeftIndent"))
+		newStyle.setRuleBelowLeftIndent(attrs.valueAsDouble("RuleBelowLeftIndent", 0.0));
+	if (attrs.hasAttribute("RuleBelowRightIndent"))
+		newStyle.setRuleBelowRightIndent(attrs.valueAsDouble("RuleBelowRightIndent", 0.0));
+	if (attrs.hasAttribute("RuleBelowKeepInFrame"))
+		newStyle.setRuleBelowKeepInFrame(static_cast<bool>(attrs.valueAsInt("RuleBelowKeepInFrame", 1)));
+
 	readCharacterStyleAttrs(doc, attrs, newStyle.charStyle());
 
 	//	newStyle.tabValues().clear();

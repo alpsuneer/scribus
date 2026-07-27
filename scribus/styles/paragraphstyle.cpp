@@ -22,6 +22,8 @@
 #include "desaxe/simple_actions.h"
 #include "util_math.h"
 
+const QString ParagraphStyle::RuleTextColor("(Text Color)");
+
 bool ParagraphStyle::TabRecord::operator==(const TabRecord& other) const
 {
 	return isequiv(tabPosition, other.tabPosition) && tabType == other.tabType && tabFillChar == other.tabFillChar;
@@ -223,6 +225,14 @@ void ParagraphStyle::getNamedResources(ResourceCollection& lists) const
 	if (!opticalMarginSet.isEmpty())
 		lists.collectOpticalMarginSet(opticalMarginSet);
 
+	// Paragraph rule colours. The "(Text Color)" sentinel is not a palette colour.
+	const QString ruleColors[4] = { ruleAboveColor(), ruleAboveGapColor(), ruleBelowColor(), ruleBelowGapColor() };
+	for (const QString& ruleColor : ruleColors)
+	{
+		if (ruleColor != CommonStrings::None && ruleColor != ParagraphStyle::RuleTextColor && !ruleColor.isEmpty())
+			lists.collectColor(ruleColor);
+	}
+
 	QString parEffectStyle = peCharStyleName();
 	if (parEffectStyle.length() > 0)
 	{
@@ -250,6 +260,15 @@ void ParagraphStyle::replaceNamedResources(ResourceCollection& newNames)
 	if (!inh_OpticalMarginSetId && (it = newNames.opticalMarginSets().find(opticalMarginSetId())) != newNames.opticalMarginSets().end())
 		setOpticalMarginSetId(it.value());
 
+	if (!inh_RuleAboveColor && (it = newNames.colors().find(ruleAboveColor())) != newNames.colors().end())
+		setRuleAboveColor(it.value());
+	if (!inh_RuleAboveGapColor && (it = newNames.colors().find(ruleAboveGapColor())) != newNames.colors().end())
+		setRuleAboveGapColor(it.value());
+	if (!inh_RuleBelowColor && (it = newNames.colors().find(ruleBelowColor())) != newNames.colors().end())
+		setRuleBelowColor(it.value());
+	if (!inh_RuleBelowGapColor && (it = newNames.colors().find(ruleBelowGapColor())) != newNames.colors().end())
+		setRuleBelowGapColor(it.value());
+
 	if ((it = (newNames.charStyles().find(peCharStyleName()))) != newNames.charStyles().end())
 		setPeCharStyleName(it.value());
 	m_cstyle.replaceNamedResources(newNames);
@@ -262,6 +281,16 @@ static QString toXMLString(ParagraphStyle::AlignmentType val)
 }
 
 static QString toXMLString(ParagraphStyle::DirectionType val)
+{
+	return QString::number(static_cast<int>(val));
+}
+
+static QString toXMLString(ParagraphStyle::RuleType val)
+{
+	return QString::number(static_cast<int>(val));
+}
+
+static QString toXMLString(ParagraphStyle::RuleWidthType val)
 {
 	return QString::number(static_cast<int>(val));
 }
@@ -354,6 +383,18 @@ template<>
 ParagraphStyle::LineSpacingMode parse<ParagraphStyle::LineSpacingMode>(const Xml_string& str)
 {
 	return parseEnum<ParagraphStyle::LineSpacingMode>(str);
+}
+
+template<>
+ParagraphStyle::RuleType parse<ParagraphStyle::RuleType>(const Xml_string& str)
+{
+	return parseEnum<ParagraphStyle::RuleType>(str);
+}
+
+template<>
+ParagraphStyle::RuleWidthType parse<ParagraphStyle::RuleWidthType>(const Xml_string& str)
+{
+	return parseEnum<ParagraphStyle::RuleWidthType>(str);
 }
 
 

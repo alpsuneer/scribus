@@ -128,6 +128,7 @@ void SMPStyleWidget::languageChange()
 {
 	retranslateUi(this);
 	alignment->languageChange();
+	rulesPage->languageChange();
 	tabList->firstLineSpin->setToolTip( tr("First Line Indent"));
 	tabList->leftIndentSpin->setToolTip(  tr("Left Indent"));
 	tabList->rightIndentSpin->setToolTip( tr("Right Indent"));
@@ -164,6 +165,7 @@ void SMPStyleWidget::unitChange(double oldRatio, double newRatio, int unitIndex)
 {
 	parEffectOffset->setNewUnit(unitIndex);
 	tabList->unitChange(unitIndex);
+	rulesPage->unitChange(unitIndex);
 }
 
 void SMPStyleWidget::setDoc(ScribusDoc *doc)
@@ -180,6 +182,7 @@ void SMPStyleWidget::setDoc(ScribusDoc *doc)
 
 	cpage->setDoc(m_Doc);
 	backgroundColor->colorButton->setDoc(m_Doc);
+	rulesPage->setDoc(m_Doc);
 }
 
 void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles, QList<CharStyle> &cstyles, int unitIndex, const QString &defLang)
@@ -445,6 +448,7 @@ void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles
 		parentCombo->setCurrentIndex(index);
 	}
 
+	rulesPage->showRules(pstyle, parent, m_hasParent, unitIndex);
 }
 
 void SMPStyleWidget::show(QList<ParagraphStyle*> &pstyles, QList<ParagraphStyle> &pstylesAll, QList<CharStyle> &cstyles, int unitIndex, const QString &defLang)
@@ -472,6 +476,8 @@ void SMPStyleWidget::show(QList<ParagraphStyle*> &pstyles, QList<ParagraphStyle>
 		//checkParEffectState();
 		setParagraphEffect(0);
 		showColors(pstyles);
+		// Rule controls edit every selected style at once, so show the first one.
+		rulesPage->showRules(pstyles[0], nullptr, false, unitIndex);
 	}
 }
 
@@ -859,7 +865,7 @@ void SMPStyleWidget::showParent(const QList<ParagraphStyle*> &pstyles)
 
 void SMPStyleWidget::clearAll()
 {
-
+	rulesPage->clearAll();
 }
 
 /*********************************************************************

@@ -97,6 +97,13 @@ public:
 	/// The current vertical scale.
 	virtual double scaleH() const;
 
+	/// Sets whether subsequent drawing operations overprint instead of
+	/// knocking out. Only honoured by the PDF and PostScript painters,
+	/// screen and other exports ignore it.
+	virtual void setOverprint(bool o);
+	/// The current overprint state.
+	virtual bool overprint() const;
+
 	/// Sets the selection state of subsequent drawing operations, used for
 	/// selecting proper foreground and background colors when drawing text
 	/// selection.
@@ -148,6 +155,7 @@ private:
 		double scaleH { 1.0 };
 		double scaleV { 1.0 };
 		bool selected { false };
+		bool overprint { false };
 	};
 
 	std::stack<State> m_stack;

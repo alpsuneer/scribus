@@ -895,6 +895,64 @@ void Scribus150Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 	if ( ! style.isInhBackgroundShade())
 		docu.writeAttribute("BSHADE", style.backgroundShade());
 
+	if (!style.isInhRuleAboveOn())
+		docu.writeAttribute("RuleAboveOn", static_cast<int>(style.ruleAboveOn()));
+	if (!style.isInhRuleAboveWeight())
+		docu.writeAttribute("RuleAboveWeight", style.ruleAboveWeight());
+	if (!style.isInhRuleAboveColor())
+		docu.writeAttribute("RuleAboveColor", style.ruleAboveColor());
+	if (!style.isInhRuleAboveOverprint())
+		docu.writeAttribute("RuleAboveOverprint", static_cast<int>(style.ruleAboveOverprint()));
+	if (!style.isInhRuleAboveGapColor())
+		docu.writeAttribute("RuleAboveGapColor", style.ruleAboveGapColor());
+	if (!style.isInhRuleAboveGapOverprint())
+		docu.writeAttribute("RuleAboveGapOverprint", static_cast<int>(style.ruleAboveGapOverprint()));
+	if (!style.isInhRuleAboveType())
+		docu.writeAttribute("RuleAboveType", static_cast<int>(style.ruleAboveType()));
+	if (!style.isInhRuleAboveTint())
+		docu.writeAttribute("RuleAboveTint", style.ruleAboveTint());
+	if (!style.isInhRuleAboveGapTint())
+		docu.writeAttribute("RuleAboveGapTint", style.ruleAboveGapTint());
+	if (!style.isInhRuleAboveWidthType())
+		docu.writeAttribute("RuleAboveWidthType", static_cast<int>(style.ruleAboveWidthType()));
+	if (!style.isInhRuleAboveOffset())
+		docu.writeAttribute("RuleAboveOffset", style.ruleAboveOffset());
+	if (!style.isInhRuleAboveLeftIndent())
+		docu.writeAttribute("RuleAboveLeftIndent", style.ruleAboveLeftIndent());
+	if (!style.isInhRuleAboveRightIndent())
+		docu.writeAttribute("RuleAboveRightIndent", style.ruleAboveRightIndent());
+	if (!style.isInhRuleAboveKeepInFrame())
+		docu.writeAttribute("RuleAboveKeepInFrame", static_cast<int>(style.ruleAboveKeepInFrame()));
+
+	if (!style.isInhRuleBelowOn())
+		docu.writeAttribute("RuleBelowOn", static_cast<int>(style.ruleBelowOn()));
+	if (!style.isInhRuleBelowWeight())
+		docu.writeAttribute("RuleBelowWeight", style.ruleBelowWeight());
+	if (!style.isInhRuleBelowColor())
+		docu.writeAttribute("RuleBelowColor", style.ruleBelowColor());
+	if (!style.isInhRuleBelowOverprint())
+		docu.writeAttribute("RuleBelowOverprint", static_cast<int>(style.ruleBelowOverprint()));
+	if (!style.isInhRuleBelowGapColor())
+		docu.writeAttribute("RuleBelowGapColor", style.ruleBelowGapColor());
+	if (!style.isInhRuleBelowGapOverprint())
+		docu.writeAttribute("RuleBelowGapOverprint", static_cast<int>(style.ruleBelowGapOverprint()));
+	if (!style.isInhRuleBelowType())
+		docu.writeAttribute("RuleBelowType", static_cast<int>(style.ruleBelowType()));
+	if (!style.isInhRuleBelowTint())
+		docu.writeAttribute("RuleBelowTint", style.ruleBelowTint());
+	if (!style.isInhRuleBelowGapTint())
+		docu.writeAttribute("RuleBelowGapTint", style.ruleBelowGapTint());
+	if (!style.isInhRuleBelowWidthType())
+		docu.writeAttribute("RuleBelowWidthType", static_cast<int>(style.ruleBelowWidthType()));
+	if (!style.isInhRuleBelowOffset())
+		docu.writeAttribute("RuleBelowOffset", style.ruleBelowOffset());
+	if (!style.isInhRuleBelowLeftIndent())
+		docu.writeAttribute("RuleBelowLeftIndent", style.ruleBelowLeftIndent());
+	if (!style.isInhRuleBelowRightIndent())
+		docu.writeAttribute("RuleBelowRightIndent", style.ruleBelowRightIndent());
+	if (!style.isInhRuleBelowKeepInFrame())
+		docu.writeAttribute("RuleBelowKeepInFrame", static_cast<int>(style.ruleBelowKeepInFrame()));
+
 	if ( ! style.shortcut().isEmpty() )
 		docu.writeAttribute("PSHORTCUT", style.shortcut()); // shortcuts won't be inherited
 

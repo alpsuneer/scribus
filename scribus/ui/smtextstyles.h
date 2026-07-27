@@ -17,6 +17,7 @@ class ScribusDoc;
 class SMCStyleWidget;
 class SMPStyleWidget;
 class SMCharacterStyle;
+struct SMRuleControls;
 
 class SMParagraphStyle : public StyleItem
 {
@@ -65,6 +66,7 @@ private:
 
 	void setupConnections();
 	void removeConnections();
+	void applyRuleSide(const SMRuleControls& rule, bool above);
 	void updateStyleList();
 	void reloadTmpStyles();
 	QList<CharStyle> getCharStyles() const;
@@ -111,6 +113,7 @@ private slots:
 	void slotRightIndent();
 	void slotFirstLine();
 	void slotBackPColor();
+	void handleParagraphRules();
 	// cstyle
 	void slotFontSize();
 	void slotEffects(int e);

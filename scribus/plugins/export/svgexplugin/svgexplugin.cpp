@@ -1297,6 +1297,7 @@ QDomElement SVGExPlug::processTextItem(const PageItem *item, const QString& tran
 	{
 		SvgPainter p(trans, this, ob);
 		item->textLayout.renderBackground(&p);
+		item->textLayout.renderParagraphRules(&p);
 		item->textLayout.render(&p);
 	}
 	if (item->isTextFrame())

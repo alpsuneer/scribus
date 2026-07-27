@@ -24,6 +24,7 @@ for which a new license (GPL+exception) is in place.
 #include "smalignselect.h"
 #include "smcolorcombo.h"
 #include "smcstylewidget.h"
+#include "smprulewidget.h"
 #include "smpstylewidget.h"
 #include "smsccombobox.h"
 #include "smshadebutton.h"
@@ -541,6 +542,7 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->parentCombo, SIGNAL(currentTextChanged(QString)), this, SLOT(slotParentChanged(QString)));
 	connect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	connect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
+	connect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
 
 	// character attributes
 	connect(m_pwidget->cpage->fontFace_, SIGNAL(fontSelected(QString)), this, SLOT(slotFont(QString)));
@@ -636,6 +638,7 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->tabList->firstLineSpin, SIGNAL(valueChanged(double)), this, SLOT(slotFirstLine()));
 	disconnect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	disconnect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
+	disconnect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
 
 	disconnect(m_pwidget->cpage->fontFace_, SIGNAL(fontSelected(QString)), this, SLOT(slotFont(QString)));
 	disconnect(m_pwidget->cpage->effects_, SIGNAL(State(int)), this, SLOT(slotEffects(int)));
@@ -1513,6 +1516,88 @@ void SMParagraphStyle::slotBackPColor()
 	}
 
 	slotSelectionDirty();
+}
+
+/**
+ The paragraph rules page has 28 attributes; rather than 28 near identical
+ slots, a single handler writes the whole page back to the selected styles
+ whenever any of its controls changes.
+ */
+void SMParagraphStyle::handleParagraphRules()
+{
+	if (!m_pwidget)
+		return;
+
+	applyRuleSide(m_pwidget->rulesPage->above, true);
+	applyRuleSide(m_pwidget->rulesPage->below, false);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::applyRuleSide(const SMRuleControls& rule, bool above)
+{
+	using PS = ParagraphStyle;
+
+	void (PS::*setOn)(bool)            = above ? &PS::setRuleAboveOn : &PS::setRuleBelowOn;
+	void (PS::*setWeight)(double)      = above ? &PS::setRuleAboveWeight : &PS::setRuleBelowWeight;
+	void (PS::*setColor)(QString)      = above ? &PS::setRuleAboveColor : &PS::setRuleBelowColor;
+	void (PS::*setOverprint)(bool)     = above ? &PS::setRuleAboveOverprint : &PS::setRuleBelowOverprint;
+	void (PS::*setGapColor)(QString)   = above ? &PS::setRuleAboveGapColor : &PS::setRuleBelowGapColor;
+	void (PS::*setGapOverprint)(bool)  = above ? &PS::setRuleAboveGapOverprint : &PS::setRuleBelowGapOverprint;
+	void (PS::*setType)(PS::RuleType)  = above ? &PS::setRuleAboveType : &PS::setRuleBelowType;
+	void (PS::*setTint)(int)           = above ? &PS::setRuleAboveTint : &PS::setRuleBelowTint;
+	void (PS::*setGapTint)(int)        = above ? &PS::setRuleAboveGapTint : &PS::setRuleBelowGapTint;
+	void (PS::*setWidth)(PS::RuleWidthType) = above ? &PS::setRuleAboveWidthType : &PS::setRuleBelowWidthType;
+	void (PS::*setOffset)(double)      = above ? &PS::setRuleAboveOffset : &PS::setRuleBelowOffset;
+	void (PS::*setLeft)(double)        = above ? &PS::setRuleAboveLeftIndent : &PS::setRuleBelowLeftIndent;
+	void (PS::*setRight)(double)       = above ? &PS::setRuleAboveRightIndent : &PS::setRuleBelowRightIndent;
+	void (PS::*setKeep)(bool)          = above ? &PS::setRuleAboveKeepInFrame : &PS::setRuleBelowKeepInFrame;
+
+	void (PS::*resetOn)()           = above ? &PS::resetRuleAboveOn : &PS::resetRuleBelowOn;
+	void (PS::*resetWeight)()       = above ? &PS::resetRuleAboveWeight : &PS::resetRuleBelowWeight;
+	void (PS::*resetColor)()        = above ? &PS::resetRuleAboveColor : &PS::resetRuleBelowColor;
+	void (PS::*resetOverprint)()    = above ? &PS::resetRuleAboveOverprint : &PS::resetRuleBelowOverprint;
+	void (PS::*resetGapColor)()     = above ? &PS::resetRuleAboveGapColor : &PS::resetRuleBelowGapColor;
+	void (PS::*resetGapOverprint)() = above ? &PS::resetRuleAboveGapOverprint : &PS::resetRuleBelowGapOverprint;
+	void (PS::*resetType)()         = above ? &PS::resetRuleAboveType : &PS::resetRuleBelowType;
+	void (PS::*resetTint)()         = above ? &PS::resetRuleAboveTint : &PS::resetRuleBelowTint;
+	void (PS::*resetGapTint)()      = above ? &PS::resetRuleAboveGapTint : &PS::resetRuleBelowGapTint;
+	void (PS::*resetWidth)()        = above ? &PS::resetRuleAboveWidthType : &PS::resetRuleBelowWidthType;
+	void (PS::*resetOffset)()       = above ? &PS::resetRuleAboveOffset : &PS::resetRuleBelowOffset;
+	void (PS::*resetLeft)()         = above ? &PS::resetRuleAboveLeftIndent : &PS::resetRuleBelowLeftIndent;
+	void (PS::*resetRight)()        = above ? &PS::resetRuleAboveRightIndent : &PS::resetRuleBelowRightIndent;
+	void (PS::*resetKeep)()         = above ? &PS::resetRuleAboveKeepInFrame : &PS::resetRuleBelowKeepInFrame;
+
+	auto applyAll = [this](auto setter, auto resetter, bool useParent, auto value)
+	{
+		for (int i = 0; i < m_selection.count(); ++i)
+		{
+			if (useParent)
+				(m_selection[i]->*resetter)();
+			else
+				(m_selection[i]->*setter)(value);
+		}
+	};
+
+	// "(Text Color)" is not a palette colour, so it is carried by a checkbox
+	// next to the colour combo rather than by an entry in the list.
+	QString colorName = rule.colorIsTextColor->isChecked() ? PS::RuleTextColor : rule.color->currentColor();
+	QString gapColorName = rule.gapColorIsTextColor->isChecked() ? PS::RuleTextColor : rule.gapColor->currentColor();
+
+	applyAll(setOn, resetOn, rule.on->useParentValue(), rule.on->isChecked());
+	applyAll(setWeight, resetWeight, rule.weight->useParentValue(), rule.weight->value());
+	applyAll(setColor, resetColor, rule.color->useParentValue() && !rule.colorIsTextColor->isChecked(), colorName);
+	applyAll(setOverprint, resetOverprint, rule.overprint->useParentValue(), rule.overprint->isChecked());
+	applyAll(setGapColor, resetGapColor, rule.gapColor->useParentValue() && !rule.gapColorIsTextColor->isChecked(), gapColorName);
+	applyAll(setGapOverprint, resetGapOverprint, rule.gapOverprint->useParentValue(), rule.gapOverprint->isChecked());
+	applyAll(setType, resetType, rule.type->useParentValue(), static_cast<PS::RuleType>(rule.type->currentIndex()));
+	applyAll(setTint, resetTint, rule.tint->useParentValue(), rule.tint->value());
+	applyAll(setGapTint, resetGapTint, rule.gapTint->useParentValue(), rule.gapTint->value());
+	applyAll(setWidth, resetWidth, rule.widthType->useParentValue(), static_cast<PS::RuleWidthType>(rule.widthType->currentIndex()));
+	applyAll(setOffset, resetOffset, rule.offset->useParentValue(), rule.offset->value() / m_unitRatio);
+	applyAll(setLeft, resetLeft, rule.leftIndent->useParentValue(), rule.leftIndent->value() / m_unitRatio);
+	applyAll(setRight, resetRight, rule.rightIndent->useParentValue(), rule.rightIndent->value() / m_unitRatio);
+	applyAll(setKeep, resetKeep, rule.keepInFrame->useParentValue(), rule.keepInFrame->isChecked());
 }
 
 void SMParagraphStyle::slotBackColor()

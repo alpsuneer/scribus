@@ -194,6 +194,11 @@ void PSPainter::drawRect(const QRectF& rect)
 	double h {0.0}, s {0.0}, v {0.0}, k {0.0};
 	m_ps->PS_save();
 	applyTransform();
+	if (overprint())
+	{
+		m_ps->PutStream("true setoverprint\n");
+		m_ps->PutStream("true setoverprintmode\n");
+	}
 	m_ps->PS_moveto(x() + rect.x(), -y() - rect.y());
 	m_ps->PS_lineto(x() + rect.x() + rect.width(), -y() - rect.y());
 	m_ps->PS_lineto(x() + rect.x() + rect.width(), -y() - rect.y() - rect.height());
@@ -4136,6 +4141,7 @@ void PSLib::setTextSt(PageItem* ite, uint argh, ScPage* pg, bool master)
 
 	PSPainter p(m_Doc, argh, pg, master, this);
 	ite->textLayout.renderBackground(&p);
+	ite->textLayout.renderParagraphRules(&p);
 	ite->textLayout.render(&p);
 }
 

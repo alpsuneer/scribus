@@ -105,6 +105,16 @@ double TextLayoutPainter::scaleH() const
 	return m_stack.top().scaleH;
 }
 
+void TextLayoutPainter::setOverprint(bool o)
+{
+	m_stack.top().overprint = o;
+}
+
+bool TextLayoutPainter::overprint() const
+{
+	return m_stack.top().overprint;
+}
+
 void TextLayoutPainter::setSelected(bool s)
 {
 	m_stack.top().selected = s;

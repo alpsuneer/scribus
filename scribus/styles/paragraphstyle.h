@@ -76,6 +76,29 @@ public:
 		CenterTab = 4
 	};
 
+	/** Line style of a paragraph rule (rule above / rule below) */
+	enum RuleType
+	{
+		RuleSolid     = 0,
+		RuleDashed    = 1,
+		RuleDotted    = 2,
+		RuleDouble    = 3,
+		RuleThickThin = 4,
+		RuleThinThick = 5
+	};
+
+	/** Horizontal extent of a paragraph rule */
+	enum RuleWidthType
+	{
+		RuleWidthColumn = 0,
+		RuleWidthText   = 1
+	};
+
+	/** Sentinel colour name for paragraph rules: the rule inherits the fill
+	    colour of the first character of the paragraph. Stored verbatim so it
+	    survives colour palette changes. */
+	static const QString RuleTextColor;
+
 	struct TabRecord
 	{
 		qreal tabPosition {0.0};

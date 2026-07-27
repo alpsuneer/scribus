@@ -3601,6 +3601,7 @@ void PageItem_TextFrame::DrawObj_Item(ScPainter *p, const QRectF& cullingArea)
 		painter.setGlyphBoxRendering(m_Doc->whiteSpaceModeEnabled);
 		if (!m_Doc->whiteSpaceModeEnabled)
 			textLayout.renderBackground(&painter);
+		textLayout.renderParagraphRules(&painter);
 		textLayout.render(&painter, this);
 
 		// Draw spell check underlines (only in edit mode)

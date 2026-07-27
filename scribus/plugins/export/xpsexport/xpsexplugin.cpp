@@ -1144,6 +1144,7 @@ void XPSExPlug::processTextItem(double xOffset, double yOffset, PageItem *item, 
 			grp2.setAttribute("Opacity", grp.attribute("Opacity"));
 		XPSPainter p(item, grp2, this, xps_fontMap, xps_fontRel, rel_root);
 		item->textLayout.renderBackground(&p);
+		item->textLayout.renderParagraphRules(&p);
 		item->textLayout.render(&p);
 		parentElem.appendChild(grp2);
 	}
