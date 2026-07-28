@@ -24,6 +24,7 @@ for which a new license (GPL+exception) is in place.
 #include "smalignselect.h"
 #include "smcolorcombo.h"
 #include "smcstylewidget.h"
+#include "smnestedstyleswidget.h"
 #include "smprulewidget.h"
 #include "smpstylewidget.h"
 #include "smsccombobox.h"
@@ -543,6 +544,7 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	connect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
 	connect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
+	connect(m_pwidget->nestedStylesPage, SIGNAL(nestedStylesChanged()), this, SLOT(handleNestedStyles()));
 
 	// character attributes
 	connect(m_pwidget->cpage->fontFace_, SIGNAL(fontSelected(QString)), this, SLOT(slotFont(QString)));
@@ -639,6 +641,7 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	disconnect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
 	disconnect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
+	disconnect(m_pwidget->nestedStylesPage, SIGNAL(nestedStylesChanged()), this, SLOT(handleNestedStyles()));
 
 	disconnect(m_pwidget->cpage->fontFace_, SIGNAL(fontSelected(QString)), this, SLOT(slotFont(QString)));
 	disconnect(m_pwidget->cpage->effects_, SIGNAL(State(int)), this, SLOT(slotEffects(int)));
@@ -1530,6 +1533,25 @@ void SMParagraphStyle::handleParagraphRules()
 
 	applyRuleSide(m_pwidget->rulesPage->above, true);
 	applyRuleSide(m_pwidget->rulesPage->below, false);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::handleNestedStyles()
+{
+	if (!m_pwidget)
+		return;
+
+	const bool useParent = m_pwidget->nestedStylesPage->useParentValue();
+	const QList<ParagraphStyle::NestedStyleRule> rules = m_pwidget->nestedStylesPage->rules();
+
+	for (int i = 0; i < m_selection.count(); ++i)
+	{
+		if (useParent)
+			m_selection[i]->resetNestedStyles();
+		else
+			m_selection[i]->setNestedStyleRules(rules);
+	}
 
 	slotSelectionDirty();
 }

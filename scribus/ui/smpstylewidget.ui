@@ -1726,6 +1726,28 @@ A value of 0 means unlimited hyphenations.</string>
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tabNestedStyles">
+      <attribute name="title">
+       <string>Nested Styles</string>
+      </attribute>
+      <layout class="QVBoxLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="SMNestedStylesWidget" name="nestedStylesPage" native="true"/>
+       </item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tabCharacterStyle">
       <attribute name="title">
        <string>Character Style</string>
@@ -1806,6 +1828,12 @@ A value of 0 means unlimited hyphenations.</string>
    <class>SMPRulesWidget</class>
    <extends>QWidget</extends>
    <header>ui/smprulewidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SMNestedStylesWidget</class>
+   <extends>QWidget</extends>
+   <header>ui/smnestedstyleswidget.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>

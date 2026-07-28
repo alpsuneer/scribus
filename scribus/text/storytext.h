@@ -29,6 +29,8 @@ pageitem.cpp  -  description
 #include <QObject>
 #include <QString>
 #include <QList>
+#include <QHash>
+#include <QVector>
 #include <unicode/uversion.h>
 
 #include "itextsource.h"
@@ -198,6 +200,11 @@ public:
 	const CharStyle& charStyle() const;
 	// Get charstyle at specific position
  	const CharStyle& charStyle(int pos) const override;
+	/** Get the charstyle to lay out and paint pos with: charStyle() plus the
+	    paragraph style's nested styles, which are derived at layout time and
+	    never stored in the text. Do not use when saving or copying. */
+	const CharStyle& layoutCharStyle(int pos) const override;
+	int layoutStyleGroup(int pos) const override;
 	// Get paragraph style at current cursor position
 	const ParagraphStyle& paragraphStyle() const;
 	// Get paragraph style at specific position
@@ -316,10 +323,30 @@ private:
 	ScText * item(int index);
 	const ScText * item(int index) const;
 	void fixSurrogateSelection();
-	
+
+	/** Recompute the nested-style overlay if the text or the styles changed. */
+	void updateNestedStyleOverlay() const;
+	/** Allocate a derived char style owned by the current overlay generation. */
+	const CharStyle* allocDerivedStyle(const CharStyle& base, const QString& nestedStyleName) const;
+
 private:
 	ScribusDoc * m_doc { nullptr };
 	ShapedTextCache* m_shapedTextCache { nullptr };
+
+	/** Nested styles, resolved at layout time. All of this stays empty and
+	    untouched unless some paragraph in this story carries nested style rules. */
+	mutable QVector<const CharStyle*> m_nestedOverlay;   //!< per character, null = no override
+	mutable QVector<int> m_nestedOverlayGroup;           //!< per character run id, 0 = no override
+	mutable bool m_nestedOverlayDirty { true };
+
+	/** Derived styles are owned per overlay generation. GlyphCluster keeps a
+	    bare pointer to the style it was shaped with, so the generation that a
+	    layout was built from is kept alive one rebuild longer than it is needed:
+	    a frame is always re-laid out before it is repainted, and invalidating
+	    any frame of a chain invalidates the whole chain, so nothing can still be
+	    pointing into the generation before last. */
+	mutable QList<CharStyle*> m_derivedStyles;
+	mutable QList<CharStyle*> m_derivedStylesPrev;
 
 	static inline icu::BreakIterator* m_graphemeIterator { nullptr };
 	static inline icu::BreakIterator* m_wordIterator { nullptr };

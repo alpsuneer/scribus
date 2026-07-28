@@ -76,6 +76,8 @@ int TextSourceSegment::nextBlockStart(int pos) const
 
 bool TextSourceSegment::isBlockStart(int pos) const { return m_source->isBlockStart(toSrc(pos)); }
 const CharStyle& TextSourceSegment::charStyle(int pos) const { return m_source->charStyle(toSrc(pos)); }
+const CharStyle& TextSourceSegment::layoutCharStyle(int pos) const { return m_source->layoutCharStyle(toSrc(pos)); }
+int TextSourceSegment::layoutStyleGroup(int pos) const { return m_source->layoutStyleGroup(toSrc(pos)); }
 const ParagraphStyle& TextSourceSegment::paragraphStyle(int pos) const { return m_source->paragraphStyle(toSrc(pos)); }
 LayoutFlags TextSourceSegment::flags(int pos) const { return m_source->flags(toSrc(pos)); }
 bool TextSourceSegment::hasFlag(int pos, LayoutFlags flag) const { return m_source->hasFlag(toSrc(pos)); }

@@ -957,6 +957,9 @@ void Scribus170Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 	if (!style.isInhRuleBelowKeepInFrame())
 		docu.writeAttribute("RuleBelowKeepInFrame", static_cast<int>(style.ruleBelowKeepInFrame()));
 
+	if (!style.isInhNestedStyles())
+		docu.writeAttribute("NestedStyles", style.nestedStyles());
+
 	if (!style.shortcut().isEmpty() )
 		docu.writeAttribute("PSHORTCUT", style.shortcut()); // shortcuts won't be inherited
 

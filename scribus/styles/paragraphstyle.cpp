@@ -29,6 +29,115 @@ bool ParagraphStyle::TabRecord::operator==(const TabRecord& other) const
 	return isequiv(tabPosition, other.tabPosition) && tabType == other.tabType && tabFillChar == other.tabFillChar;
 }
 
+bool ParagraphStyle::NestedStyleRule::operator==(const NestedStyleRule& other) const
+{
+	return charStyleName == other.charStyleName
+		&& mode == other.mode
+		&& count == other.count
+		&& delimiterType == other.delimiterType
+		&& delimiter == other.delimiter;
+}
+
+char32_t ParagraphStyle::NestedStyleRule::effectiveDelimiter() const
+{
+	switch (delimiterType)
+	{
+		case NestedDelimEndOfPara: return 0;
+		case NestedDelimSpace:     return 0x0020;
+		case NestedDelimTab:       return 0x0009;
+		case NestedDelimEnSpace:   return 0x2002;
+		case NestedDelimEmSpace:   return 0x2003;
+		case NestedDelimChar:      break;
+	}
+	return delimiter;
+}
+
+QList<ParagraphStyle::NestedStyleRule> ParagraphStyle::parseNestedStyles(const QString& encoded)
+{
+	QList<NestedStyleRule> rules;
+	if (encoded.isEmpty())
+		return rules;
+
+	const QStringList ruleStrings = encoded.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+	for (const QString& ruleString : ruleStrings)
+	{
+		const QStringList fields = ruleString.split(QLatin1Char(','));
+		if (fields.count() != 4)
+			continue;
+
+		NestedStyleRule rule;
+		rule.charStyleName = QString::fromUtf8(QByteArray::fromPercentEncoding(fields.at(0).toUtf8()));
+		rule.mode  = (fields.at(1) == QLatin1String("U")) ? NestedUpTo : NestedThrough;
+		rule.count = qBound(1, fields.at(2).toInt(), 9);
+
+		const QString& delimSpec = fields.at(3);
+		if (delimSpec == QLatin1String("EOP"))
+			rule.delimiterType = NestedDelimEndOfPara;
+		else if (delimSpec == QLatin1String("SP"))
+			rule.delimiterType = NestedDelimSpace;
+		else if (delimSpec == QLatin1String("TAB"))
+			rule.delimiterType = NestedDelimTab;
+		else if (delimSpec == QLatin1String("ENSP"))
+			rule.delimiterType = NestedDelimEnSpace;
+		else if (delimSpec == QLatin1String("EMSP"))
+			rule.delimiterType = NestedDelimEmSpace;
+		else if (delimSpec.startsWith(QLatin1Char('U')))
+		{
+			bool ok = false;
+			const char32_t cp = delimSpec.mid(1).toUInt(&ok, 16);
+			if (!ok || cp == 0)
+				continue;
+			rule.delimiterType = NestedDelimChar;
+			rule.delimiter = cp;
+		}
+		else
+			continue;
+
+		rules.append(rule);
+		if (rules.count() >= MaxNestedStyleRules)
+			break;
+	}
+	return rules;
+}
+
+QString ParagraphStyle::encodeNestedStyles(const QList<NestedStyleRule>& rules)
+{
+	QStringList encoded;
+	for (const NestedStyleRule& rule : rules)
+	{
+		if (encoded.count() >= MaxNestedStyleRules)
+			break;
+		// A rule that scans for a literal character but has no character set is
+		// not expressible; drop it rather than write something unparseable.
+		if (rule.delimiterType == NestedDelimChar && rule.delimiter == 0)
+			continue;
+
+		QString delimSpec;
+		switch (rule.delimiterType)
+		{
+			case NestedDelimEndOfPara: delimSpec = QStringLiteral("EOP"); break;
+			case NestedDelimSpace:     delimSpec = QStringLiteral("SP"); break;
+			case NestedDelimTab:       delimSpec = QStringLiteral("TAB"); break;
+			case NestedDelimEnSpace:   delimSpec = QStringLiteral("ENSP"); break;
+			case NestedDelimEmSpace:   delimSpec = QStringLiteral("EMSP"); break;
+			case NestedDelimChar:
+				delimSpec = QLatin1Char('U') + QString::number(static_cast<uint>(rule.delimiter), 16).rightJustified(4, QLatin1Char('0')).toUpper();
+				break;
+		}
+
+		// Percent-encode the style name. The default encoder leaves only the
+		// URI unreserved set alone, so ',' and ';' in a style name can never
+		// break the field/record separators.
+		const QString name = QString::fromLatin1(rule.charStyleName.toUtf8().toPercentEncoding());
+		encoded.append(QStringLiteral("%1,%2,%3,%4")
+			.arg(name)
+			.arg(rule.mode == NestedUpTo ? QLatin1String("U") : QLatin1String("T"))
+			.arg(qBound(1, rule.count, 9))
+			.arg(delimSpec));
+	}
+	return encoded.join(QLatin1Char(';'));
+}
+
 ParagraphStyle::ParagraphStyle()
 {
 	setParent("");
@@ -241,6 +350,19 @@ void ParagraphStyle::getNamedResources(ResourceCollection& lists) const
 			peCharStyle->getNamedResources(lists);
 		lists.collectCharStyle(parEffectStyle);
 	}
+
+	// Character styles referenced by nested style rules. Without this they are
+	// not written to the file and do not travel with a copied frame.
+	const QList<NestedStyleRule> nested = nestedStyleRules();
+	for (const NestedStyleRule& rule : nested)
+	{
+		if (rule.charStyleName.isEmpty())
+			continue;
+		const CharStyle* nestedCharStyle = dynamic_cast<const CharStyle*>(m_cstyleContext.resolve(rule.charStyleName));
+		if (nestedCharStyle)
+			nestedCharStyle->getNamedResources(lists);
+		lists.collectCharStyle(rule.charStyleName);
+	}
 }
 
 
@@ -271,6 +393,23 @@ void ParagraphStyle::replaceNamedResources(ResourceCollection& newNames)
 
 	if ((it = (newNames.charStyles().find(peCharStyleName()))) != newNames.charStyles().end())
 		setPeCharStyleName(it.value());
+
+	if (!inh_NestedStyles)
+	{
+		QList<NestedStyleRule> nested = nestedStyleRules();
+		bool renamed = false;
+		for (NestedStyleRule& rule : nested)
+		{
+			if ((it = newNames.charStyles().find(rule.charStyleName)) != newNames.charStyles().end())
+			{
+				rule.charStyleName = it.value();
+				renamed = true;
+			}
+		}
+		if (renamed)
+			setNestedStyleRules(nested);
+	}
+
 	m_cstyle.replaceNamedResources(newNames);
 }
 

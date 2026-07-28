@@ -3829,6 +3829,9 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute("RuleBelowKeepInFrame"))
 		newStyle.setRuleBelowKeepInFrame(static_cast<bool>(attrs.valueAsInt("RuleBelowKeepInFrame", 1)));
 
+	if (attrs.hasAttribute("NestedStyles"))
+		newStyle.setNestedStyles(attrs.valueAsString("NestedStyles", ""));
+
 	readCharacterStyleAttrs(doc, attrs, newStyle.charStyle());
 
 	//	newStyle.tabValues().clear();

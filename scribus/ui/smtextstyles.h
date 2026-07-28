@@ -114,6 +114,7 @@ private slots:
 	void slotFirstLine();
 	void slotBackPColor();
 	void handleParagraphRules();
+	void handleNestedStyles();
 	// cstyle
 	void slotFontSize();
 	void slotEffects(int e);

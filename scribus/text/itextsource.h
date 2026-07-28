@@ -34,8 +34,29 @@ public:
 	/// You may lie here, i.e. lump blocks together or just return the end of the text
 	virtual int nextBlockStart(int pos) const = 0;
 	
-	virtual const CharStyle& charStyle(int pos) const = 0; 
+	virtual const CharStyle& charStyle(int pos) const = 0;
 	virtual const ParagraphStyle& paragraphStyle(int pos) const = 0;
+
+	/**
+	 * The character style to *lay out and paint* pos with.
+	 *
+	 * This is charStyle() plus any formatting that is derived at layout time
+	 * rather than stored in the text -- currently the paragraph style's nested
+	 * styles. It must be used by the shaper, the line breaker and the painters,
+	 * and must NOT be used when saving, copying or reporting the applied style,
+	 * so that derived formatting never becomes hard formatting.
+	 */
+	virtual const CharStyle& layoutCharStyle(int pos) const { return charStyle(pos); }
+
+	/**
+	 * Opaque key identifying which derived-formatting run pos belongs to.
+	 *
+	 * Shaping runs must never straddle a change in this value. Comparing the
+	 * styles themselves is not enough: equivForShaping() ignores everything that
+	 * does not affect glyph selection, so a nested style that only changes the
+	 * colour would otherwise be swallowed by the surrounding run.
+	 */
+	virtual int layoutStyleGroup(int pos) const { return 0; }
 
 	virtual void setCharStyle(int pos, uint len, const CharStyle& style) = 0;
 	virtual void setStyle(int pos, const ParagraphStyle& style) = 0;
