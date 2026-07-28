@@ -4071,12 +4071,6 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 					doc->docHyphenator->slotHyphenate(item);
 			}
 		}
-		for (PageItem* item : *doc->Items)
-		{
-			PageItem_TextFrame* tf = item->asTextFrame();
-			if (tf && !tf->isNoteFrame() && tf->nextInChain() == nullptr && tf->itemText.isNotEmpty())
-				tf->autoFitFrameHeight();
-		}
 		delete fileLoader;
 		view->updatesOn(true);
 		w->setUpdatesEnabled(true);
