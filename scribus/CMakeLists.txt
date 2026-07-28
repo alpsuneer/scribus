@@ -155,6 +155,29 @@ if(HAVE_OSG)
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/scimageeditor.cpp
+		ui/scimagefilterdialogs.cpp
+		ui/optionsbar.cpp
+		ui/tooloptions/moveoptionswidget.cpp
+		ui/tooloptions/cropoptionswidget.cpp
+		ui/dialogs/imagesizedialog.cpp
+		ui/dialogs/canvassizedialog.cpp
+		ui/dialogs/autoarrangedialog.cpp
+		ui/marchingantsitem.cpp
+		ui/tools/imagetool.cpp
+		ui/tools/rectmarqueetool.cpp
+		ui/tools/ellipsemarqueetool.cpp
+		ui/tools/lassotool.cpp
+		ui/tools/polygonlassotool.cpp
+		ui/tools/samselecttool.cpp
+		ui/tools/refineedgesbrushtool.cpp
+		ui/dialogs/autoenhancedialog.cpp
+		scimagefilterengine.cpp
+		scimagehistogram.cpp
+		scimageselection.cpp
+		scimagesam.cpp
+		autocorrectengine.cpp
+		autoarrangeengine.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		${SCRIBUS_API_SOURCES}
@@ -175,6 +198,29 @@ else()
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/scimageeditor.cpp
+		ui/scimagefilterdialogs.cpp
+		ui/optionsbar.cpp
+		ui/tooloptions/moveoptionswidget.cpp
+		ui/tooloptions/cropoptionswidget.cpp
+		ui/dialogs/imagesizedialog.cpp
+		ui/dialogs/canvassizedialog.cpp
+		ui/dialogs/autoarrangedialog.cpp
+		ui/marchingantsitem.cpp
+		ui/tools/imagetool.cpp
+		ui/tools/rectmarqueetool.cpp
+		ui/tools/ellipsemarqueetool.cpp
+		ui/tools/lassotool.cpp
+		ui/tools/polygonlassotool.cpp
+		ui/tools/samselecttool.cpp
+		ui/tools/refineedgesbrushtool.cpp
+		ui/dialogs/autoenhancedialog.cpp
+		scimagefilterengine.cpp
+		scimagehistogram.cpp
+		scimageselection.cpp
+		scimagesam.cpp
+		autocorrectengine.cpp
+		autoarrangeengine.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		${SCRIBUS_API_SOURCES}
@@ -339,6 +385,21 @@ endif()
 
 if (HAVE_BOOST)
 	target_link_libraries(${EXE_NAME} PRIVATE ${SCRIBUS_2GEOM_LIB})
+endif()
+
+# SAM Smart Select (Phase 4C) — optional ONNX Runtime inference.
+option(WITH_SAM "Build the SAM Smart Select tool (requires ONNX Runtime)" ON)
+if (WITH_SAM)
+	find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime_cxx_api.h PATH_SUFFIXES onnxruntime)
+	find_library(ONNXRUNTIME_LIBRARY onnxruntime)
+	if (ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+		message(STATUS "SAM Smart Select: ONNX Runtime found (${ONNXRUNTIME_LIBRARY})")
+		target_include_directories(${EXE_NAME} PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+		target_link_libraries(${EXE_NAME} PRIVATE ${ONNXRUNTIME_LIBRARY})
+		target_compile_definitions(${EXE_NAME} PRIVATE HAVE_SAM)
+	else()
+		message(STATUS "SAM Smart Select: ONNX Runtime NOT found — building the tool as a stub")
+	endif()
 endif()
 
 # Now build plugins

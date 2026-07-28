@@ -120,6 +120,28 @@ private:
 	void tritone(ScribusDoc* doc, ScColor color1, int shade1, FPointArray curve1, bool lin1, ScColor color2, int shade2, FPointArray curve2, bool lin2, ScColor color3, int shade3, const FPointArray& curve3, bool lin3, bool cmyk);
 	void quadtone(ScribusDoc* doc, ScColor color1, int shade1, FPointArray curve1, bool lin1, ScColor color2, int shade2, FPointArray curve2, bool lin2, ScColor color3, int shade3, FPointArray curve3, bool lin3, ScColor color4, int shade4, FPointArray curve4, bool lin4, bool cmyk);
 	void toGrayscale(bool cmyk);
+	void posterize(int levels, bool cmyk);
+	void levels(int inBlack, int inWhite, double gamma, int outBlack, int outWhite, bool cmyk);
+	void hueSaturation(int hueShift, int satAdjust, int lightAdjust, bool cmyk);
+	void colorBalance(int sr, int sg, int sb, int mr, int mg, int mb, int hr, int hg, int hb, bool preserveLum, bool cmyk);
+	void cmykAdjust(int cAdj, int mAdj, int yAdj, int kAdj, bool cmyk);
+	// adj: 36 ints, range-major (9 ranges × C,M,Y,K). Ranges: Reds, Yellows,
+	// Greens, Cyans, Blues, Magentas, Whites, Neutrals, Blacks.
+	void selectiveColor(const int* adj, bool relative, bool cmyk);
+	// mix: 16 ints — outR{r,g,b,const} outG{...} outB{...} mono{r,g,b,const} (percent).
+	void channelMixer(const int* mix, bool monochrome, bool cmyk);
+	void photoFilter(int fr, int fg, int fb, int density, bool preserveLum, bool cmyk);
+	void threshold(int level, bool cmyk);
+	// w: 6 ints, percent weights for Reds, Yellows, Greens, Cyans, Blues, Magentas.
+	void blackWhite(const int* w, bool tint, int tr, int tg, int tb, bool cmyk);
+	void motionBlur(int angle, int distance, bool cmyk);
+	void radialBlur(int amount, int mode, bool cmyk);   // mode: 0 = spin, 1 = zoom
+	void boxBlur(int radius, bool cmyk);
+	// Auto-correction: extract the current pixels as an RGB image / write back.
+	QImage asRGBImage(bool cmyk) const;
+	void setFromRGBImage(const QImage& rgb, bool cmyk);
+	void shadowsHighlights(int shadowAmount, int shadowTone, int highlightAmount, int highlightTone,
+	                       int radius, int color, int midtone, bool cmyk);
 	void doGraduate(FPointArray curve, bool cmyk, bool linear);
 	void swapRGBA();
 	bool convolveImage(QImage *dest, const unsigned int order, const double *kernel);
