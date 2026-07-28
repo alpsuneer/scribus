@@ -8,6 +8,7 @@
 #include "scribusview.h"
 #include "canvas.h"
 #include "scribuscore.h"
+#include "filewatcher.h"
 #include "util/suneeralphawrap.h"
 #include "canvasmode_suneercontour.h"
 #include "scraction.h"
@@ -2517,23 +2518,63 @@ void SuneerControlBar::languageChange()
 void SuneerControlBar::onEmbedInSLA()
 {
 	if (!m_doc) return;
-	// All image frames iterate ചെയ്ത് base64 embed
-	int count = 0;
-	for (int i = 0; i < m_doc->DocItems.count(); i++) {
-		PageItem* item = m_doc->DocItems.at(i);
-		if (!item->isImageFrame() || !item->imageIsAvailable) continue;
-		if (item->Pfile.isEmpty()) continue;
-		QFile f(item->Pfile);
-		if (!f.open(QIODevice::ReadOnly)) continue;
-		QByteArray data = f.readAll();
-		f.close();
-		QString b64 = QString::fromLatin1(data.toBase64());
-		item->pixm.imgInfo.embeddedProfileName = b64; // temp store
-		count++;
+	// Every image frame in the document: page items, master page items, and the
+	// contents of groups on either. makeImageInline() copies the picture to a temp
+	// file and sets isInlineImage, which is what makes the .sla saver write the
+	// picture as Base64 ImageData instead of a PFILE path.
+	QList<PageItem*> frames;
+	for (int i = 0; i < m_doc->DocItems.count(); ++i)
+		frames.append(m_doc->DocItems.at(i));
+	for (int i = 0; i < m_doc->MasterItems.count(); ++i)
+		frames.append(m_doc->MasterItems.at(i));
+	const int topLevelCount = frames.count();
+	for (int i = 0; i < topLevelCount; ++i)
+	{
+		if (frames.at(i)->isGroup())
+			frames.append(frames.at(i)->getAllChildren());
 	}
-	QMessageBox::information(this, "Embed in SLA",
-		QString("Embedded %1 images.\nSave document to apply.").arg(count));
-	m_doc->changed();
+	int embedded = 0, skipped = 0, already = 0;
+	QStringList failed;
+	for (PageItem* item : std::as_const(frames))
+	{
+		if (!item->isImageFrame())
+			continue;
+		if (item->isImageInline())
+		{
+			++already;
+			continue;
+		}
+		if (!item->imageIsAvailable || item->Pfile.isEmpty())
+		{
+			++skipped;
+			continue;
+		}
+		const QString oldPath = item->Pfile;
+		if (ScCore->fileWatcher->isWatching(oldPath))
+			ScCore->fileWatcher->removeFile(oldPath);
+		item->makeImageInline();
+		if (item->isImageInline())
+		{
+			ScCore->fileWatcher->addFile(item->Pfile);
+			++embedded;
+		}
+		else
+		{
+			// makeImageInline() fails silently when the temp copy cannot be made
+			ScCore->fileWatcher->addFile(oldPath);
+			failed.append(QFileInfo(oldPath).fileName());
+		}
+	}
+	QString msg = tr("Embedded %1 images (%2 skipped — no image loaded).").arg(embedded).arg(skipped);
+	if (already > 0)
+		msg += tr("\n%1 already embedded.").arg(already);
+	if (!failed.isEmpty())
+		msg += tr("\nCould not embed: %1").arg(failed.join(", "));
+	if (embedded > 0)
+		msg += tr("\nSave the document to write them into the file.");
+	QMessageBox::information(this, tr("Embed in SLA"), msg);
+	if (embedded > 0)
+		m_doc->changed();
 }
 
 void SuneerControlBar::onEmbedLink()
