@@ -5841,6 +5841,10 @@ PageItem* Scribus170Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	currItem->LeftLine     = attrs.valueAsBool("LeftLine", false);
 	currItem->RightLine    = attrs.valueAsBool("RightLine", false);
 	currItem->BottomLine   = attrs.valueAsBool("BottomLine", false);
+	currItem->setWrapOffsets(attrs.valueAsDouble("WrapOffTop", 0.0),
+	                         attrs.valueAsDouble("WrapOffBottom", 0.0),
+	                         attrs.valueAsDouble("WrapOffLeft", 0.0),
+	                         attrs.valueAsDouble("WrapOffRight", 0.0));
 	currItem->isTableItem  = attrs.valueAsBool("isTableItem", false);
 	currItem->TopLinkID    = attrs.valueAsInt("TopLINK", -1);
 	currItem->LeftLinkID   = attrs.valueAsInt("LeftLINK", -1);

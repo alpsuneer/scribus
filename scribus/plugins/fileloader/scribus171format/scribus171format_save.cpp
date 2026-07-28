@@ -2737,6 +2737,14 @@ void Scribus171Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 			docu.writeAttribute("RightLine", 1);
 		if (item->BottomLine)
 			docu.writeAttribute("BottomLine", 1);
+		if (item->wrapOffsetTop() != 0.0)
+			docu.writeAttribute("WrapOffTop", item->wrapOffsetTop());
+		if (item->wrapOffsetBottom() != 0.0)
+			docu.writeAttribute("WrapOffBottom", item->wrapOffsetBottom());
+		if (item->wrapOffsetLeft() != 0.0)
+			docu.writeAttribute("WrapOffLeft", item->wrapOffsetLeft());
+		if (item->wrapOffsetRight() != 0.0)
+			docu.writeAttribute("WrapOffRight", item->wrapOffsetRight());
 	}
 	//write weld parameter
 	if (item->isWelded())
