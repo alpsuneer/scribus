@@ -4063,14 +4063,6 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 		}
 		view->reformPages(false);
 		doc->setLoading(false);
-		if (doc->docHyphenator)
-		{
-			for (PageItem* item : *doc->Items)
-			{
-				if (item->isTextFrame() && !item->isNoteFrame() && item->itemText.length() > 0)
-					doc->docHyphenator->slotHyphenate(item);
-			}
-		}
 		delete fileLoader;
 		view->updatesOn(true);
 		w->setUpdatesEnabled(true);
