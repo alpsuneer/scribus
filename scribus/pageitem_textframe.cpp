@@ -391,6 +391,10 @@ struct LineControl {
 	int      column { 0 };
 	bool     startOfCol { true };
 	double   spanYBottom { -1.0 };
+	// True only for a column entered via nextColumn() below a spanning paragraph:
+	// such a column top must suppress gapBefore like a real column top, but the
+	// paragraph following the span in the SAME column is mid-flow and must not.
+	bool     underSpanColStart { false };
 	bool     hasDropCap;
 	bool     afterOverflow { false };
 	bool     addLine { false };
@@ -450,9 +454,13 @@ struct LineControl {
 		{
 			yPos = spanYBottom;
 			startOfCol = false;
+			underSpanColStart = true;
 		}
 		else
+		{
 			yPos = insets.top() + lineCorr;
+			underSpanColStart = false;
+		}
 		lineData.colLeft = colLeft;
 	}
 
@@ -1633,7 +1641,7 @@ if (HasMark)
 				if ((a > firstInFrame() && itemText.isBlockStart(a)) || (a == 0 && m_backBox == nullptr && current.startOfCol))
 				{
 					if (!current.afterOverflow && current.recalculateY && !current.startOfCol
-							&& !(current.spanYBottom > 0.0 && current.yPos <= current.spanYBottom + 1.0))
+							&& !(current.underSpanColStart && current.yPos <= current.spanYBottom + 1.0))
 						current.yPos += style.gapBefore();
 					DropCapDrop = 0;
 					if (!itemText.isBlockStart(a + 1))
