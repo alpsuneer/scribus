@@ -18,6 +18,7 @@ for which a new license (GPL+exception) is in place.
 #include <QList>
 #include <QScopedPointer>
 
+#include "autocorrectengine.h"
 #include "cmsettings.h"
 #include "commonstrings.h"
 #include "documentlogmanager.h"
@@ -132,6 +133,166 @@ void ScImage::applyEffect(const ScImageEffectList& effectsList, ColorList& color
 			invert(cmyk);
 		if (effect.effectCode == ImageEffect::EF_GRAYSCALE)
 			toGrayscale(cmyk);
+		if (effect.effectCode == ImageEffect::EF_POSTERIZE)
+		{
+			QString tmpstr(effect.effectParameters);
+			int levels = 4;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> levels;
+			posterize(levels, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_LEVELS)
+		{
+			QString tmpstr(effect.effectParameters);
+			int inBlack = 0, inWhite = 255, outBlack = 0, outWhite = 255;
+			double gamma = 1.0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> inBlack;
+			fp >> inWhite;
+			fp >> gamma;
+			fp >> outBlack;
+			fp >> outWhite;
+			levels(inBlack, inWhite, gamma, outBlack, outWhite, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_HUESAT)
+		{
+			QString tmpstr(effect.effectParameters);
+			int hueShift = 0, satAdjust = 0, lightAdjust = 0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> hueShift;
+			fp >> satAdjust;
+			fp >> lightAdjust;
+			hueSaturation(hueShift, satAdjust, lightAdjust, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_COLORBALANCE)
+		{
+			QString tmpstr(effect.effectParameters);
+			int sr = 0, sg = 0, sb = 0, mr = 0, mg = 0, mb = 0, hr = 0, hg = 0, hb = 0, preserve = 1;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> sr; fp >> sg; fp >> sb;
+			fp >> mr; fp >> mg; fp >> mb;
+			fp >> hr; fp >> hg; fp >> hb;
+			fp >> preserve;
+			colorBalance(sr, sg, sb, mr, mg, mb, hr, hg, hb, preserve != 0, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_CMYKADJ)
+		{
+			QString tmpstr(effect.effectParameters);
+			int cAdj = 0, mAdj = 0, yAdj = 0, kAdj = 0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> cAdj; fp >> mAdj; fp >> yAdj; fp >> kAdj;
+			cmykAdjust(cAdj, mAdj, yAdj, kAdj, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_SELECTIVECOLOR)
+		{
+			QString tmpstr(effect.effectParameters);
+			int adj[36];
+			int relative = 1;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			for (int idx = 0; idx < 36; ++idx)
+			{
+				adj[idx] = 0;
+				fp >> adj[idx];
+			}
+			fp >> relative;
+			selectiveColor(adj, relative != 0, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_CHANNELMIXER)
+		{
+			QString tmpstr(effect.effectParameters);
+			int mix[16];
+			int monochrome = 0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			for (int idx = 0; idx < 16; ++idx)
+			{
+				mix[idx] = 0;
+				fp >> mix[idx];
+			}
+			fp >> monochrome;
+			channelMixer(mix, monochrome != 0, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_PHOTOFILTER)
+		{
+			QString tmpstr(effect.effectParameters);
+			int fr = 236, fg = 138, fb = 0, density = 25, preserve = 1;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> fr; fp >> fg; fp >> fb; fp >> density; fp >> preserve;
+			photoFilter(fr, fg, fb, density, preserve != 0, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_THRESHOLD)
+		{
+			QString tmpstr(effect.effectParameters);
+			int level = 128;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> level;
+			threshold(level, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_BLACKWHITE)
+		{
+			QString tmpstr(effect.effectParameters);
+			int wgt[6] = { 40, 60, 40, 60, 20, 80 };
+			int tint = 0, tr = 225, tg = 211, tb = 179;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			for (int idx = 0; idx < 6; ++idx)
+				fp >> wgt[idx];
+			fp >> tint;
+			fp >> tr; fp >> tg; fp >> tb;
+			blackWhite(wgt, tint != 0, tr, tg, tb, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_MOTIONBLUR)
+		{
+			QString tmpstr(effect.effectParameters);
+			int angle = 0, distance = 10;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> angle; fp >> distance;
+			motionBlur(angle, distance, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_RADIALBLUR)
+		{
+			QString tmpstr(effect.effectParameters);
+			int amount = 10, mode = 0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> amount; fp >> mode;
+			radialBlur(amount, mode, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_BOXBLUR)
+		{
+			QString tmpstr(effect.effectParameters);
+			int radius = 3;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> radius;
+			boxBlur(radius, cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_AUTOTONE)
+		{
+			setFromRGBImage(AutoCorrectEngine::autoTone(asRGBImage(cmyk)), cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_AUTOCONTRAST)
+		{
+			setFromRGBImage(AutoCorrectEngine::autoContrast(asRGBImage(cmyk)), cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_AUTOCOLOR)
+		{
+			setFromRGBImage(AutoCorrectEngine::autoColor(asRGBImage(cmyk)), cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_AUTOENHANCE)
+		{
+			AutoCorrectOptions opts = AutoCorrectEngine::parseEnhance(effect.effectParameters);
+			setFromRGBImage(AutoCorrectEngine::autoEnhanceCombined(asRGBImage(cmyk), opts), cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_AUTOCMYK)
+		{
+			CmykOptimizeOptions opts = AutoCorrectEngine::parseCmyk(effect.effectParameters);
+			setFromRGBImage(AutoCorrectEngine::autoCmykOptimize(asRGBImage(cmyk), opts), cmyk);
+		}
+		if (effect.effectCode == ImageEffect::EF_SHADOWHIGHLIGHT)
+		{
+			QString tmpstr(effect.effectParameters);
+			int sAmt = 35, sTone = 50, hAmt = 0, hTone = 50, radius = 30, color = 20, midtone = 0;
+			ScTextStream fp(&tmpstr, QIODevice::ReadOnly);
+			fp >> sAmt; fp >> sTone; fp >> hAmt; fp >> hTone; fp >> radius; fp >> color; fp >> midtone;
+			shadowsHighlights(sAmt, sTone, hAmt, hTone, radius, color, midtone, cmyk);
+		}
 		if (effect.effectCode == ImageEffect::EF_COLORIZE)
 		{
 			QString tmpstr(effect.effectParameters);
@@ -1105,6 +1266,988 @@ void ScImage::invert(bool cmyk)
 			}
 			else
 				*s ^= 0x00ffffff;
+			s++;
+		}
+	}
+}
+
+void ScImage::posterize(int levels, bool cmyk)
+{
+	if (levels < 2)
+		levels = 2;
+	if (levels > 255)
+		levels = 255;
+	// Lookup table: quantize each 0..255 channel value to `levels` steps.
+	unsigned char lut[256];
+	for (int i = 0; i < 256; ++i)
+	{
+		int step = qRound((i * (levels - 1)) / 255.0);
+		int v = qRound(step * 255.0 / (levels - 1));
+		lut[i] = static_cast<unsigned char>(qBound(0, v, 255));
+	}
+	int h = height();
+	int w = width();
+	unsigned char *p;
+	QRgb *s;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			p = (unsigned char *) s;
+			p[0] = lut[p[0]];
+			p[1] = lut[p[1]];
+			p[2] = lut[p[2]];
+			if (cmyk)
+				p[3] = lut[p[3]];
+			s++;
+		}
+	}
+}
+
+void ScImage::levels(int inBlack, int inWhite, double gamma, int outBlack, int outWhite, bool cmyk)
+{
+	inBlack  = qBound(0, inBlack, 254);
+	inWhite  = qBound(inBlack + 1, inWhite, 255);
+	outBlack = qBound(0, outBlack, 255);
+	outWhite = qBound(0, outWhite, 255);
+	if (gamma < 0.01)
+		gamma = 0.01;
+	const double invGamma = 1.0 / gamma;
+	const double inRange = static_cast<double>(inWhite - inBlack);
+	QVector<int> curveTable(256);
+	for (int i = 0; i < 256; ++i)
+	{
+		double t = (i - inBlack) / inRange;
+		t = qBound(0.0, t, 1.0);
+		t = std::pow(t, invGamma);
+		int out = qRound(outBlack + t * (outWhite - outBlack));
+		curveTable[i] = qBound(0, out, 255);
+	}
+	applyCurve(curveTable, cmyk);
+}
+
+void ScImage::hueSaturation(int hueShift, int satAdjust, int lightAdjust, bool cmyk)
+{
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				// Convert the stored CMYK back to RGB, adjust, then re-encode.
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			QColor col(r, g, b);
+			int hh, ss, ll;
+			col.getHsl(&hh, &ss, &ll);
+			const bool achromatic = (hh < 0 || ss == 0);
+			if (!achromatic)
+			{
+				hh = (hh + hueShift) % 360;
+				if (hh < 0)
+					hh += 360;
+				ss = qBound(0, ss + satAdjust * 255 / 100, 255);
+			}
+			ll = qBound(0, ll + lightAdjust * 255 / 100, 255);
+			QColor out = achromatic ? QColor::fromHsl(0, 0, ll) : QColor::fromHsl(hh, ss, ll);
+			int nr = out.red(), ng = out.green(), nb = out.blue();
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int nk = 255 - qMax(nr, qMax(ng, nb));
+				if (nk >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - nr - nk) * 255 / (255 - nk);
+					p[1] = (255 - ng - nk) * 255 / (255 - nk);
+					p[2] = (255 - nb - nk) * 255 / (255 - nk);
+					p[3] = nk;
+				}
+			}
+			else
+			{
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::colorBalance(int sr, int sg, int sb, int mr, int mg, int mb, int hr, int hg, int hb, bool preserveLum, bool cmyk)
+{
+	// Build a per-channel lookup table from smooth shadow/midtone/highlight
+	// tonal weights. The three sliders for a channel are fixed, so each channel
+	// collapses to a 256-entry LUT.
+	auto buildLut = [](double shadow, double mid, double high, int lut[256])
+	{
+		for (int i = 0; i < 256; ++i)
+		{
+			double v = i / 255.0;
+			double wS = std::exp(-(v * v) / (2.0 * 0.30 * 0.30));         // peaks at black
+			double dm = v - 0.5;
+			double wM = std::exp(-(dm * dm) / (2.0 * 0.28 * 0.28));       // peaks at mid grey
+			double dh = v - 1.0;
+			double wH = std::exp(-(dh * dh) / (2.0 * 0.30 * 0.30));       // peaks at white
+			double adj = (shadow * wS + mid * wM + high * wH) * 64.0;     // full slider ≈ 64 levels
+			lut[i] = qBound(0, qRound(i + adj), 255);
+		}
+	};
+	int lutR[256], lutG[256], lutB[256];
+	buildLut(sr / 100.0, mr / 100.0, hr / 100.0, lutR);
+	buildLut(sg / 100.0, mg / 100.0, hg / 100.0, lutG);
+	buildLut(sb / 100.0, mb / 100.0, hb / 100.0, lutB);
+
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			int nr = lutR[r], ng = lutG[g], nb = lutB[b];
+			if (preserveLum)
+			{
+				int oh, os, ol;
+				QColor(r, g, b).getHsl(&oh, &os, &ol);
+				int nh, ns, nl;
+				QColor(nr, ng, nb).getHsl(&nh, &ns, &nl);
+				QColor adj = QColor::fromHsl(nh < 0 ? 0 : nh, ns, ol);   // keep new hue/sat, original lightness
+				nr = adj.red();
+				ng = adj.green();
+				nb = adj.blue();
+			}
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int nk = 255 - qMax(nr, qMax(ng, nb));
+				if (nk >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - nr - nk) * 255 / (255 - nk);
+					p[1] = (255 - ng - nk) * 255 / (255 - nk);
+					p[2] = (255 - nb - nk) * 255 / (255 - nk);
+					p[3] = nk;
+				}
+			}
+			else
+			{
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::cmykAdjust(int cAdj, int mAdj, int yAdj, int kAdj, bool cmyk)
+{
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int c, m, y, k, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				c = p[0]; m = p[1]; y = p[2]; k = p[3];
+			}
+			else
+			{
+				// RGB → CMYK.
+				QRgb rgb = *s;
+				int r = qRed(rgb), g = qGreen(rgb), b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+				k = 255 - qMax(r, qMax(g, b));
+				if (k >= 255)
+				{
+					c = 0; m = 0; y = 0;
+				}
+				else
+				{
+					c = (255 - r - k) * 255 / (255 - k);
+					m = (255 - g - k) * 255 / (255 - k);
+					y = (255 - b - k) * 255 / (255 - k);
+				}
+			}
+
+			// Additive per-channel adjustment: full slider (±100) = ±255 levels.
+			c = qBound(0, c + cAdj * 255 / 100, 255);
+			m = qBound(0, m + mAdj * 255 / 100, 255);
+			y = qBound(0, y + yAdj * 255 / 100, 255);
+			k = qBound(0, k + kAdj * 255 / 100, 255);
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				p[0] = c; p[1] = m; p[2] = y; p[3] = k;
+			}
+			else
+			{
+				int nr = (255 - c) * (255 - k) / 255;
+				int ng = (255 - m) * (255 - k) / 255;
+				int nb = (255 - y) * (255 - k) / 255;
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::selectiveColor(const int* adj, bool relative, bool cmyk)
+{
+	// Range order matches the dialog: 0..5 chromatic (Reds, Yellows, Greens,
+	// Cyans, Blues, Magentas), 6 Whites, 7 Neutrals, 8 Blacks.
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			// Range membership weights.
+			double weight[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+			int hue, sat, light;
+			QColor(r, g, b).getHsl(&hue, &sat, &light);
+			const double satF = sat / 255.0;
+			if (hue >= 0 && satF > 0.0)
+			{
+				// Triangular hue membership between the two nearest primaries,
+				// scaled by saturation. Centres: R0° Y60° G120° C180° B240° M300°.
+				double seg = hue / 60.0;
+				int lower = static_cast<int>(std::floor(seg)) % 6;
+				int upper = (lower + 1) % 6;
+				double frac = seg - std::floor(seg);
+				weight[lower] += (1.0 - frac) * satF;
+				weight[upper] += frac * satF;
+			}
+			// Tonal ranges by lightness (apply to all pixels).
+			double l = light / 255.0;
+			double wBlack = qBound(0.0, 1.0 - l * 2.0, 1.0);
+			double wWhite = qBound(0.0, l * 2.0 - 1.0, 1.0);
+			double wNeutral = qBound(0.0, 1.0 - wBlack - wWhite, 1.0);
+			weight[6] += wWhite;
+			weight[7] += wNeutral;
+			weight[8] += wBlack;
+
+			// Accumulate CMYK adjustment (fraction, -1..1 per channel).
+			double adjC = 0, adjM = 0, adjY = 0, adjK = 0;
+			for (int rng = 0; rng < 9; ++rng)
+			{
+				double wgt = weight[rng];
+				if (wgt <= 0.0)
+					continue;
+				adjC += wgt * adj[rng * 4 + 0] / 100.0;
+				adjM += wgt * adj[rng * 4 + 1] / 100.0;
+				adjY += wgt * adj[rng * 4 + 2] / 100.0;
+				adjK += wgt * adj[rng * 4 + 3] / 100.0;
+			}
+
+			// Pixel to CMYK.
+			int k = 255 - qMax(r, qMax(g, b));
+			int c, m, y;
+			if (k >= 255)
+			{
+				c = 0; m = 0; y = 0;
+			}
+			else
+			{
+				c = (255 - r - k) * 255 / (255 - k);
+				m = (255 - g - k) * 255 / (255 - k);
+				y = (255 - b - k) * 255 / (255 - k);
+			}
+
+			// Relative: scale by existing amount; Absolute: additive.
+			if (relative)
+			{
+				c = qRound(c + c * adjC);
+				m = qRound(m + m * adjM);
+				y = qRound(y + y * adjY);
+				k = qRound(k + k * adjK);
+			}
+			else
+			{
+				c = qRound(c + adjC * 255.0);
+				m = qRound(m + adjM * 255.0);
+				y = qRound(y + adjY * 255.0);
+				k = qRound(k + adjK * 255.0);
+			}
+			c = qBound(0, c, 255);
+			m = qBound(0, m, 255);
+			y = qBound(0, y, 255);
+			k = qBound(0, k, 255);
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				p[0] = c; p[1] = m; p[2] = y; p[3] = k;
+			}
+			else
+			{
+				int nr = (255 - c) * (255 - k) / 255;
+				int ng = (255 - m) * (255 - k) / 255;
+				int nb = (255 - y) * (255 - k) / 255;
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+QImage ScImage::asRGBImage(bool cmyk) const
+{
+	if (!cmyk)
+		return qImage().copy();
+	// Stored data is C,M,Y,K bytes — convert to an RGB image for analysis.
+	int w = width();
+	int h = height();
+	QImage out(w, h, QImage::Format_ARGB32);
+	for (int y = 0; y < h; ++y)
+	{
+		const unsigned char* sl = constScanLine(y);
+		QRgb* o = (QRgb*)out.scanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			const unsigned char* p = sl + x * 4;
+			int c = p[0], m = p[1], yv = p[2], k = p[3];
+			int r = (255 - c) * (255 - k) / 255;
+			int g = (255 - m) * (255 - k) / 255;
+			int b = (255 - yv) * (255 - k) / 255;
+			o[x] = qRgba(r, g, b, 255);
+		}
+	}
+	return out;
+}
+
+void ScImage::setFromRGBImage(const QImage& rgb, bool cmyk)
+{
+	int w = qMin(width(), rgb.width());
+	int h = qMin(height(), rgb.height());
+	for (int y = 0; y < h; ++y)
+	{
+		const QRgb* s = (const QRgb*)rgb.constScanLine(y);
+		if (!cmyk)
+		{
+			QRgb* d = (QRgb*)scanLine(y);
+			for (int x = 0; x < w; ++x)
+				d[x] = s[x];
+		}
+		else
+		{
+			unsigned char* d = scanLine(y);
+			for (int x = 0; x < w; ++x)
+			{
+				int r = qRed(s[x]), g = qGreen(s[x]), b = qBlue(s[x]);
+				int k = 255 - qMax(r, qMax(g, b));
+				unsigned char* p = d + x * 4;
+				if (k >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - r - k) * 255 / (255 - k);
+					p[1] = (255 - g - k) * 255 / (255 - k);
+					p[2] = (255 - b - k) * 255 / (255 - k);
+					p[3] = k;
+				}
+			}
+		}
+	}
+}
+
+void ScImage::shadowsHighlights(int shadowAmount, int shadowTone, int highlightAmount, int highlightTone,
+                                int radius, int color, int midtone, bool cmyk)
+{
+	QImage img = asRGBImage(cmyk);
+	int w = img.width();
+	int h = img.height();
+	if (w == 0 || h == 0)
+		return;
+
+	QVector<float> lum(w * h), lumB(w * h), tmp(w * h);
+	for (int y = 0; y < h; ++y)
+	{
+		const QRgb* s = (const QRgb*)img.constScanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			QRgb p = s[x];
+			lum[y * w + x] = (0.299f * qRed(p) + 0.587f * qGreen(p) + 0.114f * qBlue(p)) / 255.0f;
+		}
+	}
+
+	// Local reference = box-blurred luminance (sliding window, O(n) per pass).
+	if (radius > 0)
+	{
+		int r = radius;
+		float div = 2 * r + 1;
+		for (int y = 0; y < h; ++y)   // horizontal
+		{
+			float sum = 0;
+			for (int k = -r; k <= r; ++k)
+				sum += lum[y * w + qBound(0, k, w - 1)];
+			for (int x = 0; x < w; ++x)
+			{
+				tmp[y * w + x] = sum / div;
+				sum -= lum[y * w + qBound(0, x - r, w - 1)];
+				sum += lum[y * w + qBound(0, x + r + 1, w - 1)];
+			}
+		}
+		for (int x = 0; x < w; ++x)   // vertical
+		{
+			float sum = 0;
+			for (int k = -r; k <= r; ++k)
+				sum += tmp[qBound(0, k, h - 1) * w + x];
+			for (int y = 0; y < h; ++y)
+			{
+				lumB[y * w + x] = sum / div;
+				sum -= tmp[qBound(0, y - r, h - 1) * w + x];
+				sum += tmp[qBound(0, y + r + 1, h - 1) * w + x];
+			}
+		}
+	}
+	else
+	{
+		lumB = lum;
+	}
+
+	double sA = shadowAmount / 100.0;
+	double hA = highlightAmount / 100.0;
+	double sTh = 0.5 * (shadowTone / 100.0) + 0.02;
+	double hTh = 0.5 * (highlightTone / 100.0) + 0.02;
+	double colorAdj = color / 100.0;
+	double midAdj = midtone / 100.0;
+
+	for (int y = 0; y < h; ++y)
+	{
+		QRgb* d = (QRgb*)img.scanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			int idx = y * w + x;
+			QRgb p = d[x];
+			int r = qRed(p), g = qGreen(p), b = qBlue(p), a = qAlpha(p);
+			float L = lum[idx];
+			float Lb = lumB[idx];
+			double shadowMask = qBound(0.0, 1.0 - Lb / sTh, 1.0);
+			double highlightMask = qBound(0.0, 1.0 - (1.0 - Lb) / hTh, 1.0);
+
+			double newL = L;
+			newL += sA * shadowMask * (1.0 - L) * 0.9;       // lift shadows toward white
+			newL -= hA * highlightMask * newL * 0.9;         // pull highlights toward black
+			if (midAdj != 0.0)                               // gentle midtone contrast
+			{
+				double dv = newL - 0.5;
+				newL += midAdj * 0.5 * dv * (1.0 - 4.0 * dv * dv);
+			}
+			newL = qBound(0.0, newL, 1.0);
+
+			double add = (newL - L) * 255.0;   // luminance shift, applied additively (hue-preserving)
+			double nr = r + add, ng = g + add, nb = b + add;
+			if (colorAdj != 0.0)
+			{
+				double gray = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+				double sat = 1.0 + colorAdj;
+				nr = gray + (nr - gray) * sat;
+				ng = gray + (ng - gray) * sat;
+				nb = gray + (nb - gray) * sat;
+			}
+			d[x] = qRgba(qBound(0, qRound(nr), 255), qBound(0, qRound(ng), 255), qBound(0, qRound(nb), 255), a);
+		}
+	}
+	setFromRGBImage(img, cmyk);
+}
+
+void ScImage::motionBlur(int angle, int distance, bool cmyk)
+{
+	if (distance < 1)
+		return;
+	const double pi = 3.14159265358979323846;
+	QImage src = qImage().copy();
+	int w = width();
+	int h = height();
+	double rad = angle * pi / 180.0;
+	double dx = std::cos(rad);
+	double dy = -std::sin(rad);   // 0° = →, 90° = ↑
+	int half = distance / 2;
+	for (int y = 0; y < h; ++y)
+	{
+		QRgb *d = (QRgb*)scanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			long r = 0, g = 0, b = 0, a = 0;
+			int cnt = 0;
+			for (int t = -half; t <= half; ++t)
+			{
+				int sx = qBound(0, qRound(x + dx * t), w - 1);
+				int sy = qBound(0, qRound(y + dy * t), h - 1);
+				QRgb pv = ((const QRgb*)src.constScanLine(sy))[sx];
+				r += qRed(pv); g += qGreen(pv); b += qBlue(pv); a += qAlpha(pv);
+				++cnt;
+			}
+			d[x] = qRgba(r / cnt, g / cnt, b / cnt, a / cnt);
+		}
+	}
+}
+
+void ScImage::radialBlur(int amount, int mode, bool cmyk)
+{
+	if (amount < 1)
+		return;
+	const double pi = 3.14159265358979323846;
+	QImage src = qImage().copy();
+	int w = width();
+	int h = height();
+	double cx = w / 2.0;
+	double cy = h / 2.0;
+	int samples = qBound(3, amount / 2 + 3, 64);
+	for (int y = 0; y < h; ++y)
+	{
+		QRgb *d = (QRgb*)scanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			double relx = x - cx;
+			double rely = y - cy;
+			long r = 0, g = 0, b = 0, a = 0;
+			int cnt = 0;
+			for (int sIdx = 0; sIdx < samples; ++sIdx)
+			{
+				double f = static_cast<double>(sIdx) / (samples - 1) - 0.5;   // -0.5..0.5
+				int sx, sy;
+				if (mode == 0)   // spin
+				{
+					double ang = f * (amount * pi / 180.0);
+					double ca = std::cos(ang), sa = std::sin(ang);
+					sx = qRound(cx + relx * ca - rely * sa);
+					sy = qRound(cy + relx * sa + rely * ca);
+				}
+				else             // zoom
+				{
+					double scale = 1.0 + f * (amount / 100.0);
+					sx = qRound(cx + relx * scale);
+					sy = qRound(cy + rely * scale);
+				}
+				sx = qBound(0, sx, w - 1);
+				sy = qBound(0, sy, h - 1);
+				QRgb pv = ((const QRgb*)src.constScanLine(sy))[sx];
+				r += qRed(pv); g += qGreen(pv); b += qBlue(pv); a += qAlpha(pv);
+				++cnt;
+			}
+			d[x] = qRgba(r / cnt, g / cnt, b / cnt, a / cnt);
+		}
+	}
+}
+
+void ScImage::boxBlur(int radius, bool cmyk)
+{
+	if (radius < 1)
+		return;
+	int w = width();
+	int h = height();
+	int div = 2 * radius + 1;
+	QImage src = qImage().copy();
+	QImage tmp(w, h, QImage::Format_ARGB32);
+
+	// Horizontal pass.
+	for (int y = 0; y < h; ++y)
+	{
+		const QRgb *s = (const QRgb*)src.constScanLine(y);
+		QRgb *t = (QRgb*)tmp.scanLine(y);
+		for (int x = 0; x < w; ++x)
+		{
+			long r = 0, g = 0, b = 0, a = 0;
+			for (int k = -radius; k <= radius; ++k)
+			{
+				QRgb pv = s[qBound(0, x + k, w - 1)];
+				r += qRed(pv); g += qGreen(pv); b += qBlue(pv); a += qAlpha(pv);
+			}
+			t[x] = qRgba(r / div, g / div, b / div, a / div);
+		}
+	}
+	// Vertical pass.
+	for (int x = 0; x < w; ++x)
+	{
+		for (int y = 0; y < h; ++y)
+		{
+			long r = 0, g = 0, b = 0, a = 0;
+			for (int k = -radius; k <= radius; ++k)
+			{
+				QRgb pv = ((const QRgb*)tmp.constScanLine(qBound(0, y + k, h - 1)))[x];
+				r += qRed(pv); g += qGreen(pv); b += qBlue(pv); a += qAlpha(pv);
+			}
+			((QRgb*)scanLine(y))[x] = qRgba(r / div, g / div, b / div, a / div);
+		}
+	}
+}
+
+void ScImage::blackWhite(const int* w, bool tint, int tr, int tg, int tb, bool cmyk)
+{
+	// Per-range weights as fractions; a pure primary maps to weight×255 gray.
+	double wf[6];
+	for (int i = 0; i < 6; ++i)
+		wf[i] = w[i] / 100.0;
+
+	int tintH = 0, tintS = 0, tintL = 0;
+	if (tint)
+	{
+		QColor(tr, tg, tb).getHsl(&tintH, &tintS, &tintL);
+		if (tintH < 0)
+			tintH = 0;
+	}
+
+	int h = height();
+	int wd = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < wd; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			int maxc = qMax(r, qMax(g, b));
+			int minc = qMin(r, qMin(g, b));
+			int chroma = maxc - minc;
+
+			double gray;
+			if (chroma == 0)
+			{
+				gray = minc;   // neutral greys pass through
+			}
+			else
+			{
+				double hue;
+				if (maxc == r)
+					hue = 60.0 * std::fmod(static_cast<double>(g - b) / chroma, 6.0);
+				else if (maxc == g)
+					hue = 60.0 * (static_cast<double>(b - r) / chroma + 2.0);
+				else
+					hue = 60.0 * (static_cast<double>(r - g) / chroma + 4.0);
+				if (hue < 0.0)
+					hue += 360.0;
+				double seg = hue / 60.0;
+				int lower = static_cast<int>(std::floor(seg)) % 6;
+				int upper = (lower + 1) % 6;
+				double frac = seg - std::floor(seg);
+				double wHue = wf[lower] * (1.0 - frac) + wf[upper] * frac;
+				gray = minc + chroma * wHue;
+			}
+			int grayI = qBound(0, qRound(gray), 255);
+
+			int nr, ng, nb;
+			if (tint)
+			{
+				QColor tc = QColor::fromHsl(tintH, tintS, grayI);
+				nr = tc.red(); ng = tc.green(); nb = tc.blue();
+			}
+			else
+			{
+				nr = ng = nb = grayI;
+			}
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int nk = 255 - qMax(nr, qMax(ng, nb));
+				if (nk >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - nr - nk) * 255 / (255 - nk);
+					p[1] = (255 - ng - nk) * 255 / (255 - nk);
+					p[2] = (255 - nb - nk) * 255 / (255 - nk);
+					p[3] = nk;
+				}
+			}
+			else
+			{
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::threshold(int level, bool cmyk)
+{
+	level = qBound(1, level, 255);
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			int lum = qRound(0.299 * r + 0.587 * g + 0.114 * b);
+			bool white = (lum >= level);
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				p[0] = 0; p[1] = 0; p[2] = 0;
+				p[3] = white ? 0 : 255;   // K only
+			}
+			else
+			{
+				int v = white ? 255 : 0;
+				*s = qRgba(v, v, v, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::photoFilter(int fr, int fg, int fb, int density, bool preserveLum, bool cmyk)
+{
+	const double d = qBound(0, density, 100) / 100.0;
+	const double nfr = fr / 255.0;
+	const double nfg = fg / 255.0;
+	const double nfb = fb / 255.0;
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			// Multiply the pixel by the filter colour, blended in at `density`.
+			double outR = r * (1.0 - d) + (r * nfr) * d;
+			double outG = g * (1.0 - d) + (g * nfg) * d;
+			double outB = b * (1.0 - d) + (b * nfb) * d;
+
+			if (preserveLum)
+			{
+				double origLum = 0.299 * r + 0.587 * g + 0.114 * b;
+				double newLum  = 0.299 * outR + 0.587 * outG + 0.114 * outB;
+				if (newLum > 0.01)
+				{
+					double scale = origLum / newLum;
+					outR *= scale;
+					outG *= scale;
+					outB *= scale;
+				}
+			}
+
+			int nr = qBound(0, qRound(outR), 255);
+			int ng = qBound(0, qRound(outG), 255);
+			int nb = qBound(0, qRound(outB), 255);
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int nk = 255 - qMax(nr, qMax(ng, nb));
+				if (nk >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - nr - nk) * 255 / (255 - nk);
+					p[1] = (255 - ng - nk) * 255 / (255 - nk);
+					p[2] = (255 - nb - nk) * 255 / (255 - nk);
+					p[3] = nk;
+				}
+			}
+			else
+			{
+				*s = qRgba(nr, ng, nb, alpha);
+			}
+			s++;
+		}
+	}
+}
+
+void ScImage::channelMixer(const int* mix, bool monochrome, bool cmyk)
+{
+	int h = height();
+	int w = width();
+	QRgb *s;
+	unsigned char *p;
+	for (int yi = 0; yi < h; ++yi)
+	{
+		s = (QRgb*)(scanLine(yi));
+		for (int xi = 0; xi < w; ++xi)
+		{
+			int r, g, b, alpha = 255;
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int cc = p[0], mm = p[1], yy = p[2], kk = p[3];
+				r = (255 - cc) * (255 - kk) / 255;
+				g = (255 - mm) * (255 - kk) / 255;
+				b = (255 - yy) * (255 - kk) / 255;
+			}
+			else
+			{
+				QRgb rgb = *s;
+				r = qRed(rgb);
+				g = qGreen(rgb);
+				b = qBlue(rgb);
+				alpha = qAlpha(rgb);
+			}
+
+			int nr, ng, nb;
+			if (monochrome)
+			{
+				int gray = qBound(0, (mix[12] * r + mix[13] * g + mix[14] * b) / 100 + mix[15] * 255 / 100, 255);
+				nr = ng = nb = gray;
+			}
+			else
+			{
+				nr = qBound(0, (mix[0] * r + mix[1] * g + mix[2]  * b) / 100 + mix[3]  * 255 / 100, 255);
+				ng = qBound(0, (mix[4] * r + mix[5] * g + mix[6]  * b) / 100 + mix[7]  * 255 / 100, 255);
+				nb = qBound(0, (mix[8] * r + mix[9] * g + mix[10] * b) / 100 + mix[11] * 255 / 100, 255);
+			}
+
+			if (cmyk)
+			{
+				p = (unsigned char *) s;
+				int nk = 255 - qMax(nr, qMax(ng, nb));
+				if (nk >= 255)
+				{
+					p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 255;
+				}
+				else
+				{
+					p[0] = (255 - nr - nk) * 255 / (255 - nk);
+					p[1] = (255 - ng - nk) * 255 / (255 - nk);
+					p[2] = (255 - nb - nk) * 255 / (255 - nk);
+					p[3] = nk;
+				}
+			}
+			else
+			{
+				*s = qRgba(nr, ng, nb, alpha);
+			}
 			s++;
 		}
 	}
