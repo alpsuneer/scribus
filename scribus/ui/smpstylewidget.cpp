@@ -129,6 +129,7 @@ void SMPStyleWidget::languageChange()
 	retranslateUi(this);
 	alignment->languageChange();
 	rulesPage->languageChange();
+	nestedStylesPage->languageChange();
 	tabList->firstLineSpin->setToolTip( tr("First Line Indent"));
 	tabList->leftIndentSpin->setToolTip(  tr("Left Indent"));
 	tabList->rightIndentSpin->setToolTip( tr("Right Indent"));
@@ -183,6 +184,7 @@ void SMPStyleWidget::setDoc(ScribusDoc *doc)
 	cpage->setDoc(m_Doc);
 	backgroundColor->colorButton->setDoc(m_Doc);
 	rulesPage->setDoc(m_Doc);
+	nestedStylesPage->setDoc(m_Doc);
 }
 
 void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles, QList<CharStyle> &cstyles, int unitIndex, const QString &defLang)
@@ -449,6 +451,7 @@ void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles
 	}
 
 	rulesPage->showRules(pstyle, parent, m_hasParent, unitIndex);
+	nestedStylesPage->showNestedStyles(pstyle, parent, m_hasParent);
 }
 
 void SMPStyleWidget::show(QList<ParagraphStyle*> &pstyles, QList<ParagraphStyle> &pstylesAll, QList<CharStyle> &cstyles, int unitIndex, const QString &defLang)
@@ -478,6 +481,7 @@ void SMPStyleWidget::show(QList<ParagraphStyle*> &pstyles, QList<ParagraphStyle>
 		showColors(pstyles);
 		// Rule controls edit every selected style at once, so show the first one.
 		rulesPage->showRules(pstyles[0], nullptr, false, unitIndex);
+		nestedStylesPage->showNestedStyles(pstyles[0], nullptr, false);
 	}
 }
 
@@ -866,6 +870,7 @@ void SMPStyleWidget::showParent(const QList<ParagraphStyle*> &pstyles)
 void SMPStyleWidget::clearAll()
 {
 	rulesPage->clearAll();
+	nestedStylesPage->clearAll();
 }
 
 /*********************************************************************

@@ -118,10 +118,10 @@ QList<TextShaper::FeaturesRun> TextShaper::itemizeFeatures(const TextRun &run) c
 	while (start < run.start + run.len)
 	{
 		int end = start;
-		QStringList startFeatures = m_story.charStyle(m_textMap.value(start)).fontFeatures().split(",");
+		QStringList startFeatures = m_story.layoutCharStyle(m_textMap.value(start)).fontFeatures().split(",");
 		while (end < run.start + run.len)
 		{
-			QStringList endFeatures = m_story.charStyle(m_textMap.value(end)).fontFeatures().split(",");
+			QStringList endFeatures = m_story.layoutCharStyle(m_textMap.value(end)).fontFeatures().split(",");
 			if (startFeatures != endFeatures)
 				break;
 			end++;
@@ -146,10 +146,16 @@ QList<TextShaper::TextRun> TextShaper::itemizeStyles(const QList<TextRun> &runs)
 		while (start < run.start + run.len)
 		{
 			int end = start;
-			const CharStyle &startStyle = m_story.charStyle(m_textMap.value(start));
+			const CharStyle &startStyle = m_story.layoutCharStyle(m_textMap.value(start));
+			const int startGroup = m_story.layoutStyleGroup(m_textMap.value(start));
 			while (end < run.start + run.len)
 			{
-				const CharStyle &endStyle = m_story.charStyle(m_textMap.value(end));
+				const CharStyle &endStyle = m_story.layoutCharStyle(m_textMap.value(end));
+				// Break the run when the derived-formatting run changes even if the
+				// styles shape identically: a nested style that only changes the
+				// colour would otherwise be swallowed by the surrounding run.
+				if (m_story.layoutStyleGroup(m_textMap.value(end)) != startGroup)
+					break;
 				if (!startStyle.equivForShaping(endStyle))
 					break;
 				end++;
@@ -237,7 +243,9 @@ void TextShaper::buildText(int fromPos, int toPos, QVector<int>& smallCaps)
 			}
 		}
 
-		const CharStyle &style = m_story.charStyle(i);
+		// Layout-time style: small caps / all caps set by a nested style must
+		// affect the text that is built here, not just the painting.
+		const CharStyle &style = m_story.layoutCharStyle(i);
 		int effects = style.effects() & ScStyle_UserStyles;
 		bool hasSmallCap = false;
 		if ((effects & ScStyle_AllCaps) || (effects & ScStyle_SmallCaps))
@@ -332,7 +340,7 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 
 	for (const TextRun& textRun : std::as_const(textRuns))
 	{
-		const CharStyle &style = m_story.charStyle(m_textMap.value(textRun.start));
+		const CharStyle &style = m_story.layoutCharStyle(m_textMap.value(textRun.start));
 
 		const ScFace &scFace = style.font();
 		hb_font_t *hbFont = reinterpret_cast<hb_font_t*>(scFace.hbFont());
@@ -429,7 +437,7 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 			
 			QChar ch = m_story.text(firstChar);
 			LayoutFlags flags = m_story.flags(firstChar);
-			const CharStyle& charStyle(m_story.charStyle(firstChar));
+			const CharStyle& charStyle(m_story.layoutCharStyle(firstChar));
 			const StyleFlag& effects = charStyle.effects();
 
 			QString str = m_text.mid(firstChar - fromPos, lastChar - firstChar + 1);

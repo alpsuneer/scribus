@@ -373,9 +373,9 @@ void TextLayout::renderParagraphRules(TextLayoutPainter *p) const
 				QString colorName = above ? style.ruleAboveColor() : style.ruleBelowColor();
 				QString gapColorName = above ? style.ruleAboveGapColor() : style.ruleBelowGapColor();
 				if (colorName == ParagraphStyle::RuleTextColor)
-					colorName = m_story->charStyle(firstChar).fillColor();
+					colorName = m_story->layoutCharStyle(firstChar).fillColor();
 				if (gapColorName == ParagraphStyle::RuleTextColor)
-					gapColorName = m_story->charStyle(firstChar).fillColor();
+					gapColorName = m_story->layoutCharStyle(firstChar).fillColor();
 				rule.color = TextLayoutColor(colorName, above ? style.ruleAboveTint() : style.ruleBelowTint());
 				rule.gapColor = TextLayoutColor(gapColorName, above ? style.ruleAboveGapTint() : style.ruleBelowGapTint());
 				rule.hasGapColor = !gapColorName.isEmpty() && gapColorName != CommonStrings::None;

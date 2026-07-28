@@ -1394,7 +1394,7 @@ void PageItem_TextFrame::layout()
 		// find start of first line
 		if (firstInFrame() < itLen)
 		{
-			const CharStyle& cstyle = itemText.charStyle(firstInFrame());
+			const CharStyle& cstyle = itemText.layoutCharStyle(firstInFrame());
 			style = itemText.paragraphStyle(firstInFrame());
 			style.setLineSpacing (calculateLineSpacing (style, this));
 
@@ -1558,7 +1558,7 @@ if (HasMark)
 				itemText.applyCharStyle(a, 1, haveSuperscript);
 			}
 			//--<#13490
-			CharStyle charStyle = ((itemText.text(a) != SpecialChars::PARSEP) ? itemText.charStyle(a) : style.charStyle());
+			CharStyle charStyle = ((itemText.text(a) != SpecialChars::PARSEP) ? itemText.layoutCharStyle(a) : style.charStyle());
 
 			double hlcsize10 = charStyle.fontSize() / 10.0;
 			double scaleV = charStyle.scaleV() / 1000.0;

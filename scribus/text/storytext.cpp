@@ -101,13 +101,18 @@ StoryText::~StoryText()
 		doc->paragraphStyles().disconnect(this, SLOT(invalidateAll()));
 		doc->charStyles().disconnect(this, SLOT(invalidateAll()));
 	} */
+	qDeleteAll(m_derivedStyles);
+	qDeleteAll(m_derivedStylesPrev);
+	m_derivedStyles.clear();
+	m_derivedStylesPrev.clear();
+
 	d->refs--;
 	if (d->refs == 0)
 	{
 		d->clear();
 		d->len = 0;
 		delete d;
-	}	
+	}
 }
 
 bool StoryText::hasBulletOrNum() const
@@ -1385,6 +1390,182 @@ const CharStyle & StoryText::charStyle(int pos) const
 	return dynamic_cast<const CharStyle &> (*that->d->at(pos));
 }
 
+const CharStyle* StoryText::allocDerivedStyle(const CharStyle& base, const QString& nestedStyleName) const
+{
+	// The derived style is the character's own style with its parent swapped for
+	// the nested character style, which is exactly how Scribus applies the drop
+	// cap character style in TextShaper::buildText(). Anything set locally still
+	// wins; anything unset now resolves through the nested character style
+	// instead of through the paragraph's own character style.
+	CharStyle* derived = new CharStyle(base);
+	derived->setParent(nestedStyleName);
+	// Resolve against the document's character styles rather than against the
+	// paragraph's context: the paragraph style belongs to the paragraph
+	// separator's ScText and dies with it, while this derived style has to
+	// outlive the layout it was built for.
+	derived->setContext(&m_doc->charStyles());
+	m_derivedStyles.append(derived);
+	return derived;
+}
+
+void StoryText::updateNestedStyleOverlay() const
+{
+	if (!m_nestedOverlayDirty)
+		return;
+	m_nestedOverlayDirty = false;
+
+	m_nestedOverlay.clear();
+	m_nestedOverlayGroup.clear();
+
+	// Retire the generation before last and promote the current one. See the
+	// comment on m_derivedStyles in the header for why one generation of slack
+	// is enough.
+	qDeleteAll(m_derivedStylesPrev);
+	m_derivedStylesPrev = m_derivedStyles;
+	m_derivedStyles.clear();
+
+	const int len = length();
+	if (len <= 0 || m_doc == nullptr)
+		return;
+
+	StoryText* that = const_cast<StoryText*>(this);
+
+	// Walk paragraph by paragraph. parStart is the first character of the
+	// paragraph, parEnd is one past its last *text* character (the paragraph
+	// separator itself is never restyled).
+	int parStart = 0;
+	bool anyOverlay = false;
+	int groupCounter = 0;
+
+	while (parStart < len)
+	{
+		int parEnd = parStart;
+		while (parEnd < len && that->d->at(parEnd)->ch != SpecialChars::PARSEP)
+			++parEnd;
+
+		const ParagraphStyle& pStyle = paragraphStyle(parStart);
+		if (!pStyle.hasNestedStyles() || parEnd <= parStart)
+		{
+			parStart = parEnd + 1;
+			continue;
+		}
+
+		const QList<ParagraphStyle::NestedStyleRule> rules = pStyle.nestedStyleRules();
+		int cursor = parStart;
+
+		for (const ParagraphStyle::NestedStyleRule& rule : rules)
+		{
+			if (cursor >= parEnd)
+				break;
+
+			// Where this rule stops. A rule whose delimiter never turns up runs
+			// to the end of the paragraph, which starves every later rule --
+			// this is what InDesign does.
+			int runEnd;
+			if (rule.delimiterType == ParagraphStyle::NestedDelimEndOfPara)
+				runEnd = parEnd;
+			else
+			{
+				const char32_t delim = rule.effectiveDelimiter();
+				int found = 0;
+				int scan = cursor;
+				runEnd = parEnd;
+				for (; scan < parEnd; ++scan)
+				{
+					if (static_cast<char32_t>(that->d->at(scan)->ch.unicode()) != delim)
+						continue;
+					if (++found < rule.count)
+						continue;
+					// "Up To" leaves the delimiter to the next rule,
+					// "Through" swallows it.
+					runEnd = (rule.mode == ParagraphStyle::NestedUpTo) ? scan : scan + 1;
+					break;
+				}
+			}
+
+			if (runEnd <= cursor)
+				continue;
+
+			// A rule pointing at a character style that no longer exists is
+			// skipped silently: it still consumes its run, so the rules after it
+			// stay put, but nothing is restyled. Looking the style up without
+			// this guard would dereference a null pointer.
+			const bool styleExists = !rule.charStyleName.isEmpty()
+				&& m_doc->charStyles().contains(rule.charStyleName);
+
+			if (styleExists)
+			{
+				if (m_nestedOverlay.isEmpty())
+				{
+					m_nestedOverlay = QVector<const CharStyle*>(len, nullptr);
+					m_nestedOverlayGroup = QVector<int>(len, 0);
+				}
+				++groupCounter;
+
+				// One derived style per stretch of identically formatted
+				// characters rather than one per character. Comparing the base
+				// styles is much cheaper than building one style each time.
+				const CharStyle* lastBase = nullptr;
+				const CharStyle* lastDerived = nullptr;
+				for (int i = cursor; i < runEnd; ++i)
+				{
+					if (that->d->at(i)->ch == SpecialChars::PARSEP)
+						continue;
+					const CharStyle& base = charStyle(i);
+					if (lastBase == nullptr || !(base == *lastBase))
+					{
+						lastDerived = allocDerivedStyle(base, rule.charStyleName);
+						lastBase = &base;
+					}
+					m_nestedOverlay[i] = lastDerived;
+					m_nestedOverlayGroup[i] = groupCounter;
+				}
+				anyOverlay = true;
+			}
+
+			cursor = runEnd;
+		}
+
+		parStart = parEnd + 1;
+	}
+
+	if (!anyOverlay)
+	{
+		m_nestedOverlay.clear();
+		m_nestedOverlayGroup.clear();
+	}
+}
+
+const CharStyle& StoryText::layoutCharStyle(int pos) const
+{
+	updateNestedStyleOverlay();
+
+	if (!m_nestedOverlay.isEmpty())
+	{
+		int p = (pos < 0) ? pos + length() : pos;
+		if (p >= 0 && p < m_nestedOverlay.count())
+		{
+			const CharStyle* derived = m_nestedOverlay.at(p);
+			if (derived)
+				return *derived;
+		}
+	}
+	return charStyle(pos);
+}
+
+int StoryText::layoutStyleGroup(int pos) const
+{
+	updateNestedStyleOverlay();
+
+	if (m_nestedOverlayGroup.isEmpty())
+		return 0;
+
+	int p = (pos < 0) ? pos + length() : pos;
+	if (p < 0 || p >= m_nestedOverlayGroup.count())
+		return 0;
+	return m_nestedOverlayGroup.at(p);
+}
+
 const ParagraphStyle & StoryText::paragraphStyle() const
 {
 	return paragraphStyle(d->cursorPosition);
@@ -2200,6 +2381,11 @@ void StoryText::invalidateObject(const PageItem * embedded)
 
 void StoryText::invalidateLayout()
 {
+	// Called when this StoryText starts pointing at different shared text, so
+	// the derived nested-style runs no longer describe what is in the story.
+	m_nestedOverlayDirty = true;
+	m_nestedOverlay.clear();
+	m_nestedOverlayGroup.clear();
 }
 
 void StoryText::invalidateAll()
@@ -2210,6 +2396,11 @@ void StoryText::invalidateAll()
 
 void StoryText::invalidate(int firstItem, int endItem)
 {
+	// Every text and style mutation funnels through here, so this is where the
+	// derived nested-style runs go stale. Rebuilding is deferred to the next
+	// layout-time style lookup.
+	m_nestedOverlayDirty = true;
+
 	for (int i = firstItem; i < endItem; ++i)
 	{
 		ParagraphStyle* par = item(i)->parstyle;

@@ -510,6 +510,7 @@ set(SCRIBUS_SOURCES
 	ui/smfontcomboh.cpp
 	ui/smlinestyle.cpp
 	ui/smlinestylewidget.cpp
+	ui/smnestedstyleswidget.cpp
 	ui/smnumformatcombo.cpp
 	ui/smopticalmarginswidget.cpp
 	ui/smprulewidget.cpp

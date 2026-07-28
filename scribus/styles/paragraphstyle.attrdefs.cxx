@@ -90,3 +90,7 @@ ATTRDEF(double, ruleBelowOffset, RuleBelowOffset, 0.0)
 ATTRDEF(double, ruleBelowLeftIndent, RuleBelowLeftIndent, 0.0)
 ATTRDEF(double, ruleBelowRightIndent, RuleBelowRightIndent, 0.0)
 ATTRDEF(bool, ruleBelowKeepInFrame, RuleBelowKeepInFrame, true)
+// InDesign-style nested styles: an ordered list of character-style rules that
+// is resolved at layout time. Encoded as a single string so it rides the normal
+// attribute machinery; see ParagraphStyle::parseNestedStyles().
+ATTRDEF(QString, nestedStyles, NestedStyles, "")

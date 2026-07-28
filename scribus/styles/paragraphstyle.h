@@ -99,6 +99,61 @@ public:
 	    survives colour palette changes. */
 	static const QString RuleTextColor;
 
+	/** How far a nested style rule reaches relative to its delimiter */
+	enum NestedStyleMode
+	{
+		NestedUpTo   = 0,  //!< the delimiter itself is *not* styled
+		NestedThrough = 1  //!< the delimiter itself *is* styled
+	};
+
+	/** What a nested style rule scans for. Anything other than NestedDelimChar
+	    is a named preset that has no single obvious literal spelling. */
+	enum NestedDelimiterType
+	{
+		NestedDelimChar         = 0, //!< the literal codepoint in NestedStyleRule::delimiter
+		NestedDelimEndOfPara    = 1,
+		NestedDelimSpace        = 2,
+		NestedDelimTab          = 3,
+		NestedDelimEnSpace      = 4,
+		NestedDelimEmSpace      = 5
+	};
+
+	/** One InDesign-style nested style rule. Rules consume the paragraph in
+	    order: rule N starts where rule N-1 stopped and runs up to / through the
+	    countth occurrence of its delimiter. */
+	struct SCRIBUS_API NestedStyleRule
+	{
+		QString charStyleName;
+		NestedStyleMode mode { NestedThrough };
+		int count { 1 };
+		NestedDelimiterType delimiterType { NestedDelimChar };
+		char32_t delimiter { 0 };
+
+		bool operator==(const NestedStyleRule& other) const;
+		bool operator!=(const NestedStyleRule& other) const { return !(*this == other); }
+
+		/** The codepoint this rule actually scans for, presets resolved.
+		    Returns 0 for NestedDelimEndOfPara, which has no character. */
+		char32_t effectiveDelimiter() const;
+	};
+
+	/** Maximum number of nested style rules kept on one paragraph style. */
+	static const int MaxNestedStyleRules = 4;
+
+	/** Parse / build the encoded nestedStyles() attribute. The encoding is
+	    rules joined by ';', fields by ',':
+	        <percent-encoded char style name>,<U|T>,<count>,<delim spec>
+	    where <delim spec> is EOP, SP, TAB, ENSP, EMSP or Uxxxx (hex codepoint).
+	    Storing the delimiter as a codepoint keeps non-Latin delimiters and
+	    delimiters that collide with the separators themselves safe. */
+	static QList<NestedStyleRule> parseNestedStyles(const QString& encoded);
+	static QString encodeNestedStyles(const QList<NestedStyleRule>& rules);
+
+	/** Convenience wrappers around the encoded nestedStyles() attribute. */
+	QList<NestedStyleRule> nestedStyleRules() const { return parseNestedStyles(nestedStyles()); }
+	void setNestedStyleRules(const QList<NestedStyleRule>& rules) { setNestedStyles(encodeNestedStyles(rules)); }
+	bool hasNestedStyles() const { return !nestedStyles().isEmpty(); }
+
 	struct TabRecord
 	{
 		qreal tabPosition {0.0};

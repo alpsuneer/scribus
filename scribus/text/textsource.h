@@ -47,17 +47,19 @@ public:
 	virtual int nextBlockStart(int pos) const;
 	
 	virtual const CharStyle& charStyle(int pos) const;
+	virtual const CharStyle& layoutCharStyle(int pos) const;
+	virtual int layoutStyleGroup(int pos) const;
 	virtual const ParagraphStyle& paragraphStyle(int pos) const;
 	virtual LayoutFlags flags(int pos) const;
 	virtual bool hasFlag(int pos, LayoutFlags flag) const;
 	virtual void setFlag(int pos, LayoutFlags flag);
 	virtual void clearFlag(int pos, LayoutFlags flag);
-	
+
 	virtual bool hasObject(int pos) const;
 	virtual InlineFrame object(int pos) const;
 	virtual bool hasExpansionPoint(int pos) const;
 	virtual ExpansionPoint expansionPoint(int pos) const;
-	
+
 	virtual const ITextSource* parent() const;
 	virtual int parentPos() const;
 };
