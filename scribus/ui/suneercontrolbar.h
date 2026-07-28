@@ -50,6 +50,7 @@ protected:
 	}
 public slots:
 	void updateFromSelection();
+	void unitChange();
 	void updateCaptionFrame(PageItem* imgFrame);
 	void languageChange();
 	void iconSetChange();
@@ -147,6 +148,7 @@ private:
 	QToolButton*    makeButton(const QString& text, const QString& tooltip, bool checkable = false);
 	QLabel*         makeLabel(const QString& text, const QString& tooltip = "");
 	void blockAllSignals(bool block);
+	void applyLineWidthUnit();
 	void showTextWidgets(bool show);
 	void showImageWidgets(bool show);
 	void showTextWrapWidgets(bool show);
@@ -316,6 +318,7 @@ public:
 
 	// Text Frame border controls
 	QDoubleSpinBox* m_textLineWidthSpin    {nullptr};
+	QDoubleSpinBox* m_imgLineWidthSpin     {nullptr};
 	QComboBox*      m_textLineStyleCombo   {nullptr};
 	QToolButton*    m_lineCapFlatBtn       {nullptr};
 	QToolButton*    m_lineCapRoundBtn      {nullptr};

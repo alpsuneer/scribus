@@ -1,4 +1,5 @@
 #include "suneercontrolbar.h"
+#include "units.h"
 #include <QCompleter>
 #include <QAbstractItemView>
 #include "scribus.h"
@@ -1373,6 +1374,30 @@ void SuneerControlBar::blockAllSignals(bool block)
 		 m_imgRotSpin
 	};
 	for (QObject* o : all) o->blockSignals(block);
+}
+
+void SuneerControlBar::applyLineWidthUnit()
+{
+	if (!m_doc) return;
+	const int    idx    = m_doc->unitIndex();
+	const double ratio  = m_doc->unitRatio();
+	const QString suffix = unitGetSuffixFromIndex(idx);
+	const int    dec    = unitGetPrecisionFromIndex(idx);
+	for (QDoubleSpinBox* sb : { m_textLineWidthSpin, m_imgLineWidthSpin, m_lineWidthSpin })
+	{
+		if (!sb) continue;
+		sb->blockSignals(true);
+		sb->setSuffix(suffix);
+		sb->setDecimals(dec);
+		sb->setRange(0.0, 300.0 * ratio);   // keep the internal 300 pt cap
+		sb->blockSignals(false);
+	}
+}
+
+void SuneerControlBar::unitChange()
+{
+	applyLineWidthUnit();
+	updateFromSelection();
 }
 
 void SuneerControlBar::updateFromSelection()
