@@ -15,5 +15,25 @@ faircode-frames/AngledBar.sce
 faircode-frames/AngledBar.png
 faircode-frames/Brackets.sce
 faircode-frames/Brackets.png
+faircode-frames/TitleRule.sce
+faircode-frames/TitleRule.png
+faircode-frames/SideRule.sce
+faircode-frames/SideRule.png
+faircode-frames/PullQuote.sce
+faircode-frames/PullQuote.png
+faircode-frames/NumberBox.sce
+faircode-frames/NumberBox.png
+faircode-frames/ShadowBox.sce
+faircode-frames/ShadowBox.png
+faircode-frames/Ribbon.sce
+faircode-frames/Ribbon.png
+faircode-frames/Badge.sce
+faircode-frames/Badge.png
+faircode-frames/DoubleBox.sce
+faircode-frames/DoubleBox.png
+faircode-frames/DashedBox.sce
+faircode-frames/DashedBox.png
+faircode-frames/Highlight.sce
+faircode-frames/Highlight.png
 DESTINATION ${SHAREDIR}scrapbook/faircode-frames
 )

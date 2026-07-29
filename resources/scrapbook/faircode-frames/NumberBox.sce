@@ -1,0 +1,26 @@
+<ScribusElementUTF8 Count="1" Height="124.724409448819" Version="1.7.3" Width="226.771653543307" XPosition="340.157480314961" YPosition="226.771653543307" previewData="iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAB10lEQVRoge3VsYsTQRgF8PdmxkQvp4J4xwlyYBAb7cTiQLja8/4Fi2stBC1Sa6N/hEUOtLWT6wStLTxRRERjI3gbLrEIay7JznwWiu4WsiEbbnPh+1Uzy8fwXjE7BCDIxzFmSuUA4NPF8/8duPT526GFKcKkN2du38Hyg4dlZSkkU+RH8zGql6+UlaWQTBHp98vKUVimyOKNTbilZZy4eq2sPBPLFBl9bWGvcRdJtFdWnom59Gbw8UNZOQoj5uQdGbfIkTAPRcQBQLP55CXJ9bLTTEJEXm1t3fp92UmuNxr3rosISYqInLLe14JzYozphhA6VuS0ACcBLBjyu2dYBez7JEm6FfKckBco0sIx+RmCs6Q/K55rtHZXRLoMYVWM6UZR9GKaRba3nwqQ/WutkNwVkdgYs5SI7FvyeJIkg2q1OhgOh21jTCC50Ivj3mKl0hnRB2t5M9C+Jfnah9CHx4q1yfDgILypOLcG7+sMYZ/Au0COplki7W+Rdrv9LPU99yHpAZ0/yy8AAv7dtSg19qhowHG5/JFcfgpnFGbyR44GLTJrtMis0SKzRovMmrkpQgCysbHZqtVq9bLDTCKO49bOzvM6AdwvO4xSSimllFJKKaWUOiy/AFIen1a+Bk5RAAAAAElFTkSuQmCC">
+ <Color C="0" K="100" M="0" Name="Black" Space="CMYK" Y="0"/>
+ <Color B="0" G="0" Name="FC-Black" R="0" Space="RGB"/>
+ <Color B="29" G="37" Name="FC-Red" R="218" Space="RGB"/>
+ <Color B="255" G="255" Name="FC-White" R="255" Space="RGB"/>
+ <CharacterStyle BackgroundColor="None" BackgroundShade="100" BaselineOffset="0" DefaultStyle="1" Features="inherit" FillShade="100" Font="Helvetica Regular" FontColor="Black" FontFeatures="" FontSize="12" HyphenWordMinimum="3" Kerning="0" Language="en_GB" Name="Default Character Style" ScaleHorizontal="100" ScaleVertical="100" StrokeColor="Black" StrokeShade="100" TextOutlineWidth="1" TextShadowXOffset="5" TextShadowYOffset="-5" TextStrikeThroughOffset="-0.1" TextStrikeThroughWidth="-0.1" TextUnderlineOffset="-0.1" TextUnderlineWidth="-0.1"/>
+ <CharacterStyle Font="Noto Sans Malayalam Regular" FontSize="11" Name="FC Malayalam Body" StrokeColor="Black"/>
+ <ParagraphStyle Alignment="0" Bullet="0" DefaultStyle="1" Direction="0" DropCapLines="2" FirstIndent="0" GapAfter="0" GapBefore="0" HasDropCap="0" HyphenConsecutiveLines="2" HyphenationMode="2" LeftMargin="0" LineSpacing="15" LineSpacingMode="0" Name="Default Paragraph Style" Numeration="0" ParagraphBackgroundColor="None" ParagraphBackgroundColorShade="100" ParagraphEffectOffset="0" RightMargin="0"/>
+ <ParagraphStyle Alignment="0" Bullet="0" CParent="FC Malayalam Body" FirstIndent="0" GapAfter="0" GapBefore="0" HasDropCap="0" LeftMargin="0" LineSpacing="15" LineSpacingMode="0" Name="FC Body ML" ParagraphEffectOffset="0" RightMargin="0"/>
+ <Item ANNAME="Group4" AutoName="Group4" ClipEdited="0" ContourLinePath="M0 0 L226.772 0 L226.772 124.724 L0 124.724 L0 0 Z" FrameType="0" GroupClipping="1" GroupHeight="124.724409448819" GroupWidth="226.771653543307" Height="124.724409448819" ItemID="248621176" ItemType="12" Layer="0" OwnPage="0" Path="M0 0 L226.772 0 L226.772 124.724 L0 124.724 L0 0 Z" Width="226.771653543307" XPosition="340.157480314961" YPosition="226.771653543307" gHeight="0" gWidth="0" gXpos="440.158480314961" gYpos="246.772653543307">
+  <PageObject Alignment="1" AutomaticTextFrame="0" BackItem="-1" ClipEdited="0" ColumnGap="0" Columns="1" ContourLinePath="M0 0 L39.685 0 L39.685 39.685 L0 39.685 L0 0 Z" FillColor="FC-Red" FirstLineOffset="1" FrameType="0" Height="39.6850393700787" ImageOffsetX="0" ImageOffsetY="0" ImageRatio="1" ImageRotation="0" ImageScaleType="1" ImageScaleX="1" ImageScaleY="1" ImageVisible="1" ItemID="1928154168" ItemType="4" Layer="0" LinePenStyle="1" LineWidth="1" NextItem="-1" OwnPage="0" Path="M0 0 L39.685 0 L39.685 39.685 L0 39.685 L0 0 Z" PathTextDistanceFromPath="0" PathTextShowPath="0" TextPathFlipped="0" TextPathType="0" TextToFrameDistanceBottom="0" TextToFrameDistanceLeft="0" TextToFrameDistanceRight="0" TextToFrameDistanceTop="0" VerticalAlignment="1" Width="39.6850393700787" XPosition="440.158480314961" YPosition="246.772653543307" gHeight="124.724409448819" gWidth="226.771653543307" gXpos="0" gYpos="0">
+   <StoryText>
+    <DefaultStyle Alignment="1" Font="DejaVu Sans Bold" FontSize="20"/>
+    <Content Chars="1" Font="DejaVu Sans Bold" FontColor="FC-White" FontSize="20"/>
+    <trail Alignment="1"/>
+   </StoryText>
+  </PageObject>
+  <PageObject AutomaticTextFrame="0" BackItem="-1" ClipEdited="0" ColumnGap="0" Columns="1" ContourLinePath="M0 0 L226.772 0 L226.772 79.3701 L0 79.3701 L0 0 Z" FirstLineOffset="1" FrameType="0" Height="79.3700787401575" ImageOffsetX="0" ImageOffsetY="0" ImageRatio="1" ImageRotation="0" ImageScaleType="1" ImageScaleX="1" ImageScaleY="1" ImageVisible="1" ItemID="383295504" ItemType="4" Layer="0" LinePenStyle="1" LineWidth="1" NextItem="-1" OwnPage="0" ParagraphStyle="FC Body ML" Path="M0 0 L226.772 0 L226.772 79.3701 L0 79.3701 L0 0 Z" PathTextDistanceFromPath="0" PathTextShowPath="0" TextPathFlipped="0" TextPathType="0" TextToFrameDistanceBottom="5.66929133858268" TextToFrameDistanceLeft="5.66929133858268" TextToFrameDistanceRight="5.66929133858268" TextToFrameDistanceTop="5.66929133858268" VerticalAlignment="0" Width="226.771653543307" XPosition="440.158480314961" YPosition="292.126984251969" gHeight="124.724409448819" gWidth="226.771653543307" gXpos="0" gYpos="45.3543307086614">
+   <StoryText>
+    <DefaultStyle Parent="FC Body ML"/>
+    <Content Chars="ഇവിടെ ടൈപ്പ് ചെയ്യുക"/>
+    <trail Parent="FC Body ML"/>
+   </StoryText>
+  </PageObject>
+ </Item>
+</ScribusElementUTF8>
