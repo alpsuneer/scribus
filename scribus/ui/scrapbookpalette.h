@@ -55,6 +55,7 @@ public:
 	QString ScFilename;
 	QString visibleName;
 	bool canWrite { true };
+	bool isSystem { false };
 
 signals:
 	void objDropped(QString text);
@@ -91,6 +92,7 @@ public:
 	void readOldContents(const QString&, const QString&);
 	void installEventFilter(QObject *);
 	void setOpenScrapbooks(const QStringList &fileNames);
+	void openSystemScrapbook(const QString& fileName, const QString& visibleName);
 	QStringList getOpenScrapbooks() const;
 	QStringList getOpenScrapbooksNames() const;
 	QString getObjectName(const QString &text) const;

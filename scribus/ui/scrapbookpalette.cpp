@@ -865,6 +865,33 @@ void Biblio::setOpenScrapbooks(const QStringList &fileNames)
 	connect(activeBView, SIGNAL(itemDoubleClicked(QListWidgetItem*)), this, SLOT(handleDoubleClick(QListWidgetItem*)));
 }
 
+void Biblio::openSystemScrapbook(const QString& fileName, const QString& visibleName)
+{
+	if (fileName.isEmpty())
+		return;
+	for (int i = 0; i < Frame3->count(); i++)
+	{
+		BibView* bv = (BibView*) Frame3->widget(i);
+		if (fileName == bv->ScFilename)
+			return;
+	}
+
+	QDir d(fileName);
+	BibView* systemBView = new BibView(this);
+	systemBView->canWrite = false;
+	systemBView->isSystem = true;
+	systemBView->setAcceptDrops(false);
+	Frame3->addItem(systemBView, IconManager::instance().loadIcon("lock"), visibleName);
+	systemBView->readContents(fileName);
+	systemBView->ScFilename = fileName;
+	systemBView->visibleName = visibleName;
+	ScCore->fileWatcher->addDir(d.absolutePath(), true);
+	systemBView->scrollToTop();
+	updateView();
+
+	emit scrapbookListChanged();
+}
+
 QStringList Biblio::getOpenScrapbooks() const
 {
 	QStringList ret;
@@ -873,6 +900,8 @@ QStringList Biblio::getOpenScrapbooks() const
 		for (int i = 2; i < Frame3->count(); i++)
 		{
 			auto bv = (BibView*) Frame3->widget(i);
+			if (bv->isSystem) // shipped collections are reopened by initScrapbook, not via prefs
+				continue;
 			ret.append(bv->ScFilename);
 		}
 	}

@@ -1076,6 +1076,9 @@ void ScribusMainWindow::initScrapbook()
 	scrapbookPalette->setScrapbookFileName(scrapbookFile);
 	ScCore->fileWatcher->addDir(scrapbookFile, true);
 	scrapbookPalette->setOpenScrapbooks(m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks);
+	QString systemScrapbook = QDir::toNativeSeparators(ScPaths::instance().shareDir() + "scrapbook/faircode-frames");
+	if (QFileInfo(systemScrapbook).isDir())
+		scrapbookPalette->openSystemScrapbook(systemScrapbook, "Faircode Frames");
 	rebuildRecentPasteMenu();
 	connect(scrapbookPalette, SIGNAL(updateRecentMenue()), this, SLOT(rebuildRecentPasteMenu()));
 	connect(ScCore->fileWatcher, SIGNAL(dirChanged(QString)), scrapbookPalette, SLOT(reloadLib(QString)));
