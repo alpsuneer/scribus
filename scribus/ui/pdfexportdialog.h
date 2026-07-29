@@ -10,9 +10,11 @@ for which a new license (GPL+exception) is in place.
 #include <QDialog>
 #include <QList>
 class QCheckBox;
+class QComboBox;
 class QGridLayout;
 class QGroupBox;
 class QHBoxLayout;
+class QLabel;
 class QLineEdit;
 class QPushButton;
 class QToolButton;
@@ -60,6 +62,8 @@ protected slots:
 	void fileNameChanged();
 	void enableSave();
 	void disableSave();
+	void handlePresetChange(int index);
+	void presetToCustom();
 
 protected:
 	// Widgets
@@ -73,6 +77,7 @@ protected:
 	QPushButton* okButton;
 	QPushButton* cancelButton;
 	QLineEdit* fileNameLineEdit;
+	QComboBox* presetCombo;
 	TabPDFOptions* Options;
 
 	// Other members
