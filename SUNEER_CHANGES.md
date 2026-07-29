@@ -62,11 +62,13 @@
 
 ### 7. Faircode Frames (Text Frame Style Presets)
 - Scrapbook palette-ൽ built-in "Faircode Frames" tab (read-only, auto-open)
-- 8 ready-made decorative frame templates:
-  - Quote box A/B (corner L-lines + quote glyphs, orange/green & pink/cyan)
-  - Title-bar box, Angled title strip (red, white title)
-  - Callout left/right (leader line + dot)
-  - Bracket-corner box, Rounded tinted box
+- 18 ready-made decorative frame templates:
+  - QuoteA/QuoteB (corner L-lines + quote glyphs, orange/green & pink/cyan)
+  - TitleBox, AngledBar, Ribbon (red banner, notched ends), TitleRule, Highlight
+  - CalloutL/CalloutR (leader line + dot), Badge (circle label)
+  - Brackets, TintedBox, SideRule, PullQuote, NumberBox (listicle badge)
+  - ShadowBox, DoubleBox, DashedBox
+- വലിയ white-background thumbnails (96px) + മുഴുവൻ പേരും കാണാം
 - Double-click thumbnail → page-ൽ insert; drag → cursor position-ൽ
 - എല്ലാ template text-ഉം Malayalam-ready (Noto Sans Malayalam styles: FC Body ML / FC Quote ML / FC Title ML)
 - FC color palette (FC-Red/Orange/Green/Pink/Cyan) insert ചെയ്യുമ്പോൾ document-ൽ ചേരും — Edit > Colours-ൽ മാറ്റാം
