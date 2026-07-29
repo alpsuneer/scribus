@@ -304,6 +304,14 @@ void ScribusDoc::init()
 	Print_Options.useDocBleeds = true;
 
 	m_docPrefsData.pdfPrefs.firstUse = true;
+	// Faircode newspaper defaults for every new document, stamped
+	// unconditionally so stale values in an existing prefs file cannot
+	// resurrect the old Auto/Maximum/300dpi settings. Documents keep
+	// whatever the user last exported with once firstUse is cleared.
+	m_docPrefsData.pdfPrefs.CompressMethod = PDFOptions::Compression_JPEG;
+	m_docPrefsData.pdfPrefs.Quality = 1;
+	m_docPrefsData.pdfPrefs.RecalcPic = true;
+	m_docPrefsData.pdfPrefs.PicRes = 240;
 	m_docPrefsData.pdfPrefs.Version = m_appPrefsData.pdfPrefs.Version;
 	m_docPrefsData.pdfPrefs.SolidProf = m_docPrefsData.colorPrefs.DCMSset.DefaultSolidColorRGBProfile;
 	m_docPrefsData.pdfPrefs.ImageProf = m_docPrefsData.colorPrefs.DCMSset.DefaultImageRGBProfile;

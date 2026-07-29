@@ -473,12 +473,14 @@ void PrefsManager::initDefaults()
 	appPrefs.pdfPrefs.Articles = false;
 	appPrefs.pdfPrefs.useLayers = false;
 	appPrefs.pdfPrefs.Compress = true;
-	appPrefs.pdfPrefs.CompressMethod = PDFOptions::Compression_Auto;
-	appPrefs.pdfPrefs.Quality = 0;
-	appPrefs.pdfPrefs.RecalcPic = false;
+	// Faircode newspaper defaults: lossy JPEG at High quality, images capped
+	// at 240 dpi. ScribusDoc stamps the same values on every new document.
+	appPrefs.pdfPrefs.CompressMethod = PDFOptions::Compression_JPEG;
+	appPrefs.pdfPrefs.Quality = 1;
+	appPrefs.pdfPrefs.RecalcPic = true;
 	appPrefs.pdfPrefs.embedPDF  = false;
 	appPrefs.pdfPrefs.Bookmarks = false;
-	appPrefs.pdfPrefs.PicRes = 300;
+	appPrefs.pdfPrefs.PicRes = 240;
 	appPrefs.pdfPrefs.Version = PDFVersion::PDF_14;
 	appPrefs.pdfPrefs.Resolution = 300;
 	appPrefs.pdfPrefs.Binding = 0;
