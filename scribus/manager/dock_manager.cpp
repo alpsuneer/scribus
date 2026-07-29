@@ -178,7 +178,24 @@ void DockManager::restoreWorkspaceFromPrefs()
 	QByteArray ba = PrefsManager::instance().appPrefs.uiPrefs.adsDockState;
 
 	if(ba.isEmpty())
-		return;
+	{
+		// Fresh install (no saved prefs): apply the Faircode default layout —
+		// Paragraph Styles docked front-tab with Content Properties (366px),
+		// Properties palette auto-hidden in the right sidebar, other palettes
+		// closed. Captured from a live CDockManager::saveState() (base64).
+		// Any layout the user saves afterwards takes priority over this.
+		static const char defaultWorkspaceState[] =
+			"AAAF7njanVTbjpswEH3vV4x43wJJmiYSsMp2lapS1aYi2z4bPGKtNXZknG2p+vEdk4QCYZO2EgJ7"
+			"LuecsYeJbn+UEp7RVEKr2AtfBx6gyjUXqoi9h+36ZuHdJtEXu+LPTOXI73X+RL60riyW8LVN9OCh"
+			"QtPuCeadVpYJRZbYm9AWlTVMfhO8QBt7Dqdn8pKozYC11Mw2EgKypzsprCXzZyMohTyO4pej2CvC"
+			"evNizE0bM6GYlUEGW5YdBe2NQefaGkTyHmTAJ1Zi7G1YgRsmkSApUuoKuSvSH4Q1qX2/71h6XNMO"
+			"115xfcIdYH1kNZ3VJbaVFIW6F5U1Itvbv9HXpRuVmYqfWCUBBBD5hzV9j0fZK2LWKSKty2yo/oOS"
+			"dHOXtKS5FNmlgDutny7W3/BeO+2wI/S8yWAlpf6O3CUcrmYtWdGkDchGck/MwXXm9JHthoiN7Zr8"
+			"bmNumGGFYbtHSG0tsTpv0oG/r7AX6/4tAj1rhmC0GcLZMqTPdD4f7YtUcLxjBlxaI/l0AEOBRu/Q"
+			"WIHVCC84XLqCxaSRcMSkVTsGxieCY3mPukRr6iQIgS+BB5BnEJDyafNun7ewCP9s5613AcvJaT2D"
+			"YPm/8ecPIfwze+S39Vyddc08dBfi926ke2j+C9M6efUbYVLTgw==";
+		ba = QByteArray::fromBase64(defaultWorkspaceState);
+	}
 
 	this->restoreState(ba);
 }
