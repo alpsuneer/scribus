@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SCRIBUSUTF8NEW Version="1.7.3">
+    <Document PageCount="1" PageWidth="1686.61417322835" PageHeight="2386.77165354331" BorderLeft="28.3464566929134" BorderRight="28.3464566929134" BorderTop="28.3464566929134" BorderBottom="28.3464566929134" MarginPreset="0" BleedTop="0" BleedLeft="0" BleedRight="0" BleedBottom="0" PageOrientation="0" PageSize="Custom" FirstPageNumber="1" PagePositioning="0" AutomaticTextFrameColumnCount="1" AutomaticTextFrameColumnGap="0" UnitIndex="1" FontFace="Helvetica Regular" FontSize="12" TextColumnCount="1" TextColumnGap="0" TabFillCharacter="" TabWidth="36" TextDistanceLeft="0" TextDistanceRight="0" TextDistanceBottom="0" TextDistanceTop="0" FirstLineOffset="1" DocumentInfoAuthor="" DocumentInfoComments="" DocumentInfoKeywords="" DocumentInfoPublisher="" DocumentInfoDate="" DocumentInfoType="" DocumentInfoFormat="" DocumentInfoIdentifier="" DocumentInfoSource="" DocumentInfoLanguage="" DocumentInfoRelation="" DocumentInfoCoverage="" DocumentInfoRights="" DocumentInfoContributors="" DocumentInfoTitle="" DocumentInfoSubject="" SuperScriptDisplacement="33" SuperScriptScaling="66" SubScriptDisplacement="33" SubScriptScaling="66" SmallCapsScaling="75" BaselineGridSpacing="14.4" BaselineGridOffset="0" AutoLineSpacingPct="100" UnderlinePosition="-1" UnderlineWidth="-1" StrikeThruPosition="-1" StrikeThruWidth="-1" GroupCounter="3" DocumentHasCMS="0" SoftProofOn="0" SoftProofFullOn="0" ColorManagementActive="0" GamutCheck="0" BlackPoint="1" DefaultPrinterProfile="ISO Coated v2 300% (basICColor)" DefaultImageRGBProfile="sRGB display profile (ICC v2.2)" DefaultImageCMYKProfile="ISO Coated v2 300% (basICColor)" DefaultSolidColorRGBProfile="sRGB display profile (ICC v2.2)" DefaultSolidColorCMYKProfile="ISO Coated v2 300% (basICColor)" DefaultIntentColors="1" DefaultIntentImages="0" ActiveLayer="0" Language="en_GB" AutomaticHyphenation="0" AutomaticHyphenationCheck="0" GuideLock="0" SnapToGuides="0" SnapToGrid="0" SnapToItems="0" MinorGridSpacing="20.001" MajorGridSpacing="100.001" ShowGrid="0" ShowGuides="1" ShowColumnBorders="1" ShowFrames="1" ShowControls="0" ShowLayerMarkers="0" ShowMargins="1" ShowBaselineGrid="0" ShowImages="1" ShowLinks="0" RulerMode="1" ShowRulers="1" ShowBleed="1" RulerXOffset="0" RulerYOffset="0" GuideRadius="10" GrabRadius="4" PolygonCorners="4" PolygonFactor="0.502" PolygonRotation="0" PolygonInnerRotation="0" PolygonCurvature="0" PolygonOuterCurvature="0" PolygonUseFactor="0" ArcStartAngle="30" ArcSweepAngle="300" SpiralStartAngle="0" SpiralEndAngle="1080" SpiralFactor="1.2" AutoSave="1" AutoSaveTime="600000" AutoSaveCount="1" AutoSaveKeep="0" AutoSaveInDocumentDirectory="1" AutoSaveDirectory="" ScratchBottom="20.001" ScratchLeft="100.001" ScratchRight="100.001" ScratchTop="20.001" GapHorizontal="0" GapVertical="40" LineStartArrow="0" LineEndArrow="0" ShapeLineColor="Black" ShapeFillColor="None" LineColor="Black" TextColor="Black" TextStrokeColor="Black" TextBackgroundColor="None" TextLineColor="None" TextBackgroundColorShade="100" TextLineColorShade="100" TextColorShade="100" TextStrokeColorShade="100" ShapeLineStyle="1" LineStyle="1" ShapeLineWidth="1" LineWidth="1" ShapeLineColorShade="100" LineColorShade="100" ShapeFillColorShade="100" ImageFillColor="None" ImageFillColorShade="100" ImageStrokeColor="None" ImageStrokeColorShade="100" ImageScaleX="1" ImageScaleY="1" ImageScaleType="1" ImageAspectRatio="1" ImageUseEmbeddedPath="0" ImageLowResType="1" DisplayOffsetX="10.001" DisplayOffsetY="10.001" RotationConstrainAngle="15" MinorGridColor="#00ff00" MajorGridColor="#00ff00" GuidesColor="#000080" BaselineGridColor="#c0c0c0" RenderStack="2 0 4 1 3" GridType="0" PageColor="#ffffff" MarginColor="#0000ff" ShowMarginsFilled="0" CurrentProfile="PDF 1.4" CalligraphicPenFillColor="Black" CalligraphicPenLineColor="Black" CalligraphicPenFillColorShade="100" CalligraphicPenLineColorShade="100" CalligraphicPenLineWidth="1" CalligraphicPenAngle="0" CalligraphicPenWidth="10" CalligraphicPenStyle="1">
+        <CheckProfile Name="PDF 1.3" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="1" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="0" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="1" CheckFontIsOpenType="1" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF 1.4" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="0" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="0" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="1" CheckFontIsOpenType="1" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF 1.5" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="0" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="0" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="1" CheckFontIsOpenType="1" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF 1.6" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="0" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="0" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="1" CheckFontIsOpenType="0" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF/X-1a" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="1" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="1" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="1" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="1" CheckFontIsOpenType="1" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF/X-3" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="1" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="1" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="1" CheckFontNotEmbedded="1" CheckFontIsOpenType="1" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PDF/X-4" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="0" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="1" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="1" CheckFontNotEmbedded="1" CheckFontIsOpenType="0" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <CheckProfile Name="PostScript" IgnoreErrors="0" AutoCheck="1" CheckGlyphs="1" CheckOrphans="1" CheckOverflow="1" CheckPictures="1" CheckPartFilledImageFrames="0" CheckResolution="1" CheckTransparency="1" MinimumResolution="144" MaximumResolution="2400" CheckAnnotations="0" CheckRasterPDF="1" CheckForGIF="1" IgnoreOffLayers="0" CheckNotCMYKOrSpot="0" CheckDeviceColorsAndOutputIntent="0" CheckFontNotEmbedded="0" CheckFontIsOpenType="0" CheckAppliedMasterDifferentSide="1" CheckEmptyTextFrames="1" CheckImageHasProgressiveEncoding="1"/>
+        <Color Name="Black" Space="CMYK" C="0" M="0" Y="0" K="100"/>
+        <Color Name="Blue" Space="RGB" R="0" G="0" B="255"/>
+        <Color Name="Cool Black" Space="CMYK" C="60" M="0" Y="0" K="100"/>
+        <Color Name="Cyan" Space="CMYK" C="100" M="0" Y="0" K="0"/>
+        <Color Name="FC-Black" Space="RGB" R="0" G="0" B="0"/>
+        <Color Name="FC-Cyan" Space="RGB" R="0" G="174" B="239"/>
+        <Color Name="FC-Green" Space="RGB" R="58" G="170" B="53"/>
+        <Color Name="FC-Orange" Space="RGB" R="247" G="148" B="29"/>
+        <Color Name="FC-Red" Space="RGB" R="218" G="37" B="29"/>
+        <Color Name="FC-White" Space="RGB" R="255" G="255" B="255"/>
+        <Color Name="Green" Space="RGB" R="0" G="255" B="0"/>
+        <Color Name="Magenta" Space="CMYK" C="0" M="100" Y="0" K="0"/>
+        <Color Name="Red" Space="RGB" R="255" G="0" B="0"/>
+        <Color Name="Registration" Space="CMYK" C="100" M="100" Y="100" K="100" Register="1"/>
+        <Color Name="Rich Black" Space="CMYK" C="60" M="40" Y="40" K="100"/>
+        <Color Name="Warm Black" Space="CMYK" C="0" M="60" Y="29.8039215686275" K="100"/>
+        <Color Name="White" Space="CMYK" C="0" M="0" Y="0" K="0"/>
+        <Color Name="Yellow" Space="CMYK" C="0" M="0" Y="100" K="0"/>
+        <Hyphenator/>
+        <CharacterStyle Name="Default Character Style" DefaultStyle="1" Font="Helvetica Regular" FontSize="12" FontFeatures="" Features="inherit" FontColor="Black" FillShade="100" HyphenWordMinimum="3" StrokeColor="Black" BackgroundColor="None" BackgroundShade="100" StrokeShade="100" TextShadowXOffset="5" TextShadowYOffset="-5" TextOutlineWidth="1" TextUnderlineOffset="-0.1" TextUnderlineWidth="-0.1" TextStrikeThroughOffset="-0.1" TextStrikeThroughWidth="-0.1" ScaleHorizontal="100" ScaleVertical="100" BaselineOffset="0" Kerning="0" Language="en_GB"/>
+        <CharacterStyle Name="FC Malayalam Body" Font="Noto Sans Malayalam Regular" FontSize="11" StrokeColor="Black"/>
+        <CharacterStyle Name="FC Malayalam Quote" Font="Noto Sans Malayalam Regular" FontSize="13" StrokeColor="Black"/>
+        <CharacterStyle Name="FC Malayalam Title" Font="Noto Sans Malayalam Bold" FontSize="13" FontColor="FC-White" StrokeColor="Black"/>
+        <ParagraphStyle Name="Default Paragraph Style" DefaultStyle="1" Alignment="0" Direction="0" LineSpacingMode="0" LineSpacing="15" LeftMargin="0" RightMargin="0" FirstIndent="0" GapBefore="0" GapAfter="0" ParagraphEffectOffset="0" HasDropCap="0" DropCapLines="2" Bullet="0" Numeration="0" HyphenConsecutiveLines="2" HyphenationMode="2" ParagraphBackgroundColor="None" ParagraphBackgroundColorShade="100"/>
+        <ParagraphStyle Name="FC Body ML" Alignment="0" LineSpacingMode="0" LineSpacing="15" LeftMargin="0" RightMargin="0" FirstIndent="0" GapBefore="0" GapAfter="0" ParagraphEffectOffset="0" HasDropCap="0" Bullet="0" CParent="FC Malayalam Body"/>
+        <ParagraphStyle Name="FC Quote ML" Alignment="1" LineSpacingMode="0" LineSpacing="15" LeftMargin="0" RightMargin="0" FirstIndent="0" GapBefore="0" GapAfter="0" ParagraphEffectOffset="0" HasDropCap="0" Bullet="0" CParent="FC Malayalam Quote"/>
+        <ParagraphStyle Name="FC Title ML" Alignment="0" LineSpacingMode="0" LineSpacing="15" LeftMargin="0" RightMargin="0" FirstIndent="0" GapBefore="0" GapAfter="0" ParagraphEffectOffset="0" HasDropCap="0" Bullet="0" CParent="FC Malayalam Title"/>
+        <TableStyle Name="Default Table Style" DefaultStyle="1" FillColor="None" FillShade="100">
+            <TableBorderLeft>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderLeft>
+            <TableBorderRight>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderRight>
+            <TableBorderTop>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderTop>
+            <TableBorderBottom>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderBottom>
+        </TableStyle>
+        <CellStyle Name="Default Cell Style" DefaultStyle="1" FillColor="None" FillShade="100" LeftPadding="1" RightPadding="1" TopPadding="1" BottomPadding="1">
+            <TableBorderLeft>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderLeft>
+            <TableBorderRight>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderRight>
+            <TableBorderTop>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderTop>
+            <TableBorderBottom>
+                <TableBorderLine Width="1" PenStyle="1" Color="Black" Shade="100"/>
+            </TableBorderBottom>
+        </CellStyle>
+        <Layers Number="0" Level="0" Name="Background" IsViewable="1" IsPrintable="1" IsEditable="1" IsSelectable="0" FlowControl="1" Transparency="1" BlendMode="0" OutlineMode="0" LayerColor="#000000"/>
+        <Printer firstUse="1" toFile="0" useAltPrintCommand="0" outputSeparations="0" useSpotColors="1" useColor="1" mirrorH="0" mirrorV="0" useICC="0" doGCR="0" doClip="0" setDevParam="0" useDocBleeds="1" cropMarks="0" bleedMarks="0" registrationMarks="0" colorMarks="0" includePDFMarks="1" PSLevel="3" PrintEngine="3" markLength="20.0013" markOffset="0" BleedTop="0" BleedLeft="0" BleedRight="0" BleedBottom="0" printer="Generic-CUPS-BRF-Printer" filename="" separationName="All" printerCommand=""/>
+        <PDF firstUse="1" Thumbnails="0" Articles="0" Bookmarks="0" Compress="1" CMethod="0" Quality="0" EmbedPDF="0" MirrorH="0" MirrorV="0" Clip="0" rangeSel="0" rangeTxt="" RotateDeg="0" PresentMode="0" RecalcPic="0" FontEmbedding="0" Grayscale="0" RGBMode="1" UseProfiles="0" UseProfiles2="0" Binding="0" PicRes="300" Resolution="300" Version="14" Intent="1" Intent2="0" SolidP="sRGB display profile (ICC v2.2)" ImageP="sRGB display profile (ICC v2.2)" PrintP="ISO Coated v2 300% (basICColor)" InfoString="" BTop="0" BLeft="0" BRight="0" BBottom="0" useDocBleeds="1" cropMarks="0" bleedMarks="0" registrationMarks="0" colorMarks="0" docInfoMarks="0" markLength="20.0012598425197" markOffset="0" ImagePr="0" PassOwner="" PassUser="" Permissions="-4" Encrypt="0" UseLayers="0" UseLpi="0" UseSpotColors="1" doMultiFile="0" displayBookmarks="0" displayFullscreen="0" displayLayers="0" displayThumbs="0" hideMenuBar="0" hideToolBar="0" fitWindow="0" openAfterExport="0" PageLayout="0" openAction="">
+            <LPI Color="Black" Frequency="133" Angle="45" SpotFunction="3"/>
+            <LPI Color="Cyan" Frequency="133" Angle="105" SpotFunction="3"/>
+            <LPI Color="Magenta" Frequency="133" Angle="75" SpotFunction="3"/>
+            <LPI Color="Yellow" Frequency="133" Angle="90" SpotFunction="3"/>
+        </PDF>
+        <DocItemAttributes/>
+        <Indexes/>
+        <TablesOfContents/>
+        <NotesStyles>
+            <notesStyle Name="Default" Start="1" Endnotes="0" Type="Type_1_2_3" Range="0" Prefix="" Suffix=")" AutoHeight="1" AutoWidth="1" AutoRemove="1" AutoWeld="1" SuperNote="1" SuperMaster="1" MarksStyle="" NotesStyle=""/>
+        </NotesStyles>
+        <OpticalMarginSets>
+            <Set Id="preset_0" Type="preset" Name="Default">
+                <Rules>
+                    <Rule Left="0" Right="0.5" Unit="7" Characters="U+003A,U+003B,U+2013,U+2033"/>
+                    <Rule Left="0" Right="0.75" Unit="7" Characters="U+002C,U+002D,U+002E,U+2010,U+2032"/>
+                    <Rule Left="0.25" Right="0.25" Unit="7" Characters="U+2014"/>
+                    <Rule Left="0.5" Right="0" Unit="7" Characters="U+2036"/>
+                    <Rule Left="0.5" Right="0.5" Unit="7" Characters="U+0022,U+0028,U+0029,U+005B,U+005D,U+00AB,U+00BB,U+201C,U+201D,U+201E,U+201F"/>
+                    <Rule Left="0.75" Right="0" Unit="7" Characters="U+2035"/>
+                    <Rule Left="0.75" Right="0.75" Unit="7" Characters="U+0027,U+002A,U+0060,U+007E,U+00B4,U+2018,U+2019,U+201A,U+201B,U+2039,U+203A"/>
+                </Rules>
+            </Set>
+        </OpticalMarginSets>
+        <PageSets>
+            <Set Name="Single Page" FirstPage="0" Rows="1" Columns="1"/>
+            <Set Name="Facing Pages" FirstPage="1" Rows="1" Columns="2">
+                <PageNames Name="Left Page"/>
+                <PageNames Name="Right Page"/>
+            </Set>
+            <Set Name="3-Fold" FirstPage="0" Rows="1" Columns="3">
+                <PageNames Name="Left Page"/>
+                <PageNames Name="Middle"/>
+                <PageNames Name="Right Page"/>
+            </Set>
+            <Set Name="4-Fold" FirstPage="0" Rows="1" Columns="4">
+                <PageNames Name="Left Page"/>
+                <PageNames Name="Middle Left"/>
+                <PageNames Name="Middle Right"/>
+                <PageNames Name="Right Page"/>
+            </Set>
+        </PageSets>
+        <Sections>
+            <Section Number="0" Name="Section 1" From="0" To="0" Type="Type_1_2_3" Start="1" Reversed="0" Active="1" FillChar="0" FieldWidth="0"/>
+        </Sections>
+        <MasterPage PageXPosition="100.001" PageYPosition="20.001" PageWidth="1686.61417322835" PageHeight="2386.77165354331" BorderLeft="28.3464566929134" BorderRight="28.3464566929134" BorderTop="28.3464566929134" BorderBottom="28.3464566929134" PageNumber="0" PageName="Normal" MasterPageName="" Size="Custom" Orientation="0" LeftPage="0" Preset="0" VerticalGuides="" HorizontalGuides="" AutoGuideHorizontalGap="0" AutoGuideVerticalGap="0" AutoGuideHorizontalCount="0" AutoGuideVerticalCount="0" AutoGuideHorizontalReference="0" AutoGuideVerticalReference="0" AutoGuideSelection="0 0 0 0" PageEffectDuration="1" PageViewDuration="1" PageEffectType="0" PageEffectLineDirection="0" PageEffectInsideOutside="0" PageEffectDirection="0"/>
+        <Page PageXPosition="100.001" PageYPosition="20.001" PageWidth="1686.61417322835" PageHeight="2386.77165354331" BorderLeft="28.3464566929134" BorderRight="28.3464566929134" BorderTop="28.3464566929134" BorderBottom="28.3464566929134" PageNumber="0" PageName="" MasterPageName="Normal" Size="Custom" Orientation="0" LeftPage="0" Preset="0" VerticalGuides="" HorizontalGuides="" AutoGuideHorizontalGap="0" AutoGuideVerticalGap="0" AutoGuideHorizontalCount="0" AutoGuideVerticalCount="0" AutoGuideHorizontalReference="0" AutoGuideVerticalReference="0" AutoGuideSelection="0 0 0 0" PageEffectDuration="1" PageViewDuration="1" PageEffectType="0" PageEffectLineDirection="0" PageEffectInsideOutside="0" PageEffectDirection="0"/>
+        <PageObject XPosition="154.993913385827" YPosition="74.9939133858268" OwnPage="0" ItemID="191625827" ItemType="12" Width="230.171653543307" Height="139.462992125984" FrameType="0" ClipEdited="0" AutoName="Group1" GroupWidth="230.171653543307" GroupHeight="139.462992125984" GroupClipping="1" Path="M0 0 L230.172 0 L230.172 139.463 L0 139.463 L0 0 Z" ContourLinePath="M0 0 L230.172 0 L230.172 139.463 L0 139.463 L0 0 Z" gXpos="154.993913385827" gYpos="74.9939133858268" gWidth="0" gHeight="0" Layer="0">
+            <PageObject XPosition="156.693913385827" YPosition="76.6939133858268" OwnPage="0" ItemID="1270280129" ItemType="7" Width="39.6850393700787" Height="39.6850393700788" FrameType="0" ClipEdited="1" LineWidth="3.4" LineColor="FC-Orange" LinePenStyle="1" Path="M0 39.685 L0 0 L39.685 0 " gXpos="1.69999999999999" gYpos="1.7" gWidth="230.171653543307" gHeight="139.462992125984" Layer="0"/>
+            <PageObject XPosition="343.780527559055" YPosition="173.071866141732" OwnPage="0" ItemID="2020463526" ItemType="7" Width="39.6850393700787" Height="39.6850393700788" FrameType="0" ClipEdited="1" LineWidth="3.4" LineColor="FC-Green" LinePenStyle="1" Path="M39.685 0 L39.685 39.685 L0 39.685 " gXpos="188.786614173228" gYpos="98.0779527559055" gWidth="230.171653543307" gHeight="139.462992125984" Layer="0"/>
+            <PageObject XPosition="165.197850393701" YPosition="80.9458818897638" OwnPage="0" ItemID="1115384373" ItemType="4" Width="45.3543307086614" Height="45.3543307086614" FrameType="0" ClipEdited="0" LineWidth="1" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="0" TextToFrameDistanceTop="0" TextToFrameDistanceBottom="0" TextToFrameDistanceRight="0" VerticalAlignment="0" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 0 L45.3543 0 L45.3543 45.3543 L0 45.3543 L0 0 Z" ContourLinePath="M0 0 L45.3543 0 L45.3543 45.3543 L0 45.3543 L0 0 Z" gXpos="10.203937007874" gYpos="5.95196850393701" gWidth="230.171653543307" gHeight="139.462992125984" Layer="0" NextItem="-1" BackItem="-1">
+                <StoryText>
+                    <DefaultStyle Font="DejaVu Sans Bold" FontSize="30"/>
+                    <Content Font="DejaVu Sans Bold" FontSize="30" FontColor="FC-Orange" Chars="“"/>
+                    <trail/>
+                </StoryText>
+            </PageObject>
+            <PageObject XPosition="329.607299212598" YPosition="163.150606299213" OwnPage="0" ItemID="822448258" ItemType="4" Width="45.3543307086614" Height="45.3543307086614" FrameType="0" ClipEdited="0" LineWidth="1" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="0" TextToFrameDistanceTop="0" TextToFrameDistanceBottom="0" TextToFrameDistanceRight="0" VerticalAlignment="2" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 0 L45.3543 0 L45.3543 45.3543 L0 45.3543 L0 0 Z" ContourLinePath="M0 0 L45.3543 0 L45.3543 45.3543 L0 45.3543 L0 0 Z" gXpos="174.613385826772" gYpos="88.1566929133859" gWidth="230.171653543307" gHeight="139.462992125984" Alignment="2" Layer="0" NextItem="-1" BackItem="-1">
+                <StoryText>
+                    <DefaultStyle Alignment="2" Font="DejaVu Sans Bold" FontSize="30"/>
+                    <Content Font="DejaVu Sans Bold" FontSize="30" FontColor="FC-Green" Chars="”"/>
+                    <trail Alignment="2"/>
+                </StoryText>
+            </PageObject>
+            <PageObject XPosition="185.04037007874" YPosition="105.04037007874" OwnPage="0" ItemID="1244765881" ItemType="4" Width="170.07874015748" Height="79.3700787401575" FrameType="0" ClipEdited="0" LineWidth="1" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="0" TextToFrameDistanceTop="0" TextToFrameDistanceBottom="0" TextToFrameDistanceRight="0" VerticalAlignment="1" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 0 L170.079 0 L170.079 79.3701 L0 79.3701 L0 0 Z" ContourLinePath="M0 0 L170.079 0 L170.079 79.3701 L0 79.3701 L0 0 Z" gXpos="30.0464566929134" gYpos="30.0464566929134" gWidth="230.171653543307" gHeight="139.462992125984" ParagraphStyle="FC Quote ML" Layer="0" NextItem="-1" BackItem="-1">
+                <StoryText>
+                    <DefaultStyle Parent="FC Quote ML"/>
+                    <Content Chars="ഉദ്ധരണി ഇവിടെ ചേർക്കുക"/>
+                    <trail Parent="FC Quote ML"/>
+                </StoryText>
+            </PageObject>
+        </PageObject>
+        <PageObject XPosition="439.908480314961" YPosition="76.6939133858268" OwnPage="0" ItemID="643299752" ItemType="12" Width="227.271653543307" Height="141.982283464567" FrameType="0" ClipEdited="0" AutoName="Group2" GroupWidth="227.271653543307" GroupHeight="141.982283464567" GroupClipping="1" Path="M0 0 L227.272 0 L227.272 141.982 L0 141.982 L0 0 Z" ContourLinePath="M0 0 L227.272 0 L227.272 141.982 L0 141.982 L0 0 Z" gXpos="439.908480314961" gYpos="76.6939133858268" gWidth="0" gHeight="0" Layer="0">
+            <PageObject XPosition="440.158480314961" YPosition="76.6939133858268" OwnPage="0" ItemID="721695030" ItemType="4" Width="226.771653543307" Height="28.3464566929134" FrameType="0" ClipEdited="0" LineWidth="1" FillColor="FC-Red" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="5.66929133858268" TextToFrameDistanceTop="2.83464566929134" TextToFrameDistanceBottom="2.83464566929134" TextToFrameDistanceRight="5.66929133858268" VerticalAlignment="1" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 0 L226.772 0 L226.772 28.3465 L0 28.3465 L0 0 Z" ContourLinePath="M0 0 L226.772 0 L226.772 28.3465 L0 28.3465 L0 0 Z" gXpos="0.25" gYpos="0" gWidth="227.271653543307" gHeight="141.982283464567" ParagraphStyle="FC Title ML" Layer="0" NextItem="-1" BackItem="-1">
+                <StoryText>
+                    <DefaultStyle Parent="FC Title ML"/>
+                    <Content Chars="തലക്കെട്ട്"/>
+                    <trail Parent="FC Title ML"/>
+                </StoryText>
+            </PageObject>
+            <PageObject XPosition="440.158480314961" YPosition="105.04037007874" OwnPage="0" ItemID="333038786" ItemType="4" Width="226.771653543307" Height="113.385826771654" FrameType="0" ClipEdited="0" LineWidth="0.5" LineColor="FC-Black" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="8.50393700787402" TextToFrameDistanceTop="8.50393700787402" TextToFrameDistanceBottom="8.50393700787402" TextToFrameDistanceRight="8.50393700787402" VerticalAlignment="0" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 0 L226.772 0 L226.772 113.386 L0 113.386 L0 0 Z" ContourLinePath="M0 0 L226.772 0 L226.772 113.386 L0 113.386 L0 0 Z" gXpos="0.25" gYpos="28.3464566929134" gWidth="227.271653543307" gHeight="141.982283464567" ParagraphStyle="FC Body ML" Layer="0" NextItem="-1" BackItem="-1">
+                <StoryText>
+                    <DefaultStyle Parent="FC Body ML"/>
+                    <Content Chars="ഇവിടെ ടൈപ്പ് ചെയ്യുക"/>
+                    <trail Parent="FC Body ML"/>
+                </StoryText>
+            </PageObject>
+        </PageObject>
+        <PageObject XPosition="156.693913385827" YPosition="275.11911023622" OwnPage="0" ItemID="1869453173" ItemType="4" Width="226.771653543307" Height="113.385826771654" CornerRadius="11" FrameType="2" ClipEdited="0" LineWidth="1" FillColor="FC-Cyan" FillShade="12" LinePenStyle="1" ImageScaleX="1" ImageScaleY="1" ImageOffsetX="0" ImageOffsetY="0" ImageRotation="0" ImageVisible="1" ImageScaleType="1" ImageRatio="1" Columns="1" ColumnGap="0" AutomaticTextFrame="0" TextToFrameDistanceLeft="11.3385826771654" TextToFrameDistanceTop="11.3385826771654" TextToFrameDistanceBottom="11.3385826771654" TextToFrameDistanceRight="11.3385826771654" VerticalAlignment="0" FirstLineOffset="1" PathTextShowPath="0" PathTextDistanceFromPath="0" TextPathType="0" TextPathFlipped="0" Path="M0 11 C0 4.92487 4.92487 0 11 0 L215.772 0 C221.847 0 226.772 4.92487 226.772 11 L226.772 102.386 C226.772 108.461 221.847 113.386 215.772 113.386 L11 113.386 C4.92487 113.386 0 108.461 0 102.386 L0 11 Z" ContourLinePath="M0 0 L226.772 0 L226.772 113.386 L0 113.386 L0 0 Z" gXpos="156.693913385827" gYpos="275.11911023622" gWidth="0" gHeight="0" ParagraphStyle="FC Body ML" Layer="0" NextItem="-1" BackItem="-1">
+            <StoryText>
+                <DefaultStyle Parent="FC Body ML"/>
+                <Content Chars="ഇവിടെ ടൈപ്പ് ചെയ്യുക"/>
+                <trail Parent="FC Body ML"/>
+            </StoryText>
+        </PageObject>
+    </Document>
+</SCRIBUSUTF8NEW>
