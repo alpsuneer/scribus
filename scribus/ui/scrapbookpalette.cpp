@@ -725,13 +725,13 @@ void BibView::readContents(const QString& name)
 		if (itf.value().isDir)
 			continue;
 		auto& preview = itf.value().Preview;
-		preview = preview.scaled(60, 60, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-		QPixmap pm(60, 60);
+		preview = preview.scaled(previewSize, previewSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		QPixmap pm(previewSize, previewSize);
 		pm.fill(palette().color(QPalette::Base));
 		QPainter p;
 		p.begin(&pm);
-		p.fillRect(0, 0, 60, 60, QBrush(iconManager.loadPixmap("testfill")));
-		p.drawPixmap(30 - preview.width() / 2, 30 - preview.height() / 2, preview);
+		p.fillRect(0, 0, previewSize, previewSize, QBrush(iconManager.loadPixmap("testfill")));
+		p.drawPixmap(previewSize / 2 - preview.width() / 2, previewSize / 2 - preview.height() / 2, preview);
 		p.end();
 		auto *item = new QListWidgetItem(QIcon(pm), itf.key(), this);
 		item->setToolTip(itf.key());
@@ -881,6 +881,9 @@ void Biblio::openSystemScrapbook(const QString& fileName, const QString& visible
 	systemBView->canWrite = false;
 	systemBView->isSystem = true;
 	systemBView->setAcceptDrops(false);
+	systemBView->previewSize = 96;
+	systemBView->setIconSize(QSize(96, 96));
+	systemBView->setGridSize(QSize(108, 122));
 	Frame3->addItem(systemBView, IconManager::instance().loadIcon("lock"), visibleName);
 	systemBView->readContents(fileName);
 	systemBView->ScFilename = fileName;
