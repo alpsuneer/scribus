@@ -681,7 +681,7 @@ export QT_IM_MODULE=fcitx
 export GTK_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx
 export QT_QPA_PLATFORM=xcb
-exec \${CMAKE_INSTALL_PREFIX}/bin/scribus.bin \\\"\\$@\\\"
+exec -a scribus \${CMAKE_INSTALL_PREFIX}/bin/scribus.bin \\\"\\$@\\\"
 \")
     execute_process(COMMAND chmod +x \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\")
 ")
