@@ -9571,7 +9571,7 @@ void ScribusMainWindow::PutScrap(int scID)
 	while (!domNode.isNull())
 	{
 		QDomElement pg = domNode.toElement();
-		if (pg.tagName() == "ITEM")
+		if ((pg.tagName() == "ITEM") || (pg.tagName() == "Item"))
 		{
 			if (first)
 				pg.setAttribute("ANNAME", doc->m_Selection->itemAt(0)->itemName());
