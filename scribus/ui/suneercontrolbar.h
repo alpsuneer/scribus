@@ -96,9 +96,14 @@ private slots:
 	void onColumnsChanged(int val);
 	void onColumnGapChanged(double val);
 	void onColumnGapModeChanged(int mode);
-	void onLeftIndentChanged(double val);
-	void onRightIndentChanged(double val);
 	void onFirstLineIndentChanged(double val);
+	void onOutlineWidthChanged();
+	void onOutlineStrokeColorChanged();
+	void onOutlineStepUp();
+	void onOutlineStepDown();
+	void onOutlineOutwardToggled(bool checked);
+	void onGapBeforeChanged(double val);
+	void onGapAfterChanged(double val);
 	void onTrackingChanged(double val);
 	void onBaselineChanged(double val);
 	void onScaleHChanged(double val);
@@ -169,6 +174,10 @@ public:
 	QDoubleSpinBox* m_fontSizeSpin        {nullptr};
 	AlignSelect*    m_alignSelect         {nullptr};
 	StyleSelect*    m_styleSelect         {nullptr};
+	ColorCombo*     m_outlineStrokeColorCombo {nullptr};
+	QToolButton*    m_outlineIncBtn       {nullptr};
+	QToolButton*    m_outlineDecBtn       {nullptr};
+	QCheckBox*      m_outlineOutwardChk   {nullptr};
 	QToolButton*    m_padResetBtn         {nullptr};
 	QToolButton*    m_padAllPlusBtn       {nullptr};
 	QToolButton*    m_padAllMinusBtn      {nullptr};

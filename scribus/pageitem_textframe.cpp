@@ -3710,6 +3710,11 @@ void PageItem_TextFrame::DrawObj_Post(ScPainter *p)
 					p->setPen(m_strokeQColor, m_lineWidth, PLineArt, PLineEnd, PLineJoin);
 					if (DashValues.count() != 0)
 						p->setDash(DashValues, DashOffset);
+					if (hasSideBorders())
+					{
+						FPointArray sb = sideBorderPath();
+						p->setupPolygon(&sb, false);   // stroke only the selected edges
+					}
 					p->strokePath();
 				}
 				else
@@ -4108,7 +4113,20 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 						undoManager->action(undoTarget, ss);
 					}
 				}
-				itemText.insertChars(QString(QChar(conv)), true);
+				{
+                    int iPos = itemText.cursorPosition();
+                    CharStyle prevStyle;
+                    bool hasPrev = (iPos > 0 && itemText.charStyle(iPos - 1).fontSize() != itemText.paragraphStyle(iPos).charStyle().fontSize());
+                    if (hasPrev)
+                        prevStyle = itemText.charStyle(iPos - 1);
+                    itemText.insertChars(QString(QChar(conv)), true);
+                    if (hasPrev)
+                    {
+                        CharStyle cs;
+                        cs.setFontSize(prevStyle.fontSize());
+                        itemText.applyCharStyle(iPos, 1, cs);
+                    }
+                }
 				if (trans)
 					trans.commit();
 //				Tinput = true;
@@ -4603,7 +4621,20 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 					undoManager->action(undoTarget, ss);
 				}
 			}
-			itemText.insertChars(uc, true);
+			{
+                    int iPos = itemText.cursorPosition();
+                    CharStyle prevStyle;
+                    bool hasPrev = (iPos > 0 && itemText.charStyle(iPos - 1).fontSize() != itemText.paragraphStyle(iPos).charStyle().fontSize());
+                    if (hasPrev)
+                        prevStyle = itemText.charStyle(iPos - 1);
+                    itemText.insertChars(uc, true);
+                    if (hasPrev)
+                    {
+                        CharStyle cs;
+                        cs.setFontSize(prevStyle.fontSize());
+                        itemText.applyCharStyle(iPos, 1, cs);
+                    }
+                }
 			if ((m_Doc->docHyphenator->autoCheck()) && (itemText.cursorPosition() > 1))
 			{
 				Twort = "";
@@ -6200,7 +6231,10 @@ void PageItem_TextFrame::autoFitFrameHeight()
 
 	// high = minimum height where no overflow
 	// Add top + bottom margins
-	double newH = high + m_textDistanceMargins.bottom();
+	// +2pt slack so the last line's descent clears the bottom clip edge; at the exact
+	// minimal-fit height endOfLine() under-measures the last line, which makes a centered
+	// last line fall back to justify (flush-left). See indentLine()/endOfLine().
+	double newH = high + m_textDistanceMargins.bottom() + 2.0;
 	setHeight(newH);
 	updateClip();
 	invalid = true;

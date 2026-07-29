@@ -482,6 +482,11 @@ void ScPageOutput::drawItem_Post(PageItem* item, ScPainterExBase* painter)
 					painter->setPen(scColor, item->lineWidth(), item->PLineArt, item->PLineEnd, item->PLineJoin);
 					if (item->DashValues.count() != 0)
 						painter->setDash(item->DashValues, item->DashOffset);
+					if (item->hasSideBorders())
+					{
+						FPointArray sb = item->sideBorderPath();
+						painter->setupPolygon(&sb, false);   // stroke only the selected edges
+					}
 					painter->strokePath();
 				}
 			}
@@ -1031,6 +1036,10 @@ public:
 
 		m_painter->setFillRule(fr);
 		m_painter->restore();
+
+		// Outward outline: redraw the fill on top so only the outer part of the stroke shows.
+		if (fill && outlineOutward())
+			drawGlyph(gc);
 	}
 
 	void drawLine(const QPointF& start, const QPointF& end) override

@@ -89,6 +89,9 @@ public:
 	void calculateArc(bool relative, double &curx, double &cury, double angle, double x, double y, double r1, double r2, bool largeArcFlag, bool sweepFlag);
 	bool parseSVG(const QString& svgPath);
 	QString svgPath(bool closed = false) const;
+	// Returns only the outer contours (those whose winding matches the largest contour),
+	// dropping counter/hole contours. Used for outward-only glyph outlines.
+	FPointArray outerContours() const;
 	QPainterPath toQPainterPath(bool closed) const;
 	void fromQPainterPath(QPainterPath &path, bool close = false);
 

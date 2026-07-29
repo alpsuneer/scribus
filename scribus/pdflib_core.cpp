@@ -334,8 +334,7 @@ public:
 				}
 				m_pathBuffer += transformToStr(transform) + " cm\n";
 
-				if (!FillColor.isEmpty())
-				{
+				auto emitXFormFill = [&]() {
 					m_pathBuffer += "q\n";
 					m_pathBuffer += FillColor;
 					m_pathBuffer += FToStr(fontSize()) + " 0 0 " + FToStr(fontSize()) + " " + FToStr(x() + gl.xoffset + current_x) + " " + FToStr(-y() + fontSize() - gl.yoffset) + " cm\n";
@@ -344,8 +343,12 @@ public:
 					m_pathBuffer += FToStr(qMax(gc.scaleH(), 0.1)) + " 0 0 " + FToStr(qMax(gc.scaleV(), 0.1)) + " 0 0 cm\n";
 					m_pathBuffer += pdfFont.name + "_gl" + Pdf::toPdf(gl.glyph) + " Do\n";
 					m_pathBuffer += "Q\n";
-				}
+				};
+				if (!FillColor.isEmpty())
+					emitXFormFill();
 
+				// Isolate the outline-path transforms in q/Q so the fill can be redrawn afterwards (outward outline)
+				m_pathBuffer += "q\n";
 				m_pathBuffer += "1.0 0 0 1.0 " + FToStr(x()) + " " + FToStr(fontSize() - y()) + " cm\n";
 				m_pathBuffer += "1.0 0 0 1.0 " + FToStr(gl.xoffset + current_x) + " " + FToStr(gc.scaleV() * fontSize() - fontSize() - gl.yoffset) + " cm\n";
 
@@ -382,7 +385,10 @@ public:
 					}
 				}
 				m_pathBuffer += "h s\n";
-				m_pathBuffer += "Q\n";
+				m_pathBuffer += "Q\n";   // close outline-path isolation
+				if (!FillColor.isEmpty() && outlineOutward())
+					emitXFormFill();     // outward outline: redraw fill on top
+				m_pathBuffer += "Q\n";   // close outer q
 			}
 			else
 			{
@@ -4573,14 +4579,32 @@ bool PDFLibCore::PDF_ProcessItem(QByteArray& output, PageItem* ite, const ScPage
 							return false;
 						tmp += "q\n";
 						tmp += tmpOut;
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 						tmp += "Q\n";
 					}
 					else if (ite->lineColor() != CommonStrings::None)
 					{
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 					}
 				}
 				else
@@ -4709,14 +4733,32 @@ bool PDFLibCore::PDF_ProcessItem(QByteArray& output, PageItem* ite, const ScPage
 							return false;
 						tmp += "q\n";
 						tmp += tmpOut;
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 						tmp += "Q\n";
 					}
 					else if (ite->lineColor() != CommonStrings::None)
 					{
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 					}
 				}
 				else
@@ -4883,14 +4925,32 @@ bool PDFLibCore::PDF_ProcessItem(QByteArray& output, PageItem* ite, const ScPage
 							return false;
 						tmp += "q\n";
 						tmp += tmpOut;
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 						tmp += "Q\n";
 					}
 					else if (ite->lineColor() != CommonStrings::None)
 					{
-						tmp += SetClipPath(ite);
-						tmp += "h\nS\n";
+						if (ite->hasSideBorders())
+						{
+							FPointArray sb = ite->sideBorderPath();
+							tmp += SetClipPathArray(&sb, false);   // stroke only the selected edges
+							tmp += "S\n";
+						}
+						else
+						{
+							tmp += SetClipPath(ite);
+							tmp += "h\nS\n";
+						}
 					}
 				}
 				else
