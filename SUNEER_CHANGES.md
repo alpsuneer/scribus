@@ -75,7 +75,21 @@
 - Group-ൽ double-click → text frame നേരിട്ട് edit mode (InDesign-style); decoration lines double-click → select
 - Templates: `resources/scrapbook/faircode-frames/` (+ authoring scripts in `resources/scrapbook/authoring/`)
 
-### 8. Authors
+### 8. Newspaper PDF Export
+- പുതിയ document-കൾക്ക് default: Lossy JPEG / High quality / Max Image
+  Resolution 240 dpi — export size ചെറുതാകും, ഒന്നും set ചെയ്യേണ്ട
+- PDF Export dialog-ൽ "News_Paper" preset — ഒറ്റ click-ൽ full press settings:
+  - Lossy JPEG High + 240 dpi image cap
+  - Output for Printer, CMYK conversion (Rel. Colorimetric / Perceptual)
+  - Newsprint ICC profile: IFRA26S 2004 Newsprint (ISOnewspaper26v4
+    install ചെയ്താൽ അത് automatic ആയി prefer ചെയ്യും —
+    `/usr/share/color/icc/`-ൽ .icc ഇടുക)
+  - PDF/X-1a:2001 + output intent embedded
+  - Document color management off ആണെങ്കിൽ automatic ആയി on ആകും
+- ഏതെങ്കിലും field മാറ്റിയാൽ preset combo "Custom" ആകും; per-export
+  മാറ്റങ്ങൾ document-ൽ സൂക്ഷിക്കും
+
+### 9. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
