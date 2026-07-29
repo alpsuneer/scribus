@@ -634,6 +634,8 @@ endif()
 if(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 	set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Scribus is an open source publishing application for Linux, Mac OSX and Windows")
 	set(CPACK_PACKAGE_VENDOR "Scribus Team")
+	# Required by the CPack DEB generator (else packaging aborts).
+	set(CPACK_PACKAGE_CONTACT "Suneer <alp.suneer@gmail.com>")
 	set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README")
 	set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/README")
 	set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
@@ -672,10 +674,20 @@ endif()
 # Output everything we've found
 #feature_summary(WHAT ALL INCLUDE_QUIET_PACKAGES)
 
-# Create wrapper script after install
+# Create an fcitx-aware wrapper script after install: rename the real ELF
+# binary to scribus.bin and drop a launcher named scribus in its place.
+# NOTE: file() operations must honour $ENV{DESTDIR} so this works both for a
+# plain `cmake --install` and for CPack (which stages into DESTDIR) — otherwise
+# the DEB generator fails looking for the binary at the un-staged path. The
+# ELF-magic guard makes it idempotent: it only wraps a freshly-installed binary
+# and skips when bin/scribus is already our wrapper (repeated installs).
 install(CODE "
-    file(RENAME \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\" \"\${CMAKE_INSTALL_PREFIX}/bin/scribus.bin\")
-    file(WRITE \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\"
+    set(_scribusBinDir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin\")
+    if(EXISTS \"\${_scribusBinDir}/scribus\")
+        file(READ \"\${_scribusBinDir}/scribus\" _scribusMagic LIMIT 4 HEX)
+        if(_scribusMagic STREQUAL \"7f454c46\")
+            file(RENAME \"\${_scribusBinDir}/scribus\" \"\${_scribusBinDir}/scribus.bin\")
+            file(WRITE \"\${_scribusBinDir}/scribus\"
 \"#!/bin/bash
 export QT_IM_MODULE=fcitx
 export GTK_IM_MODULE=fcitx
@@ -683,5 +695,7 @@ export XMODIFIERS=@im=fcitx
 export QT_QPA_PLATFORM=xcb
 exec -a scribus \${CMAKE_INSTALL_PREFIX}/bin/scribus.bin \\\"\\$@\\\"
 \")
-    execute_process(COMMAND chmod +x \"\${CMAKE_INSTALL_PREFIX}/bin/scribus\")
+            execute_process(COMMAND chmod +x \"\${_scribusBinDir}/scribus\")
+        endif()
+    endif()
 ")
