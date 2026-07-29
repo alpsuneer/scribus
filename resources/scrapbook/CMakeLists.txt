@@ -1,11 +1,19 @@
 install(FILES
-faircode-frames/quote-box-A.sce
-faircode-frames/quote-box-B.sce
-faircode-frames/title-bar-box.sce
-faircode-frames/rounded-tint-box.sce
-faircode-frames/callout-left.sce
-faircode-frames/callout-right.sce
-faircode-frames/angled-title-strip.sce
-faircode-frames/bracket-corner-box.sce
+faircode-frames/QuoteA.sce
+faircode-frames/QuoteA.png
+faircode-frames/QuoteB.sce
+faircode-frames/QuoteB.png
+faircode-frames/TitleBox.sce
+faircode-frames/TitleBox.png
+faircode-frames/TintedBox.sce
+faircode-frames/TintedBox.png
+faircode-frames/CalloutL.sce
+faircode-frames/CalloutL.png
+faircode-frames/CalloutR.sce
+faircode-frames/CalloutR.png
+faircode-frames/AngledBar.sce
+faircode-frames/AngledBar.png
+faircode-frames/Brackets.sce
+faircode-frames/Brackets.png
 DESTINATION ${SHAREDIR}scrapbook/faircode-frames
 )

@@ -56,6 +56,7 @@ public:
 	QString visibleName;
 	bool canWrite { true };
 	bool isSystem { false };
+	int previewSize { 60 };
 
 signals:
 	void objDropped(QString text);
