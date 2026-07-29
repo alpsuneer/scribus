@@ -218,6 +218,31 @@ void CanvasMode_Normal::mouseDoubleClickEvent(QMouseEvent *m)
 					m_ScMW->scrActions[action]->trigger();
 				}
 			}
+			else if (currItem->itemType() == PageItem::Group)
+			{
+				// Double-click drills into the group like Alt+click would:
+				// a text frame under the cursor goes straight to text editing,
+				// any other child just becomes the selection. The group's node
+				// editor stays reachable via Properties > Shape > Edit.
+				PageItem* child = m_canvas->itemUnderCursor(m->globalPosition(), nullptr, true);
+				if (child && !child->isGroup() && !child->locked())
+				{
+					m_view->deselectItems(false);
+					m_doc->m_Selection->delaySignalsOn();
+					m_doc->m_Selection->addItem(child);
+					child->isSingleSel = true;
+					m_doc->m_Selection->delaySignalsOff();
+					m_doc->m_Selection->connectItemToGUI();
+					m_canvas->update();
+					if (child->itemType() == PageItem::TextFrame)
+						m_view->requestMode(modeEdit);
+				}
+				else
+				{
+					m_view->requestMode(modeEditClip);
+					m_ScMW->scrActions["itemUngroup"]->setEnabled(false);
+				}
+			}
 			else
 			{
 				m_view->requestMode(modeEditClip);
