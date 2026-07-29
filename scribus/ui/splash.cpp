@@ -60,23 +60,9 @@ void ScSplashScreen::drawContents(QPainter* painter)
 	QRect messageRect = m_messageRect.isEmpty() ? rect() : m_messageRect;
 	QRect rM = messageRect.adjusted(0, 0, -15, -5);
 
-	// Unfortunately on Windows the palette information
-	// does not match Light/Dark theme immediately, so we
-	// force text color according to current colorScheme
-#if defined(Q_OS_WINDOWS)
-	QColor textColor;
-	switch (QApplication::styleHints()->colorScheme())
-	{
-	case Qt::ColorScheme::Dark:
-		textColor.setRgb(255, 255, 255);
-		break;
-	default:
-		textColor.setRgb(0, 0, 0);
-		break;
-	}
-#else
-	QColor textColor = palette().windowText().color();
-#endif
+	// The splash artwork has a blue background in both light and dark
+	// themes, so palette-derived text colors are unreadable on it
+	QColor textColor(Qt::white);
 
 	painter->setFont(f);
 	painter->setPen(textColor);
