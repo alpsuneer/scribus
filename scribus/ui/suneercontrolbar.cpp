@@ -136,8 +136,72 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 	// Typography — use existing StyleSelect widget (has popups for outline/shadow)
 	m_styleSelect = new StyleSelect(this);
+	m_styleSelect->hideCapsButtons();     // remove All Caps / Fake Small Caps from the layout
+	m_styleSelect->removeGroupSpacers();  // drop the fixed 12px group gaps → even spacing
+	m_styleSelect->setButtonSpacing(3);   // uniform gap matching the toolbar row spacing
+	// Detach the Shadow button so it can be placed after the +/- outline-width controls.
+	QToolButton* shadowBtn = m_styleSelect->detachShadowButton();
 	addR1(m_styleSelect);
 	m_textWidgets << m_styleSelect;
+
+	// Add a stroke/shadow colour chooser to the Outline hold-down popup
+	if (m_styleSelect->outlinePopup())
+	{
+		QWidget* ocw = new QWidget(this);
+		QHBoxLayout* ocl = new QHBoxLayout(ocw);
+		ocl->setContentsMargins(8, 4, 8, 6);
+		ocl->setSpacing(6);
+		QLabel* ocLbl = new QLabel(tr("Colour:"), ocw);
+		ocLbl->setToolTip(tr("Color of text stroke and/or drop shadow, depending which is chosen. If both are chosen, then they share the same color."));
+		ocl->addWidget(ocLbl);
+		m_outlineStrokeColorCombo = new ColorCombo(false, ocw);
+		m_outlineStrokeColorCombo->setMinimumWidth(140);
+		m_outlineStrokeColorCombo->setToolTip(tr("Color of text stroke and/or drop shadow, depending which is chosen. If both are chosen, then they share the same color."));
+		m_outlineStrokeColorCombo->addItem(CommonStrings::tr_NoneColor);   // default "None" before a doc is loaded
+		ocl->addWidget(m_outlineStrokeColorCombo);
+		QWidgetAction* oca = new QWidgetAction(this);
+		oca->setDefaultWidget(ocw);
+		m_styleSelect->outlinePopup()->addAction(oca);
+	}
+
+	// [outward checkbox] + vertical [+/-] step buttons — placed in row1 right after the
+	// effects group (StyleSelect stays untouched so its Outline "A" button is never clipped).
+	{
+		QWidget* leadW = new QWidget(this);
+		QHBoxLayout* leadL = new QHBoxLayout(leadW);
+		leadL->setContentsMargins(4, 0, 4, 0);
+		leadL->setSpacing(5);                     // space between checkbox and the +/- stack
+		leadL->setAlignment(Qt::AlignVCenter);
+
+		m_outlineOutwardChk = new QCheckBox(leadW);
+		m_outlineOutwardChk->setToolTip(tr("Grow the outline stroke outward from the text (default: inward)"));
+		leadL->addWidget(m_outlineOutwardChk, 0, Qt::AlignVCenter);
+
+		// Vertical +/- stack — buttons tall enough for the glyph to render clearly
+		QWidget* stepW = new QWidget(leadW);
+		QVBoxLayout* stepL = new QVBoxLayout(stepW);
+		stepL->setContentsMargins(0, 0, 0, 0);
+		stepL->setSpacing(1);
+		m_outlineIncBtn = new QToolButton(stepW);
+		m_outlineIncBtn->setText("+");
+		m_outlineIncBtn->setFixedSize(22, 13);
+		m_outlineIncBtn->setStyleSheet("QToolButton { padding:0; margin:0; font-size:12px; font-weight:bold; }");
+		m_outlineIncBtn->setToolTip(tr("Increase outline stroke width"));
+		m_outlineDecBtn = new QToolButton(stepW);
+		m_outlineDecBtn->setText("−");   // minus sign
+		m_outlineDecBtn->setFixedSize(22, 13);
+		m_outlineDecBtn->setStyleSheet("QToolButton { padding:0; margin:0; font-size:12px; font-weight:bold; }");
+		m_outlineDecBtn->setToolTip(tr("Decrease outline stroke width"));
+		stepL->addWidget(m_outlineIncBtn);
+		stepL->addWidget(m_outlineDecBtn);
+		leadL->addWidget(stepW, 0, Qt::AlignVCenter);
+
+		addR1(leadW);   // add to row1 after StyleSelect; shows/hides with the text widgets
+	}
+
+	// Shadow button, moved to appear immediately after the +/- outline-width controls
+	if (shadowBtn)
+		addR1(shadowBtn);
 
 	addR1(makeSep());
 
@@ -1239,6 +1303,18 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_lineJoinRoundBtn, &QToolButton::clicked, this, [this]{ onLineJoinChanged(Qt::RoundJoin); });
 	connect(m_lineJoinBevelBtn, &QToolButton::clicked, this, [this]{ onLineJoinChanged(Qt::BevelJoin); });
 	connect(m_styleSelect, &StyleSelect::State, this, &SuneerControlBar::onStyleEffectChanged);
+	if (m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->LWidth)
+		connect(m_styleSelect->OutlineVal->LWidth, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+			this, &SuneerControlBar::onOutlineWidthChanged);
+	if (m_outlineStrokeColorCombo)
+		connect(m_outlineStrokeColorCombo, QOverload<int>::of(&QComboBox::activated),
+			this, &SuneerControlBar::onOutlineStrokeColorChanged);
+	if (m_outlineIncBtn)
+		connect(m_outlineIncBtn, &QToolButton::clicked, this, &SuneerControlBar::onOutlineStepUp);
+	if (m_outlineDecBtn)
+		connect(m_outlineDecBtn, &QToolButton::clicked, this, &SuneerControlBar::onOutlineStepDown);
+	if (m_outlineOutwardChk)
+		connect(m_outlineOutwardChk, &QCheckBox::toggled, this, &SuneerControlBar::onOutlineOutwardToggled);
 	connect(m_textColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onTextColorChanged);
 	connect(m_bgColorBtn,       &ColorButton::changed,  this, &SuneerControlBar::onBgColorChanged);
 	connect(m_lineColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onLineColorChanged);
@@ -1465,6 +1541,26 @@ void SuneerControlBar::updateFromSelection()
 
 		// Character formatting via StyleSelect
 		m_styleSelect->setStyle(cs.effects());
+		// Outline stroke width popup + stroke/shadow colour
+		if (m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->LWidth)
+		{
+			m_styleSelect->OutlineVal->LWidth->blockSignals(true);
+			m_styleSelect->OutlineVal->LWidth->setValue(cs.outlineWidth() / 10.0);
+			m_styleSelect->OutlineVal->LWidth->blockSignals(false);
+		}
+		if (m_outlineStrokeColorCombo)
+		{
+			m_outlineStrokeColorCombo->blockSignals(true);
+			m_outlineStrokeColorCombo->setColors(m_doc->PageColors, true);
+			m_outlineStrokeColorCombo->setCurrentColor(cs.strokeColor());
+			m_outlineStrokeColorCombo->blockSignals(false);
+		}
+		if (m_outlineOutwardChk)
+		{
+			m_outlineOutwardChk->blockSignals(true);
+			m_outlineOutwardChk->setChecked(cs.outlineOutward() != 0);
+			m_outlineOutwardChk->blockSignals(false);
+		}
 
 		// Alignment
 		m_alignSelect->setStyle(ps.alignment(), ps.direction());
@@ -1837,6 +1933,45 @@ void SuneerControlBar::onStyleEffectChanged(int effect)
 	if (m_updating || !m_doc) return;
 	m_doc->itemSelection_SetEffects(effect);
 	m_doc->changed();
+}
+
+void SuneerControlBar::onOutlineWidthChanged()
+{
+	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	if (!m_styleSelect || !m_styleSelect->OutlineVal || !m_styleSelect->OutlineVal->LWidth) return;
+	// CharStyle outline width is stored in tenths of a percent
+	int x = qRound(m_styleSelect->OutlineVal->LWidth->value() * 10.0);
+	m_doc->itemSelection_SetOutlineWidth(x);
+	m_doc->changed();
+}
+
+void SuneerControlBar::onOutlineStrokeColorChanged()
+{
+	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	if (!m_outlineStrokeColorCombo) return;
+	m_doc->itemSelection_SetStrokeColor(m_outlineStrokeColorCombo->currentColor());
+	m_doc->changed();
+}
+
+void SuneerControlBar::onOutlineStepUp()
+{
+	if (!m_styleSelect || !m_styleSelect->OutlineVal || !m_styleSelect->OutlineVal->LWidth) return;
+	// stepUp() bumps the spinbox by one step and emits valueChanged → onOutlineWidthChanged applies it
+	m_styleSelect->OutlineVal->LWidth->stepUp();
+}
+
+void SuneerControlBar::onOutlineStepDown()
+{
+	if (!m_styleSelect || !m_styleSelect->OutlineVal || !m_styleSelect->OutlineVal->LWidth) return;
+	m_styleSelect->OutlineVal->LWidth->stepDown();
+}
+
+void SuneerControlBar::onOutlineOutwardToggled(bool checked)
+{
+	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	m_doc->itemSelection_SetOutlineOutward(checked ? 1 : 0);
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onTrackingChanged(double val)

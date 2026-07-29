@@ -78,6 +78,11 @@ public:
 	/// The current width for line strokes.
 	virtual double strokeWidth() const;
 
+	/// Sets whether the glyph outline grows outward (non-zero) instead of inward.
+	virtual void setOutlineOutward(int v);
+	/// Whether the glyph outline grows outward (non-zero) instead of inward.
+	virtual int outlineOutward() const;
+
 	/// Sets the current render mode for glyph boxes only.
 	virtual void setGlyphBoxRendering(bool r);
 	/// The current render mode for glyph boxes only.
@@ -150,6 +155,7 @@ private:
 		TextLayoutColor fillColor;
 		QTransform matrix;
 		double strokeWidth { 0.0 };
+		int outlineOutward { 0 };
 		double x { 0.0 };
 		double y { 0.0 };
 		double scaleH { 1.0 };

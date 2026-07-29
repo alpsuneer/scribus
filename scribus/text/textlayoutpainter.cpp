@@ -63,6 +63,16 @@ double TextLayoutPainter::strokeWidth() const
 	return m_stack.top().strokeWidth;
 }
 
+void TextLayoutPainter::setOutlineOutward(int v)
+{
+	m_stack.top().outlineOutward = v;
+}
+
+int TextLayoutPainter::outlineOutward() const
+{
+	return m_stack.top().outlineOutward;
+}
+
 void TextLayoutPainter::setGlyphBoxRendering(bool r)
 {
 	m_glyphBoxRendering = r;

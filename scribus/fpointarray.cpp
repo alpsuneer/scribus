@@ -499,6 +499,79 @@ struct SVGState
 };
 
 
+FPointArray FPointArray::outerContours() const
+{
+	int n = size();
+	if (n < 8)
+		return *this;
+
+	// Split into contour ranges [start,end) (markers are 4-point separators).
+	struct Contour { int start; int end; double area; };
+	QVector<Contour> contours;
+	int cstart = 0;
+	for (int poi = 0; poi <= n - 4; poi += 4)
+	{
+		if (isMarker(poi))
+		{
+			if (poi > cstart)
+				contours.append({ cstart, poi, 0.0 });
+			cstart = poi + 4;
+		}
+	}
+	if (cstart <= n - 4)
+		contours.append({ cstart, n, 0.0 });
+	if (contours.size() <= 1)
+		return *this;
+
+	// Signed area (shoelace over segment-start anchors) — only the sign/orientation matters.
+	for (Contour& c : contours)
+	{
+		double area = 0.0;
+		FPoint prev, first;
+		bool haveFirst = false, havePrev = false;
+		for (int poi = c.start; poi <= c.end - 4; poi += 4)
+		{
+			FPoint p = point(poi);
+			if (!haveFirst) { first = p; haveFirst = true; }
+			if (havePrev)
+				area += (prev.x() * p.y() - p.x() * prev.y());
+			prev = p; havePrev = true;
+		}
+		if (haveFirst && havePrev)
+			area += (prev.x() * first.y() - first.x() * prev.y());
+		c.area = area * 0.5;
+	}
+
+	// Outer winding = sign of the largest-area contour.
+	double maxA = 0.0;
+	double outerSign = 1.0;
+	for (const Contour& c : contours)
+	{
+		if (fabs(c.area) > maxA)
+		{
+			maxA = fabs(c.area);
+			outerSign = (c.area >= 0) ? 1.0 : -1.0;
+		}
+	}
+
+	FPointArray out;
+	bool firstKept = true;
+	for (const Contour& c : contours)
+	{
+		double sgn = (c.area >= 0) ? 1.0 : -1.0;
+		if (sgn != outerSign)
+			continue;
+		if (!firstKept)
+			out.setMarker();
+		for (int poi = c.start; poi < c.end; ++poi)
+			out.addPoint(point(poi));
+		firstKept = false;
+	}
+	if (out.size() < 4)
+		return *this;   // safety: never return an empty outline
+	return out;
+}
+
 QString FPointArray::svgPath(bool closed) const
 {
 	QString tmp;

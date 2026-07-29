@@ -1025,6 +1025,8 @@ void Scribus150Format::putCStyle(ScXmlStreamWriter & docu, const CharStyle & sty
 		docu.writeAttribute("TXTSHY", style.shadowYOffset() / 10.0);
 	if ( ! style.isInhOutlineWidth())
 		docu.writeAttribute("TXTOUT", style.outlineWidth() / 10.0);
+	if ( ! style.isInhOutlineOutward())
+		docu.writeAttribute("TXTOUTWARD", style.outlineOutward());
 	if ( ! style.isInhUnderlineOffset())
 		docu.writeAttribute("TXTULP", style.underlineOffset() / 10.0);
 	if ( ! style.isInhUnderlineWidth())

@@ -2989,6 +2989,9 @@ void Scribus150Format::readCharacterStyleAttrs(ScribusDoc *doc, const ScXmlStrea
 	static const QString TXTOUT("TXTOUT");
 	if (attrs.hasAttribute(TXTOUT))
 		newStyle.setOutlineWidth(qRound(attrs.valueAsDouble(TXTOUT) * 10));
+	static const QString TXTOUTWARD("TXTOUTWARD");
+	if (attrs.hasAttribute(TXTOUTWARD))
+		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD, 0));
 
 	static const QString TXTULP("TXTULP");
 	if (attrs.hasAttribute(TXTULP))
@@ -5528,6 +5531,8 @@ PageItem* Scribus150Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		pstyle.charStyle().setShadowYOffset(qRound(attrs.valueAsDouble("TXTSHY") * 10));
 	if (attrs.hasAttribute("TXTOUT"))
 		pstyle.charStyle().setOutlineWidth(qRound(attrs.valueAsDouble("TXTOUT") * 10));
+	if (attrs.hasAttribute("TXTOUTWARD"))
+		pstyle.charStyle().setOutlineOutward(attrs.valueAsInt("TXTOUTWARD", 0));
 	if (attrs.hasAttribute("TXTULP"))
 		pstyle.charStyle().setUnderlineOffset(qRound(attrs.valueAsDouble("TXTULP") * 10));
 	if (attrs.hasAttribute("TXTULW"))

@@ -8293,6 +8293,13 @@ void ScribusDoc::itemSelection_SetOutlineWidth(int wid, Selection* customSelecti
 	itemSelection_ApplyCharStyle(newStyle, customSelection, "OUTLINE_WIDTH");
 }
 
+void ScribusDoc::itemSelection_SetOutlineOutward(int outward, Selection* customSelection)
+{
+	CharStyle newStyle;
+	newStyle.setOutlineOutward(outward);
+	itemSelection_ApplyCharStyle(newStyle, customSelection, "OUTLINE_OUTWARD");
+}
+
 void ScribusDoc::itemSelection_SetItemBrush(QString colorName, Selection* customSelection)
 {
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;

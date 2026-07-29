@@ -181,6 +181,17 @@ void PSPainter::drawGlyphOutline(const GlyphCluster& gc, bool fill)
 		m_ps->SetClipPath(gly, true);
 		m_ps->PS_closepath();
 		m_ps->putColor(strokeColor().color, strokeColor().shade, false);
+
+		// Outward outline: redraw the fill on top so only the outer part of the stroke shows.
+		if (fill && outlineOutward())
+		{
+			m_ps->PS_save();
+			if (gc.scaleH() != 1.0 || gc.scaleV() != 1.0)
+				m_ps->PS_scale(gc.scaleH(), gc.scaleV());
+			m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
+			m_ps->PS_showSub(gl.glyph, m_ps->FontSubsetMap[font().scName()], fontSize(), false);
+			m_ps->PS_restore();
+		}
 		m_ps->PS_restore();
 
 		current_x += gl.xadvance * gl.scaleH;
@@ -1897,8 +1908,13 @@ bool PSLib::ProcessItem(ScPage* page, PageItem* item, uint PNr, bool master, boo
 					PS_setlinewidth(item->lineWidth());
 					PS_setcapjoin(item->PLineEnd, item->PLineJoin);
 					PS_setdash(item->PLineArt, item->DashOffset, item->DashValues);
-					SetClipPath(item->PoLine);
-					PS_closepath();
+					if (item->hasSideBorders())
+						SetClipPath(item->sideBorderPath(), false);   // stroke only the selected edges
+					else
+					{
+						SetClipPath(item->PoLine);
+						PS_closepath();
+					}
 					if (strokePattern)
 						HandleStrokePattern(item);
 					else if (item->GrTypeStroke > 0)
@@ -2000,8 +2016,13 @@ bool PSLib::ProcessItem(ScPage* page, PageItem* item, uint PNr, bool master, boo
 				}
 				else
 				{
-					SetClipPath(item->PoLine);
-					PS_closepath();
+					if (item->hasSideBorders())
+						SetClipPath(item->sideBorderPath(), false);   // stroke only the selected edges
+					else
+					{
+						SetClipPath(item->PoLine);
+						PS_closepath();
+					}
 					if (strokePattern)
 						HandleStrokePattern(item);
 					else if (item->GrTypeStroke > 0)
@@ -2132,8 +2153,13 @@ bool PSLib::ProcessItem(ScPage* page, PageItem* item, uint PNr, bool master, boo
 				}
 				else
 				{
-					SetClipPath(item->PoLine);
-					PS_closepath();
+					if (item->hasSideBorders())
+						SetClipPath(item->sideBorderPath(), false);   // stroke only the selected edges
+					else
+					{
+						SetClipPath(item->PoLine);
+						PS_closepath();
+					}
 					if (strokePattern)
 						HandleStrokePattern(item);
 					else if (item->GrTypeStroke > 0)

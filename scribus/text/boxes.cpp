@@ -700,6 +700,7 @@ void GlyphBox::render(TextLayoutPainter *p) const
 	{
 		p->setStrokeColor(p->fillColor());
 		p->setStrokeWidth(charStyle.fontSize() * m_glyphRun.scaleV() * charStyle.outlineWidth() / 10000.0);
+		p->setOutlineOutward(charStyle.outlineOutward());
 		p->drawGlyphOutline(m_glyphRun, false);
 	}
 	else
@@ -726,6 +727,7 @@ void GlyphBox::render(TextLayoutPainter *p) const
 		if ((charStyle.effects() & ScStyle_Outline) && hasStrokeColor && ((charStyle.fontSize() * m_glyphRun.scaleV() * charStyle.outlineWidth() / 10000.0) != 0))
 		{
 			p->setStrokeWidth(charStyle.fontSize() * m_glyphRun.scaleV() * charStyle.outlineWidth() / 10000.0);
+			p->setOutlineOutward(charStyle.outlineOutward());
 			p->drawGlyphOutline(m_glyphRun, hasFillColor);
 		}
 		else if (hasFillColor)

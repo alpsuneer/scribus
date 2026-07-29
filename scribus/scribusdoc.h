@@ -1194,6 +1194,7 @@ public:
 	void itemSelection_SetScaleH(int, Selection* customSelection = nullptr);
 	void itemSelection_SetBaselineOffset(int, Selection* customSelection = nullptr);
 	void itemSelection_SetOutlineWidth(int, Selection* customSelection = nullptr);
+	void itemSelection_SetOutlineOutward(int, Selection* customSelection = nullptr);
 	void itemSelection_SetShadowOffsets(int shx, int shy, Selection* customSelection = nullptr);
 	void itemSelection_SetUnderline(int pos, int wid, Selection* customSelection = nullptr);
 	void itemSelection_SetStrikethru(int pos, int wid, Selection* customSelection = nullptr);
