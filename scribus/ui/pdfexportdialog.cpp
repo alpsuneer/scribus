@@ -18,6 +18,8 @@ for which a new license (GPL+exception) is in place.
 
 #include <QByteArray>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QLabel>
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -40,6 +42,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsmanager.h"
 #include "scpaths.h"
 #include "scribusdoc.h"
+#include "scribuscore.h"
 #include "scribusview.h"
 #include "ui/scmessagebox.h"
 #include "ui/scrspinbox.h"
@@ -109,6 +112,18 @@ PDFExportDialog::PDFExportDialog( QWidget* parent, const QString & docFileName,
 	NameLayout->addWidget( openAfterExportCheckBox, 2, 0 );
 	PDFExportLayout->addWidget( Name );
 
+	QHBoxLayout* presetLayout = new QHBoxLayout;
+	presetLayout->setSpacing(6);
+	presetLayout->setContentsMargins(0, 0, 0, 0);
+	QLabel* presetLabel = new QLabel( tr( "Preset:" ), this );
+	presetCombo = new QComboBox( this );
+	presetCombo->addItem( tr( "Custom" ) );
+	presetCombo->addItem( "News_Paper" );
+	presetLayout->addWidget( presetLabel );
+	presetLayout->addWidget( presetCombo );
+	presetLayout->addStretch();
+	PDFExportLayout->addLayout( presetLayout );
+
 	Options = new TabPDFOptions( this, pdfOptions, AllFonts, PDFXProfiles, DocFonts, currView->m_doc );
 	PDFExportLayout->addWidget( Options );
 	Layout7 = new QHBoxLayout;
@@ -138,6 +153,8 @@ PDFExportDialog::PDFExportDialog( QWidget* parent, const QString & docFileName,
 	connect( fileNameLineEdit, SIGNAL( editingFinished() ), this, SLOT( fileNameChanged() ) );
 	connect( Options, SIGNAL(noInfo()), this, SLOT(disableSave()));
 	connect( Options, SIGNAL(hasInfo()), this, SLOT(enableSave()));
+	connect( presetCombo, SIGNAL(activated(int)), this, SLOT(handlePresetChange(int)));
+	connect( Options, SIGNAL(presetOverridden()), this, SLOT(presetToCustom()));
 }
 
 void PDFExportDialog::enableSave()
@@ -148,6 +165,26 @@ void PDFExportDialog::enableSave()
 void PDFExportDialog::disableSave()
 {
 	okButton->setEnabled(false);
+}
+
+void PDFExportDialog::handlePresetChange(int index)
+{
+	if (index != 1) // News_Paper
+		return;
+	// PDF/X-1a needs document color management; newspaper docs commonly
+	// have it off, so switch it on for the document (same as Document
+	// Setup would) before applying the preset.
+	if (!m_doc->HasCMS && ScCore->haveCMS())
+	{
+		m_doc->enableCMS(true);
+		Options->enableCMS(true);
+	}
+	Options->applyNewspaperPreset();
+}
+
+void PDFExportDialog::presetToCustom()
+{
+	presetCombo->setCurrentIndex(0);
 }
 
 void PDFExportDialog::DoExport()

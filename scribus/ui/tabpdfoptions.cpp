@@ -193,6 +193,20 @@ TabPDFOptions::TabPDFOptions(QWidget* parent, PDFOptions & Optionen,
 	connect(LPIcolor, SIGNAL(activated(int)), this, SLOT(SelLPIcol(int)));
 	connect(CMethod, SIGNAL(activated(int)), this, SLOT(handleCompressionMethod(int)));
 
+	// Manual edits to any preset-controlled widget invalidate the preset
+	// selection shown in the export dialog (see applyNewspaperPreset).
+	connect(PDFVersionCombo, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(CMethod, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(CQuality, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(DSColor, SIGNAL(clicked()), this, SLOT(notifyPresetOverride()));
+	connect(ValC, SIGNAL(valueChanged(int)), this, SLOT(notifyPresetOverride()));
+	connect(OutCombo, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(EmbedProfs, SIGNAL(clicked()), this, SLOT(notifyPresetOverride()));
+	connect(EmbedProfs2, SIGNAL(clicked()), this, SLOT(notifyPresetOverride()));
+	connect(IntendS, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(IntendI, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+	connect(PrintProfC, SIGNAL(activated(int)), this, SLOT(notifyPresetOverride()));
+
 	// Tooltips : General tab
 	RotateDeg->setToolTip( "<qt>" + tr( "Automatically rotate the exported pages" ) + "</qt>" );
 	AllPages->setToolTip( "<qt>" + tr( "Export all pages to PDF" ) + "</qt>" );
@@ -663,6 +677,65 @@ void TabPDFOptions::handleCompressionMethod(int ind)
 	CQuality->setDisabled(ind == 3);
 }
 
+void TabPDFOptions::notifyPresetOverride()
+{
+	if (!m_applyingPreset)
+		emit presetOverridden();
+}
+
+void TabPDFOptions::applyNewspaperPreset()
+{
+	m_applyingPreset = true;
+
+	// Images: lossy JPEG at High quality, capped at 240 dpi
+	CMethod->setCurrentIndex(PDFOptions::Compression_JPEG);
+	handleCompressionMethod(PDFOptions::Compression_JPEG);
+	CQuality->setCurrentIndex(1); // High
+	DSColor->setChecked(true);
+	DoDownsample();
+	ValC->setValue(240);
+
+	// Color: printer output; newsprint rendering intents. Intents are set
+	// while the profile groups are still live — the PDF/X-1a switch below
+	// locks profile embedding off again, as X-1a requires.
+	OutCombo->setCurrentIndex(1);
+	EnablePr(1);
+	EmbedProfs->setChecked(true);
+	EnablePG();
+	EmbedProfs2->setChecked(true);
+	EnablePGI();
+	IntendS->setCurrentIndex(1); // Relative Colorimetric for solids
+	IntendI->setCurrentIndex(0); // Perceptual for images
+
+	// Output profile: prefer WAN-IFRA ISOnewspaper if the user installed
+	// it, else the IFRA26S / SNAP newsprint profiles shipped with colord.
+	// Never fall back to a coated-stock profile.
+	const QStringList wanted { "ISOnewspaper", "IFRA26S 2004 Newsprint",
+	                           "SNAP TR002 Newsprint", "newsprint", "newspaper" };
+	int profIndex = -1;
+	for (const QString& want : wanted)
+	{
+		for (int i = 0; i < PrintProfC->count(); ++i)
+		{
+			if (PrintProfC->itemText(i).contains(want, Qt::CaseInsensitive))
+			{
+				profIndex = i;
+				break;
+			}
+		}
+		if (profIndex >= 0)
+			break;
+	}
+	if (profIndex >= 0)
+		PrintProfC->setCurrentIndex(profIndex);
+
+	// PDF/X-1a last: blind-exchange CMYK, flattened, output intent embedded
+	PDFVersionCombo->setVersion(PDFVersion::PDF_X1a);
+	EnablePDFX(PDFVersionCombo->currentIndex());
+
+	m_applyingPreset = false;
+}
+
 void TabPDFOptions::storeValues(PDFOptions& pdfOptions) const
 {
 	pdfOptions.Thumbnails = CheckBox1->isChecked();
@@ -802,6 +875,8 @@ void TabPDFOptions::enableCMS(bool enable)
 	if (!enable)
 		currVersion = qMax(PDFVersion::PDF_13, qMin((PDFVersion::Version) currVersion, PDFVersion::PDF_16));
 	PDFVersionCombo->setVersion(currVersion);
+	solidsProfileGroup->setVisible(enable);
+	imageProfileGroup->setVisible(enable);
 	EnablePr(1);
 }
 

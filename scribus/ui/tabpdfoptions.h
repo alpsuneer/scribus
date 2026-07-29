@@ -59,6 +59,10 @@ public:
 
 	void unitChange(int docUnitIndex);
 
+	/** @brief One-click newspaper production settings: lossy JPEG High /
+	 *  240 dpi cap, printer output with newsprint profile and PDF/X-1a. */
+	void applyNewspaperPreset();
+
 	PDFOptions::PDFFontEmbedding fontEmbeddingMode() const;
 	QStringList fontsToEmbed() const;
 	QStringList fontsToSubset() const;
@@ -67,6 +71,7 @@ public:
 signals:
 	void noInfo();
 	void hasInfo();
+	void presetOverridden();
 
 public slots:
 	void doDocBleeds();
@@ -102,6 +107,7 @@ public slots:
 protected slots:
 	void createPageNumberRange();
 	void handleCompressionMethod(int ind);
+	void notifyPresetOverride();
 
 protected:
 	// PDFExportDialog should really privately inherit from us, but it can't
@@ -123,6 +129,7 @@ private:
 	const SCFonts & AllFonts;
 	PDFOptions & Opts;
 	bool cms {false};
+	bool m_applyingPreset {false};
 
 	QStringList m_docFonts;
 	QMap<QString, QString> m_annotationFonts;
