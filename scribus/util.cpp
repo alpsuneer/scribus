@@ -27,6 +27,9 @@ for which a new license (GPL+exception) is in place.
 #include <qglobal.h>
 #include <QApplication>
 #include <QCryptographicHash>
+#include <QImage>
+#include <QPainter>
+#include <QtSvg/QSvgRenderer>
 #include <QMessageBox>
 #include <QProcess>
 #include <QSignalBlocker>
@@ -1465,6 +1468,46 @@ QString bulletImageDataFor(const QString& path)
 	if (!f.open(QIODevice::ReadOnly))
 		return QString();
 	return QString::fromLatin1(f.readAll().toBase64());
+}
+
+QString rasterizeSvgBullet(const QString& svgPath)
+{
+	QFile f(svgPath);
+	if (!f.open(QIODevice::ReadOnly))
+		return QString();
+	QByteArray svgData = f.readAll();
+	f.close();
+	if (svgData.isEmpty())
+		return QString();
+
+	// content-addressed raster cache next to the materialized bullet images
+	QString dirPath = ScPaths::applicationDataDir(true) + QStringLiteral("bulletimages/");
+	if (!QDir().mkpath(dirPath))
+		return QString();
+	QString sha1(QCryptographicHash::hash(svgData, QCryptographicHash::Sha1).toHex());
+	QString pngPath = dirPath + sha1 + QStringLiteral("-svg.png");
+	if (QFile::exists(pngPath))
+		return pngPath;
+
+	// filename ctor so compressed .svgz also works
+	QSvgRenderer renderer(svgPath);
+	if (!renderer.isValid())
+		return QString();
+	QSizeF size = renderer.defaultSize();
+	if (size.isEmpty())
+		size = QSizeF(1024, 1024);
+	// rasterize 1024px tall: even the 3em size clamp stays well below this,
+	// so the scaled-down bullet is always crisp
+	int h = 1024;
+	int w = qMax(1, qRound(h * size.width() / size.height()));
+	QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+	img.fill(Qt::transparent);
+	QPainter p(&img);
+	renderer.render(&p, QRectF(0, 0, w, h));
+	p.end();
+	if (!img.save(pngPath, "PNG"))
+		return QString();
+	return pngPath;
 }
 
 QString materializeBulletImage(const QString& base64Data, const QString& origPath)

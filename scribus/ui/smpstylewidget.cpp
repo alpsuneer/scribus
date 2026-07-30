@@ -1137,7 +1137,11 @@ void SMPStyleWidget::setBulletImagePreview(const QString& path)
 		bulletImagePreview->setPixmap(QPixmap());
 		return;
 	}
-	QPixmap pm(path);
+	QString previewPath = path;
+	if (path.endsWith(QLatin1String(".svg"), Qt::CaseInsensitive) ||
+	    path.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive))
+		previewPath = rasterizeSvgBullet(path);
+	QPixmap pm(previewPath);
 	if (pm.isNull())
 		bulletImagePreview->setPixmap(QPixmap());
 	else
@@ -1149,7 +1153,7 @@ void SMPStyleWidget::on_bulletImageBrowseButton_clicked()
 	QString startDir = bulletImagePathEdit->text().isEmpty() ? QDir::homePath()
 	                                                         : QFileInfo(bulletImagePathEdit->text()).absolutePath();
 	QString path = QFileDialog::getOpenFileName(this, tr("Choose Bullet Image"), startDir,
-	                    tr("Images") + " (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif);;" + tr("All Files") + " (*)");
+	                    tr("Images") + " (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif *.svg *.svgz);;" + tr("All Files") + " (*)");
 	if (path.isEmpty())
 		return;
 	bulletImagePathEdit->setText(path); // textChanged applies it to the style
