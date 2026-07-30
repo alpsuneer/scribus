@@ -96,8 +96,10 @@
 
 ### 9. Image Bullets (Bulleted Lists)
 - Style Manager → Lists & Drop Caps → Bulleted List-ൽ "Use Image" option:
-  ഒരു PNG image browse ചെയ്ത് bullet ആയി ഉപയോഗിക്കാം (arrows, logos,
-  section markers...)
+  ഒരു PNG അല്ലെങ്കിൽ SVG image browse ചെയ്ത് bullet ആയി ഉപയോഗിക്കാം
+  (arrows, logos, section markers...)
+- SVG bullets ഏത് size-ലും sharp ആയിരിക്കും (auto high-res rasterization);
+  .sla-യിൽ SVG source തന്നെ embed ആകും
 - Size control: Auto (0.8em) / Scale % (auto size-ന്റെ 10–500%) / Fixed (mm) —
   വലുതാക്കാൻ "150%" എന്ന് കൊടുത്താൽ മതി; max 3em clamp
 - V-Offset spinbox (mm, ±20): icon താഴ്ത്താൻ positive, ഉയർത്താൻ negative —
