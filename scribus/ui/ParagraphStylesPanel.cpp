@@ -519,6 +519,18 @@ class StyleItemDelegate : public QStyledItemDelegate
 public:
 	using QStyledItemDelegate::QStyledItemDelegate;
 
+	static constexpr int IconSize = 15;
+	static constexpr int IconRightMargin = 4;
+
+	// Clickable area around the chain-link icon: icon bounds padded ~5px, full row
+	// height. Shared by the hover-cursor and click hit-tests in the panel's
+	// eventFilter so the two can never drift apart.
+	static QRect chainHitRect(const QRect& rowRect)
+	{
+		const int left = rowRect.right() - IconRightMargin - IconSize - 5;
+		return QRect(left, rowRect.top(), rowRect.right() - left + 1, rowRect.height());
+	}
+
 	// The iconset SVG uses stroke="currentColor"; Qt's SVG renderer has no palette,
 	// so substitute the color textually before rasterizing. Cached per color/size/dpr.
 	static QPixmap chainLinkPixmap(const QColor& color, int size, qreal dpr)
@@ -570,11 +582,10 @@ public:
 			}
 
 			// Draw chain-link icon, right-aligned and vertically centered
-			const int iconSize = 15;
 			const qreal dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
-			QPoint iconPos(option.rect.right() - iconSize - 4,
-			               option.rect.top() + (option.rect.height() - iconSize) / 2);
-			painter->drawPixmap(iconPos, chainLinkPixmap(iconColor, iconSize, dpr));
+			QPoint iconPos(option.rect.right() - IconSize - IconRightMargin,
+			               option.rect.top() + (option.rect.height() - IconSize) / 2);
+			painter->drawPixmap(iconPos, chainLinkPixmap(iconColor, IconSize, dpr));
 			painter->restore();
 		}
 	}
@@ -801,6 +812,8 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 
 	m_stylesList->setItemDelegate(new StyleItemDelegate(m_stylesList));
 	m_stylesList->viewport()->installEventFilter(this);
+	// Needed for the hand-cursor hover feedback over the chain-link icon.
+	m_stylesList->viewport()->setMouseTracking(true);
 }
 
 bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
@@ -813,6 +826,26 @@ bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
 	if (obj == m_stylesList->viewport() && event->type() == QEvent::MouseButtonPress)
 		m_userInteracting = true;
 
+	// Hand cursor while hovering the chain-link icon's (padded) hit area, so it
+	// reads as clickable. Same rect as the click test below via chainHitRect().
+	if (obj == m_stylesList->viewport() && event->type() == QEvent::MouseMove)
+	{
+		QWidget* vp = m_stylesList->viewport();
+		QMouseEvent* me = static_cast<QMouseEvent*>(event);
+		QListWidgetItem* item = m_stylesList->itemAt(me->pos());
+		bool overChain = item && item->data(Qt::UserRole + 1).toBool()
+			&& StyleItemDelegate::chainHitRect(m_stylesList->visualItemRect(item)).contains(me->pos());
+		if (overChain != (vp->cursor().shape() == Qt::PointingHandCursor))
+		{
+			if (overChain)
+				vp->setCursor(Qt::PointingHandCursor);
+			else
+				vp->unsetCursor();
+		}
+	}
+	if (obj == m_stylesList->viewport() && event->type() == QEvent::Leave)
+		m_stylesList->viewport()->unsetCursor();
+
 	if (obj == m_stylesList->viewport() && event->type() == QEvent::MouseButtonRelease)
 	{
 		// Clear before applying: the apply below emits docChanged, and we
@@ -824,7 +857,8 @@ bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
 		{
 			QString styleName = item->data(Qt::UserRole).toString();
 			bool hasChain = item->data(Qt::UserRole + 1).toBool();
-			bool clickedChain = hasChain && (me->pos().x() > m_stylesList->viewport()->width() - 60);
+			bool clickedChain = hasChain
+				&& StyleItemDelegate::chainHitRect(m_stylesList->visualItemRect(item)).contains(me->pos());
 			if (clickedChain)
 			{
 				applyChainFromStyle(styleName);
