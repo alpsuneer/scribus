@@ -62,16 +62,21 @@
 
 ### 7. Faircode Frames (Text Frame Style Presets)
 - Scrapbook palette-ൽ built-in "Faircode Frames" tab (read-only, auto-open)
-- 18 ready-made decorative frame templates:
+- 23 ready-made decorative frame templates:
   - QuoteA/QuoteB (corner L-lines + quote glyphs, orange/green & pink/cyan)
   - TitleBox, AngledBar, Ribbon (red banner, notched ends), TitleRule, Highlight
   - CalloutL/CalloutR (leader line + dot), Badge (circle label)
   - Brackets, TintedBox, SideRule, PullQuote, NumberBox (listicle badge)
   - ShadowBox, DoubleBox, DashedBox
+  - Wave 3 (Hindi newspaper reference designs): AttrQuote (yellow-tint
+    attributed quote — author + designation lines), SectionStrip (yellow strip
+    + red/black bars), NewsBox (bordered item box, corner accents,
+    kicker/title/body), BannerHead (rounded blue banner + red rules),
+    LedeBars (fading blue bars + bold lede line)
 - വലിയ white-background thumbnails (96px) + മുഴുവൻ പേരും കാണാം
 - Double-click thumbnail → page-ൽ insert; drag → cursor position-ൽ
-- എല്ലാ template text-ഉം Malayalam-ready (Noto Sans Malayalam styles: FC Body ML / FC Quote ML / FC Title ML)
-- FC color palette (FC-Red/Orange/Green/Pink/Cyan) insert ചെയ്യുമ്പോൾ document-ൽ ചേരും — Edit > Colours-ൽ മാറ്റാം
+- എല്ലാ template text-ഉം Malayalam-ready (Noto Sans Malayalam styles: FC Body ML / FC Quote ML / FC Title ML / FC TitleDark ML / FC BodyBold ML)
+- FC color palette (FC-Red/Orange/Green/Pink/Cyan/Yellow/Primary) insert ചെയ്യുമ്പോൾ document-ൽ ചേരും — Edit > Colours-ൽ മാറ്റാം
 - Group-ൽ double-click → text frame നേരിട്ട് edit mode (InDesign-style); decoration lines double-click → select
 - Templates: `resources/scrapbook/faircode-frames/` (+ authoring scripts in `resources/scrapbook/authoring/`)
 
