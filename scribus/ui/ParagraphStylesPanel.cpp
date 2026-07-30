@@ -32,6 +32,8 @@
 #include <QLabel>
 #include <QPainter>
 #include <QStyledItemDelegate>
+#include <QSvgRenderer>
+#include "iconmanager.h"
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QMouseEvent>
@@ -511,11 +513,39 @@ private:
 	QLabel* m_conflictLabel;
 };
 
-// Custom delegate to draw chain arrow + shortcut on right side
+// Custom delegate to draw chain-link icon + shortcut on right side
 class StyleItemDelegate : public QStyledItemDelegate
 {
 public:
 	using QStyledItemDelegate::QStyledItemDelegate;
+
+	// The iconset SVG uses stroke="currentColor"; Qt's SVG renderer has no palette,
+	// so substitute the color textually before rasterizing. Cached per color/size/dpr.
+	static QPixmap chainLinkPixmap(const QColor& color, int size, qreal dpr)
+	{
+		static QHash<QString, QPixmap> cache;
+		const QString key = QString("%1|%2|%3").arg(color.name()).arg(size).arg(dpr);
+		auto it = cache.constFind(key);
+		if (it != cache.constEnd())
+			return *it;
+
+		QPixmap pm(qRound(size * dpr), qRound(size * dpr));
+		pm.setDevicePixelRatio(dpr);
+		pm.fill(Qt::transparent);
+
+		QFile f(IconManager::instance().pathForIcon("16/next-style-chain.svg"));
+		if (f.open(QIODevice::ReadOnly))
+		{
+			QByteArray svg = f.readAll();
+			svg.replace("currentColor", color.name().toLatin1());
+			QSvgRenderer renderer(svg);
+			QPainter p(&pm);
+			renderer.render(&p, QRectF(0, 0, size, size));
+		}
+		cache.insert(key, pm);
+		return pm;
+	}
+
 	void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override
 	{
 		QStyledItemDelegate::paint(painter, option, index);
@@ -524,9 +554,9 @@ public:
 		{
 			painter->save();
 			bool selected = (option.state & QStyle::State_Selected);
-			QColor arrowColor = selected ? Qt::white : QColor("#1a5fb4");
+			QColor iconColor = selected ? Qt::white : QColor("#1a5fb4");
 
-			// Draw shortcut text left of arrow
+			// Draw shortcut text left of icon
 			QString styleName = index.data(Qt::UserRole).toString();
 			QKeySequence sc = s_styleShortcuts.value(styleName);
 			if (!sc.isEmpty())
@@ -535,18 +565,16 @@ public:
 				QFont sf = painter->font();
 				sf.setPointSize(8);
 				painter->setFont(sf);
-				QRect scRect = option.rect.adjusted(0, 0, -42, 0);
+				QRect scRect = option.rect.adjusted(0, 0, -24, 0);
 				painter->drawText(scRect, Qt::AlignRight | Qt::AlignVCenter, sc.toString());
 			}
 
-			// Draw arrow icon
-			painter->setPen(arrowColor);
-			QFont f = painter->font();
-			f.setBold(true);
-			f.setPointSize(36);
-			painter->setFont(f);
-			QRect r = option.rect.adjusted(0, 0, -4, 0);
-			painter->drawText(r, Qt::AlignRight | Qt::AlignVCenter, QString::fromUtf8("\xF0\x9F\x94\x97"));
+			// Draw chain-link icon, right-aligned and vertically centered
+			const int iconSize = 15;
+			const qreal dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
+			QPoint iconPos(option.rect.right() - iconSize - 4,
+			               option.rect.top() + (option.rect.height() - iconSize) / 2);
+			painter->drawPixmap(iconPos, chainLinkPixmap(iconColor, iconSize, dpr));
 			painter->restore();
 		}
 	}
@@ -958,7 +986,7 @@ void ParagraphStylesPanel::updateStylesList()
 			item->setFont(f);
 			item->setForeground(QColor("#1a5fb4"));
 			QStringList chainList = nextStyle.split(";");
-			item->setToolTip(styleName + " -> " + chainList.join(" -> "));
+			item->setToolTip("Next style: " + chainList.join(" -> "));
 		}
 		m_stylesList->addItem(item);
 	}
