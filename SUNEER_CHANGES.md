@@ -118,7 +118,20 @@
 - Character bullets പഴയതുപോലെ; image unusable ആയാൽ character bullet-ലേക്ക്
   fallback
 
-### 10. Authors
+### 10. Paragraph Shading (InDesign-style)
+- Style Manager → പുതിയ "Paragraph Shading" tab: paragraph-ന്റെ പിന്നിൽ
+  background color band — text reflow ആകുമ്പോൾ band കൂടെ വളരും/നീങ്ങും
+- Controls: On, Color + Tint %, Width (Column/Text), 4 padding
+  (negative ആകാം), Corner Radius, Merge Adjacent
+- Merge Adjacent: ഒരേ shading ഉള്ള അടുത്തടുത്ത paragraphs ഒറ്റ seamless
+  block ആയി render ആകും (ഇടയിൽ seam ഇല്ല)
+- Frame fill None ആയാലും paragraph-കൾക്ക് മാത്രം color കൊടുക്കാം;
+  filled frame-ൽ ഒരു paragraph White/Paper കൊടുത്ത് mask ചെയ്യാം
+- Canvas, PDF, Print, PS, SVG, XPS — എല്ലാ export-ലും ഒരേപോലെ;
+  Paragraph Rules-നൊപ്പം ഒരേ style-ൽ ഉപയോഗിക്കാം (shade താഴെ, rule മുകളിൽ)
+- എല്ലാ .sla format-ലും save ആകും; copy/paste, scrapbook-ലും travel ചെയ്യും
+
+### 11. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
