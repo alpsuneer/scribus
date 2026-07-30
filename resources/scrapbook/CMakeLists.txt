@@ -35,5 +35,15 @@ faircode-frames/DashedBox.sce
 faircode-frames/DashedBox.png
 faircode-frames/Highlight.sce
 faircode-frames/Highlight.png
+faircode-frames/AttrQuote.sce
+faircode-frames/AttrQuote.png
+faircode-frames/SectionStrip.sce
+faircode-frames/SectionStrip.png
+faircode-frames/NewsBox.sce
+faircode-frames/NewsBox.png
+faircode-frames/BannerHead.sce
+faircode-frames/BannerHead.png
+faircode-frames/LedeBars.sce
+faircode-frames/LedeBars.png
 DESTINATION ${SHAREDIR}scrapbook/faircode-frames
 )
