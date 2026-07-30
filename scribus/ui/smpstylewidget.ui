@@ -1836,6 +1836,28 @@ A value of 0 means unlimited hyphenations.</string>
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tabParagraphShading">
+      <attribute name="title">
+       <string>Paragraph Shading</string>
+      </attribute>
+      <layout class="QVBoxLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="SMPShadeWidget" name="shadePage" native="true"/>
+       </item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tabNestedStyles">
       <attribute name="title">
        <string>Nested Styles</string>
@@ -1938,6 +1960,12 @@ A value of 0 means unlimited hyphenations.</string>
    <class>SMPRulesWidget</class>
    <extends>QWidget</extends>
    <header>ui/smprulewidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SMPShadeWidget</class>
+   <extends>QWidget</extends>
+   <header>ui/smpshadewidget.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>

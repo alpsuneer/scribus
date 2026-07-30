@@ -1253,6 +1253,28 @@ public:
 		m_elem.appendChild(path);
 	}
 
+	void drawRoundedRect(const QRectF& rect, double radius) override
+	{
+		const double r = qMin(radius, qMin(rect.width(), rect.height()) / 2.0);
+		if (r <= 0.0)
+		{
+			drawRect(rect);
+			return;
+		}
+		QTransform transform = matrix();
+		transform.translate(x(), y());
+		QDomElement re = m_svg->m_domDoc.createElement("rect");
+		re.setAttribute("x", rect.x());
+		re.setAttribute("y", rect.y());
+		re.setAttribute("width", rect.width());
+		re.setAttribute("height", rect.height());
+		re.setAttribute("rx", r);
+		re.setAttribute("ry", r);
+		re.setAttribute("transform", m_svg->matrixToStr(transform));
+		re.setAttribute("style", "fill:" + m_svg->setColor(fillColor().color, fillColor().shade) + ";" + "stroke:none;");
+		m_elem.appendChild(re);
+	}
+
 	void drawObject(PageItem* item) override
 	{
 		QTransform transform = matrix();
@@ -1297,6 +1319,7 @@ QDomElement SVGExPlug::processTextItem(const PageItem *item, const QString& tran
 	{
 		SvgPainter p(trans, this, ob);
 		item->textLayout.renderBackground(&p);
+		item->textLayout.renderParagraphShading(&p);
 		item->textLayout.renderParagraphRules(&p);
 		item->textLayout.render(&p);
 	}

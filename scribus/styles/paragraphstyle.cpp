@@ -342,6 +342,10 @@ void ParagraphStyle::getNamedResources(ResourceCollection& lists) const
 			lists.collectColor(ruleColor);
 	}
 
+	const QString& shadeColorName = shadeColor();
+	if (shadeColorName != CommonStrings::None && !shadeColorName.isEmpty())
+		lists.collectColor(shadeColorName);
+
 	QString parEffectStyle = peCharStyleName();
 	if (parEffectStyle.length() > 0)
 	{
@@ -390,6 +394,8 @@ void ParagraphStyle::replaceNamedResources(ResourceCollection& newNames)
 		setRuleBelowColor(it.value());
 	if (!inh_RuleBelowGapColor && (it = newNames.colors().find(ruleBelowGapColor())) != newNames.colors().end())
 		setRuleBelowGapColor(it.value());
+	if (!inh_ShadeColor && (it = newNames.colors().find(shadeColor())) != newNames.colors().end())
+		setShadeColor(it.value());
 
 	if ((it = (newNames.charStyles().find(peCharStyleName()))) != newNames.charStyles().end())
 		setPeCharStyleName(it.value());

@@ -136,6 +136,11 @@ public:
 	/// color and width for its border, and filled with the current fill
 	/// color.
 	virtual void drawRect(const QRectF& rect) = 0;
+	/// Draws a rectangle with rounded corners filled with the current fill
+	/// color. The base implementation approximates the corners with thin
+	/// horizontal drawRect() slices so no backend is forced to override it;
+	/// painters with real path support override it for smooth curves.
+	virtual void drawRoundedRect(const QRectF& rect, double radius);
 	/// Draws and embedded page item at the current x and y positions.
 	virtual void drawObject(PageItem* item) = 0;
 	/// Draws embedded page item decoration at the current x and y positions.

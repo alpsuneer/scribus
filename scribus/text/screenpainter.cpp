@@ -304,6 +304,26 @@ void ScreenPainter::drawRect(const QRectF& rect)
 	m_painter->restore();
 }
 
+void ScreenPainter::drawRoundedRect(const QRectF& rect, double radius)
+{
+	const double r = qMin(radius, qMin(rect.width(), rect.height()) / 2.0);
+	if (r <= 0.0)
+	{
+		drawRect(rect);
+		return;
+	}
+	m_painter->save();
+	setupState(true);
+	QPainterPath path;
+	path.addRoundedRect(rect, r, r);
+	FPointArray points;
+	points.fromQPainterPath(path, true);
+	m_painter->setupPolygon(&points);
+	m_painter->fillPath();
+	m_painter->strokePath();
+	m_painter->restore();
+}
+
 void ScreenPainter::drawObject(PageItem* embedded)
 {
 	if (!embedded)

@@ -142,8 +142,10 @@ void TextLayout::renderBackground(TextLayoutPainter *p) const
 			const Box* box = lineBoxes.at(j);
 			
 			const ParagraphStyle& style = m_story->paragraphStyle(box->firstChar());
-			backColor = style.backgroundColor();
-			backShade = style.backgroundShade();
+			// Paragraph shading supersedes the legacy per-paragraph background
+			// color, otherwise the two would paint on top of each other.
+			backColor = style.shadeOn() ? CommonStrings::None : style.backgroundColor();
+			backShade = style.shadeOn() ? 100.0 : style.backgroundShade();
 
 			if ((lastColor != backColor) || (lastShade != backShade))
 			{
@@ -426,6 +428,195 @@ void TextLayout::renderParagraphRules(TextLayoutPainter *p) const
 				paintRule(p, rule, ruleX, ruleWidth, yTop);
 			}
 		}
+	}
+
+	p->restore();
+}
+
+namespace
+{
+	/** The shading properties of one line's paragraph. Two lines may share a
+	    band only if their signatures compare equal. */
+	struct ShadeSignature
+	{
+		QString color;
+		int tint { 100 };
+		ParagraphStyle::RuleWidthType widthType { ParagraphStyle::RuleWidthColumn };
+		double padTop { 0.0 };
+		double padBottom { 0.0 };
+		double padLeft { 0.0 };
+		double padRight { 0.0 };
+		double cornerRadius { 0.0 };
+		bool mergeAdjacent { true };
+
+		bool operator==(const ShadeSignature& o) const
+		{
+			return color == o.color && tint == o.tint && widthType == o.widthType
+				&& padTop == o.padTop && padBottom == o.padBottom
+				&& padLeft == o.padLeft && padRight == o.padRight
+				&& cornerRadius == o.cornerRadius && mergeAdjacent == o.mergeAdjacent;
+		}
+	};
+}
+
+/**
+ Draws the paragraph shading (per-paragraph background band) of every shaded
+ paragraph in this frame. Called by every output backend between
+ renderBackground() and renderParagraphRules(), so the shade always sits
+ under the rules and the glyphs in every output.
+
+ Pass 1 accumulates consecutive lines into bands: a band grows while the
+ shading signature and the band geometry stay identical, and across a
+ paragraph boundary only when Merge Adjacent is set — that is what renders
+ consecutive shaded paragraphs as one seamless block. Pass 2 (flushBand)
+ paints each band, applying the top padding only when the band starts on a
+ paragraph's true first line and the bottom padding only when it ends on a
+ true last line, so a paragraph split over columns or linked frames is not
+ padded at the split.
+ */
+void TextLayout::renderParagraphShading(TextLayoutPainter *p) const
+{
+	if (!m_story || !m_box || m_box->boxes().isEmpty())
+		return;
+
+	const int storyLength = m_story->length();
+	if (storyLength <= 0)
+		return;
+
+	// The painter is translated by the layout box origin below, so the frame
+	// edges live at these coordinates in the drawing space.
+	const double frameTop = -m_box->y();
+	const double frameBottom = frameTop + (m_frame ? m_frame->height() : 0.0);
+
+	p->save();
+	p->translate(m_box->x(), m_box->y());
+
+	for (const Box* column : m_box->boxes())
+	{
+		const QRectF colBBox = column->bbox();
+
+		bool bandActive = false;
+		ShadeSignature bandSig;
+		double bandX = 0.0, bandW = 0.0, bandTop = 0.0, bandBottom = 0.0;
+		bool bandFirstIsParaFirst = false;
+		bool bandLastIsParaLast = false;
+
+		auto flushBand = [&]()
+		{
+			if (!bandActive)
+				return;
+			bandActive = false;
+
+			double top = bandTop - (bandFirstIsParaFirst ? bandSig.padTop : 0.0);
+			double bottom = bandBottom + (bandLastIsParaLast ? bandSig.padBottom : 0.0);
+			const double x = bandX - bandSig.padLeft;
+			const double width = bandW + bandSig.padLeft + bandSig.padRight;
+
+			// Keep the band inside the frame, same clamping as the rules.
+			top = qMax(frameTop, top);
+			bottom = qMin(frameBottom, bottom);
+			if (width <= 0.0 || (bottom - top) <= 0.0)
+				return;
+
+			TextLayoutColor color(bandSig.color, bandSig.tint);
+			p->save();
+			p->setFillColor(color);
+			p->setStrokeColor(color);
+			p->drawRoundedRect(QRectF(x, top, width, bottom - top), bandSig.cornerRadius);
+			p->restore();
+		};
+
+		for (const Box* box : column->boxes())
+		{
+			// Text on a path has no band geometry to shade.
+			if (box->type() == Box::T_PathLine)
+			{
+				flushBand();
+				continue;
+			}
+
+			const int firstChar = box->firstChar();
+			const int lastChar = box->lastChar();
+			if (firstChar > lastChar || firstChar >= storyLength)
+			{
+				flushBand();
+				continue;
+			}
+
+			const ParagraphStyle& style = m_story->paragraphStyle(firstChar);
+			if (!style.shadeOn() || style.shadeColor().isEmpty() || style.shadeColor() == CommonStrings::None)
+			{
+				flushBand();
+				continue;
+			}
+
+			ShadeSignature sig;
+			sig.color         = style.shadeColor();
+			sig.tint          = style.shadeTint();
+			sig.widthType     = style.shadeWidthType();
+			sig.padTop        = style.shadeTopPadding();
+			sig.padBottom     = style.shadeBottomPadding();
+			sig.padLeft       = style.shadeLeftPadding();
+			sig.padRight      = style.shadeRightPadding();
+			sig.cornerRadius  = style.shadeCornerRadius();
+			sig.mergeAdjacent = style.shadeMergeAdjacent();
+
+			const bool isParaFirstLine = (firstChar == 0) || (m_story->text(firstChar - 1) == SpecialChars::PARSEP);
+			const bool isParaLastLine = (lastChar >= storyLength - 1) || (m_story->text(lastChar) == SpecialChars::PARSEP);
+			const bool isEmptyParagraph = (firstChar == lastChar) && (m_story->text(firstChar) == SpecialChars::PARSEP);
+
+			double lineX = 0.0;
+			double lineW = 0.0;
+			if (sig.widthType == ParagraphStyle::RuleWidthText)
+			{
+				// An empty paragraph has no text extent to span.
+				if (isEmptyParagraph)
+				{
+					flushBand();
+					continue;
+				}
+				lineX = colBBox.x() + box->x();
+				lineW = box->naturalWidth();
+			}
+			else if (style.spanColumns() != 0)
+			{
+				lineX = 0.0;
+				lineW = m_box->width();
+			}
+			else
+			{
+				lineX = colBBox.x();
+				lineW = colBBox.width();
+			}
+			if (lineW <= 0.0)
+			{
+				flushBand();
+				continue;
+			}
+
+			// In Text width mode every line has its own extent, so lines only
+			// merge when their widths happen to match (e.g. justified text).
+			const bool canExtend = bandActive
+				&& sig == bandSig
+				&& bandX == lineX && bandW == lineW
+				&& (!isParaFirstLine || sig.mergeAdjacent);
+			if (!canExtend)
+				flushBand();
+
+			if (!bandActive)
+			{
+				bandActive = true;
+				bandSig = sig;
+				bandX = lineX;
+				bandW = lineW;
+				bandTop = box->y();
+				bandFirstIsParaFirst = isParaFirstLine;
+			}
+			bandBottom = box->y() + box->height();
+			bandLastIsParaLast = isParaLastLine;
+		}
+
+		flushBand();
 	}
 
 	p->restore();

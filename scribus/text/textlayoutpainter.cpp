@@ -5,6 +5,8 @@
  for which a new license (GPL+exception) is in place.
  */
 
+#include <cmath>
+
 #include "textlayoutpainter.h"
 
 TextLayoutPainter::TextLayoutPainter()
@@ -143,6 +145,35 @@ void TextLayoutPainter::setMatrix(const QTransform& matrix)
 const QTransform& TextLayoutPainter::matrix() const
 {
 	return m_stack.top().matrix;
+}
+
+void TextLayoutPainter::drawRoundedRect(const QRectF& rect, double radius)
+{
+	const double r = qMin(radius, qMin(rect.width(), rect.height()) / 2.0);
+	if (r <= 0.0)
+	{
+		drawRect(rect);
+		return;
+	}
+
+	// Middle band between the two rounded zones.
+	drawRect(QRectF(rect.x(), rect.y() + r, rect.width(), rect.height() - 2.0 * r));
+
+	// Corner slices. 0.35pt steps are below visual resolution at print DPI;
+	// the widest inset inside each slice is used so slices never overshoot
+	// the true circle.
+	const double step = 0.35;
+	for (double y = 0.0; y < r; y += step)
+	{
+		const double h = qMin(step, r - y);
+		const double t = r - y; // distance of the slice's outer edge from the circle's center row
+		const double inset = r - sqrt(qMax(0.0, r * r - t * t));
+		const double w = rect.width() - 2.0 * inset;
+		if (w <= 0.0)
+			continue;
+		drawRect(QRectF(rect.x() + inset, rect.y() + y, w, h));
+		drawRect(QRectF(rect.x() + inset, rect.y() + rect.height() - y - h, w, h));
+	}
 }
 
 void TextLayoutPainter::save()

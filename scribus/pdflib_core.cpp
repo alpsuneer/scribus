@@ -558,6 +558,38 @@ public:
 		m_backBuffer += "Q\n";
 	}
 
+	void drawRoundedRect(const QRectF& rect, double radius) override
+	{
+		const double r = qMin(radius, qMin(rect.width(), rect.height()) / 2.0);
+		if (r <= 0.0)
+		{
+			drawRect(rect);
+			return;
+		}
+		QTransform transform = matrix();
+		// Same coordinate handling as drawRect(): PDF's y axis points up.
+		const double x0 = x() + rect.x();
+		const double y0 = -y() - rect.y();
+		const double x1 = x0 + rect.width();
+		const double y1 = y0 - rect.height();
+		const double k = 0.5523 * r; // kappa: circular arc as cubic bezier
+		m_backBuffer += "q\n";
+		m_backBuffer += transformToStr(transform) + " cm\n";
+		m_backBuffer += "n\n";
+		m_backBuffer += m_pdf->putColor(fillColor().color, fillColor().shade, true);
+		m_backBuffer += FToStr(x0 + r) + " " + FToStr(y0) + " m\n";
+		m_backBuffer += FToStr(x1 - r) + " " + FToStr(y0) + " l\n";
+		m_backBuffer += FToStr(x1 - r + k) + " " + FToStr(y0) + " " + FToStr(x1) + " " + FToStr(y0 - r + k) + " " + FToStr(x1) + " " + FToStr(y0 - r) + " c\n";
+		m_backBuffer += FToStr(x1) + " " + FToStr(y1 + r) + " l\n";
+		m_backBuffer += FToStr(x1) + " " + FToStr(y1 + r - k) + " " + FToStr(x1 - r + k) + " " + FToStr(y1) + " " + FToStr(x1 - r) + " " + FToStr(y1) + " c\n";
+		m_backBuffer += FToStr(x0 + r) + " " + FToStr(y1) + " l\n";
+		m_backBuffer += FToStr(x0 + r - k) + " " + FToStr(y1) + " " + FToStr(x0) + " " + FToStr(y1 + r - k) + " " + FToStr(x0) + " " + FToStr(y1 + r) + " c\n";
+		m_backBuffer += FToStr(x0) + " " + FToStr(y0 - r) + " l\n";
+		m_backBuffer += FToStr(x0) + " " + FToStr(y0 - r + k) + " " + FToStr(x0 + r - k) + " " + FToStr(y0) + " " + FToStr(x0 + r) + " " + FToStr(y0) + " c\n";
+		m_backBuffer += "h\nf\n";
+		m_backBuffer += "Q\n";
+	}
+
 	void drawObject(PageItem* embedded) override
 	{
 		m_glyphBuffer += "ET\n" + m_pathBuffer;
@@ -5877,6 +5909,7 @@ QByteArray PDFLibCore::setTextSt(PageItem *ite, uint PNr, const ScPage* pag)
 	
 	PdfPainter p(this, PNr, pag);
 	ite->textLayout.renderBackground(&p);
+	ite->textLayout.renderParagraphShading(&p);
 	ite->textLayout.renderParagraphRules(&p);
 	ite->textLayout.render(&p);
 	return p.getBuffer();

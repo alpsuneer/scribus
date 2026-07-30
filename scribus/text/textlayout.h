@@ -50,6 +50,7 @@ public:
 	void render(ScreenPainter *p, ITextContext *ctx) const;
 	void render(TextLayoutPainter *p) const;
 	void renderBackground(TextLayoutPainter *p) const;
+	void renderParagraphShading(TextLayoutPainter *p) const;
 	void renderParagraphRules(TextLayoutPainter *p) const;
 	int startOfLine(int pos) const;
 	int endOfLine(int pos) const;
