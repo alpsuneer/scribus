@@ -85,6 +85,9 @@ private slots:
 	void slotBulletUseImage(bool isOn);
 	void slotBulletImagePath(const QString &path);
 	void slotBulletImageSize();
+	void slotBulletImageOffset();
+	void slotBulletImageSizeMode(int index);
+	void slotBulletImageScale(double value);
 	void slotNumName(const QString &str);
 	void slotNumNew();
 	void slotSelectionDirty();

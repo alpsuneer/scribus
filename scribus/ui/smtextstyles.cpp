@@ -519,6 +519,9 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->bulletImageCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotBulletUseImage(bool)));
 	connect(m_pwidget->bulletImagePathEdit, SIGNAL(textChanged(QString)), this, SLOT(slotBulletImagePath(QString)));
 	connect(m_pwidget->bulletImageSizeSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageSize()));
+	connect(m_pwidget->bulletImageOffsetSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageOffset()));
+	connect(m_pwidget->bulletImageSizeModeCombo, SIGNAL(activated(int)), this, SLOT(slotBulletImageSizeMode(int)));
+	connect(m_pwidget->bulletImageScaleSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageScale(double)));
 	connect(m_pwidget->numComboBox, SIGNAL(textActivated(QString)), this, SLOT(slotNumName(QString)));
 	connect(m_pwidget->numLevelSpin, SIGNAL(valueChanged(int)), this, SLOT(slotNumLevel(int)));
 	connect(m_pwidget->numFormatCombo, SIGNAL(activated(int)), this, SLOT(slotNumFormat(int)));
@@ -620,6 +623,9 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->bulletImageCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotBulletUseImage(bool)));
 	disconnect(m_pwidget->bulletImagePathEdit, SIGNAL(textChanged(QString)), this, SLOT(slotBulletImagePath(QString)));
 	disconnect(m_pwidget->bulletImageSizeSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageSize()));
+	disconnect(m_pwidget->bulletImageOffsetSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageOffset()));
+	disconnect(m_pwidget->bulletImageSizeModeCombo, SIGNAL(activated(int)), this, SLOT(slotBulletImageSizeMode(int)));
+	disconnect(m_pwidget->bulletImageScaleSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageScale(double)));
 	disconnect(m_pwidget->numComboBox, SIGNAL(textActivated(QString)), this, SLOT(slotNumName(QString)));
 	disconnect(m_pwidget->numFormatCombo, SIGNAL(activated(int)), this, SLOT(slotNumFormat(int)));
 	disconnect(m_pwidget->numLevelSpin, SIGNAL(valueChanged(int)), this, SLOT(slotNumLevel(int)));
@@ -1057,6 +1063,54 @@ void SMParagraphStyle::slotBulletImageSize()
 		value = value / m_unitRatio;
 		for (int i = 0; i < m_selection.count(); ++i)
 			m_selection[i]->setBulletImageSize(value);
+	}
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletImageSizeMode(int index)
+{
+	for (int i = 0; i < m_selection.count(); ++i)
+	{
+		if (index == 1) // Scale % of the automatic size
+			m_selection[i]->setBulletImageScaleMode(1);
+		else
+		{
+			m_selection[i]->setBulletImageScaleMode(0);
+			if (index == 0) // Auto
+				m_selection[i]->setBulletImageSize(0.0);
+			else // Fixed: apply the size spinbox as-is
+				m_selection[i]->setBulletImageSize(qMax(0.0, m_pwidget->bulletImageSizeSpin->value() / m_unitRatio));
+		}
+	}
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletImageScale(double value)
+{
+	for (int i = 0; i < m_selection.count(); ++i)
+		m_selection[i]->setBulletImageScale(value);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletImageOffset()
+{
+	if (m_pwidget->bulletImageOffsetSpin->useParentValue())
+	{
+		for (int i = 0; i < m_selection.count(); ++i)
+			m_selection[i]->resetBulletImageOffset();
+	}
+	else
+	{
+		double a, b, value;
+		int c;
+
+		m_pwidget->bulletImageOffsetSpin->getValues(&a, &b, &c, &value);
+		value = value / m_unitRatio;
+		for (int i = 0; i < m_selection.count(); ++i)
+			m_selection[i]->setBulletImageOffset(value);
 	}
 
 	slotSelectionDirty();

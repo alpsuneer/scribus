@@ -64,6 +64,13 @@ SMPStyleWidget::SMPStyleWidget(ScribusDoc* doc, StyleSet<CharStyle> *cstyles) :
 
 	parEffectOffset->setSuffix(unitGetSuffixFromIndex(0));
 	bulletImageSizeSpin->setSuffix(unitGetSuffixFromIndex(0));
+	bulletImageOffsetSpin->setSuffix(unitGetSuffixFromIndex(0));
+	bulletImageOffsetSpin->setMinimum(-57.0); // ~ -20 mm, rescaled on unit change
+	bulletImageOffsetSpin->setMaximum(57.0);
+	bulletImageSizeModeCombo->addItem(tr("Auto"));
+	bulletImageSizeModeCombo->addItem(tr("Scale %"));
+	bulletImageSizeModeCombo->addItem(tr("Fixed"));
+	updateBulletImageSizeWidgets();
 
 	fillBulletStrEditCombo();
 
@@ -172,6 +179,7 @@ void SMPStyleWidget::unitChange(double oldRatio, double newRatio, int unitIndex)
 {
 	parEffectOffset->setNewUnit(unitIndex);
 	bulletImageSizeSpin->setNewUnit(unitIndex);
+	bulletImageOffsetSpin->setNewUnit(unitIndex);
 	tabList->unitChange(unitIndex);
 	rulesPage->unitChange(unitIndex);
 }
@@ -1101,10 +1109,22 @@ void SMPStyleWidget::showBullet(const QList<ParagraphStyle *> &pstyles, const QL
 	const QSignalBlocker blockCheck(bulletImageCheckBox);
 	const QSignalBlocker blockPath(bulletImagePathEdit);
 	const QSignalBlocker blockSize(bulletImageSizeSpin);
+	const QSignalBlocker blockOffset(bulletImageOffsetSpin);
+	const QSignalBlocker blockMode(bulletImageSizeModeCombo);
+	const QSignalBlocker blockScale(bulletImageScaleSpin);
 	bulletImageCheckBox->setChecked(pstyles[0]->bulletUseImage());
 	bulletImagePathEdit->setText(pstyles[0]->bulletImagePath());
 	setBulletImagePreview(pstyles[0]->bulletImagePath());
 	bulletImageSizeSpin->setValue(pstyles[0]->bulletImageSize() * unitRatio, pstyles[0]->isInhBulletImageSize());
+	bulletImageOffsetSpin->setValue(pstyles[0]->bulletImageOffset() * unitRatio, pstyles[0]->isInhBulletImageOffset());
+	int sizeMode = 0; // Auto
+	if (pstyles[0]->bulletImageScaleMode() == 1)
+		sizeMode = 1; // Scale %
+	else if (pstyles[0]->bulletImageSize() > 0.0)
+		sizeMode = 2; // Fixed
+	bulletImageSizeModeCombo->setCurrentIndex(sizeMode);
+	bulletImageScaleSpin->setValue(pstyles[0]->bulletImageScale());
+	updateBulletImageSizeWidgets();
 	bool useImg = bulletImageCheckBox->isChecked();
 	bulletStrEdit->setEnabled(!useImg);
 	bulletCharTableButton->setEnabled(!useImg);
@@ -1142,6 +1162,18 @@ void SMPStyleWidget::on_bulletImageCheckBox_toggled(bool checked)
 {
 	bulletStrEdit->setEnabled(!checked);
 	bulletCharTableButton->setEnabled(!checked);
+}
+
+void SMPStyleWidget::updateBulletImageSizeWidgets()
+{
+	int mode = bulletImageSizeModeCombo->currentIndex();
+	bulletImageScaleSpin->setVisible(mode == 1);
+	bulletImageSizeSpin->setVisible(mode == 2);
+}
+
+void SMPStyleWidget::on_bulletImageSizeModeCombo_currentIndexChanged(int)
+{
+	updateBulletImageSizeWidgets();
 }
 
 void SMPStyleWidget::showNumeration(const QList<ParagraphStyle *> &pstyles, const QList<CharStyle> &cstyles, int unitIndex)

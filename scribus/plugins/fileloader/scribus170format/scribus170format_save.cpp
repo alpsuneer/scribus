@@ -867,6 +867,12 @@ void Scribus170Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 	}
 	if (!style.isInhBulletImageSize())
 		docu.writeAttribute("BulletImageSize", style.bulletImageSize());
+	if (!style.isInhBulletImageOffset())
+		docu.writeAttribute("BulletImageOffset", style.bulletImageOffset());
+	if (!style.isInhBulletImageScaleMode())
+		docu.writeAttribute("BulletImageScaleMode", style.bulletImageScaleMode());
+	if (!style.isInhBulletImageScale())
+		docu.writeAttribute("BulletImageScale", style.bulletImageScale());
 	if (!style.isInhHasNum())
 		docu.writeAttribute("Numeration", static_cast<int>(style.hasNum()));
 	if (!style.isInhNumFormat())

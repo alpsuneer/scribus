@@ -1254,7 +1254,7 @@ A value of 0 means unlimited hyphenations.</string>
             </layout>
            </item>
            <item>
-            <layout class="QHBoxLayout" name="bulletImageLayout" stretch="0,1,0,0,0,0">
+            <layout class="QHBoxLayout" name="bulletImageLayout" stretch="0,1,0,0,0,0,0,0,0,0">
              <property name="spacing">
               <number>4</number>
              </property>
@@ -1312,9 +1312,52 @@ A value of 0 means unlimited hyphenations.</string>
               </widget>
              </item>
              <item>
+              <widget class="QComboBox" name="bulletImageSizeModeCombo">
+               <property name="toolTip">
+                <string>How the bullet image is sized: automatic (80% of font size), a percentage of the automatic size, or a fixed size</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QDoubleSpinBox" name="bulletImageScaleSpin">
+               <property name="toolTip">
+                <string>Bullet image size as a percentage of the automatic size</string>
+               </property>
+               <property name="suffix">
+                <string> %</string>
+               </property>
+               <property name="decimals">
+                <number>0</number>
+               </property>
+               <property name="minimum">
+                <double>10.000000000000000</double>
+               </property>
+               <property name="maximum">
+                <double>500.000000000000000</double>
+               </property>
+               <property name="value">
+                <double>100.000000000000000</double>
+               </property>
+              </widget>
+             </item>
+             <item>
               <widget class="SMScrSpinBox" name="bulletImageSizeSpin">
                <property name="toolTip">
-                <string>Bullet image size (0 = automatic, relative to font size)</string>
+                <string>Fixed bullet image size (0 = automatic, relative to font size)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="bulletImageOffsetLabel">
+               <property name="text">
+                <string>V-Offset:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="SMScrSpinBox" name="bulletImageOffsetSpin">
+               <property name="toolTip">
+                <string>Baseline offset of the bullet image — positive lowers the image, negative raises it</string>
                </property>
               </widget>
              </item>
