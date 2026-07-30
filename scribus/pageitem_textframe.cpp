@@ -1047,7 +1047,23 @@ struct LineControl {
 			auto* objectBox = new ObjectBox(run, context);
 			result = objectBox;
 			QRectF bBox = context->getVisualBoundingBox(run.object());
-			if (run.hasFlag(ScLayout_DropCap))
+			if (run.object().getInlineCharID() >= ScribusDoc::BulletImageIdBase)
+			{
+				// Image bullet: center the image on half the x-height (the
+				// optical middle of the text — bottom-on-baseline reads too
+				// high, especially for tall-ascent scripts), then apply the
+				// style's vertical offset (positive lowers the image).
+				// This single spot moves the image in every output backend,
+				// since all of them render through ObjectBox.
+				const CharStyle& cs = run.style();
+				double xh = cs.font().xHeight(cs.fontSize() / 10.0);
+				double ascent = (xh + bBox.height() * run.scaleV()) / 2.0;
+				const PageItem* frame = context->getFrame();
+				if (frame != nullptr)
+					ascent -= frame->itemText.paragraphStyle(run.firstChar()).bulletImageOffset();
+				objectBox->setAscent(ascent);
+			}
+			else if (run.hasFlag(ScLayout_DropCap))
 				objectBox->setAscent(bBox.height() * run.scaleV() - run.yoffset);
 			else
 				objectBox->setAscent(bBox.height() * run.scaleV());

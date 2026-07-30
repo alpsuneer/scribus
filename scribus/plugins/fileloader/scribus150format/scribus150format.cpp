@@ -3166,6 +3166,18 @@ void Scribus150Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute(BulletImageSize))
 		newStyle.setBulletImageSize(attrs.valueAsDouble(BulletImageSize));
 
+	static const QString BulletImageOffset("BulletImageOffset");
+	if (attrs.hasAttribute(BulletImageOffset))
+		newStyle.setBulletImageOffset(attrs.valueAsDouble(BulletImageOffset));
+
+	static const QString BulletImageScaleMode("BulletImageScaleMode");
+	if (attrs.hasAttribute(BulletImageScaleMode))
+		newStyle.setBulletImageScaleMode(attrs.valueAsInt(BulletImageScaleMode));
+
+	static const QString BulletImageScale("BulletImageScale");
+	if (attrs.hasAttribute(BulletImageScale))
+		newStyle.setBulletImageScale(attrs.valueAsDouble(BulletImageScale));
+
 	static const QString BulletImageData("BulletImageData");
 	if (attrs.hasAttribute(BulletImageData))
 	{
@@ -5619,6 +5631,12 @@ PageItem* Scribus150Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		pstyle.setBulletImagePath(attrs.valueAsString("BulletImagePath"));
 	if (attrs.hasAttribute("BulletImageSize"))
 		pstyle.setBulletImageSize(attrs.valueAsDouble("BulletImageSize"));
+	if (attrs.hasAttribute("BulletImageOffset"))
+		pstyle.setBulletImageOffset(attrs.valueAsDouble("BulletImageOffset"));
+	if (attrs.hasAttribute("BulletImageScaleMode"))
+		pstyle.setBulletImageScaleMode(attrs.valueAsInt("BulletImageScaleMode"));
+	if (attrs.hasAttribute("BulletImageScale"))
+		pstyle.setBulletImageScale(attrs.valueAsDouble("BulletImageScale"));
 	if (attrs.hasAttribute("BulletImageData"))
 	{
 		QString bulletPath = pstyle.bulletImagePath();

@@ -49,6 +49,13 @@ ATTRDEF(QString, bulletStr, BulletStr, QString(QChar(0x2022)))
 ATTRDEF(bool, bulletUseImage, BulletUseImage, false)
 ATTRDEF(QString, bulletImagePath, BulletImagePath, "")
 ATTRDEF(double, bulletImageSize, BulletImageSize, 0.0)
+// Vertical offset of the image bullet in points; positive lowers the image.
+ATTRDEF(double, bulletImageOffset, BulletImageOffset, 0.0)
+// Sizing mode: 0 = from bulletImageSize (0 = auto 0.8em, >0 = fixed points),
+// 1 = bulletImageScale percent of the automatic size. Mode 0 keeps old files
+// behaving exactly as before this attribute existed.
+ATTRDEF(int, bulletImageScaleMode, BulletImageScaleMode, 0)
+ATTRDEF(double, bulletImageScale, BulletImageScale, 100.0)
 ATTRDEF(bool, hasNum, HasNum, false)
 ATTRDEF(QString, numName, NumName, "")
 ATTRDEF(int, numFormat, NumFormat, 0)

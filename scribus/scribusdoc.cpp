@@ -486,15 +486,20 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 	if (!style.bulletUseImage() || style.bulletImagePath().isEmpty())
 		return -1;
 	const QString& path = style.bulletImagePath();
-	double sizePt = style.bulletImageSize();
-	if (sizePt <= 0.0)
-	{
-		// automatic size: 0.8 x the size of the char style the bullet marker uses
-		CharStyle cs(style.charStyle());
-		if (!style.peCharStyleName().isEmpty() && charStyles().contains(style.peCharStyleName()))
-			cs = charStyles().get(style.peCharStyleName());
-		sizePt = 0.8 * cs.fontSize() / 10.0;
-	}
+	CharStyle cs(style.charStyle());
+	if (!style.peCharStyleName().isEmpty() && charStyles().contains(style.peCharStyleName()))
+		cs = charStyles().get(style.peCharStyleName());
+	double emPt = cs.fontSize() / 10.0;
+	double autoPt = 0.8 * emPt; // automatic size: 0.8 x the bullet char style size
+	double sizePt;
+	if (style.bulletImageScaleMode() == 1)
+		sizePt = autoPt * style.bulletImageScale() / 100.0;
+	else if (style.bulletImageSize() > 0.0)
+		sizePt = style.bulletImageSize();
+	else
+		sizePt = autoPt;
+	// keep layout sane: never taller than 3 em (~3 x line height)
+	sizePt = qMin(sizePt, 3.0 * emPt);
 	if (sizePt < 0.1)
 		return -1;
 
