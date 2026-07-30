@@ -94,7 +94,20 @@
 - ഏതെങ്കിലും field മാറ്റിയാൽ preset combo "Custom" ആകും; per-export
   മാറ്റങ്ങൾ document-ൽ സൂക്ഷിക്കും
 
-### 9. Authors
+### 9. Image Bullets (Bulleted Lists)
+- Style Manager → Lists & Drop Caps → Bulleted List-ൽ "Use Image" option:
+  ഒരു PNG image browse ചെയ്ത് bullet ആയി ഉപയോഗിക്കാം (arrows, logos,
+  section markers...)
+- Size spinbox (0 = automatic, font size-ന് ആനുപാതികം 0.8em); Distance
+  field പഴയതുപോലെ പ്രവർത്തിക്കും
+- Canvas, PDF, Print, SVG, XPS — എല്ലാ export-ലും ഒരേപോലെ render ആകും;
+  News_Paper preset-ന്റെ CMYK conversion automatic
+- Image file .sla-യിൽ base64 ആയി embed ആകും — വേറെ PC-യിൽ തുറന്നാലും
+  bullet കാണാം (file missing ആയാൽ auto-restore)
+- Character bullets പഴയതുപോലെ; image unusable ആയാൽ character bullet-ലേക്ക്
+  fallback
+
+### 10. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
