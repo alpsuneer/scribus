@@ -98,8 +98,14 @@
 - Style Manager → Lists & Drop Caps → Bulleted List-ൽ "Use Image" option:
   ഒരു PNG image browse ചെയ്ത് bullet ആയി ഉപയോഗിക്കാം (arrows, logos,
   section markers...)
-- Size spinbox (0 = automatic, font size-ന് ആനുപാതികം 0.8em); Distance
-  field പഴയതുപോലെ പ്രവർത്തിക്കും
+- Size control: Auto (0.8em) / Scale % (auto size-ന്റെ 10–500%) / Fixed (mm) —
+  വലുതാക്കാൻ "150%" എന്ന് കൊടുത്താൽ മതി; max 3em clamp
+- V-Offset spinbox (mm, ±20): icon താഴ്ത്താൻ positive, ഉയർത്താൻ negative —
+  headline-ന്റെ നടുവിൽ കൃത്യമായി വയ്ക്കാം
+- Default placement മെച്ചപ്പെടുത്തി: icon ഇപ്പോൾ x-height-ന്റെ നടുവിൽ center
+  ആകും (baseline-ൽ ഇരിക്കുന്നതിനു പകരം) — Malayalam headline-കളിൽ high
+  ആയി float ചെയ്യില്ല
+- Distance field പഴയതുപോലെ പ്രവർത്തിക്കും
 - Canvas, PDF, Print, SVG, XPS — എല്ലാ export-ലും ഒരേപോലെ render ആകും;
   News_Paper preset-ന്റെ CMYK conversion automatic
 - Image file .sla-യിൽ base64 ആയി embed ആകും — വേറെ PC-യിൽ തുറന്നാലും
