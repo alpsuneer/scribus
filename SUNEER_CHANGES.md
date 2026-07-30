@@ -60,7 +60,8 @@
 - Auto fit frame height
 - Telugu/Malayalam direct typing in text frame
 - Paragraph Styles panel: Next Style chain ഉള്ള row-കളിൽ chain-link icon
-  (പഴയ blue box glyph-നു പകരം) + "Next style: ..." tooltip
+  (പഴയ blue box glyph-നു പകരം) + "Next style: ..." tooltip; icon-ൽ hover
+  ചെയ്യുമ്പോൾ hand cursor, click area വലുതാക്കി (full row height)
 
 ### 7. Faircode Frames (Text Frame Style Presets)
 - Scrapbook palette-ൽ built-in "Faircode Frames" tab (read-only, auto-open)
