@@ -511,8 +511,14 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 	int newId = -1;
 	bool wasLoading = isLoading();
 	setLoading(true); // no undo states, no dirty flags for the hidden item
+	// SVG bullets: image frames cannot load SVG, so rasterize to a cached
+	// high-resolution PNG first (content-addressed, crisp at any bullet size)
+	QString loadPath = path;
+	if (path.endsWith(QLatin1String(".svg"), Qt::CaseInsensitive) ||
+		path.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive))
+		loadPath = rasterizeSvgBullet(path);
 	auto* item = new PageItem_ImageFrame(this, 0, 0, 1, 1, 0, CommonStrings::None, CommonStrings::None);
-	if (QFile::exists(path) && item->loadImage(path, false, 72, false) && (item->OrigW > 0) && (item->OrigH > 0))
+	if (!loadPath.isEmpty() && QFile::exists(loadPath) && item->loadImage(loadPath, false, 72, false) && (item->OrigW > 0) && (item->OrigH > 0))
 	{
 		double w = sizePt * double(item->OrigW) / double(item->OrigH);
 		item->setWidthHeight(w, sizePt);

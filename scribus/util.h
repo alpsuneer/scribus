@@ -64,6 +64,9 @@ QString SCRIBUS_API bulletImageDataFor(const QString& path);
 (applicationDataDir()/bulletimages/, content-addressed) and return the cached
 file path; empty on failure. */
 QString SCRIBUS_API materializeBulletImage(const QString& base64Data, const QString& origPath);
+/*! \brief Rasterize an SVG bullet file to a cached 1024px PNG (content-addressed
+in applicationDataDir()/bulletimages/) and return the PNG path; empty on failure. */
+QString SCRIBUS_API rasterizeSvgBullet(const QString& svgPath);
 char SCRIBUS_API *toAscii85( quint32 value, bool& allZero );
 char SCRIBUS_API *toHex( uchar u );
 QString SCRIBUS_API String2Hex(QString *in, bool lang = true);
