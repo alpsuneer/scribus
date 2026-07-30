@@ -1407,6 +1407,21 @@ public: // Public attributes
 	QHash<int, PageItem*> FrameItems;
 	QList<PageItem*> EditFrameItems;
 
+	// --- Image bullets -----------------------------------------------------
+	// Style-driven bullet images render through the inline-object (ObjectBox)
+	// pipeline. The backing PageItem_ImageFrames live in this registry, NOT in
+	// FrameItems, so they are never saved and never become document content.
+	// Ids start at BulletImageIdBase and can never collide with inline ids.
+	static const int BulletImageIdBase = 0x40000000;
+	//! Registry id of the cached bullet image item for this style, loading it
+	//! on first use; -1 if the style has no usable image.
+	int bulletImageFrameId(const ParagraphStyle& style);
+	//! Item behind an id returned by bulletImageFrameId().
+	PageItem* bulletImageItem(int id) const;
+	QHash<QString, int> m_bulletImageIds;     // "path|sizePt" -> id (-1 = failed load)
+	QHash<int, PageItem*> m_bulletImageItems; // id -> hidden image item
+	int m_bulletImageNextId { BulletImageIdBase };
+
 	Selection* const m_Selection;
 	/** \brief Number of Columns */
 	double PageSp {1.0};

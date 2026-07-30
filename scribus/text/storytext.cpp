@@ -1153,6 +1153,22 @@ bool StoryText::hasObject(int pos) const
 }
 
 
+int StoryText::imageBulletFrameId(int pos) const
+{
+	if (m_doc == nullptr)
+		return -1;
+	if (!hasMark(pos))
+		return -1;
+	const Mark* mk = mark(pos);
+	if ((mk == nullptr) || !mk->isType(MARKBullNumType))
+		return -1;
+	const ParagraphStyle& pStyle = paragraphStyle(pos);
+	if (!pStyle.hasBullet() || !pStyle.bulletUseImage() || pStyle.bulletImagePath().isEmpty())
+		return -1;
+	return m_doc->bulletImageFrameId(pStyle);
+}
+
+
 PageItem* StoryText::getItem(int pos) const
 {
 	if (pos < 0)

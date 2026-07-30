@@ -15,6 +15,8 @@ PageItem* InlineFrame::getPageItem(const ScribusDoc* doc) const
 {
 	if (doc->FrameItems.contains(m_object_id))
 		return doc->FrameItems[m_object_id];
+	if (m_object_id >= ScribusDoc::BulletImageIdBase)
+		return doc->bulletImageItem(m_object_id);
 	return nullptr;
 }
 

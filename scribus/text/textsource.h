@@ -57,6 +57,7 @@ public:
 
 	virtual bool hasObject(int pos) const;
 	virtual InlineFrame object(int pos) const;
+	virtual int imageBulletFrameId(int pos) const;
 	virtual bool hasExpansionPoint(int pos) const;
 	virtual ExpansionPoint expansionPoint(int pos) const;
 

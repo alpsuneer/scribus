@@ -85,6 +85,7 @@ void TextSourceSegment::setFlag(int pos, LayoutFlags flag) { return m_source->se
 void TextSourceSegment::clearFlag(int pos, LayoutFlags flag) { return m_source->clearFlag(toSrc(pos)); }
 bool TextSourceSegment::hasObject(int pos) const{ return m_source->hasObject(toSrc(pos)); }
 InlineFrame TextSourceSegment::object(int pos) const { return m_source->object(toSrc(pos)); }
+int TextSourceSegment::imageBulletFrameId(int pos) const { return m_source->imageBulletFrameId(toSrc(pos)); }
 bool TextSourceSegment::hasExpansionPoint(int pos) const { return m_source->hasExpansionPoint(toSrc(pos)); }
 ExpansionPoint TextSourceSegment::expansionPoint(int pos) const { return m_source->expansionPoint(toSrc(pos)); }
 const ITextSource* TextSourceSegment::parent() const { return m_source->parent(); }

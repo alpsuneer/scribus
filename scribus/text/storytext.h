@@ -183,6 +183,11 @@ public:
 
 	bool hasObject(int pos) const override;
 	PageItem* getItem(int pos) const; // deprecated
+	/** If pos is a bullet/number mark whose paragraph style uses an image
+	bullet, the registry id (ScribusDoc::bulletImageFrameId) of the image
+	item to draw instead of glyphs; -1 otherwise. Layout-time only — this
+	never makes hasObject() true, so the mark is not document content. */
+	int imageBulletFrameId(int pos) const override;
 
 	int  findMark(const Mark* mrk, int startPos = 0) const;
 	bool hasMark(int pos, const Mark* mrk = nullptr) const;

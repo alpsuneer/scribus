@@ -1253,6 +1253,73 @@ A value of 0 means unlimited hyphenations.</string>
              </item>
             </layout>
            </item>
+           <item>
+            <layout class="QHBoxLayout" name="bulletImageLayout" stretch="0,1,0,0,0,0">
+             <property name="spacing">
+              <number>4</number>
+             </property>
+             <item>
+              <widget class="QCheckBox" name="bulletImageCheckBox">
+               <property name="toolTip">
+                <string>Draw an image file instead of the bullet character(s)</string>
+               </property>
+               <property name="text">
+                <string>Use Image:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="bulletImagePathEdit">
+               <property name="toolTip">
+                <string>Image file used as the bullet</string>
+               </property>
+               <property name="readOnly">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="bulletImageBrowseButton">
+               <property name="text">
+                <string>Browse...</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="bulletImagePreview">
+               <property name="minimumSize">
+                <size>
+                 <width>22</width>
+                 <height>22</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>22</width>
+                 <height>22</height>
+                </size>
+               </property>
+               <property name="text">
+                <string/>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="bulletImageSizeLabel">
+               <property name="text">
+                <string>Size:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="SMScrSpinBox" name="bulletImageSizeSpin">
+               <property name="toolTip">
+                <string>Bullet image size (0 = automatic, relative to font size)</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
           </layout>
          </widget>
          <widget class="QWidget" name="pageNumbered">

@@ -5,7 +5,12 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 
+#include <QDir>
 #include <QEvent>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QPixmap>
+#include <QSignalBlocker>
 
 
 #include "iconmanager.h"
@@ -58,6 +63,7 @@ SMPStyleWidget::SMPStyleWidget(ScribusDoc* doc, StyleSet<CharStyle> *cstyles) :
 //	optMarginCombo->addItem(tr("Default"), ParagraphStyle::OM_Default);
 
 	parEffectOffset->setSuffix(unitGetSuffixFromIndex(0));
+	bulletImageSizeSpin->setSuffix(unitGetSuffixFromIndex(0));
 
 	fillBulletStrEditCombo();
 
@@ -165,6 +171,7 @@ void SMPStyleWidget::languageChange()
 void SMPStyleWidget::unitChange(double oldRatio, double newRatio, int unitIndex)
 {
 	parEffectOffset->setNewUnit(unitIndex);
+	bulletImageSizeSpin->setNewUnit(unitIndex);
 	tabList->unitChange(unitIndex);
 	rulesPage->unitChange(unitIndex);
 }
@@ -1089,6 +1096,52 @@ void SMPStyleWidget::showBullet(const QList<ParagraphStyle *> &pstyles, const QL
 		chStr = pstyles[i]->bulletStr();
 	}
 	bulletStrEdit->setEditText(chStr);
+
+	double unitRatio = unitGetRatioFromIndex(unitIndex);
+	const QSignalBlocker blockCheck(bulletImageCheckBox);
+	const QSignalBlocker blockPath(bulletImagePathEdit);
+	const QSignalBlocker blockSize(bulletImageSizeSpin);
+	bulletImageCheckBox->setChecked(pstyles[0]->bulletUseImage());
+	bulletImagePathEdit->setText(pstyles[0]->bulletImagePath());
+	setBulletImagePreview(pstyles[0]->bulletImagePath());
+	bulletImageSizeSpin->setValue(pstyles[0]->bulletImageSize() * unitRatio, pstyles[0]->isInhBulletImageSize());
+	bool useImg = bulletImageCheckBox->isChecked();
+	bulletStrEdit->setEnabled(!useImg);
+	bulletCharTableButton->setEnabled(!useImg);
+}
+
+void SMPStyleWidget::setBulletImagePreview(const QString& path)
+{
+	if (path.isEmpty())
+	{
+		bulletImagePreview->setPixmap(QPixmap());
+		return;
+	}
+	QPixmap pm(path);
+	if (pm.isNull())
+		bulletImagePreview->setPixmap(QPixmap());
+	else
+		bulletImagePreview->setPixmap(pm.scaled(22, 22, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+}
+
+void SMPStyleWidget::on_bulletImageBrowseButton_clicked()
+{
+	QString startDir = bulletImagePathEdit->text().isEmpty() ? QDir::homePath()
+	                                                         : QFileInfo(bulletImagePathEdit->text()).absolutePath();
+	QString path = QFileDialog::getOpenFileName(this, tr("Choose Bullet Image"), startDir,
+	                    tr("Images") + " (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.gif);;" + tr("All Files") + " (*)");
+	if (path.isEmpty())
+		return;
+	bulletImagePathEdit->setText(path); // textChanged applies it to the style
+	setBulletImagePreview(path);
+	if (!bulletImageCheckBox->isChecked())
+		bulletImageCheckBox->setChecked(true); // toggled applies it to the style
+}
+
+void SMPStyleWidget::on_bulletImageCheckBox_toggled(bool checked)
+{
+	bulletStrEdit->setEnabled(!checked);
+	bulletCharTableButton->setEnabled(!checked);
 }
 
 void SMPStyleWidget::showNumeration(const QList<ParagraphStyle *> &pstyles, const QList<CharStyle> &cstyles, int unitIndex)

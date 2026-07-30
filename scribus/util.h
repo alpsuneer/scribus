@@ -58,6 +58,12 @@ void SCRIBUS_API WordAndPara(PageItem *currItem, int *w, int *p, int *c, int *wN
 bool SCRIBUS_API overwrite(QWidget *parent, const QString& filename);
 QString SCRIBUS_API Path2Relative(const QString& Path, const QString& baseDir = QDir::currentPath());
 QString SCRIBUS_API Relative2Path(const QString& File, const QString& baseDir = QDir::currentPath());
+/*! \brief Base64 of an image-bullet file for embedding in the SLA; empty on failure. */
+QString SCRIBUS_API bulletImageDataFor(const QString& path);
+/*! \brief Write embedded image-bullet data to the per-user cache
+(applicationDataDir()/bulletimages/, content-addressed) and return the cached
+file path; empty on failure. */
+QString SCRIBUS_API materializeBulletImage(const QString& base64Data, const QString& origPath);
 char SCRIBUS_API *toAscii85( quint32 value, bool& allZero );
 char SCRIBUS_API *toHex( uchar u );
 QString SCRIBUS_API String2Hex(QString *in, bool lang = true);

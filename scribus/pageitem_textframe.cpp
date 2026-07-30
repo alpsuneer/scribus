@@ -1470,6 +1470,17 @@ void PageItem_TextFrame::layout()
 			int a = current.glyphs[currentIndex].firstChar();
 			bool HasObject = itemText.hasObject(a);
 			PageItem* currentObject = itemText.object(a).getPageItem(m_Doc);
+			if (!HasObject)
+			{
+				// image bullet: size the line off the hidden image item,
+				// exactly as if it were an inline object
+				int bulletId = itemText.imageBulletFrameId(a);
+				if (bulletId >= 0)
+				{
+					currentObject = m_Doc->bulletImageItem(bulletId);
+					HasObject = (currentObject != nullptr);
+				}
+			}
 			QRectF currentObjectBox;
 			if (HasObject)
 				currentObjectBox = currentObject->getVisualBoundingRect();
@@ -5020,7 +5031,15 @@ void PageItem_TextFrame::updateBulletsNum()
 					continue;
 				}
 				if (style.hasBullet())
-					mark->setString(style.bulletStr());
+				{
+					// image bullet: single placeholder char; the shaper
+					// attaches the image item to this cluster. Falls back
+					// to the character bullet if the image is unusable.
+					if (style.bulletUseImage() && (m_Doc->bulletImageFrameId(style) >= 0))
+						mark->setString(QString(SpecialChars::OBJECT));
+					else
+						mark->setString(style.bulletStr());
+				}
 				else if (style.hasNum() && mark->getString().isEmpty())
 				{
 					mark->setString("?");

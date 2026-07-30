@@ -38,6 +38,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusview.h"
 #include "scribusdoc.h"
 #include "scpainter.h"
+#include "scpaths.h"
 #include "ui/scmessagebox.h"
 
 #include <csignal>
@@ -1456,4 +1457,35 @@ QString digitSubstitution(int num, QChar zeroDigit)
 			ch = QChar(zeroDigit.unicode() + ch.digitValue());
 	}
 	return result;
+}
+
+QString bulletImageDataFor(const QString& path)
+{
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly))
+		return QString();
+	return QString::fromLatin1(f.readAll().toBase64());
+}
+
+QString materializeBulletImage(const QString& base64Data, const QString& origPath)
+{
+	QByteArray data = QByteArray::fromBase64(base64Data.toLatin1());
+	if (data.isEmpty())
+		return QString();
+	QString ext = QFileInfo(origPath).suffix().toLower();
+	if (ext.isEmpty())
+		ext = QStringLiteral("png");
+	QString dirPath = ScPaths::applicationDataDir(true) + QStringLiteral("bulletimages/");
+	if (!QDir().mkpath(dirPath))
+		return QString();
+	QString sha1(QCryptographicHash::hash(data, QCryptographicHash::Sha1).toHex());
+	QString filePath = dirPath + sha1 + QLatin1Char('.') + ext;
+	if (QFile::exists(filePath))
+		return filePath;
+	QFile out(filePath);
+	if (!out.open(QIODevice::WriteOnly))
+		return QString();
+	out.write(data);
+	out.close();
+	return filePath;
 }

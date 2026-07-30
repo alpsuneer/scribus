@@ -3660,6 +3660,32 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute(BulletStr))
 		newStyle.setBulletStr(attrs.valueAsString(BulletStr));
 
+	static const QString BulletUseImage("BulletUseImage");
+	if (attrs.hasAttribute(BulletUseImage))
+		newStyle.setBulletUseImage(static_cast<bool>(attrs.valueAsInt(BulletUseImage)));
+
+	static const QString BulletImagePath("BulletImagePath");
+	if (attrs.hasAttribute(BulletImagePath))
+		newStyle.setBulletImagePath(attrs.valueAsString(BulletImagePath));
+
+	static const QString BulletImageSize("BulletImageSize");
+	if (attrs.hasAttribute(BulletImageSize))
+		newStyle.setBulletImageSize(attrs.valueAsDouble(BulletImageSize));
+
+	static const QString BulletImageData("BulletImageData");
+	if (attrs.hasAttribute(BulletImageData))
+	{
+		// portability: if the referenced file is absent on this machine,
+		// materialize the embedded copy and point the style at it
+		QString bulletPath = newStyle.bulletImagePath();
+		if (!bulletPath.isEmpty() && !QFile::exists(bulletPath))
+		{
+			QString cachedPath = materializeBulletImage(attrs.valueAsString(BulletImageData), bulletPath);
+			if (!cachedPath.isEmpty())
+				newStyle.setBulletImagePath(cachedPath);
+		}
+	}
+
 	static const QString Numeration("Numeration");
 	if (attrs.hasAttribute(Numeration))
 		newStyle.setHasNum(static_cast<bool>(attrs.valueAsInt(Numeration)));
@@ -6687,6 +6713,22 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		pstyle.setHasBullet(static_cast<bool>(attrs.valueAsInt("Bullet")));
 	if (attrs.hasAttribute("BulletStr"))
 		pstyle.setBulletStr(attrs.valueAsString("BulletStr"));
+	if (attrs.hasAttribute("BulletUseImage"))
+		pstyle.setBulletUseImage(static_cast<bool>(attrs.valueAsInt("BulletUseImage")));
+	if (attrs.hasAttribute("BulletImagePath"))
+		pstyle.setBulletImagePath(attrs.valueAsString("BulletImagePath"));
+	if (attrs.hasAttribute("BulletImageSize"))
+		pstyle.setBulletImageSize(attrs.valueAsDouble("BulletImageSize"));
+	if (attrs.hasAttribute("BulletImageData"))
+	{
+		QString bulletPath = pstyle.bulletImagePath();
+		if (!bulletPath.isEmpty() && !QFile::exists(bulletPath))
+		{
+			QString cachedPath = materializeBulletImage(attrs.valueAsString("BulletImageData"), bulletPath);
+			if (!cachedPath.isEmpty())
+				pstyle.setBulletImagePath(cachedPath);
+		}
+	}
 	if (attrs.hasAttribute("Numeration"))
 		pstyle.setHasNum(static_cast<bool>(attrs.valueAsInt("Numeration")));
 	if (attrs.hasAttribute("NumerationName"))
