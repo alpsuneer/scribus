@@ -142,6 +142,7 @@ void SMPStyleWidget::languageChange()
 	retranslateUi(this);
 	alignment->languageChange();
 	rulesPage->languageChange();
+	shadePage->languageChange();
 	nestedStylesPage->languageChange();
 	tabList->firstLineSpin->setToolTip( tr("First Line Indent"));
 	tabList->leftIndentSpin->setToolTip(  tr("Left Indent"));
@@ -182,6 +183,7 @@ void SMPStyleWidget::unitChange(double oldRatio, double newRatio, int unitIndex)
 	bulletImageOffsetSpin->setNewUnit(unitIndex);
 	tabList->unitChange(unitIndex);
 	rulesPage->unitChange(unitIndex);
+	shadePage->unitChange(unitIndex);
 }
 
 void SMPStyleWidget::setDoc(ScribusDoc *doc)
@@ -199,6 +201,7 @@ void SMPStyleWidget::setDoc(ScribusDoc *doc)
 	cpage->setDoc(m_Doc);
 	backgroundColor->colorButton->setDoc(m_Doc);
 	rulesPage->setDoc(m_Doc);
+	shadePage->setDoc(m_Doc);
 	nestedStylesPage->setDoc(m_Doc);
 }
 
@@ -466,6 +469,7 @@ void SMPStyleWidget::show(ParagraphStyle *pstyle, QList<ParagraphStyle> &pstyles
 	}
 
 	rulesPage->showRules(pstyle, parent, m_hasParent, unitIndex);
+	shadePage->showShade(pstyle, parent, m_hasParent, unitIndex);
 	nestedStylesPage->showNestedStyles(pstyle, parent, m_hasParent);
 }
 
@@ -496,6 +500,7 @@ void SMPStyleWidget::show(QList<ParagraphStyle*> &pstyles, QList<ParagraphStyle>
 		showColors(pstyles);
 		// Rule controls edit every selected style at once, so show the first one.
 		rulesPage->showRules(pstyles[0], nullptr, false, unitIndex);
+		shadePage->showShade(pstyles[0], nullptr, false, unitIndex);
 		nestedStylesPage->showNestedStyles(pstyles[0], nullptr, false);
 	}
 }
@@ -885,6 +890,7 @@ void SMPStyleWidget::showParent(const QList<ParagraphStyle*> &pstyles)
 void SMPStyleWidget::clearAll()
 {
 	rulesPage->clearAll();
+	shadePage->clearAll();
 	nestedStylesPage->clearAll();
 }
 

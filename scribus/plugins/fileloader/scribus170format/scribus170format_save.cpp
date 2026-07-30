@@ -978,6 +978,27 @@ void Scribus170Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 	if (!style.isInhRuleBelowKeepInFrame())
 		docu.writeAttribute("RuleBelowKeepInFrame", static_cast<int>(style.ruleBelowKeepInFrame()));
 
+	if (!style.isInhShadeOn())
+		docu.writeAttribute("ShadeOn", static_cast<int>(style.shadeOn()));
+	if (!style.isInhShadeColor())
+		docu.writeAttribute("ShadeColor", style.shadeColor());
+	if (!style.isInhShadeTint())
+		docu.writeAttribute("ShadeTint", style.shadeTint());
+	if (!style.isInhShadeWidthType())
+		docu.writeAttribute("ShadeWidthType", static_cast<int>(style.shadeWidthType()));
+	if (!style.isInhShadeTopPadding())
+		docu.writeAttribute("ShadeTopPadding", style.shadeTopPadding());
+	if (!style.isInhShadeBottomPadding())
+		docu.writeAttribute("ShadeBottomPadding", style.shadeBottomPadding());
+	if (!style.isInhShadeLeftPadding())
+		docu.writeAttribute("ShadeLeftPadding", style.shadeLeftPadding());
+	if (!style.isInhShadeRightPadding())
+		docu.writeAttribute("ShadeRightPadding", style.shadeRightPadding());
+	if (!style.isInhShadeCornerRadius())
+		docu.writeAttribute("ShadeCornerRadius", style.shadeCornerRadius());
+	if (!style.isInhShadeMergeAdjacent())
+		docu.writeAttribute("ShadeMergeAdjacent", static_cast<int>(style.shadeMergeAdjacent()));
+
 	if (!style.isInhNestedStyles())
 		docu.writeAttribute("NestedStyles", style.nestedStyles());
 

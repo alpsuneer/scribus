@@ -3635,7 +3635,10 @@ void PageItem_TextFrame::DrawObj_Item(ScPainter *p, const QRectF& cullingArea)
 		ScreenPainter painter(p, this);
 		painter.setGlyphBoxRendering(m_Doc->whiteSpaceModeEnabled);
 		if (!m_Doc->whiteSpaceModeEnabled)
+		{
 			textLayout.renderBackground(&painter);
+			textLayout.renderParagraphShading(&painter);
+		}
 		textLayout.renderParagraphRules(&painter);
 		textLayout.render(&painter, this);
 

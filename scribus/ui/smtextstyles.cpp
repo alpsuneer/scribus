@@ -26,6 +26,7 @@ for which a new license (GPL+exception) is in place.
 #include "smcstylewidget.h"
 #include "smnestedstyleswidget.h"
 #include "smprulewidget.h"
+#include "smpshadewidget.h"
 #include "smpstylewidget.h"
 #include "smsccombobox.h"
 #include "smshadebutton.h"
@@ -550,6 +551,7 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	connect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
 	connect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
+	connect(m_pwidget->shadePage, SIGNAL(shadeChanged()), this, SLOT(handleParagraphShading()));
 	connect(m_pwidget->nestedStylesPage, SIGNAL(nestedStylesChanged()), this, SLOT(handleNestedStyles()));
 
 	// character attributes
@@ -653,6 +655,7 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->backgroundColor->colorButton, SIGNAL(colorChanged()), this, SLOT(slotBackPColor()));
 	disconnect(m_pwidget->backgroundColor->parentButton, SIGNAL(clicked()), this, SLOT(slotBackPColor()));
 	disconnect(m_pwidget->rulesPage, SIGNAL(ruleChanged()), this, SLOT(handleParagraphRules()));
+	disconnect(m_pwidget->shadePage, SIGNAL(shadeChanged()), this, SLOT(handleParagraphShading()));
 	disconnect(m_pwidget->nestedStylesPage, SIGNAL(nestedStylesChanged()), this, SLOT(handleNestedStyles()));
 
 	disconnect(m_pwidget->cpage->fontFace_, SIGNAL(fontSelected(QString)), this, SLOT(slotFont(QString)));
@@ -1717,6 +1720,43 @@ void SMParagraphStyle::applyRuleSide(const SMRuleControls& rule, bool above)
 	applyAll(setLeft, resetLeft, rule.leftIndent->useParentValue(), rule.leftIndent->value() / m_unitRatio);
 	applyAll(setRight, resetRight, rule.rightIndent->useParentValue(), rule.rightIndent->value() / m_unitRatio);
 	applyAll(setKeep, resetKeep, rule.keepInFrame->useParentValue(), rule.keepInFrame->isChecked());
+}
+
+/**
+ Writes the whole Paragraph Shading page back to the selected styles whenever
+ any of its controls changes, same single-handler pattern as the rules page.
+ */
+void SMParagraphStyle::handleParagraphShading()
+{
+	if (!m_pwidget)
+		return;
+
+	SMPShadeWidget* shade = m_pwidget->shadePage;
+
+	auto applyAll = [this](auto setter, auto resetter, bool useParent, auto value)
+	{
+		for (int i = 0; i < m_selection.count(); ++i)
+		{
+			if (useParent)
+				(m_selection[i]->*resetter)();
+			else
+				(m_selection[i]->*setter)(value);
+		}
+	};
+
+	using PS = ParagraphStyle;
+	applyAll(&PS::setShadeOn, &PS::resetShadeOn, shade->on->useParentValue(), shade->on->isChecked());
+	applyAll(&PS::setShadeColor, &PS::resetShadeColor, shade->color->useParentValue(), shade->color->currentColor());
+	applyAll(&PS::setShadeTint, &PS::resetShadeTint, shade->tint->useParentValue(), shade->tint->value());
+	applyAll(&PS::setShadeWidthType, &PS::resetShadeWidthType, shade->widthType->useParentValue(), static_cast<PS::RuleWidthType>(shade->widthType->currentIndex()));
+	applyAll(&PS::setShadeTopPadding, &PS::resetShadeTopPadding, shade->padTop->useParentValue(), shade->padTop->value() / m_unitRatio);
+	applyAll(&PS::setShadeBottomPadding, &PS::resetShadeBottomPadding, shade->padBottom->useParentValue(), shade->padBottom->value() / m_unitRatio);
+	applyAll(&PS::setShadeLeftPadding, &PS::resetShadeLeftPadding, shade->padLeft->useParentValue(), shade->padLeft->value() / m_unitRatio);
+	applyAll(&PS::setShadeRightPadding, &PS::resetShadeRightPadding, shade->padRight->useParentValue(), shade->padRight->value() / m_unitRatio);
+	applyAll(&PS::setShadeCornerRadius, &PS::resetShadeCornerRadius, shade->cornerRadius->useParentValue(), shade->cornerRadius->value() / m_unitRatio);
+	applyAll(&PS::setShadeMergeAdjacent, &PS::resetShadeMergeAdjacent, shade->mergeAdjacent->useParentValue(), shade->mergeAdjacent->isChecked());
+
+	slotSelectionDirty();
 }
 
 void SMParagraphStyle::slotBackColor()

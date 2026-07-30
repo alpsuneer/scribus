@@ -3867,6 +3867,27 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute("RuleBelowKeepInFrame"))
 		newStyle.setRuleBelowKeepInFrame(static_cast<bool>(attrs.valueAsInt("RuleBelowKeepInFrame", 1)));
 
+	if (attrs.hasAttribute("ShadeOn"))
+		newStyle.setShadeOn(static_cast<bool>(attrs.valueAsInt("ShadeOn", 0)));
+	if (attrs.hasAttribute("ShadeColor"))
+		newStyle.setShadeColor(attrs.valueAsString("ShadeColor", "Black"));
+	if (attrs.hasAttribute("ShadeTint"))
+		newStyle.setShadeTint(attrs.valueAsInt("ShadeTint", 100));
+	if (attrs.hasAttribute("ShadeWidthType"))
+		newStyle.setShadeWidthType(static_cast<ParagraphStyle::RuleWidthType>(attrs.valueAsInt("ShadeWidthType", 0)));
+	if (attrs.hasAttribute("ShadeTopPadding"))
+		newStyle.setShadeTopPadding(attrs.valueAsDouble("ShadeTopPadding", 0.0));
+	if (attrs.hasAttribute("ShadeBottomPadding"))
+		newStyle.setShadeBottomPadding(attrs.valueAsDouble("ShadeBottomPadding", 0.0));
+	if (attrs.hasAttribute("ShadeLeftPadding"))
+		newStyle.setShadeLeftPadding(attrs.valueAsDouble("ShadeLeftPadding", 0.0));
+	if (attrs.hasAttribute("ShadeRightPadding"))
+		newStyle.setShadeRightPadding(attrs.valueAsDouble("ShadeRightPadding", 0.0));
+	if (attrs.hasAttribute("ShadeCornerRadius"))
+		newStyle.setShadeCornerRadius(attrs.valueAsDouble("ShadeCornerRadius", 0.0));
+	if (attrs.hasAttribute("ShadeMergeAdjacent"))
+		newStyle.setShadeMergeAdjacent(static_cast<bool>(attrs.valueAsInt("ShadeMergeAdjacent", 1)));
+
 	if (attrs.hasAttribute("NestedStyles"))
 		newStyle.setNestedStyles(attrs.valueAsString("NestedStyles", ""));
 

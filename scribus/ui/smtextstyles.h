@@ -120,6 +120,7 @@ private slots:
 	void slotFirstLine();
 	void slotBackPColor();
 	void handleParagraphRules();
+	void handleParagraphShading();
 	void handleNestedStyles();
 	// cstyle
 	void slotFontSize();

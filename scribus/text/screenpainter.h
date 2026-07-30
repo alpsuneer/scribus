@@ -25,6 +25,7 @@ public:
 	void drawGlyphOutline(const GlyphCluster& gc, bool fill) override;
 	void drawLine(const QPointF& start, const QPointF& end) override;
 	void drawRect(const QRectF& rect) override;
+	void drawRoundedRect(const QRectF& rect, double radius) override;
 	void drawObject(PageItem* embedded) override;
 	void drawObjectDecoration(PageItem* embedded) override;
 

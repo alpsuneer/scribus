@@ -4167,6 +4167,7 @@ void PSLib::setTextSt(PageItem* ite, uint argh, ScPage* pg, bool master)
 
 	PSPainter p(m_Doc, argh, pg, master, this);
 	ite->textLayout.renderBackground(&p);
+	ite->textLayout.renderParagraphShading(&p);
 	ite->textLayout.renderParagraphRules(&p);
 	ite->textLayout.render(&p);
 }

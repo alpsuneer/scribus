@@ -102,6 +102,16 @@ ATTRDEF(double, ruleBelowOffset, RuleBelowOffset, 0.0)
 ATTRDEF(double, ruleBelowLeftIndent, RuleBelowLeftIndent, 0.0)
 ATTRDEF(double, ruleBelowRightIndent, RuleBelowRightIndent, 0.0)
 ATTRDEF(bool, ruleBelowKeepInFrame, RuleBelowKeepInFrame, true)
+ATTRDEF(bool, shadeOn, ShadeOn, false)
+ATTRDEF(QString, shadeColor, ShadeColor, "Black")
+ATTRDEF(int, shadeTint, ShadeTint, 100)
+ATTRDEF(ParagraphStyle::RuleWidthType, shadeWidthType, ShadeWidthType, ParagraphStyle::RuleWidthColumn)
+ATTRDEF(double, shadeTopPadding, ShadeTopPadding, 0.0)
+ATTRDEF(double, shadeBottomPadding, ShadeBottomPadding, 0.0)
+ATTRDEF(double, shadeLeftPadding, ShadeLeftPadding, 0.0)
+ATTRDEF(double, shadeRightPadding, ShadeRightPadding, 0.0)
+ATTRDEF(double, shadeCornerRadius, ShadeCornerRadius, 0.0)
+ATTRDEF(bool, shadeMergeAdjacent, ShadeMergeAdjacent, true)
 // InDesign-style nested styles: an ordered list of character-style rules that
 // is resolved at layout time. Encoded as a single string so it rides the normal
 // attribute machinery; see ParagraphStyle::parseNestedStyles().
