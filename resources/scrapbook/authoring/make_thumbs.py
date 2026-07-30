@@ -36,6 +36,11 @@ TEMPLATES = {
     'DoubleBox':  ('wave2b', 20, 60, 80, 40),
     'DashedBox':  ('wave2b', 20, 110, 80, 40),
     'Highlight':  ('wave2b', 120, 60, 80, 9),
+    'AttrQuote':  ('wave3', 20, 20, 80, 55),
+    'SectionStrip': ('wave3', 120, 20, 80, 11),
+    'NewsBox':    ('wave3', 19, 89, 81, 46),
+    'BannerHead': ('wave3', 120, 90, 80, 17),
+    'LedeBars':   ('wave3', 20, 150, 80, 9),
 }
 
 def make_thumb(render, x, y, w, h, out, margin=4.0):
