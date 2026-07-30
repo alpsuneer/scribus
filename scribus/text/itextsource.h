@@ -68,6 +68,10 @@ public:
 
 	virtual bool hasObject(int pos) const = 0;
 	virtual InlineFrame object(int pos) const = 0;
+	/** Layout-time image bullets: registry id (ScribusDoc::bulletImageFrameId)
+	of the image item to draw for a bullet mark at pos, or -1 for none.
+	Never makes hasObject() true — the mark is not document content. */
+	virtual int imageBulletFrameId(int /*pos*/) const { return -1; }
 	virtual bool hasExpansionPoint(int pos) const = 0;
 	virtual ExpansionPoint expansionPoint(int pos) const = 0;
 	

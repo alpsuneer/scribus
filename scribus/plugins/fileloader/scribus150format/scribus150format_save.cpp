@@ -850,6 +850,21 @@ void Scribus150Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 		docu.writeAttribute("Bullet", static_cast<int>(style.hasBullet()));
 	if ( ! style.isInhBulletStr())
 		docu.writeAttribute("BulletStr", style.bulletStr());
+	if ( ! style.isInhBulletUseImage())
+		docu.writeAttribute("BulletUseImage", static_cast<int>(style.bulletUseImage()));
+	if ( ! style.isInhBulletImagePath())
+	{
+		docu.writeAttribute("BulletImagePath", style.bulletImagePath());
+		// embed the (small) icon so documents stay portable across machines
+		if (!style.bulletImagePath().isEmpty())
+		{
+			QString bulletData = bulletImageDataFor(style.bulletImagePath());
+			if (!bulletData.isEmpty())
+				docu.writeAttribute("BulletImageData", bulletData);
+		}
+	}
+	if ( ! style.isInhBulletImageSize())
+		docu.writeAttribute("BulletImageSize", style.bulletImageSize());
 	if ( ! style.isInhHasNum())
 		docu.writeAttribute("Numeration", static_cast<int>(style.hasNum()));
 	if ( ! style.isInhNumFormat())

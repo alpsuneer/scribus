@@ -44,6 +44,11 @@ ATTRDEF(bool, parEffectIndent, ParEffectIndent, false)
 ATTRDEF(QString, peCharStyleName, PeCharStyleName,"")
 ATTRDEF(bool, hasBullet, HasBullet, false)
 ATTRDEF(QString, bulletStr, BulletStr, QString(QChar(0x2022)))
+// Image bullets: a raster file drawn instead of the bullet character(s).
+// Size is in points; 0.0 means automatic (0.8 x the bullet char style size).
+ATTRDEF(bool, bulletUseImage, BulletUseImage, false)
+ATTRDEF(QString, bulletImagePath, BulletImagePath, "")
+ATTRDEF(double, bulletImageSize, BulletImageSize, 0.0)
 ATTRDEF(bool, hasNum, HasNum, false)
 ATTRDEF(QString, numName, NumName, "")
 ATTRDEF(int, numFormat, NumFormat, 0)

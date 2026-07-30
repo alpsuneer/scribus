@@ -441,7 +441,20 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 			const StyleFlag& effects = charStyle.effects();
 
 			QString str = m_text.mid(firstChar - fromPos, lastChar - firstChar + 1);
-			GlyphCluster run(&charStyle, flags, firstChar, lastChar, m_story.object(firstChar), result.glyphs().length(), str);
+			// Image bullets: give the bullet mark's cluster the hidden image
+			// item, so it lays out and renders exactly like an inline object.
+			InlineFrame object = m_story.object(firstChar);
+			bool isImageBullet = false;
+			if (!m_story.hasObject(firstChar))
+			{
+				int bulletId = m_story.imageBulletFrameId(firstChar);
+				if (bulletId >= 0)
+				{
+					object = InlineFrame(bulletId);
+					isImageBullet = true;
+				}
+			}
+			GlyphCluster run(&charStyle, flags, firstChar, lastChar, object, result.glyphs().length(), str);
 
 			run.clearFlag(ScLayout_HyphenationPossible);
 			if (m_story.hasFlag(lastChar, ScLayout_HyphenationPossible))
@@ -521,11 +534,11 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 				if (SpecialChars::isExpandingSpace(ch))
 					gl.xadvance *= run.style().wordTracking();
 
-				if (m_story.hasObject(firstChar))
+				if (m_story.hasObject(firstChar) || isImageBullet)
 				{
 					m_contextNeeded = true;
 					if (m_context != nullptr)
-						gl.xadvance = m_context->getVisualBoundingBox(m_story.object(firstChar)).width();
+						gl.xadvance = m_context->getVisualBoundingBox(object).width();
 				}
 
 				if ((effects & ScStyle_Superscript) || (effects & ScStyle_Subscript))

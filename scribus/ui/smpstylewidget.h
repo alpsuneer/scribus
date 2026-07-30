@@ -72,6 +72,7 @@ private:
 
 	void openEnhanced();
 	void closeEnhanced(bool show = false);
+	void setBulletImagePreview(const QString& path);
 
 	friend class SMParagraphStyle;
 
@@ -82,6 +83,8 @@ private slots:
 	void slotParentParEffects();
 	void handleParEffectUse(int);
 	void on_bulletCharTableButton_toggled(bool checked);
+	void on_bulletImageBrowseButton_clicked();
+	void on_bulletImageCheckBox_toggled(bool checked);
 	void handleUpdateRequest(int);
 
 signals:

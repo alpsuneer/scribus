@@ -516,6 +516,9 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->parEffectIndentBox, SIGNAL(toggled(bool)), this, SLOT(slotParEffectIndent(bool)));
 	connect(m_pwidget->parEffectCharStyleCombo, SIGNAL(activated(int)), this, SLOT(slotParEffectCharStyle(int)));
 	connect(m_pwidget->bulletStrEdit, SIGNAL(editTextChanged(QString)), this, SLOT(slotBulletStr(QString)));
+	connect(m_pwidget->bulletImageCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotBulletUseImage(bool)));
+	connect(m_pwidget->bulletImagePathEdit, SIGNAL(textChanged(QString)), this, SLOT(slotBulletImagePath(QString)));
+	connect(m_pwidget->bulletImageSizeSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageSize()));
 	connect(m_pwidget->numComboBox, SIGNAL(textActivated(QString)), this, SLOT(slotNumName(QString)));
 	connect(m_pwidget->numLevelSpin, SIGNAL(valueChanged(int)), this, SLOT(slotNumLevel(int)));
 	connect(m_pwidget->numFormatCombo, SIGNAL(activated(int)), this, SLOT(slotNumFormat(int)));
@@ -614,6 +617,9 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->parEffectIndentBox, SIGNAL(toggled(bool)), this, SLOT(slotParEffectIndent(bool)));
 	disconnect(m_pwidget->parEffectCharStyleCombo, SIGNAL(activated(int)), this, SLOT(slotParEffectCharStyle(int)));
 	disconnect(m_pwidget->bulletStrEdit, SIGNAL(editTextChanged(QString)), this, SLOT(slotBulletStr(QString)));
+	disconnect(m_pwidget->bulletImageCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotBulletUseImage(bool)));
+	disconnect(m_pwidget->bulletImagePathEdit, SIGNAL(textChanged(QString)), this, SLOT(slotBulletImagePath(QString)));
+	disconnect(m_pwidget->bulletImageSizeSpin, SIGNAL(valueChanged(double)), this, SLOT(slotBulletImageSize()));
 	disconnect(m_pwidget->numComboBox, SIGNAL(textActivated(QString)), this, SLOT(slotNumName(QString)));
 	disconnect(m_pwidget->numFormatCombo, SIGNAL(activated(int)), this, SLOT(slotNumFormat(int)));
 	disconnect(m_pwidget->numLevelSpin, SIGNAL(valueChanged(int)), this, SLOT(slotNumLevel(int)));
@@ -1015,6 +1021,43 @@ void SMParagraphStyle::slotBulletStr(const QString &str)
 	}
 	for (int i = 0; i < m_selection.count(); ++i)
 		m_selection[i]->setBulletStr(bstr);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletUseImage(bool isOn)
+{
+	for (int i = 0; i < m_selection.count(); ++i)
+		m_selection[i]->setBulletUseImage(isOn);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletImagePath(const QString &path)
+{
+	for (int i = 0; i < m_selection.count(); ++i)
+		m_selection[i]->setBulletImagePath(path);
+
+	slotSelectionDirty();
+}
+
+void SMParagraphStyle::slotBulletImageSize()
+{
+	if (m_pwidget->bulletImageSizeSpin->useParentValue())
+	{
+		for (int i = 0; i < m_selection.count(); ++i)
+			m_selection[i]->resetBulletImageSize();
+	}
+	else
+	{
+		double a, b, value;
+		int c;
+
+		m_pwidget->bulletImageSizeSpin->getValues(&a, &b, &c, &value);
+		value = value / m_unitRatio;
+		for (int i = 0; i < m_selection.count(); ++i)
+			m_selection[i]->setBulletImageSize(value);
+	}
 
 	slotSelectionDirty();
 }

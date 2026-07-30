@@ -82,6 +82,9 @@ private slots:
 	void slotParEffectIndent(bool);
 	void slotParEffectCharStyle(int);
 	void slotBulletStr(const QString &str);
+	void slotBulletUseImage(bool isOn);
+	void slotBulletImagePath(const QString &path);
+	void slotBulletImageSize();
 	void slotNumName(const QString &str);
 	void slotNumNew();
 	void slotSelectionDirty();

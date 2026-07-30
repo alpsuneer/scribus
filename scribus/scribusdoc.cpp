@@ -481,12 +481,68 @@ void ScribusDoc::init()
 }
 
 
+int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
+{
+	if (!style.bulletUseImage() || style.bulletImagePath().isEmpty())
+		return -1;
+	const QString& path = style.bulletImagePath();
+	double sizePt = style.bulletImageSize();
+	if (sizePt <= 0.0)
+	{
+		// automatic size: 0.8 x the size of the char style the bullet marker uses
+		CharStyle cs(style.charStyle());
+		if (!style.peCharStyleName().isEmpty() && charStyles().contains(style.peCharStyleName()))
+			cs = charStyles().get(style.peCharStyleName());
+		sizePt = 0.8 * cs.fontSize() / 10.0;
+	}
+	if (sizePt < 0.1)
+		return -1;
+
+	QString key = path + QLatin1Char('|') + QString::number(sizePt, 'f', 3);
+	auto idIt = m_bulletImageIds.constFind(key);
+	if (idIt != m_bulletImageIds.constEnd())
+		return idIt.value();
+
+	int newId = -1;
+	bool wasLoading = isLoading();
+	setLoading(true); // no undo states, no dirty flags for the hidden item
+	auto* item = new PageItem_ImageFrame(this, 0, 0, 1, 1, 0, CommonStrings::None, CommonStrings::None);
+	if (QFile::exists(path) && item->loadImage(path, false, 72, false) && (item->OrigW > 0) && (item->OrigH > 0))
+	{
+		double w = sizePt * double(item->OrigW) / double(item->OrigH);
+		item->setWidthHeight(w, sizePt);
+		item->SetRectFrame();
+		item->setFitImageToFrame(true);
+		item->setKeepAspectRatio(true);
+		item->adjustPictScale();
+		item->isEmbedded = true;
+		item->gXpos = 0.0;
+		item->gYpos = 0.0;
+		item->gWidth = w;
+		item->gHeight = sizePt;
+		newId = m_bulletImageNextId++;
+		m_bulletImageItems.insert(newId, item);
+	}
+	else
+		delete item;
+	setLoading(wasLoading);
+	m_bulletImageIds.insert(key, newId);
+	return newId;
+}
+
+PageItem* ScribusDoc::bulletImageItem(int id) const
+{
+	return m_bulletImageItems.value(id, nullptr);
+}
+
 ScribusDoc::~ScribusDoc()
 {
 	m_guardedObject.nullify();
 	CloseCMSProfiles();
 	ScCore->fileWatcher->stop();
 	ScCore->fileWatcher->removeFile(m_documentFileName);
+	qDeleteAll(m_bulletImageItems);
+	m_bulletImageItems.clear();
 	QList<PageItem*> allItems;
 	for (int i = 0; i < DocItems.count(); ++i)
 	{
