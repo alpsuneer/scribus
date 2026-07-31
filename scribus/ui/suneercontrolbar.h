@@ -260,6 +260,9 @@ public:
 	QDoubleSpinBox* m_imgCropW            {nullptr};
 	double imgCropW() const { return m_imgCropW ? m_imgCropW->value() : 80.0; }
 	bool isCropResizeEnabled() const { return m_imgCropEnableChk ? m_imgCropEnableChk->isChecked() : false; }
+	//! Show the crop button as pressed while the canvas is in crop mode, so the
+	//! mode is visible instead of silently swallowing canvas gestures.
+	void setCropModeActive(bool active);
 	double imgCropH() const { return m_imgCropH ? m_imgCropH->value() : 60.0; }
 	QDoubleSpinBox* m_imgCropH            {nullptr};
 	QToolButton*    m_imgCropApplyBtn     {nullptr};
