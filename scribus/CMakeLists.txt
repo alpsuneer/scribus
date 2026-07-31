@@ -263,6 +263,7 @@ message("RPATH: ${CMAKE_INSTALL_RPATH}")
 target_link_libraries(${EXE_NAME}
 	PUBLIC
 	Qt6::Core
+	Qt6::Concurrent
 	Qt6::Core5Compat
 	Qt6::Gui
 	Qt6::Widgets

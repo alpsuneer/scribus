@@ -75,6 +75,10 @@ find_package(Qt6 COMPONENTS Core REQUIRED)
 add_definitions(${Qt6Core_DEFINITIONS})
 include_directories(${Qt6Core_INCLUDE_DIRS})
 
+find_package(Qt6 COMPONENTS Concurrent REQUIRED)
+include_directories(${Qt6Concurrent_INCLUDE_DIRS})
+add_definitions(${Qt6Concurrent_DEFINITIONS})
+
 find_package(Qt6 COMPONENTS Core5Compat REQUIRED)
 include_directories(${Qt6Core5Compat_INCLUDE_DIRS})
 add_definitions(${Qt6Core5Compat_DEFINITIONS})

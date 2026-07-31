@@ -228,6 +228,14 @@ protected:
 	//! Render the visible entries onto the base image, one effect at a time,
 	//! blending each masked entry through its selection mask.
 	QImage applyStackToImage(const QList<StackEntry>& entries);
+	//! Same, but starting from an arbitrary base image (used by the previews).
+	QImage applyEntriesTo(QImage base, const QList<StackEntry>& entries);
+	//! Cached result of the first \a count entries of m_stack applied to the
+	//! original image, so a filter dialog's slider preview only recomputes its
+	//! own effect instead of the whole stack (expensive with e.g. a blur in
+	//! the stack on a large photo). Invalidated whenever stack or base change.
+	QImage stackPrefixImage(int count);
+	void invalidateStackPrefixCache();
 	//! true if any visible entry is region-masked (Save & Apply must bake it).
 	bool hasMaskedEffects() const;
 	//! The current selection mask if non-empty, else a null image.
@@ -263,6 +271,8 @@ protected:
 	QImage m_image;                 //!< currently displayed image (original + committed effects)
 	QImage m_originalImage;         //!< working base (pristine, unless cropped)
 	QList<StackEntry> m_stack;      //!< applied effect stack (top = first applied)
+	QImage m_stackPrefixCache;      //!< see stackPrefixImage()
+	int m_stackPrefixCount { -1 };  //!< entry count the cache was built for (-1 = invalid)
 	QUndoStack* m_undoStack { nullptr };
 	QRectF m_selectionRect;         //!< active marquee (image coords), or null
 	bool m_baseIsCropped { false }; //!< true once the base image has been cropped

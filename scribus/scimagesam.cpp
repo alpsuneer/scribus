@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QDir>
 #include <QFileInfo>
+#include <QMutex>
 #include <QObject>
 
 #ifdef HAVE_SAM
@@ -31,6 +32,10 @@ QString SamSegmenter::modelDir()
 
 struct SamSegmenter::Impl
 {
+	// The Smart Select tool encodes on a worker thread while the GUI thread may
+	// query state or (on quick tool switches) start another encode; recursive
+	// because setImage() calls ensureLoaded() internally.
+	QRecursiveMutex mutex;
 	QString status;
 #ifdef HAVE_SAM
 	Ort::Env env { ORT_LOGGING_LEVEL_WARNING, "scribus-sam" };
@@ -164,16 +169,19 @@ SamSegmenter::~SamSegmenter()
 
 QString SamSegmenter::statusMessage() const
 {
+	QMutexLocker locker(&d->mutex);
 	return d->status;
 }
 
 void SamSegmenter::setAntialias(bool on)
 {
+	QMutexLocker locker(&d->mutex);
 	d->antialias = on;
 }
 
 bool SamSegmenter::antialias() const
 {
+	QMutexLocker locker(&d->mutex);
 	return d->antialias;
 }
 
@@ -188,6 +196,7 @@ bool SamSegmenter::isAvailable() const
 
 bool SamSegmenter::ensureLoaded()
 {
+	QMutexLocker locker(&d->mutex);
 #ifdef HAVE_SAM
 	if (d->loaded)
 		return true;
@@ -225,6 +234,7 @@ bool SamSegmenter::ensureLoaded()
 
 bool SamSegmenter::setImage(const QImage& image)
 {
+	QMutexLocker locker(&d->mutex);
 #ifdef HAVE_SAM
 	if (!ensureLoaded() || image.isNull())
 		return false;
@@ -287,11 +297,13 @@ bool SamSegmenter::setImage(const QImage& image)
 
 QImage SamSegmenter::segmentAtPoint(const QPoint& pt, bool foreground)
 {
+	QMutexLocker locker(&d->mutex);
 	return segmentAtPoints({ pt }, { foreground ? 1 : 0 });
 }
 
 QImage SamSegmenter::segmentAtPoints(const QVector<QPoint>& points, const QVector<int>& labels)
 {
+	QMutexLocker locker(&d->mutex);
 #ifdef HAVE_SAM
 	if (!d->haveImage || points.isEmpty())
 		return QImage();
@@ -318,6 +330,7 @@ QImage SamSegmenter::segmentAtPoints(const QVector<QPoint>& points, const QVecto
 
 QImage SamSegmenter::segmentInBox(const QRect& box)
 {
+	QMutexLocker locker(&d->mutex);
 #ifdef HAVE_SAM
 	if (!d->haveImage)
 		return QImage();

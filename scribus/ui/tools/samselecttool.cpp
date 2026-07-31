@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
 #include <QStatusBar>
 #include <QToolButton>
 #include <QWidget>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include "scimagesam.h"
 #include "scimageselection.h"
@@ -129,19 +130,36 @@ void SamSelectTool::activate(ScImageEditor* editor)
 	ImageTool::activate(editor);
 	m_ready = false;
 	clearSession();
-	SamSegmenter& sam = SamSegmenter::instance();
-	if (!sam.ensureLoaded())
-	{
-		showStatus(sam.statusMessage());
-		return;
-	}
-	sam.setAntialias(m_antialias);
-	// Encode the current image once (this is the expensive step).
-	QApplication::setOverrideCursor(Qt::WaitCursor);
+	SamSegmenter::instance().setAntialias(m_antialias);
+
+	// Model load + encoder run used to block the GUI thread for many seconds
+	// on large photos, freezing the whole application. Run both on a worker
+	// thread instead: the UI (including switching to another tool) stays
+	// responsive, and canvas clicks are ignored until the encode lands.
 	showStatus(tr("Smart Select: analyzing image..."));
-	m_ready = sam.setImage(m_editor->currentImage());
-	QApplication::restoreOverrideCursor();
-	showStatus(m_ready ? tr("Smart Select: click an object, or drag a box") : sam.statusMessage());
+	m_encoding = true;
+	const QImage img = m_editor->currentImage();
+	connect(&m_encodeWatcher, &QFutureWatcher<bool>::finished,
+	        this, &SamSelectTool::onEncodeFinished, Qt::UniqueConnection);
+	// Setting a new future detaches the watcher from any still-running one, so
+	// re-activation mid-encode never delivers a stale result; SamSegmenter's
+	// internal mutex serialises overlapping worker runs.
+	m_encodeWatcher.setFuture(QtConcurrent::run([img]() -> bool {
+		SamSegmenter& sam = SamSegmenter::instance();
+		return sam.ensureLoaded() && sam.setImage(img);
+	}));
+}
+
+void SamSelectTool::onEncodeFinished()
+{
+	// deactivate() cleared the flag: the user left the tool mid-encode and
+	// this result must not resurrect its state.
+	if (!m_encoding)
+		return;
+	m_encoding = false;
+	m_ready = m_encodeWatcher.result();
+	showStatus(m_ready ? tr("Smart Select: click an object, or drag a box")
+	                   : SamSegmenter::instance().statusMessage());
 }
 
 void SamSelectTool::deactivate()
@@ -149,6 +167,8 @@ void SamSelectTool::deactivate()
 	m_dragging = false;
 	removeRubber();
 	clearSession();
+	m_ready = false;
+	m_encoding = false;   // discard a pending encode result (see onEncodeFinished)
 }
 
 void SamSelectTool::mousePress(QMouseEvent* e, const QPointF& imagePos)
@@ -156,6 +176,18 @@ void SamSelectTool::mousePress(QMouseEvent* e, const QPointF& imagePos)
 	Q_UNUSED(e)
 	if (!m_editor)
 		return;
+	// Not ready yet: ignore the click gracefully instead of starting a rubber
+	// band that can never produce a segment.
+	if (m_encoding)
+	{
+		showStatus(tr("Smart Select: still analyzing image..."));
+		return;
+	}
+	if (!m_ready)
+	{
+		showStatus(SamSegmenter::instance().statusMessage());
+		return;
+	}
 	m_start = imagePos;
 	m_dragging = true;
 	removeRubber();
