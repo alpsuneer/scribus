@@ -56,6 +56,12 @@ bool SCRIBUS_API sortingQPairOfStrings( const QPair<QString, QString>& aP, const
 void SCRIBUS_API ReOrderText(ScribusDoc *currentDoc, ScribusView *view);
 void SCRIBUS_API WordAndPara(PageItem *currItem, int *w, int *p, int *c, int *wN, int *pN, int *cN);
 bool SCRIBUS_API overwrite(QWidget *parent, const QString& filename);
+/*! \brief Write \a image to \a path. Returns an empty string on success, or a
+human-readable failure reason. JPEG cannot store an alpha channel, so ARGB
+images are converted before a .jpg/.jpeg write. Permission problems are
+spelled out explicitly because QImageWriter's own message omits the OS reason.
+\a quality is passed to the writer when >= 0 (JPEG: 0-100). */
+QString SCRIBUS_API writeImageToFile(const QImage& image, const QString& path, int quality = -1);
 QString SCRIBUS_API Path2Relative(const QString& Path, const QString& baseDir = QDir::currentPath());
 QString SCRIBUS_API Relative2Path(const QString& File, const QString& baseDir = QDir::currentPath());
 /*! \brief Base64 of an image-bullet file for embedding in the SLA; empty on failure. */

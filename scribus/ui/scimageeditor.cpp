@@ -68,6 +68,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/tools/samselecttool.h"
 #include "ui/tools/refineedgesbrushtool.h"
 #include "scribusdoc.h"
+#include "util.h"
 #include "selection.h"
 #include "undomanager.h"
 
@@ -1815,10 +1816,11 @@ void ScImageEditor::saveAndApply()
 			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 		if (answer != QMessageBox::Yes)
 			return;
-		if (m_image.isNull() || !m_image.save(m_frame->Pfile))
+		const QString writeError = m_image.isNull() ? tr("there is no image to write") : writeImageToFile(m_image, m_frame->Pfile);
+		if (!writeError.isEmpty())
 		{
 			QMessageBox::warning(this, tr("Save && Apply"),
-				tr("Could not write the flattened image to \"%1\".").arg(m_frame->Pfile));
+				tr("Could not write the flattened image to \"%1\".\n\n%2").arg(m_frame->Pfile, writeError));
 			return;
 		}
 		m_frame->effectsInUse.clear();   // everything is baked into the file now
@@ -1841,10 +1843,11 @@ void ScImageEditor::saveAndApply()
 			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 		if (answer != QMessageBox::Yes)
 			return;
-		if (!m_originalImage.save(m_frame->Pfile))
+		const QString writeError = writeImageToFile(m_originalImage, m_frame->Pfile);
+		if (!writeError.isEmpty())
 		{
 			QMessageBox::warning(this, tr("Save && Apply"),
-				tr("Could not write the cropped image to \"%1\".").arg(m_frame->Pfile));
+				tr("Could not write the cropped image to \"%1\".\n\n%2").arg(m_frame->Pfile, writeError));
 			return;
 		}
 		m_baseIsCropped = false;   // the file now matches the cropped base
@@ -1897,10 +1900,11 @@ void ScImageEditor::exportFlattened()
 	}
 
 	// m_image already holds the original with the visible effect stack baked in.
-	if (!m_image.save(path))
+	const QString writeError = writeImageToFile(m_image, path);
+	if (!writeError.isEmpty())
 	{
 		QMessageBox::warning(this, tr("Export Flattened Image"),
-			tr("Could not save the image to \"%1\".").arg(path));
+			tr("Could not save the image to \"%1\".\n\n%2").arg(path, writeError));
 	}
 }
 
