@@ -30,6 +30,7 @@
 #include "styles/paragraphstyle.h"
 #include "styles/charstyle.h"
 #include "propertywidget_distance.h"
+#include "resizeimagedialog.h"
 #include <QAction>
 #include <QFont>
 #include <QDebug>
@@ -332,6 +333,12 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imgCropApplyBtn->setIconSize(QSize(20, 20));
 	row1->addWidget(m_imgCropApplyBtn);
 	m_imageWidgets << m_imgCropApplyBtn;
+	// Resize Image button — resample the source file to what the frame needs
+	// in print (Fit @ 240dpi one-click path); writes name_resized.* + relinks.
+	QToolButton* imgResizeBtn = makeButton("RS", "Resize Image (reduce file resolution to frame)");
+	connect(imgResizeBtn, &QToolButton::clicked, this, [this]{ ResizeImageDialog::openForSelection(m_doc, this); });
+	row1->addWidget(imgResizeBtn);
+	m_imageWidgets << imgResizeBtn;
 	// Background Remove button (rembg)
 	m_imgRemoveBgBtn = makeButton("BG", "Remove Background (AI)");
 	m_imgRemoveBgBtn->setFixedSize(26, 22);
