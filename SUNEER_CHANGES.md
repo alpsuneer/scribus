@@ -131,7 +131,35 @@
   Paragraph Rules-നൊപ്പം ഒരേ style-ൽ ഉപയോഗിക്കാം (shade താഴെ, rule മുകളിൽ)
 - എല്ലാ .sla format-ലും save ആകും; copy/paste, scrapbook-ലും travel ചെയ്യും
 
-### 11. Authors
+### 11. Image Resize / DPI Tools
+- Toolbar-ൽ "RS" button → **Resize Image** dialog: ഇപ്പോഴത്തെ pixel size,
+  file size, frame size-ലെ effective DPI കാണിക്കും
+- "Fit to frame @ N dpi" (default 240 — News_Paper standard; 300 preset):
+  frame-ന് വേണ്ട pixel size automatic ആയി കണക്കാക്കും
+- പുതിയ file `name_resized.jpg` ആയി source-ന്റെ അടുത്ത് save ആകും —
+  **original file മാറ്റില്ല**; frame relink ആകും, page-ൽ ഒരേപോലെ കാണും
+- Ctrl+Z → ഒറ്റ step-ൽ പഴയ image-ഉം scale-ഉം തിരികെ വരും
+- Toolbar-ൽ **DPI field**: current effective DPI live കാണിക്കും; ഒരു value
+  type ചെയ്ത് Enter → ആ DPI-ലേക്ക് resample (dialog തുറക്കേണ്ട)
+- **Auto** checkbox (default OFF) + target DPI: canvas-ൽ frame drag ചെയ്ത്
+  ചെറുതാക്കുമ്പോൾ automatic ആയി resample ആകും (effective DPI target-നേക്കാൾ
+  25%-ൽ കൂടുതൽ ആണെങ്കിൽ മാത്രം — repeated quality loss ഒഴിവാക്കാൻ);
+  tick ചെയ്യുമ്പോൾ തന്നെ current selection-ന് apply ആകും
+- **Embed ചെയ്ത images**: resize കഴിഞ്ഞാൽ .sla-യിലെ base64 data-യും
+  ചെറുതാകും (15.1MB → 1.2MB verified)
+- Image write fail ആയാൽ കൃത്യമായ കാരണം കാണിക്കും (permission denied
+  ഉൾപ്പെടെ); masked adjustment JPEG ആയി save ചെയ്യുമ്പോൾ RGB ആക്കും
+- Crop mode ഇപ്പോൾ status bar-ൽ കാണിക്കും (Enter = apply, Esc = cancel),
+  button highlight ആകും, selection മാറിയാൽ automatic ആയി exit ചെയ്യും
+
+### 12. Image Editor Improvements
+- Selection tools + Hand tool-ന് പുതിയ Photoshop-style icons
+- Smart Select (SAM): model load + encode ഇപ്പോൾ background thread-ൽ —
+  വലിയ photo-യിലും UI freeze ആകില്ല, വേറെ tool-ലേക്ക് മാറാം
+- Filter preview വേഗത്തിലായി: slider drag ചെയ്യുമ്പോൾ stack മുഴുവൻ
+  വീണ്ടും കണക്കാക്കില്ല (blur ഉള്ളപ്പോൾ പ്രത്യേകിച്ച്)
+
+### 13. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
