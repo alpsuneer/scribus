@@ -7,6 +7,7 @@ for which a new license (GPL+exception) is in place.
 #ifndef SAMSELECTTOOL_H
 #define SAMSELECTTOOL_H
 
+#include <QFutureWatcher>
 #include <QImage>
 #include <QPoint>
 #include <QPointF>
@@ -57,11 +58,18 @@ private:
 	QImage featherMask(const QImage& mask) const;       //!< soften the object edge by m_feather px
 	void refineFromPoints();                            //!< re-run SAM on all points
 	void resegment();                                   //!< re-run the last prompt (e.g. after AA toggle)
+	void onEncodeFinished();                            //!< worker-thread encode completed
 
 	QGraphicsItem* m_rubber { nullptr };
 	QPointF m_start;
 	bool m_dragging { false };
 	bool m_ready { false };
+	//! true while the encoder runs on a worker thread; canvas clicks are
+	//! ignored (with a status hint) until it clears. Cleared by deactivate()
+	//! so a stale encode result is discarded rather than applied (ONNX runs
+	//! cannot be aborted mid-flight; "cancel" = ignore the result).
+	bool m_encoding { false };
+	QFutureWatcher<bool> m_encodeWatcher;
 	bool m_addMode { true };                            //!< true = add (fg) point, false = subtract (bg)
 	bool m_antialias { true };                          //!< anti-alias mask edges from the decoder logits
 	int m_feather { 0 };                                //!< soften the object edge by N px (0 = crisp)

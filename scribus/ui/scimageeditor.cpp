@@ -1002,7 +1002,12 @@ QImage ScImageEditor::applyStackToImage(const QList<StackEntry>& entries)
 {
 	if (m_originalImage.isNull())
 		return m_originalImage;
-	QImage cur = m_originalImage;
+	return applyEntriesTo(m_originalImage, entries);
+}
+
+QImage ScImageEditor::applyEntriesTo(QImage base, const QList<StackEntry>& entries)
+{
+	QImage cur = base;
 	ColorList& colors = docColors();
 	for (const StackEntry& e : entries)
 	{
@@ -1014,6 +1019,22 @@ QImage ScImageEditor::applyStackToImage(const QList<StackEntry>& entries)
 		cur = e.mask.isNull() ? effected : blendMasked(cur, effected, e.mask);
 	}
 	return cur;
+}
+
+QImage ScImageEditor::stackPrefixImage(int count)
+{
+	count = qBound(0, count, static_cast<int>(m_stack.size()));
+	if (m_stackPrefixCount == count && !m_stackPrefixCache.isNull())
+		return m_stackPrefixCache;
+	m_stackPrefixCache = applyStackToImage(m_stack.mid(0, count));
+	m_stackPrefixCount = count;
+	return m_stackPrefixCache;
+}
+
+void ScImageEditor::invalidateStackPrefixCache()
+{
+	m_stackPrefixCache = QImage();
+	m_stackPrefixCount = -1;
 }
 
 void ScImageEditor::setActiveTool(ImageTool* tool)
@@ -1140,38 +1161,44 @@ void ScImageEditor::previewEffects(const ScImageEffectList& extra)
 {
 	if (m_originalImage.isNull())
 		return;
-	// The pending (Add) filter uses the CURRENT selection as its mask.
+	// The pending (Add) filter uses the CURRENT selection as its mask. Only
+	// the new effect is computed per preview tick; the committed stack comes
+	// from the prefix cache.
 	const QImage mask = currentSelectionMask();
-	QList<StackEntry> temp = m_stack;
+	QList<StackEntry> pending;
 	for (const ImageEffect& e : extra)
-		temp.append(makeStackEntry(e, true, mask));
-	setPreviewImage(applyStackToImage(temp));
+		pending.append(makeStackEntry(e, true, mask));
+	setPreviewImage(applyEntriesTo(stackPrefixImage(m_stack.size()), pending));
 }
 
 void ScImageEditor::previewReplace(int row, const ScImageEffectList& repl)
 {
 	if (m_originalImage.isNull())
 		return;
-	// Editing an existing entry keeps that entry's own mask.
-	const QImage mask = (row >= 0 && row < m_stack.size()) ? m_stack.at(row).mask : QImage();
-	QList<StackEntry> temp = m_stack;
-	if (row >= 0 && row < temp.size())
+	if (row < 0 || row >= m_stack.size())
 	{
-		if (repl.isEmpty())
-			temp.removeAt(row);
-		else
-		{
-			temp[row] = makeStackEntry(repl.at(0), true, mask);   // shown even if the entry was hidden
-			for (int k = 1; k < repl.size(); ++k)
-				temp.insert(row + k, makeStackEntry(repl.at(k), true, mask));
-		}
+		setPreviewImage(applyStackToImage(m_stack));
+		return;
 	}
-	setPreviewImage(applyStackToImage(temp));
+	// Editing an existing entry keeps that entry's own mask. Entries before
+	// the edited row come from the prefix cache; the replacement plus the
+	// entries after it are recomputed per preview tick (they depend on it).
+	const QImage mask = m_stack.at(row).mask;
+	QList<StackEntry> tail;
+	if (!repl.isEmpty())
+	{
+		for (int k = 0; k < repl.size(); ++k)
+			tail.append(makeStackEntry(repl.at(k), true, mask));   // shown even if the entry was hidden
+	}
+	for (int k = row + 1; k < m_stack.size(); ++k)
+		tail.append(m_stack.at(k));
+	setPreviewImage(applyEntriesTo(stackPrefixImage(row), tail));
 }
 
 void ScImageEditor::applyStackState(const QList<StackEntry>& state)
 {
 	m_stack = state;
+	invalidateStackPrefixCache();
 	refreshStackList();
 	renderEffects();
 }
@@ -1655,6 +1682,7 @@ void ScImageEditor::onCropConfirmed(const QRectF& sceneRect)
 void ScImageEditor::applyBaseState(const QImage& base, bool cropped)
 {
 	m_originalImage = base;
+	invalidateStackPrefixCache();
 	m_baseIsCropped = cropped;
 	m_selectionRect = QRectF();
 	if (m_view)
@@ -1885,6 +1913,7 @@ void ScImageEditor::revertImage()
 		return;
 	m_originalImage = img;
 	m_stack.clear();
+	invalidateStackPrefixCache();
 	if (m_undoStack)
 		m_undoStack->clear();   // prior states referred to the old base image
 	ensureSelection();
