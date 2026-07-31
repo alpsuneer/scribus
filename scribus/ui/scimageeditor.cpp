@@ -551,6 +551,27 @@ void ScImageEditor::createActions()
 		m_toolGroup->addAction(a);
 		return a;
 	};
+	// User-provided Photoshop-style PNG tool icons, shipped in the iconset root
+	// as <base>-24.png plus a <base>-48.png HiDPI variant. Loaded via addFile()
+	// with explicit sizes because IconManager returns PNGs at native size and
+	// never consults @2x siblings; QIcon then picks the right file per screen
+	// device pixel ratio.
+	auto makePngTool = [&](const QString& pngBase, QStyle::StandardPixmap fallback, const QString& text) -> QAction* {
+		QIcon ic;
+		QString p24 = im.pathForIcon(pngBase + "-24.png");
+		QString p48 = im.pathForIcon(pngBase + "-48.png");
+		if (!p24.isEmpty())
+			ic.addFile(p24, QSize(24, 24));
+		if (!p48.isEmpty())
+			ic.addFile(p48, QSize(48, 48));
+		if (ic.isNull())
+			ic = style()->standardIcon(fallback);
+		QAction* a = new QAction(ic, text, this);
+		a->setCheckable(true);
+		a->setToolTip(text);
+		m_toolGroup->addAction(a);
+		return a;
+	};
 	// tool-move, not align-mode-move: the latter is the Align & Distribute palette's glyph
 	// and reads as "alignment", not the Photoshop 4-way move cursor.
 	m_toolMove       = makeTool("tool-move",                 QStyle::SP_ArrowRight,             tr("Move"));
@@ -558,13 +579,13 @@ void ScImageEditor::createActions()
 	m_toolCrop       = makeTool("transform-crop-and-resize", QStyle::SP_FileDialogDetailedView, tr("Crop"));
 	m_toolEyedropper = makeTool("tool-color-picker",         QStyle::SP_DialogResetButton,      tr("Eyedropper"));
 	m_toolZoom       = makeTool("tool-zoom",                 QStyle::SP_FileDialogContentsView, tr("Zoom"));
-	m_toolHand       = makeTool("mover",                     QStyle::SP_DesktopIcon,            tr("Hand"));
+	m_toolHand       = makePngTool("tool-hand",              QStyle::SP_DesktopIcon,            tr("Hand"));
 	// Selection tools (mask-based, via the ImageTool framework).
-	m_toolRectMarquee    = makeTool("select-rectangular", QStyle::SP_FileDialogListView,     tr("Rectangular Marquee"));
-	m_toolEllipseMarquee = makeTool("select-ellipse",     QStyle::SP_FileDialogListView,     tr("Elliptical Marquee"));
-	m_toolLasso          = makeTool("select-lasso",       QStyle::SP_FileDialogDetailedView, tr("Lasso"));
-	m_toolPolyLasso      = makeTool("select-polygon",     QStyle::SP_FileDialogDetailedView, tr("Polygonal Lasso"));
-	m_toolSmartSelect    = makeTool("select-smart",       QStyle::SP_DialogYesButton,        tr("Smart Select (SAM)"));
+	m_toolRectMarquee    = makePngTool("select-rectangular", QStyle::SP_FileDialogListView,  tr("Rectangular Marquee"));
+	m_toolEllipseMarquee = makePngTool("select-ellipse",     QStyle::SP_FileDialogListView,  tr("Elliptical Marquee"));
+	m_toolLasso          = makePngTool("select-lasso",       QStyle::SP_FileDialogDetailedView, tr("Lasso"));
+	m_toolPolyLasso      = makePngTool("select-polygon",     QStyle::SP_FileDialogDetailedView, tr("Polygonal Lasso"));
+	m_toolSmartSelect    = makePngTool("select-smart",       QStyle::SP_DialogYesButton,     tr("Smart Select (SAM)"));
 	m_toolRefineBrush    = makeTool("select-brush",       QStyle::SP_DialogResetButton,      tr("Refine Edges Brush"));
 	m_rectMarqueeTool    = new RectMarqueeTool(this);
 	m_ellipseMarqueeTool = new EllipseMarqueeTool(this);
