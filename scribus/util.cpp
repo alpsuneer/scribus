@@ -28,6 +28,7 @@ for which a new license (GPL+exception) is in place.
 #include <QApplication>
 #include <QCryptographicHash>
 #include <QImage>
+#include <QImageWriter>
 #include <QPainter>
 #include <QtSvg/QSvgRenderer>
 #include <QMessageBox>
@@ -387,6 +388,26 @@ bool overwrite(QWidget *parent, const QString& filename)
 			retval = false;
 	}
 	return retval;
+}
+
+QString writeImageToFile(const QImage& image, const QString& path, int quality)
+{
+	QImage out = image;
+	const QString suffix = QFileInfo(path).suffix().toLower();
+	if ((suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg")) && out.hasAlphaChannel())
+		out = out.convertToFormat(QImage::Format_RGB32);
+	QImageWriter writer(path);
+	if (quality >= 0)
+		writer.setQuality(quality);
+	if (writer.write(out))
+		return QString();
+	QString reason = writer.errorString();
+	const QFileInfo fi(path);
+	if (fi.exists() && !fi.isWritable())
+		reason = QObject::tr("Permission denied: the file exists but is not writable by you. Check who owns it (e.g. it may have been created by another user).");
+	else if (!fi.exists() && !QFileInfo(fi.absolutePath()).isWritable())
+		reason = QObject::tr("Permission denied: the folder \"%1\" is not writable.").arg(fi.absolutePath());
+	return reason.isEmpty() ? QObject::tr("unknown error") : reason;
 }
 
 void WordAndPara(PageItem* currItem, int *w, int *p, int *c, int *wN, int *pN, int *cN)
