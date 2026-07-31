@@ -22,6 +22,7 @@
 class ScribusMainWindow;
 class ScribusDoc;
 class PageItem;
+class ColorCombo;
 
 class SuneerControlBar : public QToolBar
 {
