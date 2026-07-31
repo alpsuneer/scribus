@@ -48,6 +48,9 @@
 #include <QApplication>
 #include <QDialog>
 #include <QMenu>
+#include <QWidgetAction>
+#include <QPushButton>
+#include "colorcombo.h"
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QLabel>
