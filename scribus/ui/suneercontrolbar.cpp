@@ -2800,6 +2800,24 @@ void SuneerControlBar::onImgCropApply()
     m_doc->regionsChanged()->update(QRectF());
 }
 
+void SuneerControlBar::setCropModeActive(bool active)
+{
+    if (!m_imgCropApplyBtn)
+        return;
+    m_imgCropApplyBtn->setCheckable(true);
+    QSignalBlocker blocker(m_imgCropApplyBtn);
+    m_imgCropApplyBtn->setChecked(active);
+    // The default checked look is too subtle at this button size, and crop mode
+    // swallows canvas gestures — make it unmistakable regardless of theme.
+    m_imgCropApplyBtn->setStyleSheet(active
+        ? QStringLiteral("QToolButton { background: #e8a33d; border: 2px solid #b3701a;"
+                         " border-radius: 3px; font-weight: bold; }")
+        : QString());
+    m_imgCropApplyBtn->setToolTip(active
+        ? tr("Crop mode active — Enter to apply, Esc to cancel")
+        : tr("Crop + Resize to fixed size"));
+}
+
 void SuneerControlBar::onImgCropResize()
 {
     if (!m_doc || m_doc->m_Selection->isEmpty()) return;

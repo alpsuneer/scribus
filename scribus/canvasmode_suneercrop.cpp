@@ -16,10 +16,62 @@
 #include <QImage>
 #include <QFileInfo>
 #include <QApplication>
+#include <QStatusBar>
 
 CanvasMode_SuneerCrop::CanvasMode_SuneerCrop(ScribusView* view)
     : CanvasMode(view), m_ScMW(view->m_ScMW)
 {
+}
+
+PageItem* CanvasMode_SuneerCrop::croppedItem() const
+{
+    if (!m_doc || m_doc->m_Selection->isEmpty())
+        return nullptr;
+    return m_doc->m_Selection->itemAt(0);
+}
+
+void CanvasMode_SuneerCrop::activate(bool fromGesture)
+{
+    CanvasMode::activate(fromGesture);
+    // Crop mode swallows the normal canvas gestures (frame resize included), so
+    // it must announce itself and say how to get out — otherwise a stray click
+    // on the toolbar's crop button leaves the canvas silently "dead".
+    PageItem* item = croppedItem();
+    m_cropItemName = item ? item->itemName() : QString();
+    if (m_ScMW)
+    {
+        m_ScMW->statusBar()->showMessage(tr("Crop mode: drag a crop area — Enter to apply, Esc to cancel"));
+        if (m_ScMW->suneerControlBar())
+            m_ScMW->suneerControlBar()->setCropModeActive(true);
+    }
+}
+
+void CanvasMode_SuneerCrop::deactivate(bool forGesture)
+{
+    CanvasMode::deactivate(forGesture);
+    if (forGesture)
+        return;
+    m_drawing = false;
+    m_hasCrop = false;
+    m_cropRect = QRectF();
+    m_cropItemName.clear();
+    if (m_ScMW)
+    {
+        m_ScMW->statusBar()->clearMessage();
+        if (m_ScMW->suneerControlBar())
+            m_ScMW->suneerControlBar()->setCropModeActive(false);
+    }
+}
+
+void CanvasMode_SuneerCrop::exitCropMode()
+{
+    m_drawing = false;
+    m_hasCrop = false;
+    m_cropRect = QRectF();
+    if (m_view)
+        m_view->updateCanvas();
+    if (m_ScMW)
+        m_ScMW->setAppModeByToggle(false, modeSuneerImageCrop);
 }
 
 void CanvasMode_SuneerCrop::enterEvent(QEvent*)
@@ -35,6 +87,16 @@ void CanvasMode_SuneerCrop::leaveEvent(QEvent*)
 void CanvasMode_SuneerCrop::mousePressEvent(QMouseEvent* m)
 {
     m->accept();
+    // The frame we were cropping is gone or another one was selected (e.g. via
+    // the Outline palette): drop back to normal editing rather than silently
+    // swallowing every drag on a frame the user is no longer cropping.
+    PageItem* item = croppedItem();
+    const QString nowName = item ? item->itemName() : QString();
+    if (nowName != m_cropItemName)
+    {
+        exitCropMode();
+        return;
+    }
     m_startPoint = m->pos();
     m_endPoint   = m->pos();
     m_drawing    = true;
@@ -93,11 +155,7 @@ void CanvasMode_SuneerCrop::keyPressEvent(QKeyEvent* e)
 {
     if (e->key() == Qt::Key_Escape) {
         // Cancel — crop area clear ചെയ്യൂ
-        m_drawing = false;
-        m_hasCrop = false;
-        m_cropRect = QRectF();
-        m_view->updateCanvas();
-        m_ScMW->setAppModeByToggle(false, modeSuneerImageCrop);
+        exitCropMode();
         return;
     }
 
