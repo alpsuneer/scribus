@@ -513,6 +513,7 @@ set(SCRIBUS_SOURCES
 	ui/smnestedstyleswidget.cpp
 	ui/smnumformatcombo.cpp
 	ui/smopticalmarginswidget.cpp
+	ui/resizeimagedialog.cpp
 	ui/smprulewidget.cpp
 	ui/smpshadewidget.cpp
 	ui/smpstylewidget.cpp
