@@ -8,5 +8,7 @@ pageplusx3.xml
 pagestream.xml
 scribus15.xml
 scribus17.xml
+malayalam-dtp.xml
+photoshop-style.xml
 DESTINATION ${SHAREDIR}keysets
 )

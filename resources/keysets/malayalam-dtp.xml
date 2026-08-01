@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Malayalam DTP (Photoshop-style) keyboard shortcut set.
+
+  NOTE: only real, registered ScrAction names appear here. The Scribus keyset
+  system controls the MAIN window's actions. The built-in image editor
+  (ScImageEditor) is a separate window whose filter/tool shortcuts (Ctrl+L
+  Levels, Ctrl+M Curves, Ctrl+U Hue/Saturation, V/M/C/I/Z/H tools, etc.) are
+  handled inside that window and are NOT keyset-controllable — see
+  scribus/ui/scimageeditor.cpp.
+-->
+<shortcutset name="Malayalam DTP (Photoshop-style)">
+  <!-- Standard Scribus shortcuts -->
+  <function name="fileNew" shortcut="Ctrl+N"/>
+  <function name="fileOpen" shortcut="Ctrl+O"/>
+  <function name="fileSave" shortcut="Ctrl+S"/>
+  <function name="fileClose" shortcut="Ctrl+W"/>
+  <function name="editUndoAction" shortcut="Ctrl+Z"/>
+  <function name="editRedoAction" shortcut="Ctrl+Shift+Z"/>
+  <function name="editCut" shortcut="Ctrl+X"/>
+  <function name="editCopy" shortcut="Ctrl+C"/>
+  <function name="editPaste" shortcut="Ctrl+V"/>
+
+  <!-- Open the built-in Scribus image editor for the selected frame -->
+  <function name="imageEditor" shortcut="Ctrl+E"/>
+</shortcutset>
