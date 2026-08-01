@@ -1400,7 +1400,8 @@ void Scribus13Format::GetItemText(QDomElement *it, ScribusDoc *doc, PageItem* ob
 void Scribus13Format::readParagraphStyle(ParagraphStyle& vg, const QDomElement& pg, ScribusDoc *doc)
 {
 	vg.setName(pg.attribute("NAME"));
-	vg.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(pg.attribute("LINESPMode", "0").toInt()));
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
+	vg.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(pg.attribute("LINESPMode", pg.attribute("LINESPMODE", "0")).toInt()));
 	vg.setLineSpacing(ScCLocale::toDoubleC(pg.attribute("LINESP")));
 	vg.setLeftMargin(ScCLocale::toDoubleC(pg.attribute("INDENT"), 0.0));
 	if (pg.hasAttribute("RMARGIN"))
@@ -1683,7 +1684,8 @@ PageItem* Scribus13Format::PasteItem(QDomElement *obj, ScribusDoc *doc, const QS
 	currItem->setLineShade(Pshade2);
 	ParagraphStyle pstyle;
 	pstyle.setLineSpacing(ScCLocale::toDoubleC(obj->attribute("LINESP")));
-	pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(obj->attribute("LINESPMode", "0").toInt()));
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
+	pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(obj->attribute("LINESPMode", obj->attribute("LINESPMODE", "0")).toInt()));
 	int align = obj->attribute("ALIGN", "-1").toInt();
 	if (align >= 5)
 		pstyle.setParent(DoVorl[align-5]);

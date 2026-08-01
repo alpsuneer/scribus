@@ -1535,7 +1535,8 @@ void Scribus12Format::GetItemProps(QDomElement *obj, struct CopyPasteBuffer *OB,
 	OB->PLineEnd = Qt::PenCapStyle(obj->attribute("PLINEEND", "0").toInt());
 	OB->PLineJoin = Qt::PenJoinStyle(obj->attribute("PLINEJOIN", "0").toInt());
 	OB->LineSp = ScCLocale::toDoubleC(obj->attribute("LINESP"));
-	OB->LineSpMode = obj->attribute("LINESPMode", "0").toInt();
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
+	OB->LineSpMode = obj->attribute("LINESPMode", obj->attribute("LINESPMODE", "0")).toInt();
 	OB->LocalScX   = ScCLocale::toDoubleC(obj->attribute("LOCALSCX"));
 	OB->LocalScY   = ScCLocale::toDoubleC(obj->attribute("LOCALSCY"));
 	OB->LocalX     = ScCLocale::toDoubleC(obj->attribute("LOCALX"));
@@ -2279,7 +2280,8 @@ void Scribus12Format::GetStyle(QDomElement *pg, ParagraphStyle *vg, StyleSet<Par
 	const StyleSet<ParagraphStyle> & docParagraphStyles(tempParagraphStyles? *tempParagraphStyles : doc->paragraphStyles());
 
 	vg->setName(pg->attribute("NAME"));
-	vg->setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(pg->attribute("LINESPMode", "0").toInt()));
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
+	vg->setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(pg->attribute("LINESPMode", pg->attribute("LINESPMODE", "0")).toInt()));
 	vg->setLineSpacing(ScCLocale::toDoubleC(pg->attribute("LINESP")));
 	vg->setLeftMargin(ScCLocale::toDoubleC(pg->attribute("INDENT"), 0.0));
 	vg->setFirstIndent(ScCLocale::toDoubleC(pg->attribute("FIRST"), 0.0));
