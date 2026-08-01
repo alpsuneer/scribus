@@ -8688,6 +8688,14 @@ void ScribusMainWindow::suneerAutoFitHeight()
 	if (!HaveDoc) return;
 	int count = doc->m_Selection->count();
 	if (count == 0) return;
+
+	// autoFitFrameHeight() opens a transaction of its own, so fitting a
+	// multi-frame selection produced one undo step per frame. Nesting them in
+	// an outer transaction makes the whole selection a single Ctrl+Z.
+	UndoTransaction fitTransaction;
+	if (UndoManager::undoEnabled())
+		fitTransaction = m_undoManager->beginTransaction(Um::Selection, Um::IGroup,
+		                                                Um::Resize, QString(), Um::IResize);
 	for (int i = 0; i < count; ++i)
 	{
 		PageItem* item = doc->m_Selection->itemAt(i);
@@ -8702,6 +8710,9 @@ void ScribusMainWindow::suneerAutoFitHeight()
 			tf->autoFitFrameHeight();
 		}
 	}
+
+	if (fitTransaction)
+		fitTransaction.commit();
 }
 
 void ScribusMainWindow::suneerAutoflowToNewPages()
