@@ -33,6 +33,7 @@ for which a new license (GPL+exception) is in place.
 #include "curvewidget.h"
 #include "iconmanager.h"
 #include "scclocale.h"
+#include "scimagefilterengine.h"
 #include "scpage.h"
 #include "scribusdoc.h"
 #include "scrspinbox.h"
@@ -631,17 +632,16 @@ EffectsDialog::EffectsDialog( QWidget* parent, PageItem* item, ScribusDoc* docc 
 	usedEffects->clearSelection();
 	availableEffects->clearSelection();
 	resize( minimumSizeHint() );
-	ScImage im(m_image);
 	saveValues(false);
-	im.applyEffect(effectsList, m_doc->PageColors, false);
+	QImage im = ImageFilterEngine::applyEffects(m_image.qImage(), effectsList, m_doc->PageColors, false);
 	QPixmap Bild = QPixmap(pixmapLabel1->width(), pixmapLabel1->height());
-	int x = (pixmapLabel1->width() - im.qImage().width()) / 2;
-	int y = (pixmapLabel1->height() - im.qImage().height()) / 2;
+	int x = (pixmapLabel1->width() - im.width()) / 2;
+	int y = (pixmapLabel1->height() - im.height()) / 2;
 	QPainter p;
 	QBrush b(QColor(205,205,205), IconManager::instance().loadPixmap("testfill"));
 	p.begin(&Bild);
 	p.fillRect(0, 0, pixmapLabel1->width(), pixmapLabel1->height(), b);
-	p.drawImage(x, y, im.qImage());
+	p.drawImage(x, y, im);
 	p.end();
 	pixmapLabel1->setPixmap( Bild );
 
@@ -740,17 +740,16 @@ void EffectsDialog::createPreview()
 {
 	if (m_time.elapsed() < 50)
 		return;
-	ScImage im(m_image);
 	saveValues(false);
-	im.applyEffect(effectsList, m_doc->PageColors, false);
+	QImage im = ImageFilterEngine::applyEffects(m_image.qImage(), effectsList, m_doc->PageColors, false);
 	QPixmap Bild = QPixmap(pixmapLabel1->width(), pixmapLabel1->height());
-	int x = (pixmapLabel1->width() - im.qImage().width()) / 2;
-	int y = (pixmapLabel1->height() - im.qImage().height()) / 2;
+	int x = (pixmapLabel1->width() - im.width()) / 2;
+	int y = (pixmapLabel1->height() - im.height()) / 2;
 	QPainter p;
 	QBrush b(QColor(205,205,205), IconManager::instance().loadPixmap("testfill"));
 	p.begin(&Bild);
 	p.fillRect(0, 0, pixmapLabel1->width(), pixmapLabel1->height(), b);
-	p.drawImage(x, y, im.qImage());
+	p.drawImage(x, y, im);
 	p.end();
 	pixmapLabel1->setPixmap( Bild );
 	m_time.start();
