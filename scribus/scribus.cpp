@@ -1522,6 +1522,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
+	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
+	scrMenuMgr->addMenuItemString("extrasFixOverflowFramesDoc", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
 	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
 	scrMenuMgr->addMenuItemString("SRTools", "Extras");
@@ -2617,6 +2619,9 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 		              && currItem->frameOverflows();
 	}
 	scrActions["extrasAutoflowToNewPages"]->setEnabled(enableAutoflow);
+	// Document-scoped: available whenever a document is open, selection or not.
+	scrActions["extrasFixOverflowFrames"]->setEnabled(HaveDoc);
+	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(HaveDoc);
 }
 
 
@@ -2877,6 +2882,8 @@ void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 	scrActions["viewRulerMode"]->setChecked(doc->guidesPrefs().rulerMode);
 	scrActions["extrasGenerateTableOfContents"]->setEnabled(doc->hasTOCSetup() || doc->hasIndexSetup());
 	scrActions["extrasUpdateDocument"]->setEnabled(true);
+	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
+	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
 	if (!doc->masterPageMode())
 		pagePalette->rebuild();
 	outlinePalette->setDoc(doc);
@@ -7509,6 +7516,8 @@ void ScribusMainWindow::slotDocSetup()
 	scrActions["viewRulerMode"]->setChecked(doc->guidesPrefs().rulerMode);
 	scrActions["extrasGenerateTableOfContents"]->setEnabled(doc->hasTOCSetup() || doc->hasIndexSetup());
 	scrActions["extrasUpdateDocument"]->setEnabled(true);
+	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
+	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
 	scrActions["viewToggleCMS"]->setChecked(doc->HasCMS);
 	scrActions["viewToggleWhiteSpaceMode"]->setChecked(doc->whiteSpaceModeEnabled);
 	view->setRulersShown(doc->guidesPrefs().rulersShown);
@@ -8816,6 +8825,203 @@ void ScribusMainWindow::suneerAutoflowToNewPages()
 		setStatusBarInfoText( tr("Autoflow stopped at 500 pages — text may still overflow. Check content."));
 	else
 		setStatusBarInfoText( tr("Autoflow: created %1 new pages").arg(created));
+}
+
+// ---------------------------------------------------------------------------
+// Fix Overflowing Frames — grow-only autofit over a batch of text frames.
+//
+// Only frames that actually overflow are touched, so frames that already fit
+// keep the geometry they were saved with. That is the whole point: Select All
+// + Ctrl+Alt+C also *shrinks* frames that are fine, which destroys a newspaper
+// grid. Legacy 1.5.x pages typically need 1-4% more height on a handful of
+// frames, and hunting those down by hand across a full page is the tedium this
+// replaces.
+//
+// Never runs automatically. Per 1863b8f nothing may mutate saved geometry on
+// document open; this is an explicit operator action with a single undo step.
+// ---------------------------------------------------------------------------
+
+//! Growth beyond this fraction of the frame's height is refused and reported
+//! instead: that much overset is an editorial decision, not a layout nudge.
+static const double SUNEER_OVERFLOW_GROWTH_CAP = 0.10;
+
+namespace
+{
+	// Frames a batch grow must not touch. A frame that is not the tail of its
+	// chain must not absorb its own overflow — that text belongs downstream.
+	// Note frames are owned by the notes machinery, group children would need
+	// the group's geometry rebuilt around them, and locked means locked.
+	bool suneerOverflowFrameIneligible(const PageItem* item)
+	{
+		return !item
+		    || !item->isTextFrame()
+		    || item->isNoteFrame()
+		    || item->isGroupChild()
+		    || item->locked()
+		    || item->nextInChain() != nullptr;
+	}
+}
+
+double ScribusMainWindow::suneerMeasureFitHeight(PageItem_TextFrame* tf) const
+{
+	if (!tf)
+		return -1.0;
+
+	// The probe resizes and relayouts repeatedly. Undo is suspended for it so
+	// the batch transaction records only the final height of each frame.
+	const bool undoWasOn = UndoManager::undoEnabled();
+	if (undoWasOn)
+		m_undoManager->setUndoEnabled(false);
+
+	const double origHeight = tf->height();
+	auto tryHeight = [tf](double h) {
+		tf->setHeight(h);
+		tf->updateClip();
+		tf->invalid = true;
+		tf->layout();
+		return !tf->frameOverflows();
+	};
+
+	// Grow geometrically until it fits, then bisect for the smallest height
+	// that still fits. Bounded so a frame that can never fit (an image-wrapped
+	// column narrower than a single word) terminates instead of spinning.
+	double low = origHeight, high = origHeight;
+	bool fits = false;
+	while (high < 20000.0)
+	{
+		high = qMin(high * 1.5 + 1.0, 20000.0);
+		if (tryHeight(high))
+		{
+			fits = true;
+			break;
+		}
+		low = high;
+	}
+	double needed = -1.0;
+	if (fits)
+	{
+		for (int i = 0; i < 20; ++i)
+		{
+			const double mid = (low + high) / 2.0;
+			if (tryHeight(mid))
+				high = mid;
+			else
+				low = mid;
+		}
+		// Same slack autoFitFrameHeight() applies, so the cap is measured
+		// against the height that will actually be set.
+		needed = high + tf->textToFrameDistBottom() + 2.0;
+	}
+
+	tryHeight(origHeight);
+	if (undoWasOn)
+		m_undoManager->setUndoEnabled(true);
+	return needed;
+}
+
+void ScribusMainWindow::suneerFixOverflowFramesRun(bool wholeDocument)
+{
+	if (!HaveDoc || !doc)
+		return;
+	if (doc->masterPageMode())
+	{
+		setStatusBarInfoText( tr("Fix Overflowing Frames does not run in master page mode"));
+		return;
+	}
+
+	// Scope: an explicit selection wins for the page-scoped action; otherwise
+	// the current page. The document-wide entry always sweeps every page.
+	QList<PageItem*> candidates;
+	if (!wholeDocument && doc->m_Selection->count() > 0)
+	{
+		for (int i = 0; i < doc->m_Selection->count(); ++i)
+			candidates.append(doc->m_Selection->itemAt(i));
+	}
+	else
+	{
+		const int currentPage = doc->currentPageNumber();
+		for (PageItem* item : std::as_const(*doc->Items))
+		{
+			if (wholeDocument || item->OwnPage == currentPage)
+				candidates.append(item);
+		}
+	}
+
+	QList<PageItem*> tooBig;
+	int fixed = 0;
+
+	UndoTransaction batch;
+	if (UndoManager::undoEnabled())
+		batch = m_undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize,
+		                                        tr("Fix overflowing frames"), Um::IResize);
+
+	for (PageItem* item : std::as_const(candidates))
+	{
+		if (suneerOverflowFrameIneligible(item))
+			continue;
+		PageItem_TextFrame* tf = item->asTextFrame();
+		if (!tf || !tf->frameOverflows())
+			continue;
+
+		const double origHeight = tf->height();
+		const double needed = suneerMeasureFitHeight(tf);
+		if (needed <= 0.0 || needed > origHeight * (1.0 + SUNEER_OVERFLOW_GROWTH_CAP))
+		{
+			tooBig.append(item);
+			continue;
+		}
+		// Resize through the same path as Ctrl+Alt+C so the result is identical
+		// to fixing the frame by hand. Its transaction nests inside the batch.
+		tf->autoFitFrameHeight();
+		++fixed;
+	}
+
+	if (batch)
+		batch.commit();
+
+	doc->changed();
+	doc->regionsChanged()->update(QRectF());
+	view->DrawNew();
+
+	const int capPercent = qRound(SUNEER_OVERFLOW_GROWTH_CAP * 100.0);
+	QString summary = tr("Fixed %1 overflowing frame(s)").arg(fixed);
+	if (!tooBig.isEmpty())
+		summary += tr("; %1 skipped (would grow more than %2%)").arg(tooBig.count()).arg(capPercent);
+	setStatusBarInfoText(summary);
+
+	if (tooBig.isEmpty())
+		return;
+
+	// Frames needing more than the cap are an editorial call, so name them and
+	// offer to select them rather than growing them behind the operator's back.
+	QStringList names;
+	for (const PageItem* item : std::as_const(tooBig))
+		names << item->itemName();
+	ScMessageBox box(QMessageBox::Information, tr("Fix Overflowing Frames"), summary, QMessageBox::NoButton, this);
+	box.setInformativeText(tr("These frames need more than %1% extra height and were left alone:\n%2")
+	                       .arg(capPercent).arg(names.join(", ")));
+	QPushButton* selectButton = box.addButton(tr("Select Them"), QMessageBox::AcceptRole);
+	box.addButton(QMessageBox::Close);
+	box.exec();
+	if (box.clickedButton() != selectButton)
+		return;
+
+	view->deselectItems(true);
+	doc->m_Selection->delaySignalsOn();
+	for (PageItem* item : std::as_const(tooBig))
+		doc->m_Selection->addItem(item);
+	doc->m_Selection->delaySignalsOff();
+	view->DrawNew();
+}
+
+void ScribusMainWindow::suneerFixOverflowFrames()
+{
+	suneerFixOverflowFramesRun(false);
+}
+
+void ScribusMainWindow::suneerFixOverflowFramesDoc()
+{
+	suneerFixOverflowFramesRun(true);
 }
 
 void ScribusMainWindow::suneerFitImageToFrame(PageItem* item)

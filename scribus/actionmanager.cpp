@@ -1076,11 +1076,17 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasAutoflowToNewPages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasFixOverflowFrames";
+	scrActions->insert(name, new ScrAction("scale-height", "scale-height", "", defaultKey(name), mainWindow));
+	name = "extrasFixOverflowFramesDoc";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
 	connect( (*scrActions)["SRDuplicateContentCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateContentCheck()) );
 	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
+	connect( (*scrActions)["extrasFixOverflowFrames"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFrames()) );
+	connect( (*scrActions)["extrasFixOverflowFramesDoc"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFramesDoc()) );
 }
 
 
@@ -1914,6 +1920,8 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
 	(*scrActions)["SRDuplicateContentCheck"]->setTexts( tr("Duplicate Content Check"));
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
+	(*scrActions)["extrasFixOverflowFrames"]->setTexts( tr("Fix Overflowing Frames"));
+	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2154,6 +2162,8 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("suneerReduceTextSize", QKeySequence());
 	defKeys.insert("suneerEnlargeLineSpacing", QKeySequence(Qt::SHIFT | Qt::Key_Greater));
 	defKeys.insert("suneerReduceLineSpacing", QKeySequence("Shift+&lt;"));
+	defKeys.insert("extrasFixOverflowFrames", QKeySequence());
+	defKeys.insert("extrasFixOverflowFramesDoc", QKeySequence());
 	defKeys.insert("itemImageScaleUp", QKeySequence(Qt::CTRL | Qt::Key_Period));
 	defKeys.insert("itemImageScaleDown", QKeySequence(Qt::CTRL | Qt::Key_Comma));
 	defKeys.insert("toolsLayers", QKeySequence(Qt::Key_F6));
@@ -2568,7 +2578,9 @@ void ActionManager::createDefaultMenus()
 		<< "extrasDeHyphenateText"
 		<< "extrasGenerateTableOfContents"
 		<< "extrasUpdateDocument"
-		<< "extrasAutoflowToNewPages";
+		<< "extrasAutoflowToNewPages"
+		<< "extrasFixOverflowFrames"
+		<< "extrasFixOverflowFramesDoc";
 	//Windows
 	++itmenu;
 	itmenu->second
