@@ -23,6 +23,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpaths.h"
 #include "scplugin.h"
 #include "scraction.h"
+#include "ui/ParagraphStylesPanel.h"
 #include "ui/preferences/prefs_keyboardshortcuts.h"
 #include "ui/scmessagebox.h"
 #include "util.h"
@@ -527,17 +528,44 @@ void Prefs_KeyboardShortcuts::keyPressEvent(QKeyEvent *k)
 			if (selectedLVI)
 			{
 				QString actionName = lviToActionMap[selectedLVI];
-				// Suneer group-ൽ same shortcut allow ചെയ്യുന്നു
-				bool isSuneerAction = actionName.startsWith("suneer") || actionName.startsWith("itemImageScale");
-				if (checkKey(keyCode) && !isSuneerAction)
+				const QKeySequence newKeySequence(keyCode);
+				const QString oldText = keyMap[actionName].keySequence.toString(QKeySequence::NativeText);
+				// Shortcuts owned by the paragraph-styles panel are not in keyMap, so they
+				// cannot be reassigned from here — refuse rather than create a duplicate.
+				const QString dynOwner = dynamicShortcutOwner(keyCode);
+				if (!dynOwner.isEmpty())
 				{
-					ScMessageBox::information(this, CommonStrings::trWarning, tr("The %1 key sequence is already in use by \"%2\"").arg(getTrKeyText(keyCode),getAction(keyCode)));
-					selectedLVI->setText(1,keyMap[actionName].keySequence.toString(QKeySequence::NativeText));
-					keyDisplay->setText(keyMap[actionName].keySequence.toString(QKeySequence::NativeText));
+					ScMessageBox::information(this, CommonStrings::trWarning,
+						tr("The %1 key sequence is already in use by %2.\n"
+						   "Change or remove it in the Paragraph Styles panel first.")
+						   .arg(getTrKeyText(keyCode), dynOwner));
+					selectedLVI->setText(1, oldText);
+					keyDisplay->setText(oldText);
+				}
+				else if (checkKey(keyCode, actionName))
+				{
+					// Offer to move the shortcut rather than refusing outright. Leaving both
+					// bindings in place would make Qt fire neither ("Ambiguous shortcut
+					// overload"), so a duplicate is never an acceptable outcome here.
+					QMessageBox::StandardButton reply = ScMessageBox::question(this, tr("Shortcut Conflict"),
+						tr("The %1 key sequence is already used by \"%2\".\nReassign it to \"%3\"?")
+						   .arg(getTrKeyText(keyCode), getAction(keyCode, actionName), keyMap[actionName].cleanMenuText),
+						QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+					if (reply == QMessageBox::Yes)
+					{
+						clearConflictingShortcuts(newKeySequence, actionName);
+						selectedLVI->setText(1, newKeySequence.toString(QKeySequence::NativeText));
+						keyMap[actionName].keySequence = newKeySequence;
+						userDef->setChecked(true);
+					}
+					else
+					{
+						selectedLVI->setText(1, oldText);
+						keyDisplay->setText(oldText);
+					}
 				}
 				else
 				{
-					QKeySequence newKeySequence(keyCode);
 					selectedLVI->setText(1, newKeySequence.toString(QKeySequence::NativeText));
 					keyMap[actionName].keySequence = newKeySequence;
 					userDef->setChecked(true);
@@ -566,26 +594,70 @@ void Prefs_KeyboardShortcuts::keyReleaseEvent(QKeyEvent *k)
 	keyDisplay->setText(getTrKeyText(keyCode));
 }
 
-QString Prefs_KeyboardShortcuts::getAction(int code)
+QString Prefs_KeyboardShortcuts::getAction(int code, const QString& excludeAction)
 {
 	QKeySequence key(code);
+	if (key.isEmpty())
+		return QString();
 	for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
 	{
-		if (key.matches(it.value().keySequence) != QKeySequence::NoMatch)
+		if (it.key() == excludeAction || it.value().keySequence.isEmpty())
+			continue;
+		// ExactMatch only: PartialMatch would flag unrelated prefixes as conflicts.
+		if (key.matches(it.value().keySequence) == QKeySequence::ExactMatch)
 			return it->cleanMenuText;
 	}
 	return QString();
 }
 
-bool Prefs_KeyboardShortcuts::checkKey(int code)
+bool Prefs_KeyboardShortcuts::checkKey(int code, const QString& excludeAction)
 {
 	QKeySequence key(code);
+	if (key.isEmpty())
+		return false;
 	for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
 	{
-		if (key.matches(it.value().keySequence) != QKeySequence::NoMatch)
+		if (it.key() == excludeAction || it.value().keySequence.isEmpty())
+			continue;
+		if (key.matches(it.value().keySequence) == QKeySequence::ExactMatch)
 			return true;
 	}
 	return false;
+}
+
+QString Prefs_KeyboardShortcuts::dynamicShortcutOwner(int code) const
+{
+	QKeySequence key(code);
+	if (key.isEmpty())
+		return QString();
+	const QMap<QString, QKeySequence> dynamic = ParagraphStylesPanel::dynamicShortcuts();
+	for (auto it = dynamic.constBegin(); it != dynamic.constEnd(); ++it)
+	{
+		if (key.matches(it.value()) == QKeySequence::ExactMatch)
+			return it.key();
+	}
+	return QString();
+}
+
+void Prefs_KeyboardShortcuts::clearConflictingShortcuts(const QKeySequence& keySeq, const QString& excludeAction)
+{
+	if (keySeq.isEmpty())
+		return;
+	for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
+	{
+		if (it.key() == excludeAction || it.value().keySequence.isEmpty())
+			continue;
+		if (keySeq.matches(it.value().keySequence) != QKeySequence::ExactMatch)
+			continue;
+		it.value().keySequence = QKeySequence();
+		// Keep the list view in step with the map, otherwise the old owner keeps
+		// displaying a shortcut it no longer holds.
+		for (auto lvi = lviToActionMap.constBegin(); lvi != lviToActionMap.constEnd(); ++lvi)
+		{
+			if (lvi.value() == it.key() && lvi.key())
+				lvi.key()->setText(1, QString());
+		}
+	}
 }
 
 void Prefs_KeyboardShortcuts::clearSearchString( )

@@ -10,6 +10,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QKeySequence>
 #include <QList>
 #include <QMap>
 #include <QSpinBox>
@@ -28,6 +29,12 @@ public:
 	
 	void setDocument(ScribusDoc* doc);
 	void setMainWindow(ScribusMainWindow* mw);
+
+	// Shortcuts owned by this panel (paragraph-style chains and column configs) are plain
+	// QShortcuts, so they never appear in the ScrAction keymap the Keyboard Shortcuts
+	// preferences page checks against. Expose them so that page can still detect conflicts.
+	// Returns a human-readable owner label -> key sequence map; empty sequences are omitted.
+	static QMap<QString, QKeySequence> dynamicShortcuts();
 public slots:
 	void updateStylesList();
 	void applyChainCurrentStyle();

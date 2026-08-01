@@ -842,6 +842,8 @@ void CanvasMode::commonkeyPressEvent_Default(QKeyEvent *e)
 	{
 		QKeySequence pressed(kk | int(buttonModifiers));
 
+		QList< QPointer<ScrAction> > matches;
+		QStringList matchNames;
 		for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
 		{
 			if (!it.value()) continue;
@@ -853,10 +855,26 @@ void CanvasMode::commonkeyPressEvent_Default(QKeyEvent *e)
 			if (sc.matches(pressed) == QKeySequence::ExactMatch ||
 			    pressed.matches(sc) == QKeySequence::ExactMatch)
 			{
-				it.value()->trigger();
-				m_keyRepeat = false;
-				return;
+				matches.append(it.value());
+				matchNames << it.key();
 			}
+		}
+		// This loop does its own dispatch and so bypasses Qt's ambiguity handling. Firing the
+		// first of several equally valid matches would mutate the document unpredictably
+		// (map order is alphabetical, not meaningful), so fail closed instead: consume the
+		// key, change nothing, and tell the user where to fix it.
+		if (matches.count() > 1)
+		{
+			qWarning() << "Ambiguous shortcut" << pressed.toString() << "is bound to" << matchNames
+			           << "- ignoring it. Resolve the conflict in Preferences > Keyboard Shortcuts.";
+			m_keyRepeat = false;
+			return;
+		}
+		if (matches.count() == 1 && matches.first())
+		{
+			matches.first()->trigger();
+			m_keyRepeat = false;
+			return;
 		}
 	}
 

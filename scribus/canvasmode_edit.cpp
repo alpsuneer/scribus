@@ -102,16 +102,33 @@ void CanvasMode_Edit::keyPressEvent(QKeyEvent *e)
 		{
 			QKeySequence pressed(int(e->modifiers()) | k);
 			const auto& actions = m_ScMW->scrActions;
+			QList< QPointer<ScrAction> > matches;
+			QStringList matchNames;
 			for (auto it = actions.constBegin(); it != actions.constEnd(); ++it)
 			{
 				if (it.value() && it.value()->shortcut() == pressed &&
 				    it.value()->shortcutContext() == Qt::ApplicationShortcut &&
 				    it.value()->isEnabled())
 				{
-					it.value()->trigger();
-					m_keyRepeat = false;
-					return;
+					matches.append(it.value());
+					matchNames << it.key();
 				}
+			}
+			// Same reasoning as CanvasMode::commonkeyPressEvent_Default: this hand-rolled
+			// dispatch replaces Qt's, so it must fail closed on an ambiguous binding rather
+			// than silently firing whichever action happens to sort first.
+			if (matches.count() > 1)
+			{
+				qWarning() << "Ambiguous shortcut" << pressed.toString() << "is bound to" << matchNames
+				           << "- ignoring it. Resolve the conflict in Preferences > Keyboard Shortcuts.";
+				m_keyRepeat = false;
+				return;
+			}
+			if (matches.count() == 1 && matches.first())
+			{
+				matches.first()->trigger();
+				m_keyRepeat = false;
+				return;
 			}
 		}
 	}
