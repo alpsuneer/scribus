@@ -3567,8 +3567,11 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	}
 
 	//Remove uppercase in 1.8 format
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute("LINESPMode"))
 		newStyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMode")));
+	else if (attrs.hasAttribute("LINESPMODE"))
+		newStyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMODE")));
 	else if (attrs.hasAttribute("LineSpacingMode"))
 		newStyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LineSpacingMode")));
 
@@ -6556,8 +6559,11 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		if (attrs.hasAttribute("LineSpacing"))
 			pstyle.setLineSpacing(attrs.valueAsDouble("LineSpacing"));
 	//Remove uppercase in 1.8
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute("LINESPMode"))
 		pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMode", 0)));
+	else if (attrs.hasAttribute("LINESPMODE"))
+		pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMODE", 0)));
 	else
 		if (attrs.hasAttribute("LineSpacingMode"))
 			pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LineSpacingMode", 0)));

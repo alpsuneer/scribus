@@ -3083,8 +3083,12 @@ void Scribus150Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	}
 
 	static const QString LINESPMode("LINESPMode");
+	static const QString LINESPMODE("LINESPMODE");
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute(LINESPMode))
 		newStyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt(LINESPMode)));
+	else if (attrs.hasAttribute(LINESPMODE))
+		newStyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt(LINESPMODE)));
 
 	static const QString LINESP("LINESP");
 	if (attrs.hasAttribute(LINESP))
@@ -5579,8 +5583,11 @@ PageItem* Scribus150Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	ParagraphStyle pstyle;
 	if (attrs.hasAttribute("LINESP"))
 		pstyle.setLineSpacing(attrs.valueAsDouble("LINESP"));
+	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute("LINESPMode"))
 		pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMode", 0)));
+	else if (attrs.hasAttribute("LINESPMODE"))
+		pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMODE", 0)));
 	if (attrs.hasAttribute("ALIGN"))
 		pstyle.setAlignment(static_cast<ParagraphStyle::AlignmentType>(attrs.valueAsInt("ALIGN", 0)));
 	if (attrs.valueAsBool("REVERS"))
