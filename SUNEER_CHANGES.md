@@ -196,7 +196,29 @@
 - Verified: LINESPMODE="1" മാത്രം ഉള്ള file-ൽ 77 style-ഉം Automatic
   ആയി load ആയി; രണ്ട് spelling-ഉം ഉള്ളപ്പോൾ പുതിയത് ജയിച്ചു
 
-### 15. Authors
+### 15. Fix Overflowing Frames (Batch)
+- **Extras > Fix Overflowing Frames** + toolbar button (preflight-ന്റെ അടുത്ത്)
+- പഴയ 1.5.x pages open ചെയ്യുമ്പോൾ ചില frames 1-4% overflow ആകും;
+  ഓരോന്നും കണ്ടുപിടിച്ച് Ctrl+Alt+C ചെയ്യുന്നത് മടുപ്പിക്കുന്ന പണിയാണ്
+- Select All + Ctrl+Alt+C പകരം ഉപയോഗിക്കാൻ പറ്റില്ല — അത് ശരിയായി
+  ഇരിക്കുന്ന frames-ഉം ചെറുതാക്കും, grid നശിക്കും
+- ഈ command **overflow ഉള്ള frames മാത്രം വലുതാക്കും** (grow-only);
+  ബാക്കിയെല്ലാം saved size-ൽ തന്നെ നിൽക്കും
+- Scope: current page (selection ഉണ്ടെങ്കിൽ selected frames മാത്രം).
+  Whole document-ന് പ്രത്യേക menu entry ഉണ്ട്
+- Skip ചെയ്യുന്നവ: chain-ന്റെ അവസാനത്തേത് അല്ലാത്ത frames, note frames,
+  group-നുള്ളിലെ frames, lock ചെയ്ത frames, master page mode
+- **10%-ൽ കൂടുതൽ വളരേണ്ട frames വളർത്തില്ല** — പകരം പേര് സഹിതം
+  report ചെയ്യും (അത് editorial തീരുമാനമാണ്, layout fix അല്ല).
+  "Select Them" അമർത്തിയാൽ ആ frames select ആകും
+- മുഴുവൻ batch-ഉം **ഒറ്റ undo** — ഒരു Ctrl+Z-ൽ എല്ലാം പഴയപടി ആകും
+- ഒരിക്കലും automatic ആയി run ആകില്ല (1863b8f policy)
+- Verified: യഥാർത്ഥ 1.5.6 page-ൽ (46 text frames) "Fixed 3 overflowing
+  frame(s); 1 skipped (would grow more than 10%)" — 3 എണ്ണം വളർന്നു
+  (+3.9%, +4.4%, +4.8%), 42 എണ്ണം തൊട്ടില്ല, ഒന്നും ചെറുതായില്ല,
+  ഒറ്റ undo-യിൽ എല്ലാം restore ആയി
+
+### 16. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
