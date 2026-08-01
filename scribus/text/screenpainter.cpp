@@ -261,9 +261,6 @@ void ScreenPainter::drawGlyphOutline(const GlyphCluster& gc, bool fill)
 		m_painter->translate(gl.xoffset + current_x, - (fontSize() * gl.scaleV) + gl.yoffset );
 
 		FPointArray outline = font().glyphOutline(gl.glyph);
-		// Outward outline: stroke only the outer contours so counters (holes) are untouched.
-		if (outlineOutward())
-			outline = outline.outerContours();
 		double scaleHv = gl.scaleH * fontSize() / 10.0;
 		double scaleVv = gl.scaleV * fontSize() / 10.0;
 		QTransform trans;
