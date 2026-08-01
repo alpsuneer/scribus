@@ -181,7 +181,22 @@
   80 B, kickerline) + 33 next-style links restore ആയി; re-save ചെയ്ത്
   വീണ്ടും open ചെയ്താൽ layout pixel-identical
 
-### 14. Authors
+### 14. Legacy Line Spacing Mode (LINESPMODE)
+- പഴയ ചില pages-ൽ line spacing mode `LINESPMODE` എന്ന് capital-ൽ
+  എഴുതിയിട്ടുണ്ട്, loader വായിച്ചിരുന്നത് `LINESPMode` എന്നും —
+  XML-ൽ അക്ഷരത്തിന്റെ case പ്രധാനമാണ്, അതുകൊണ്ട് ആ value drop ആയി
+  style default (Fixed) ആയി മാറിയിരുന്നു
+- Automatic / Baseline Grid line spacing ഉള്ള പഴയ page open ചെയ്താൽ
+  ഒരു warning-ഉം ഇല്ലാതെ layout മാറിപ്പോകുമായിരുന്നു — [[FullSpan]]
+  പ്രശ്നത്തിന്റെ അതേ വർഗ്ഗം
+- ഇപ്പോൾ ആറ് loader-കളിലും (1.2 / 1.3 / 1.3.4 / 1.5 / 1.7.0 / 1.7.1)
+  രണ്ട് spelling-ഉം സ്വീകരിക്കും; രണ്ടും ഉണ്ടെങ്കിൽ പുതിയതിന് മുൻഗണന
+- Saver-കൾ പഴയപടി `LINESPMode` മാത്രം എഴുതും — ഒരിക്കൽ open ചെയ്ത്
+  save ചെയ്താൽ file normalise ആകും
+- Verified: LINESPMODE="1" മാത്രം ഉള്ള file-ൽ 77 style-ഉം Automatic
+  ആയി load ആയി; രണ്ട് spelling-ഉം ഉള്ളപ്പോൾ പുതിയത് ജയിച്ചു
+
+### 15. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
