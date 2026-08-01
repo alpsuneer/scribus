@@ -218,7 +218,16 @@
   (+3.9%, +4.4%, +4.8%), 42 എണ്ണം തൊട്ടില്ല, ഒന്നും ചെറുതായില്ല,
   ഒറ്റ undo-യിൽ എല്ലാം restore ആയി
 
-### 16. Authors
+### 16. Undo Improvements
+- **Apply Style Chain**: നേരത്തെ Ctrl+Z-ൽ ഒട്ടും undo ആകുമായിരുന്നില്ല —
+  StoryText-ന് സ്വന്തമായി undo record ഇല്ല, അതുകൊണ്ട് style apply
+  ചെയ്തത് undo stack-ൽ എത്തിയിരുന്നില്ല. ഇപ്പോൾ ഒറ്റ undo step
+- **Auto Fit Height (Ctrl+Alt+C)**: പല frames select ചെയ്ത് fit
+  ചെയ്താൽ ഓരോ frame-നും ഓരോ undo step ആയിരുന്നു (12 frames = 12 തവണ
+  Ctrl+Z). ഇപ്പോൾ മുഴുവൻ selection-ഉം ഒറ്റ Ctrl+Z
+- രണ്ടും pure grouping/recording ആണ് — behaviour-ൽ മാറ്റമില്ല
+
+### 17. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
