@@ -50,6 +50,9 @@ for which a new license (GPL+exception) is in place.
 #include <QKeySequence>
 #include <QLabel>
 #include <QList>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QFileInfo>
 #include <QLocale>
 #include <QMdiArea>
 #include <QMdiSubWindow>
@@ -364,7 +367,15 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 	m_doc->addPage(0);
 	m_doc->setGUI(false, this, nullptr);
 	CurrStED = nullptr;
-	QString scribusTitle = QString("Faircode Scribus %1 [Build: " __DATE__ " " __TIME__ "]").arg(ScribusAPI::getVersion());
+	// Build stamp taken from the executable's own mtime, not __DATE__/__TIME__: those are
+	// baked into this file's object file, so they only advance when scribus.cpp itself
+	// recompiles and go stale whenever a build touches only other sources — exactly when
+	// you most want to know whether the rebuild landed. The C locale keeps the month names
+	// English and the string stable, matching what __DATE__ produced; it is a build
+	// identifier, not user-facing text, so it stays outside tr().
+	const QDateTime buildTime = QFileInfo(QCoreApplication::applicationFilePath()).lastModified();
+	QString scribusTitle = QString("Faircode Scribus %1 [Build: %2]")
+			.arg(ScribusAPI::getVersion(), QLocale::c().toString(buildTime, "MMM d yyyy HH:mm:ss"));
 	if (ScribusAPI::isSVN() && ScribusAPI::haveSVNRevision())
 		scribusTitle.append(QString(" (r%1)").arg(ScribusAPI::getSVNRevision()));
 	setWindowTitle(scribusTitle);
