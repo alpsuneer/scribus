@@ -327,6 +327,53 @@ int StyleSelect::getStyle()
 	return ret;
 }
 
+void StyleSelect::hideCapsButtons()
+{
+	allcapsButton->setVisible(false);
+	smallcapsButton->setVisible(false);
+	// Remove from the layout too, so they leave no spacing gap.
+	if (ssLayout)
+	{
+		ssLayout->removeWidget(allcapsButton);
+		ssLayout->removeWidget(smallcapsButton);
+	}
+}
+
+void StyleSelect::removeGroupSpacers()
+{
+	if (!ssLayout)
+		return;
+	for (int i = ssLayout->count() - 1; i >= 0; --i)
+	{
+		QLayoutItem* item = ssLayout->itemAt(i);
+		if (item && item->spacerItem())
+			delete ssLayout->takeAt(i);
+	}
+}
+
+QToolButton* StyleSelect::detachShadowButton()
+{
+	if (ssLayout && shadowButton)
+		ssLayout->removeWidget(shadowButton);
+	return shadowButton;
+}
+
+void StyleSelect::addOutlineLeadingWidget(QWidget* w)
+{
+	if (!w || !ssLayout || !outlineButton)
+		return;
+	int idx = ssLayout->indexOf(outlineButton);
+	if (idx < 0)
+		idx = ssLayout->count();
+	ssLayout->insertWidget(idx, w);
+}
+
+void StyleSelect::setButtonSpacing(int px)
+{
+	if (ssLayout)
+		ssLayout->setSpacing(px);
+}
+
 void StyleSelect::setTypeStyle()
 {
 	if (superscriptButton == sender())

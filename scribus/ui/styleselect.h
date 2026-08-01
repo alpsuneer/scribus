@@ -111,6 +111,22 @@ public:
 	void setStyle(int s);
 	int getStyle();
 
+	// Hide the All Caps / Fake Small Caps buttons on this instance (used by SuneerControlBar)
+	void hideCapsButtons();
+
+	// Access the Outline hold-down popup so callers can add extra controls (e.g. stroke colour)
+	QMenu* outlinePopup() const { return OutlinePop; }
+
+	// Insert a widget immediately to the left of the Outline button (used by SuneerControlBar)
+	void addOutlineLeadingWidget(QWidget* w);
+
+	// Set spacing between the effect buttons on this instance (used by SuneerControlBar)
+	void setButtonSpacing(int px);
+	// Remove the fixed group spacers from the layout (used by SuneerControlBar for even spacing)
+	void removeGroupSpacers();
+	// Remove the Shadow button from this widget's layout and return it (to reposition elsewhere)
+	QToolButton* detachShadowButton();
+
 	ShadowValues* ShadowVal { nullptr };
 	OutlineValues* OutlineVal { nullptr };
 	UnderlineValues* UnderlineVal { nullptr };
