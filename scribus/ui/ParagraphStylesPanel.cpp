@@ -26,6 +26,7 @@
 #include "pageitem_table.h"
 #include "selection.h"
 #include "appmodes.h"
+#include "undomanager.h"
 #include <QMessageBox>
 #include <QDebug>
 #include <QInputDialog>
@@ -1134,6 +1135,16 @@ void ParagraphStylesPanel::applyChainFromStyle(const QString& startStyle)
 	if (!chainStr.isEmpty())
 		chain << chainStr.split(";");
 
+	// StoryText has no undo hooks of its own, so applying styles straight into
+	// itemText records nothing and Ctrl+Z cannot reach it. Wrap the whole chain
+	// in one transaction and log a state per paragraph, exactly as
+	// ScribusDoc::itemSelection_ApplyParagraphStyle() does.
+	UndoManager* undoManager = UndoManager::instance();
+	UndoTransaction chainTransaction;
+	if (UndoManager::undoEnabled())
+		chainTransaction = undoManager->beginTransaction(textFrame->getUName(), textFrame->getUPixmap(),
+		                                                 Um::ApplyTextStyle, startStyle, Um::IFont);
+
 	int pos = paraStart;
 	for (int ci = 0; ci < chain.count() && pos <= len; ++ci)
 	{
@@ -1141,14 +1152,27 @@ void ParagraphStylesPanel::applyChainFromStyle(const QString& startStyle)
 		int pEnd = pos;
 		while (pEnd < len && textFrame->itemText.text(pEnd) != SpecialChars::PARSEP)
 			pEnd++;
-		if (m_doc->paragraphStyles().contains(sn))
+		if (pos < len && m_doc->paragraphStyles().contains(sn))
 		{
 			const ParagraphStyle& ps = m_doc->paragraphStyles().get(sn);
-			for (int p = pos; p <= pEnd && p < len; ++p)
-				textFrame->itemText.applyStyle(p, ps);
+			if (UndoManager::undoEnabled())
+			{
+				auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+				is->set("APPLY_PARASTYLE");
+				is->set("POS", pos);
+				is->setStates(textFrame->itemText.paragraphStyle(pos), ps);
+				undoManager->action(textFrame, is);
+			}
+			// applyStyle() scans forward to the paragraph's terminator and applies
+			// there, so one call per paragraph does the whole paragraph. The old
+			// loop over every character position repeated the same work.
+			textFrame->itemText.applyStyle(pos, ps);
 		}
 		pos = pEnd + 1;
 	}
+
+	if (chainTransaction)
+		chainTransaction.commit();
 
 	textFrame->update();
 	textFrame->invalidateLayout(true);
