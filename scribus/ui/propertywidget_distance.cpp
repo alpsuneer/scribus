@@ -54,6 +54,12 @@ PropertyWidget_Distance::PropertyWidget_Distance(QWidget* parent) : QFrame(paren
 	connect(ScQApp, SIGNAL(iconSetChanged()), this, SLOT(iconSetChange()));
 	connect(ScQApp, SIGNAL(localeChanged()), this, SLOT(localeChange()));
 	connect(ScQApp, SIGNAL(labelVisibilityChanged(bool)), this, SLOT(toggleLabelVisibility(bool)));
+
+	// Hide the Text Distances section (Distance from Left/Right/Top/Bottom spin
+	// boxes plus their labels/icons) from the content properties UI. Signals and
+	// slots are left intact; only the widget is hidden. Columns, column gap, tab
+	// settings and indents remain visible.
+	distanceWidget->hide();
 }
 
 void PropertyWidget_Distance::setMainWindow(ScribusMainWindow* mw)
