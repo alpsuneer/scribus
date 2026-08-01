@@ -3279,6 +3279,27 @@ void Scribus150Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	static const QString KeepTogether("KeepTogether");
 	if (attrs.hasAttribute(KeepTogether))
 		newStyle.setKeepTogether(attrs.valueAsInt(KeepTogether));
+
+	// Span columns. 1.5.x-era files wrote a boolean "FullSpan"; 1.7.1+ writes
+	// "SpanColumns" (0 = none, -1 = all columns, N = N columns). Legacy 1 must
+	// become -1: a literal 1 would mean "span one column", i.e. no span at all.
+	static const QString SpanColumns("SpanColumns");
+	static const QString FullSpan("FullSpan");
+	if (attrs.hasAttribute(SpanColumns))
+		newStyle.setSpanColumns(attrs.valueAsInt(SpanColumns));
+	else if (attrs.hasAttribute(FullSpan))
+	{
+		int fullSpan = attrs.valueAsInt(FullSpan, 0);
+		newStyle.setSpanColumns(fullSpan == 1 ? -1 : fullSpan);
+	}
+
+	// Next style. 1.5.x-era files wrote "nxtStyle", 1.7.1+ writes "NextStyle".
+	static const QString NextStyle("NextStyle");
+	static const QString NxtStyle("nxtStyle");
+	if (attrs.hasAttribute(NextStyle))
+		newStyle.setNextStyle(attrs.valueAsString(NextStyle));
+	else if (attrs.hasAttribute(NxtStyle))
+		newStyle.setNextStyle(attrs.valueAsString(NxtStyle));
 	static const QString BCOLOR("BCOLOR");
 	if (attrs.hasAttribute(BCOLOR))
 		newStyle.setBackgroundColor(attrs.valueAsString(BCOLOR, CommonStrings::None));

@@ -3792,12 +3792,25 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute(KeepTogether))
 		newStyle.setKeepTogether(attrs.valueAsInt(KeepTogether));
 
+	// Span columns: 0 = none, -1 = all columns, N = N columns. Accept the
+	// 1.5.x-era boolean "FullSpan" as a fallback; legacy 1 must become -1,
+	// since a literal 1 would mean "span one column", i.e. no span at all.
 	static const QString SpanColumns("SpanColumns");
+	static const QString FullSpan("FullSpan");
 	if (attrs.hasAttribute(SpanColumns))
 		newStyle.setSpanColumns(attrs.valueAsInt(SpanColumns));
+	else if (attrs.hasAttribute(FullSpan))
+	{
+		int fullSpan = attrs.valueAsInt(FullSpan, 0);
+		newStyle.setSpanColumns(fullSpan == 1 ? -1 : fullSpan);
+	}
+	// Next style: "nxtStyle" is the 1.5.x-era spelling.
 	static const QString NextStyle("NextStyle");
+	static const QString NxtStyle("nxtStyle");
 	if (attrs.hasAttribute(NextStyle))
 		newStyle.setNextStyle(attrs.valueAsString(NextStyle));
+	else if (attrs.hasAttribute(NxtStyle))
+		newStyle.setNextStyle(attrs.valueAsString(NxtStyle));
 	//Remove uppercase in 1.8 format
 	if (attrs.hasAttribute("BCOLOR"))
 		newStyle.setBackgroundColor(attrs.valueAsString("BCOLOR", CommonStrings::None));
