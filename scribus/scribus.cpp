@@ -9875,6 +9875,11 @@ void ScribusMainWindow::ImageEffects()
 		return;
 
 	PageItem *currItem = doc->m_Selection->itemAt(0);
+	// EffectsDialog reads the item's image data straight away, so it is only meaningful for
+	// an image frame that actually has a picture. Reachable with anything selected when the
+	// shortcut is ambiguous, so fail closed rather than trusting the caller.
+	if (!currItem || !currItem->isImageFrame() || !currItem->imageIsAvailable)
+		return;
 	EffectsDialog* dia = new EffectsDialog(this, currItem, doc);
 	if (dia->exec())
 		doc->itemSelection_ApplyImageEffects(dia->effectsList);
@@ -10047,7 +10052,7 @@ void ScribusMainWindow::slotOpenScImageEditor()
 
 void ScribusMainWindow::callImageEditor()
 {
-	if (doc->m_Selection->isEmpty())
+	if (!HaveDoc || !doc || doc->m_Selection->isEmpty())
 		return;
 
 	//NOTE to reviewers: I added my code to this function,
