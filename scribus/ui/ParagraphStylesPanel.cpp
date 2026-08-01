@@ -1317,7 +1317,9 @@ void ParagraphStylesPanel::openColumnConfig()
 void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 {
 	if (!m_doc || !m_mainWindow) return;
-	if (configIndex >= s_columnConfigs.size()) return;
+	// configIndex was captured when the shortcut was created; the config list can have been
+	// edited or shrunk since, so re-validate against the current size (and guard negatives).
+	if (configIndex < 0 || configIndex >= s_columnConfigs.size()) return;
 	const SuneerColumnConfigEntry& e = s_columnConfigs[configIndex];
 	PageItem* selItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
 	PageItem_TextFrame* tf = selItem ? selItem->asTextFrame() : nullptr;
@@ -1406,10 +1408,38 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 	// Force redraw
 }
 
+QMap<QString, QKeySequence> ParagraphStylesPanel::dynamicShortcuts()
+{
+	QMap<QString, QKeySequence> out;
+	for (auto it = s_styleShortcuts.constBegin(); it != s_styleShortcuts.constEnd(); ++it)
+	{
+		if (it.value().isEmpty())
+			continue;
+		out.insert(tr("paragraph style \"%1\"").arg(it.key()), it.value());
+	}
+	for (int i = 0; i < s_columnConfigs.size(); ++i)
+	{
+		const SuneerColumnConfigEntry& e = s_columnConfigs[i];
+		if (e.shortcut.isEmpty())
+			continue;
+		out.insert(tr("column config %1").arg(i + 1), e.shortcut);
+	}
+	return out;
+}
+
 void ParagraphStylesPanel::rebuildColumnShortcuts()
 {
+	// A rebuild can be reached from inside a shortcut's own activated() handler (the slots
+	// below open modal dialogs, which spin a nested event loop). Deleting the emitting
+	// QShortcut outright would unwind into freed memory, so disable it now so it cannot
+	// fire again, and let the event loop reclaim it once the stack is clear.
 	for (QShortcut* sc : m_columnShortcuts)
-		delete sc;
+	{
+		if (!sc)
+			continue;
+		sc->setEnabled(false);
+		sc->deleteLater();
+	}
 	m_columnShortcuts.clear();
 	// Use mainWindow as parent so shortcut works app-wide
 	QWidget* parent = m_mainWindow ? m_mainWindow : (parentWidget() ? parentWidget() : this);
@@ -1434,8 +1464,14 @@ void ParagraphStylesPanel::clearShortcuts() {}
 
 void ParagraphStylesPanel::rebuildShortcuts()
 {
+	// See rebuildColumnShortcuts(): never delete a QShortcut that may be mid-emit.
 	for (QShortcut* sc : m_shortcuts)
-		delete sc;
+	{
+		if (!sc)
+			continue;
+		sc->setEnabled(false);
+		sc->deleteLater();
+	}
 	m_shortcuts.clear();
 
 	QWidget* parent = parentWidget() ? parentWidget() : this;

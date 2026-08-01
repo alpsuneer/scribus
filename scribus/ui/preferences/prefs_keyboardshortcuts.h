@@ -57,8 +57,15 @@ protected:
 	void importKeySet(const QString&);
 	bool exportKeySet(const QString&);
 	QStringList scanForSets();
-	bool checkKey(int code);
-	QString getAction(int code);
+	// excludeAction lets the action currently being edited be skipped, so re-pressing an
+	// action's own shortcut is not reported as a conflict with itself.
+	bool checkKey(int code, const QString& excludeAction = QString());
+	QString getAction(int code, const QString& excludeAction = QString());
+	// Owner label if the sequence belongs to a non-ScrAction shortcut (paragraph-styles
+	// panel), otherwise an empty string. Those cannot be reassigned from this page.
+	QString dynamicShortcutOwner(int code) const;
+	// Clear keySeq from every action except excludeAction, updating their list rows too.
+	void clearConflictingShortcuts(const QKeySequence& keySeq, const QString& excludeAction);
 
 protected slots:
 	void setKeyText();
