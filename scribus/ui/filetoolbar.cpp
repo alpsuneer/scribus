@@ -38,6 +38,7 @@ FileToolBar::FileToolBar(ScribusMainWindow* p) : ScToolBar( tr("File"), "File", 
 	addAction(p->scrActions["fileClose"]);
 	addAction(p->scrActions["filePrint"]);
 	addAction(p->scrActions["toolsPreflightVerifier"]);
+	addAction(p->scrActions["extrasFixOverflowFrames"]);
 	addAction(p->scrActions["fileExportAsPDF"]);
 	fileOpenButtonMenu = new QMenu();
 	QToolButton* tb = dynamic_cast<QToolButton*>(widgetForAction(parent->scrActions["fileOpen"]));

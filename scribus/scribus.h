@@ -96,6 +96,7 @@ class OutlinePalette;
 class PDFToolBar;
 class PSLib;
 class PageItem;
+class PageItem_TextFrame;
 class PagePalette;
 class PageSelector;
 class PrefsContext;
@@ -436,6 +437,9 @@ public slots:
 	void slotEditCopyContents();
 	//! \brief Suneer: autoflow an overflowing text frame onto new pages (linked frames, same master/layout)
 	void suneerAutoflowToNewPages();
+	//! \brief Grow-only autofit over every overflowing text frame in scope.
+	void suneerFixOverflowFrames();
+	void suneerFixOverflowFramesDoc();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor
@@ -660,6 +664,11 @@ protected:
 	void dropEvent( QDropEvent* e) override;
 
 private:
+	//! \brief Shared worker for the two Fix Overflowing Frames entry points.
+	void suneerFixOverflowFramesRun(bool wholeDocument);
+	//! \brief Smallest height at which the frame stops overflowing, or -1 if it
+	//! never does. Leaves the frame at its original height.
+	double suneerMeasureFitHeight(PageItem_TextFrame* tf) const;
     /** init methods */
 	void initSplash(bool showSplash);
 	void initMdiArea();
