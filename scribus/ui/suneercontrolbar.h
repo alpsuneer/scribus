@@ -32,6 +32,8 @@ public:
 	void setDocument(ScribusDoc* doc);
 
 protected:
+	bool eventFilter(QObject* obj, QEvent* ev) override;
+
 	void showEvent(QShowEvent* e) override {
 		QToolBar::showEvent(e);
 		updateGeometry();
@@ -60,7 +62,6 @@ private slots:
 	// Row 1
 	void onFontChanged(const QFont& font = QFont());
 	void onFontSizeChanged(double val);
-	void onTextDistChanged();
 	void onAlignChanged(int align);
 	// Row 2
 	void onStyleChanged(int idx);
@@ -160,7 +161,6 @@ private:
 	void showTextWrapWidgets(bool show);
 	void updateTextWrapControls(PageItem* item);
 	void showLineWidgets(bool show);
-	void syncGapSpinsFromTextFrame(PageItem* item);
 
 	ScribusMainWindow* m_scmw {nullptr};
 	QPointer<ScribusDoc> m_doc;
@@ -170,6 +170,22 @@ private:
 	// ── ROW 1 ─────────────────────────────────
 	QComboBox*      m_fontCombo           {nullptr};
 	bool            m_fontComboPopupShown  {false};
+
+	// ── Live font preview (arrow-key / hover navigation in the font dropdown) ──
+	// Preview applies fonts with undo suppressed, so the original per-run fonts are kept
+	// here and restored when the popup closes. A selection can span several fonts, hence
+	// runs rather than one style: restoring a single style would flatten the others.
+	struct FontPreviewRun   { int start; int length; QString fontName; };
+	struct FontPreviewFrame { QPointer<PageItem> item; QList<FontPreviewRun> runs; };
+	QList<FontPreviewFrame> m_fontPreviewFrames;
+	bool     m_fontPreviewActive  {false};
+	QTimer*  m_fontPreviewTimer   {nullptr};
+	QString  m_fontPreviewPending;
+	QString  m_fontPreviewApplied;
+	void snapshotFontPreview();
+	void applyFontPreview(const QString& fontName);
+	void restoreFontPreview();
+	void endFontPreview();
 public:
 	void focusFontCombo() { m_fontCombo->setFocus(); m_fontCombo->lineEdit()->selectAll(); }
 	QDoubleSpinBox* m_fontSizeSpin        {nullptr};
@@ -198,12 +214,12 @@ public:
 	QSpinBox*       m_columnsSpin         {nullptr};
 	QComboBox*      m_columnGapCombo      {nullptr};
 	QDoubleSpinBox* m_columnGapSpin       {nullptr};
-	QLabel*         m_leftIndentIconLbl   {nullptr};
-	QDoubleSpinBox* m_leftIndentSpin      {nullptr};
-	QLabel*         m_rightIndentIconLbl  {nullptr};
-	QDoubleSpinBox* m_rightIndentSpin     {nullptr};
 	QLabel*         m_firstLineIndentIconLbl {nullptr};
 	QDoubleSpinBox* m_firstLineIndentSpin {nullptr};
+	QLabel*         m_gapBeforeIconLbl    {nullptr};
+	QDoubleSpinBox* m_gapBeforeSpin       {nullptr};
+	QLabel*         m_gapAfterIconLbl     {nullptr};
+	QDoubleSpinBox* m_gapAfterSpin        {nullptr};
 
 	// ── ROW 2 advanced spinboxes ─────────────
 	QLabel*         m_trackingIconLbl     {nullptr};
@@ -281,10 +297,11 @@ public:
 	QToolButton*    m_featherBtn           {nullptr};
 	QToolButton*    m_textFeatherBtn       {nullptr};
 	QToolButton*    m_textBoxBtn           {nullptr};
-	QDoubleSpinBox* m_textDistLeftSpin    {nullptr};
-	QDoubleSpinBox* m_textDistRightSpin   {nullptr};
-	QDoubleSpinBox* m_textDistTopSpin     {nullptr};
-	QDoubleSpinBox* m_textDistBottomSpin  {nullptr};
+	QCheckBox*      m_borderTopChk         {nullptr};
+	QCheckBox*      m_borderBottomChk      {nullptr};
+	QCheckBox*      m_borderLeftChk        {nullptr};
+	QCheckBox*      m_borderRightChk       {nullptr};
+	QDoubleSpinBox* m_borderInsetSpin      {nullptr};
 	QWidget*        m_featherPopup         {nullptr};
 	QDoubleSpinBox* m_featherSpin          {nullptr};
 	QToolButton*    m_featherAllBtn        {nullptr};
@@ -305,6 +322,9 @@ public:
 	QToolButton*    m_textPadLeftMinusBtn  {nullptr};
 	QToolButton*    m_textPadRightPlusBtn  {nullptr};
 	QToolButton*    m_textPadRightMinusBtn {nullptr};
+	// Session-wide toggle: checked → pad buttons adjust internal text distance
+	// (textToFrameDist*); unchecked (default) → external wrap boundary (wrapOffset*)
+	QCheckBox*      m_internalPadChk       {nullptr};
 
 	// Unused — kept for compat
 	QComboBox*      m_paraStyleCombo      {nullptr};
