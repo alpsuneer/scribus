@@ -439,6 +439,8 @@ public slots:
 	void suneerAutoflowToNewPages();
 	//! \brief Grow-only autofit over every overflowing text frame in scope.
 	void suneerFixOverflowFrames();
+	//! \brief Add or remove the News Browser tab in the Paragraph Styles docker.
+	void suneerSetNewsBrowserTabVisible(bool visible);
 	void suneerFixOverflowFramesDoc();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();

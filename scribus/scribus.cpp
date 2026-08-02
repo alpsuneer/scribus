@@ -799,7 +799,13 @@ void ScribusMainWindow::initPalettes()
 	// News Browser Panel
 	m_suneerNewsPanel = new SuneerNewsPanel(this);
 	m_suneerNewsPanel->setVisible(false);  // ADS tab-ൽ widget use ചെയ്യും
-	scrActions["toolsNewsPanel"]->setCheckable(true);
+	// Not a view toggle any more: the News Browser is a tab in the Paragraph
+	// Styles docker, so this menu entry just brings that tab to the front.
+	scrActions["toolsNewsPanel"]->setCheckable(false);
+	connect(scrActions["toolsNewsPanel"], &QAction::triggered, this, [this]() {
+		if (m_suneerNewsPanel && paragraphStylesPanelTabs)
+			paragraphStylesPanelTabs->showExtraTab(m_suneerNewsPanel->widget());
+	});
 	if (!PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled) {
 		scrActions["toolsNewsPanel"]->setVisible(false);
 	}
@@ -943,21 +949,11 @@ void ScribusMainWindow::initPalettes()
 
 	auto* stylesArea = dockManager->addDockWidget(ads::CenterDockWidgetArea, stylesDock, dockManager->contentPalette->dockAreaWidget());
 
-	// ✅ News Panel — same tab area as Paragraph Styles
-	if (stylesArea && PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled) {
-		CDockWidget* newsDock = new CDockWidget(tr("News Browser"), this);
-		// SuneerNewsPanel-ന്റെ inner widget extract ചെയ്യൂ
-		QWidget* newsInnerWidget = m_suneerNewsPanel->widget();
-		if (!newsInnerWidget) {
-			newsInnerWidget = new QWidget();
-			QVBoxLayout* nl = new QVBoxLayout(newsInnerWidget);
-			nl->addWidget(new QLabel("News Browser"));
-		}
-		newsDock->setWidget(newsInnerWidget);
-		newsDock->setToggleViewAction(scrActions["toolsNewsPanel"]);
-		dockManager->addDockWidget(ads::CenterDockWidgetArea, newsDock, stylesArea);
-		connect(scrActions["toolsNewsPanel"], &QAction::triggered, newsDock, &CDockWidget::toggleView);
-	}
+	// News Browser lives as the third tab inside the Paragraph Styles docker,
+	// after Styles and Design Style. m_suneerNewsPanel stays alive as the owner
+	// of the network manager and all the slots; only its visible widget moves.
+	suneerSetNewsBrowserTabVisible(
+		PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled);
 	if (stylesArea)
 	{
 		for (auto* btn : stylesArea->findChildren<QAbstractButton*>())
@@ -7310,12 +7306,8 @@ void ScribusMainWindow::slotPrefsOrg()
 	m_prefsManager.setNewPrefs(newPrefs);
 	m_prefsManager.applyLoadedShortCuts();
 	enforceStyledClipboardShortcuts();
-	// News Browser panel show/hide based on preference
-	if (m_suneerNewsPanel) {
-		bool newsBrowserEnabled = newPrefs.experimentalFeaturePrefs.newsBrowserEnabled;
-		m_suneerNewsPanel->setVisible(newsBrowserEnabled);
-		scrActions["toolsNewsPanel"]->setVisible(newsBrowserEnabled);
-	}
+	// News Browser tab added/removed live — no restart needed.
+	suneerSetNewsBrowserTabVisible(newPrefs.experimentalFeaturePrefs.newsBrowserEnabled);
 
 	//TODO: and the other dirs?
 	if (oldPrefs.pathPrefs.documents != newPrefs.pathPrefs.documents)
@@ -8766,6 +8758,27 @@ void ScribusMainWindow::suneerScaleImageDown()
 	doc->changed();
 }
 
+
+// Adds or removes the News Browser tab in the Paragraph Styles docker.
+// The tab is absent entirely when the feature is off, so newsrooms that do not
+// use the database see a clean two-tab docker rather than an empty third tab.
+void ScribusMainWindow::suneerSetNewsBrowserTabVisible(bool visible)
+{
+	if (!m_suneerNewsPanel || !paragraphStylesPanelTabs)
+		return;
+	QWidget* newsInner = m_suneerNewsPanel->widget();
+	if (!newsInner)
+		return;
+	if (scrActions.contains("toolsNewsPanel") && scrActions["toolsNewsPanel"])
+		scrActions["toolsNewsPanel"]->setVisible(visible);
+	if (visible)
+	{
+		newsInner->show();
+		paragraphStylesPanelTabs->addExtraTab(newsInner, tr("News Browser"));
+	}
+	else
+		paragraphStylesPanelTabs->removeExtraTab(newsInner);
+}
 
 void ScribusMainWindow::suneerAutoFitHeight()
 {
