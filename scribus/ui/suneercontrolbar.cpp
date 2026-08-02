@@ -3941,16 +3941,22 @@ void SuneerControlBar::onTextFrameBox()
 	const bool left   = !m_borderLeftChk   || m_borderLeftChk->isChecked();
 	const bool right  = !m_borderRightChk  || m_borderRightChk->isChecked();
 
+	// One undo step for the whole press. Safe to group now that the per-side
+	// flags record a state of their own: before that, grouping would have
+	// produced a single Ctrl+Z that restored the stroke and insets but left the
+	// edges as set — a partial revert is worse than several complete ones.
+	UndoTransaction borderTransaction;
+	if (UndoManager::undoEnabled())
+		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                                             Um::ObjectFrame, QString(), Um::IBorder);
+
 	for (int i = 0; i < doc->m_Selection->count(); ++i)
 	{
 		PageItem* item = doc->m_Selection->itemAt(i);
 		if (!item || !item->isTextFrame()) continue;
 
 		// Per-side border flags (rendered by PageItem::DrawObj_Post etc.)
-		item->TopLine    = top;
-		item->BottomLine = bottom;
-		item->LeftLine   = left;
-		item->RightLine  = right;
+		item->setSideBorders(top, bottom, left, right);
 
 		// Border stroke used by the selected sides; if none selected, no border.
 		if (top || bottom || left || right)
@@ -3969,6 +3975,8 @@ void SuneerControlBar::onTextFrameBox()
 
 		item->update();
 	}
+	if (borderTransaction)
+		borderTransaction.commit();
 	doc->regionsChanged()->update(QRect());
 	doc->changed();
 }

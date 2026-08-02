@@ -1126,6 +1126,8 @@ public: // Start public functions
 	void setWrapOffsetLeft(double v)   { m_wrapOffsetLeft   = v; checkTextFlowInteractions(); }
 	void setWrapOffsetRight(double v)  { m_wrapOffsetRight  = v; checkTextFlowInteractions(); }
 	void setWrapOffsets(double top, double bottom, double left, double right);
+	//! \brief Set the per-side frame border flags as one undoable change.
+	void setSideBorders(bool top, bool bottom, bool left, bool right);
 
 	//! \brief Suneer: copy frame layout properties (columns, gap, padding, wrap, textFlow) from
 	//! another frame. Width/height are NOT copied (callers set geometry separately).
@@ -1584,6 +1586,7 @@ protected: // Start protected functions
 	void restoreColumnsGap(SimpleState *state, bool isUndo);
 	//! \brief Suneer: undo/redo of external wrap offsets (setWrapOffsets records no undo itself)
 	void restoreWrapOffsets(SimpleState *state, bool isUndo);
+	void restoreSideBorders(SimpleState *state, bool isUndo);
 	void restoreConnectPath(SimpleState *state, bool isUndo);
 	void restoreContourLine(SimpleState *state, bool isUndo);
 	void restoreCornerRadius(SimpleState *state, bool isUndo);

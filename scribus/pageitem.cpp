@@ -4542,6 +4542,34 @@ void PageItem::setWrapOffsets(double top, double bottom, double left, double rig
 	m_Doc->changed();
 }
 
+void PageItem::setSideBorders(bool top, bool bottom, bool left, bool right)
+{
+	// The four flags are a single user-facing choice ("which edges are stroked"),
+	// so they get one state between them. Without this they were the only part of
+	// the border button that undo could not reach, which made a single Ctrl+Z
+	// restore the stroke and insets but leave the edges as the user had set them.
+	if (UndoManager::undoEnabled()
+		&& (TopLine != top || BottomLine != bottom
+			|| LeftLine != left || RightLine != right))
+	{
+		auto *ss = new SimpleState(Um::ObjectFrame, QString(), Um::IBorder);
+		ss->set("SIDE_BORDERS");
+		ss->set("OLD_TOP",    TopLine);
+		ss->set("OLD_BOTTOM", BottomLine);
+		ss->set("OLD_LEFT",   LeftLine);
+		ss->set("OLD_RIGHT",  RightLine);
+		ss->set("NEW_TOP",    top);
+		ss->set("NEW_BOTTOM", bottom);
+		ss->set("NEW_LEFT",   left);
+		ss->set("NEW_RIGHT",  right);
+		undoManager->action(this, ss);
+	}
+	TopLine    = top;
+	BottomLine = bottom;
+	LeftLine   = left;
+	RightLine  = right;
+}
+
 void PageItem::setTextFlowMode(TextFlowMode mode)
 {
 	if (m_textFlowMode == mode)
@@ -4981,6 +5009,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreColumns(ss, isUndo);
 		else if (ss->contains("COLUMNSGAP"))
 			restoreColumnsGap(ss, isUndo);
+		else if (ss->contains("SIDE_BORDERS"))
+			restoreSideBorders(ss, isUndo);
 		else if (ss->contains("SUNEER_WRAPOFFSETS"))
 			restoreWrapOffsets(ss, isUndo);
 		else if (ss->contains("LINE_SHADE"))
@@ -6991,6 +7021,16 @@ void PageItem::restoreColumnsGap(SimpleState *ss, bool isUndo)
 		m_columnGap = ss->getDouble("OLD_COLUMNS");
 	else
 		m_columnGap = ss->getDouble("NEW_COLUMNS");
+	update();
+}
+
+void PageItem::restoreSideBorders(SimpleState *state, bool isUndo)
+{
+	const QString prefix = isUndo ? QString("OLD_") : QString("NEW_");
+	TopLine    = state->getBool(prefix + "TOP");
+	BottomLine = state->getBool(prefix + "BOTTOM");
+	LeftLine   = state->getBool(prefix + "LEFT");
+	RightLine  = state->getBool(prefix + "RIGHT");
 	update();
 }
 
