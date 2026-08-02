@@ -227,7 +227,22 @@
   Ctrl+Z). ഇപ്പോൾ മുഴുവൻ selection-ഉം ഒറ്റ Ctrl+Z
 - രണ്ടും pure grouping/recording ആണ് — behaviour-ൽ മാറ്റമില്ല
 
-### 17. Authors
+### 17. News Browser — Paragraph Styles Docker-ൽ ഒരു Tab ആയി
+- Paragraph Styles docker-ന്റെ tab bar ഇപ്പോൾ:
+  **[ Styles ] [ Design Style ] [ News Browser ]**
+- നേരത്തെ News Browser പുറത്തെ dock tab bar-ൽ ആയിരുന്നു — ഒരേ panel-ന്
+  രണ്ട് tab bar. ഇപ്പോൾ ഒറ്റ tab bar
+- **SR Menu > Enable News Browser Panel** setting പഴയപടി പ്രവർത്തിക്കും:
+  OFF ആണെങ്കിൽ tab കാണിക്കില്ല (ശൂന്യമായ tab അല്ല, tab തന്നെ ഇല്ല)
+- ഇപ്പോൾ setting മാറ്റിയാൽ **ഉടനെ** tab വരും/പോകും — restart വേണ്ട
+  (നേരത്തെ restart വേണമായിരുന്നു, പക്ഷേ അത് എവിടെയും പറഞ്ഞിരുന്നില്ല)
+- News Browser-ന്റെ എല്ലാ പ്രവർത്തനവും അതേപടി: edition/page/date,
+  Fetch News, Select All, place — ഒന്നും മാറിയിട്ടില്ല
+- Tab മാറുമ്പോൾ docker-ന്റെ വീതി മാറില്ല (scroll area ഉപയോഗിക്കുന്നു)
+- Windows menu-വിലെ "News Browser" ഇപ്പോൾ ആ tab-ലേക്ക് കൊണ്ടുപോകും
+- പഴയ layout-കളും fresh install-ഉം പഴയപടി open ആകും
+
+### 18. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
