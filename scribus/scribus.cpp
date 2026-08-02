@@ -8698,6 +8698,9 @@ void ScribusMainWindow::suneerEnlargeImageSize()
 	PageItem* item = doc->m_Selection->itemAt(0);
 	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
 	item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
+	// setImageXYScale() records nothing on its own; checkChanges() turns the
+	// change into an IMAGE_SCALE undo state. One state, so no transaction.
+	item->checkChanges();
 	item->update();
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
@@ -8709,6 +8712,9 @@ void ScribusMainWindow::suneerReduceImageSize()
 	PageItem* item = doc->m_Selection->itemAt(0);
 	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
 	item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
+	// setImageXYScale() records nothing on its own; checkChanges() turns the
+	// change into an IMAGE_SCALE undo state. One state, so no transaction.
+	item->checkChanges();
 	item->update();
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
@@ -8719,6 +8725,16 @@ void ScribusMainWindow::suneerScaleImageUp()
 	if (!doc || doc->m_Selection->isEmpty()) return;
 	PageItem* item = doc->m_Selection->itemAt(0);
 	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+
+	// sizeItem() records the frame resize itself, but the image scale and offset
+	// setters record nothing. Without checkChanges() below, undo restored the
+	// frame and left the picture scaled and shifted inside it — a revert that
+	// looks complete and is not. The transaction keeps the three together.
+	UndoTransaction scaleTransaction;
+	if (UndoManager::undoEnabled())
+		scaleTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                   Um::ImageScale, QString(), Um::IMove);
+
 	if (doc->appMode == modeEdit)
 	{
 		item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
@@ -8731,6 +8747,11 @@ void ScribusMainWindow::suneerScaleImageUp()
 		item->setImageXYScale(item->imageXScale() * 1.05, item->imageYScale() * 1.05);
 		item->setImageXYOffset(newOffX, newOffY);
 	}
+	// Turns the mutations above into IMAGE_SCALE / IMAGE_OFFSET undo states.
+	item->checkChanges();
+	if (scaleTransaction)
+		scaleTransaction.commit();
+
 	item->update();
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
@@ -8741,6 +8762,16 @@ void ScribusMainWindow::suneerScaleImageDown()
 	if (!doc || doc->m_Selection->isEmpty()) return;
 	PageItem* item = doc->m_Selection->itemAt(0);
 	if (!item || !item->isImageFrame() || !item->imageIsAvailable) return;
+
+	// sizeItem() records the frame resize itself, but the image scale and offset
+	// setters record nothing. Without checkChanges() below, undo restored the
+	// frame and left the picture scaled and shifted inside it — a revert that
+	// looks complete and is not. The transaction keeps the three together.
+	UndoTransaction scaleTransaction;
+	if (UndoManager::undoEnabled())
+		scaleTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                   Um::ImageScale, QString(), Um::IMove);
+
 	if (doc->appMode == modeEdit)
 	{
 		item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
@@ -8753,6 +8784,11 @@ void ScribusMainWindow::suneerScaleImageDown()
 		item->setImageXYScale(item->imageXScale() * 0.95, item->imageYScale() * 0.95);
 		item->setImageXYOffset(newOffX, newOffY);
 	}
+	// Turns the mutations above into IMAGE_SCALE / IMAGE_OFFSET undo states.
+	item->checkChanges();
+	if (scaleTransaction)
+		scaleTransaction.commit();
+
 	item->update();
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
