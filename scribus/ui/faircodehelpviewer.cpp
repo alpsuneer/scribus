@@ -10,6 +10,7 @@ for which a new license (GPL+exception) is in place.
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QPushButton>
 #include <QTextBrowser>
 #include <QToolButton>
@@ -38,6 +39,13 @@ FaircodeHelpViewer::FaircodeHelpViewer(QWidget* parent)
 	m_browser->setOpenLinks(true);
 	layout->addWidget(m_browser);
 
+	// Which file is in effect is worth stating outright: with a personal copy
+	// shadowing the installed one, editing the wrong file is an easy mistake.
+	m_sourceLabel = new QLabel(this);
+	m_sourceLabel->setStyleSheet(QStringLiteral("color: #777; font-size: 8pt;"));
+	m_sourceLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	layout->addWidget(m_sourceLabel);
+
 	auto* buttons = new QDialogButtonBox(this);
 	auto* homeButton = buttons->addButton(tr("Contents"), QDialogButtonBox::ActionRole);
 	buttons->addButton(QDialogButtonBox::Close);
@@ -46,32 +54,65 @@ FaircodeHelpViewer::FaircodeHelpViewer(QWidget* parent)
 	layout->addWidget(buttons);
 }
 
-QString FaircodeHelpViewer::helpFilePath()
+QString FaircodeHelpViewer::userHelpFilePath()
+{
+	return ScPaths::applicationDataDir() + "help/faircode/faircode-help.html";
+}
+
+QString FaircodeHelpViewer::installedHelpFilePath()
 {
 	return ScPaths::instance().shareDir() + "help/faircode/faircode-help.html";
 }
 
+QString FaircodeHelpViewer::helpFilePath()
+{
+	// A per-user copy wins, so newsroom wording can be adjusted on a machine
+	// without root and without being overwritten by the next install.
+	const QString userPath = userHelpFilePath();
+	if (QFileInfo::exists(userPath))
+		return userPath;
+	return installedHelpFilePath();
+}
+
 bool FaircodeHelpViewer::loadContent()
 {
-	if (m_loaded)
-		return true;
-
 	const QString path = helpFilePath();
-	if (!QFileInfo::exists(path))
+	const QFileInfo info(path);
+
+	if (!info.exists())
 	{
-		// Say where the file was expected rather than showing an empty window:
-		// on a part-installed tree that is the whole diagnosis.
+		// Name both candidates rather than showing an empty window: on a
+		// part-installed tree that is the whole diagnosis.
 		m_browser->setHtml(tr("<h3>Help file not found</h3>"
-		                      "<p>Expected it at:</p><p><tt>%1</tt></p>"
+		                      "<p>Looked for a personal copy at:</p><p><tt>%1</tt></p>"
+		                      "<p>then the installed copy at:</p><p><tt>%2</tt></p>"
 		                      "<p>Reinstall Scribus, or check that the help resources "
-		                      "were installed.</p>").arg(path));
+		                      "were installed.</p>")
+		                   .arg(userHelpFilePath(), installedHelpFilePath()));
+		m_loadedPath.clear();
+		if (m_sourceLabel)
+			m_sourceLabel->clear();
 		return false;
 	}
+
+	// Re-read when the file has been edited since it was last shown, so wording
+	// can be tweaked and checked without restarting Scribus.
+	if (path == m_loadedPath && info.lastModified() == m_loadedStamp)
+		return true;
 
 	// setSource() resolves relative links (images, css) against the file's own
 	// directory, which keeps the content file free of absolute paths.
 	m_browser->setSource(QUrl::fromLocalFile(path));
-	m_loaded = true;
+	m_loadedPath = path;
+	m_loadedStamp = info.lastModified();
+
+	if (m_sourceLabel)
+	{
+		const bool isUserCopy = (path == userHelpFilePath());
+		m_sourceLabel->setText(isUserCopy
+			? tr("Personal copy: %1").arg(path)
+			: tr("Installed copy: %1").arg(path));
+	}
 	return true;
 }
 
