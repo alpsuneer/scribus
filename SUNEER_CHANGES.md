@@ -242,7 +242,25 @@
 - Windows menu-വിലെ "News Browser" ഇപ്പോൾ ആ tab-ലേക്ക് കൊണ്ടുപോകും
 - പഴയ layout-കളും fresh install-ഉം പഴയപടി open ആകും
 
-### 18. Authors
+### 18. In-App Help (? Buttons)
+- Panel-കളുടെ tab bar-ന്റെ വലതു മൂലയിൽ ഒരു ചെറിയ **?** button
+- അമർത്തിയാൽ ആ tab-ന്റെ സഹായം നേരിട്ട് തുറക്കും (Malayalam-ൽ)
+- മൂന്ന് ? button, ഏഴ് വിഷയം:
+  - **Paragraph Styles docker** — Styles / Design Style / News Browser
+  - **Style Manager** — Paragraph Rules / Paragraph Shading /
+    Nested Styles / Image Bullets
+  - **News Browser** panel-ന്റെ header-ൽ ഒരെണ്ണം
+- എല്ലാം ഒരേ help window തന്നെ ഉപയോഗിക്കും; വീണ്ടും അമർത്തിയാൽ
+  പുതിയ window വരില്ല, ഉള്ളത് തന്നെ ആ ഭാഗത്തേക്ക് പോകും
+- ഉള്ളടക്കം compositor-ന് വേണ്ടിയാണ്: എന്ത് ചെയ്യും, എപ്പോൾ ഉപയോഗിക്കും,
+  step by step, തെറ്റിയാൽ എന്ത് നോക്കണം
+- News Browser-ന്റെ ഭാഗത്ത് **API URL** ആണ് പറയുന്നത് —
+  ഇത് database connection അല്ല, web API ആണ്
+- Help text ഒരു **HTML file** ആണ്:
+  `/usr/local/share/scribus/help/faircode/faircode-help.html`.
+  അത് edit ചെയ്താൽ മതി — Scribus വീണ്ടും build ചെയ്യേണ്ട
+
+### 19. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
