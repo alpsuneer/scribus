@@ -7,11 +7,14 @@ for which a new license (GPL+exception) is in place.
 #ifndef FAIRCODEHELPVIEWER_H
 #define FAIRCODEHELPVIEWER_H
 
+#include <QDateTime>
 #include <QDialog>
 #include <QPointer>
+#include <QString>
 
 #include "scribusapi.h"
 
+class QLabel;
 class QTextBrowser;
 class QToolButton;
 
@@ -44,12 +47,22 @@ protected:
 private slots:
 	void onHomeClicked();
 
+public:
+	//! \brief Editable per-user copy, which wins over the installed one if present.
+	static QString userHelpFilePath();
+	//! \brief Read-only copy shipped with the package.
+	static QString installedHelpFilePath();
+
 private:
+	//! \brief Whichever of the two is in effect, user copy first.
 	static QString helpFilePath();
+	//! \brief (Re)read the file if the path or its timestamp has changed.
 	bool loadContent();
 
 	QTextBrowser* m_browser {nullptr};
-	bool m_loaded {false};
+	QLabel* m_sourceLabel {nullptr};
+	QString m_loadedPath;
+	QDateTime m_loadedStamp;
 
 	static QPointer<FaircodeHelpViewer> s_instance;
 };
