@@ -8450,6 +8450,45 @@ void ScribusMainWindow::suneerTextToTable()
 	doc->changed();
 }
 
+// StoryText has no undo hooks of its own, so applying styles straight into it
+// leaves nothing for Ctrl+Z. These two mirror the states that
+// ScribusDoc::itemSelection_ApplyCharStyle() and itemSelection_ApplyParagraphStyle()
+// record, which PageItem::restoreCharStyle()/restoreParagraphStyle() already know
+// how to reverse.
+namespace
+{
+	void suneerRecordAndApplyCharStyle(UndoManager* um, PageItem* item, StoryText& text,
+	                                   int start, int length, const CharStyle& cs)
+	{
+		if (length <= 0)
+			return;
+		if (UndoManager::undoEnabled())
+		{
+			auto* is = new ScOldNewState<CharStyle>(Um::ApplyTextStyle);
+			is->set("APPLY_CHARSTYLE");
+			is->set("START", start);
+			is->set("LENGTH", length);
+			is->setStates(text.charStyle(start), cs);
+			um->action(item, is);
+		}
+		text.applyCharStyle(start, length, cs);
+	}
+
+	void suneerRecordAndApplyParaStyle(UndoManager* um, PageItem* item, StoryText& text,
+	                                   int pos, const ParagraphStyle& ps)
+	{
+		if (UndoManager::undoEnabled())
+		{
+			auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+			is->set("APPLY_PARASTYLE");
+			is->set("POS", pos);
+			is->setStates(text.paragraphStyle(pos), ps);
+			um->action(item, is);
+		}
+		text.applyStyle(pos, ps);
+	}
+}
+
 void ScribusMainWindow::suneerEnlargeTextSize()
 {
 	if (!doc || doc->m_Selection->isEmpty()) return;
@@ -8471,25 +8510,43 @@ void ScribusMainWindow::suneerEnlargeTextSize()
 			end = text.endOfParagraph(text.nrOfParagraph(cursorPos));
 		}
 	}
-	// Font size change
-	for (int i = start; i < end; ++i)
+	// One undo step for the whole press: the size change spans many runs and the
+	// line spacing change rides along with it.
+	UndoTransaction sizeTransaction;
+	if (UndoManager::undoEnabled())
+		sizeTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                  Um::ApplyTextStyle, QString(), Um::IFont);
+
+	// Font size change. Applied per run of equal size rather than per character:
+	// the new size depends only on the old one, so characters that share a size
+	// share a result — and one undo state per run beats one per character.
+	int runStart = start;
+	while (runStart < end)
 	{
+		const double runSize = text.charStyle(runStart).fontSize();
+		int runEnd = runStart;
+		while (runEnd < end && text.charStyle(runEnd).fontSize() == runSize)
+			++runEnd;
 		CharStyle cs;
-		double currentSize = text.charStyle(i).fontSize() / 10.0;
+		double currentSize = runSize / 10.0;
 		cs.setFontSize(qRound(currentSize * 10) + 3);
-		text.applyCharStyle(i, 1, cs);
+		suneerRecordAndApplyCharStyle(m_undoManager, item, text, runStart, runEnd - runStart, cs);
+		runStart = runEnd;
 	}
 	// Line spacing proportionally change
 	{
-		int paraNo = text.nrOfParagraph(start);
 		ParagraphStyle ps = text.paragraphStyle(start);
 		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
 		{
 			double currentLS = ps.lineSpacing();
 			ps.setLineSpacing(currentLS + 0.3);
-			text.applyStyle(start, ps);
+			suneerRecordAndApplyParaStyle(m_undoManager, item, text, start, ps);
 		}
 	}
+
+	if (sizeTransaction)
+		sizeTransaction.commit();
+
 	item->invalidateLayout();
 	item->update();
 	doc->regionsChanged()->update(QRectF());
@@ -8517,13 +8574,25 @@ void ScribusMainWindow::suneerReduceTextSize()
 			end = text.endOfParagraph(text.nrOfParagraph(cursorPos));
 		}
 	}
-	// Font size change
-	for (int i = start; i < end; ++i)
+	// One undo step for the whole press; see suneerEnlargeTextSize().
+	UndoTransaction sizeTransaction;
+	if (UndoManager::undoEnabled())
+		sizeTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                  Um::ApplyTextStyle, QString(), Um::IFont);
+
+	// Font size change, one state per run of equal size.
+	int runStart = start;
+	while (runStart < end)
 	{
+		const double runSize = text.charStyle(runStart).fontSize();
+		int runEnd = runStart;
+		while (runEnd < end && text.charStyle(runEnd).fontSize() == runSize)
+			++runEnd;
 		CharStyle cs;
-		double currentSize = text.charStyle(i).fontSize() / 10.0;
+		double currentSize = runSize / 10.0;
 		cs.setFontSize(qMax(10, qRound(currentSize * 10) - 3));
-		text.applyCharStyle(i, 1, cs);
+		suneerRecordAndApplyCharStyle(m_undoManager, item, text, runStart, runEnd - runStart, cs);
+		runStart = runEnd;
 	}
 	// Line spacing proportionally change
 	{
@@ -8532,9 +8601,13 @@ void ScribusMainWindow::suneerReduceTextSize()
 		{
 			double currentLS = ps.lineSpacing();
 			ps.setLineSpacing(qMax(1.0, currentLS - 0.3));
-			text.applyStyle(start, ps);
+			suneerRecordAndApplyParaStyle(m_undoManager, item, text, start, ps);
 		}
 	}
+
+	if (sizeTransaction)
+		sizeTransaction.commit();
+
 	item->invalidateLayout();
 	item->update();
 	doc->regionsChanged()->update(QRectF());
@@ -8562,6 +8635,11 @@ void ScribusMainWindow::suneerEnlargeLineSpacing()
     }
     int startPara = text.nrOfParagraph(start);
     int endPara = text.nrOfParagraph(qMax(start, end - 1));
+    // One undo step per press, covering every paragraph in scope.
+    UndoTransaction lsTransaction;
+    if (UndoManager::undoEnabled())
+        lsTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+                                                        Um::SetStyle, QString(), Um::IFont);
     for (int para = startPara; para <= endPara; para++)
     {
         int paraStart = text.startOfParagraph(para);
@@ -8569,8 +8647,10 @@ void ScribusMainWindow::suneerEnlargeLineSpacing()
         double currentLS = ps.lineSpacing();
         ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
         ps.setLineSpacing(currentLS + 1.0);
-        text.applyStyle(paraStart, ps);
+        suneerRecordAndApplyParaStyle(m_undoManager, item, text, paraStart, ps);
     }
+    if (lsTransaction)
+        lsTransaction.commit();
     item->invalidateLayout();
     item->update();
     doc->regionsChanged()->update(QRectF());
@@ -8598,6 +8678,11 @@ void ScribusMainWindow::suneerReduceLineSpacing()
     }
     int startPara = text.nrOfParagraph(start);
     int endPara = text.nrOfParagraph(qMax(start, end - 1));
+    // One undo step per press, covering every paragraph in scope.
+    UndoTransaction lsTransaction;
+    if (UndoManager::undoEnabled())
+        lsTransaction = m_undoManager->beginTransaction(item->getUName(), item->getUPixmap(),
+                                                        Um::SetStyle, QString(), Um::IFont);
     for (int para = startPara; para <= endPara; para++)
     {
         int paraStart = text.startOfParagraph(para);
@@ -8605,8 +8690,10 @@ void ScribusMainWindow::suneerReduceLineSpacing()
         double currentLS = ps.lineSpacing();
         ps.setLineSpacingMode(ParagraphStyle::FixedLineSpacing);
         ps.setLineSpacing(qMax(1.0, currentLS - 1.0));
-        text.applyStyle(paraStart, ps);
+        suneerRecordAndApplyParaStyle(m_undoManager, item, text, paraStart, ps);
     }
+    if (lsTransaction)
+        lsTransaction.commit();
     item->invalidateLayout();
     item->update();
     doc->regionsChanged()->update(QRectF());
