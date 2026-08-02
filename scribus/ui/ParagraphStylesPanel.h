@@ -4,6 +4,7 @@
 #define PARAGRAPHSTYLESPANEL_H
 #include <QPointer>
 #include <QDockWidget>
+#include <QTabWidget>
 #include <QListWidget>
 #include <QLineEdit>
 #include <QPushButton>
@@ -35,6 +36,16 @@ public:
 	// preferences page checks against. Expose them so that page can still detect conflicts.
 	// Returns a human-readable owner label -> key sequence map; empty sequences are omitted.
 	static QMap<QString, QKeySequence> dynamicShortcuts();
+
+	//! \brief Append a tab after the built-in Styles and Design Style tabs.
+	//! Used for the News Browser, which is optional and owned elsewhere: the
+	//! widget is only reparented in, never taken ownership of beyond Qt's
+	//! normal parenting, and removeExtraTab() puts it back where it was.
+	void addExtraTab(QWidget* page, const QString& label);
+	void removeExtraTab(QWidget* page);
+	bool hasExtraTab(QWidget* page) const;
+	//! \brief Bring an extra tab to the front. Returns false if absent.
+	bool showExtraTab(QWidget* page);
 public slots:
 	void updateStylesList();
 	void applyChainCurrentStyle();
@@ -70,6 +81,7 @@ private:
 	ScribusMainWindow* m_mainWindow;
 	
 	QListWidget* m_stylesList;
+	QTabWidget* m_tabWidget {nullptr};
 	QLineEdit* m_searchBox;
 	QGridLayout* m_iconsGrid = nullptr;
 	QWidget*     m_designTab  = nullptr;

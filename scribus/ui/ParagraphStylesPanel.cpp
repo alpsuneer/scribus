@@ -673,6 +673,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 
 	// ── Tab Widget ──
 	QTabWidget* tabWidget = new QTabWidget(this);
+	m_tabWidget = tabWidget;
 	tabWidget->setStyleSheet(
 		"QTabWidget::pane { border: 1px solid #ddd; }"
 		"QTabBar::tab { padding: 6px 12px; font-size: 10pt; }"
@@ -1178,6 +1179,73 @@ void ParagraphStylesPanel::applyChainFromStyle(const QString& startStyle)
 	textFrame->invalidateLayout(true);
 	m_doc->changed();
 	m_doc->regionsChanged()->update(QRectF());
+}
+
+// The News Browser tab is optional and its widget belongs to SuneerNewsPanel,
+// which stays alive as the owner of the network manager and every slot behind
+// the UI. Only the visible widget is reparented in here; nothing about the
+// panel's own QShortcut lifetime handling is touched.
+void ParagraphStylesPanel::addExtraTab(QWidget* page, const QString& label)
+{
+	if (!m_tabWidget || !page || m_tabWidget->indexOf(page) >= 0)
+		return;
+	// A scroll area keeps a wide guest widget from imposing its minimum width on
+	// the whole docker, which would make the panel jump when switching tabs.
+	QScrollArea* scroller = new QScrollArea(m_tabWidget);
+	scroller->setWidgetResizable(true);
+	scroller->setFrameShape(QFrame::NoFrame);
+	scroller->setWidget(page);
+	scroller->setProperty("suneerExtraTabPage", QVariant::fromValue<QObject*>(page));
+	m_tabWidget->addTab(scroller, label);
+}
+
+void ParagraphStylesPanel::removeExtraTab(QWidget* page)
+{
+	if (!m_tabWidget || !page)
+		return;
+	for (int i = m_tabWidget->count() - 1; i >= 0; --i)
+	{
+		QScrollArea* scroller = qobject_cast<QScrollArea*>(m_tabWidget->widget(i));
+		if (!scroller || scroller->property("suneerExtraTabPage").value<QObject*>() != page)
+			continue;
+		// Hand the widget back before the scroll area dies, or takeWidget()'s owner
+		// would take it down with the tab.
+		scroller->takeWidget();
+		page->setParent(nullptr);
+		page->hide();
+		m_tabWidget->removeTab(i);
+		scroller->deleteLater();
+		return;
+	}
+}
+
+bool ParagraphStylesPanel::showExtraTab(QWidget* page)
+{
+	if (!m_tabWidget || !page)
+		return false;
+	for (int i = 0; i < m_tabWidget->count(); ++i)
+	{
+		QScrollArea* scroller = qobject_cast<QScrollArea*>(m_tabWidget->widget(i));
+		if (scroller && scroller->property("suneerExtraTabPage").value<QObject*>() == page)
+		{
+			m_tabWidget->setCurrentIndex(i);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool ParagraphStylesPanel::hasExtraTab(QWidget* page) const
+{
+	if (!m_tabWidget || !page)
+		return false;
+	for (int i = 0; i < m_tabWidget->count(); ++i)
+	{
+		QScrollArea* scroller = qobject_cast<QScrollArea*>(m_tabWidget->widget(i));
+		if (scroller && scroller->property("suneerExtraTabPage").value<QObject*>() == page)
+			return true;
+	}
+	return false;
 }
 
 void ParagraphStylesPanel::applyChainCurrentStyle()
