@@ -5234,21 +5234,7 @@ void ScribusMainWindow::slotEditStyledPaste()
 		const SuneerFrameSnapshot& snap = s_suneerFrameSnap;
 		if (snap.valid)
 		{
-			// Wrap offsets have no built-in undo action; record one explicitly so Ctrl+Z restores them.
-			if (UndoManager::undoEnabled())
-			{
-				auto *ws = new SimpleState(Um::TextFrame, QString(), Um::ITextFrame);
-				ws->set("SUNEER_WRAPOFFSETS");
-				ws->set("OLD_WT", currItem->wrapOffsetTop());
-				ws->set("OLD_WB", currItem->wrapOffsetBottom());
-				ws->set("OLD_WL", currItem->wrapOffsetLeft());
-				ws->set("OLD_WR", currItem->wrapOffsetRight());
-				ws->set("NEW_WT", snap.wrapT);
-				ws->set("NEW_WB", snap.wrapB);
-				ws->set("NEW_WL", snap.wrapL);
-				ws->set("NEW_WR", snap.wrapR);
-				m_undoManager->action(currItem, ws);
-			}
+			// setWrapOffsets() now records its own state, so no explicit one here.
 
 			// R2: keep the target's top-left AND its drawn WIDTH; take everything else from source.
 			currItem->setColumns(snap.columns);
