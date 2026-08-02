@@ -244,7 +244,7 @@
 
 ### 18. In-App Help (? Buttons)
 - Panel-കളുടെ tab bar-ന്റെ വലതു മൂലയിൽ ഒരു ചെറിയ **?** button
-- അമർത്തിയാൽ ആ tab-ന്റെ സഹായം നേരിട്ട് തുറക്കും (Malayalam-ൽ)
+- അമർത്തിയാൽ ആ tab-ന്റെ സഹായം നേരിട്ട് തുറക്കും (help text English-ൽ)
 - മൂന്ന് ? button, ഏഴ് വിഷയം:
   - **Paragraph Styles docker** — Styles / Design Style / News Browser
   - **Style Manager** — Paragraph Rules / Paragraph Shading /

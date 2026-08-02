@@ -1,7 +1,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Faircode Scribus — സഹായം</title>
+<title>Faircode Scribus — Help</title>
 <style type="text/css">
 body      { font-family: sans-serif; font-size: 11pt; color: #222; margin: 12px; }
 h1        { font-size: 17pt; color: #1565C0; margin-bottom: 2px; }
@@ -14,6 +14,7 @@ tt, code  { font-family: monospace; color: #7B1FA2; }
 .note     { background-color: #FFF8E1; padding: 8px; margin-top: 8px; }
 .trouble  { background-color: #FBE9E7; padding: 8px; margin-top: 8px; }
 .back     { font-size: 9pt; color: #777; margin-top: 6px; }
+.sample   { background-color: #F5F5F5; padding: 6px; }
 table     { margin-top: 6px; }
 th        { background-color: #ECEFF1; text-align: left; padding: 4px; }
 td        { padding: 4px; }
@@ -22,18 +23,19 @@ td        { padding: 4px; }
 <body>
 
 <a name="top"></a>
-<h1>Faircode Scribus — സഹായം</h1>
-<p class="lead">ഈ പേജിൽ Faircode Scribus-ൽ മാത്രമുള്ള features വിശദീകരിക്കുന്നു.
-ഓരോ panel-ന്റെയും മുകളിൽ വലതുവശത്തുള്ള <b>?</b> button അമർത്തിയാൽ ആ ഭാഗം നേരിട്ട് തുറക്കും.</p>
+<h1>Faircode Scribus — Help</h1>
+<p class="lead">This page explains the features that exist only in Faircode Scribus.
+The small <b>?</b> button at the top right of each panel opens this page at the
+section for whatever tab you are on.</p>
 
 <div class="toc">
-<b>ഉള്ളടക്കം</b>
+<b>Contents</b>
 <ul>
-<li><a href="#news-browser">വാർത്ത ബ്രൗസർ (News Browser)</a></li>
+<li><a href="#news-browser">News Browser</a></li>
 <li><a href="#styles-tab">Styles tab</a></li>
 <li><a href="#design-style">Design Style tab</a></li>
-<li><a href="#paragraph-rules">Paragraph Rules — വരകൾ</a></li>
-<li><a href="#paragraph-shading">Paragraph Shading — പശ്ചാത്തല ബാൻഡ്</a></li>
+<li><a href="#paragraph-rules">Paragraph Rules</a></li>
+<li><a href="#paragraph-shading">Paragraph Shading</a></li>
 <li><a href="#nested-styles">Nested Styles</a></li>
 <li><a href="#image-bullets">Image Bullets</a></li>
 </ul>
@@ -41,274 +43,274 @@ td        { padding: 4px; }
 
 
 <a name="news-browser"></a>
-<h2>വാർത്ത ബ്രൗസർ (News Browser)</h2>
+<h2>News Browser</h2>
 
-<p>Newsroom-ലെ വാർത്തകൾ നേരിട്ട് Scribus-ലേക്ക് കൊണ്ടുവരാനുള്ള panel ആണിത്.
-Copy-paste ചെയ്യാതെ, edition അനുസരിച്ച് വാർത്ത തിരഞ്ഞെടുത്ത് text frame-ൽ
-നേരിട്ട് ഇടാം. Paragraph Styles docker-ന്റെ മൂന്നാമത്തെ tab ആയി ഇത് വരും.</p>
+<p>The News Browser pulls story copy straight from the newsroom system into
+Scribus. Instead of copying and pasting from another window, you pick the
+edition and page, choose the stories you want, and drop them into a text frame.
+It is the third tab in the Paragraph Styles docker.</p>
 
-<h3>Connect ചെയ്യാൻ</h3>
-<p>ഇത് ഒരു <b>web API</b> വഴിയാണ് വാർത്ത എടുക്കുന്നത് — database-ലേക്ക് നേരിട്ടുള്ള
-connection അല്ല. അതുകൊണ്ട് server / username / password എന്നിവ ഇവിടെ ചോദിക്കില്ല.
-വേണ്ടത് ഒരു <b>API URL</b> മാത്രം.</p>
+<h3>Connecting</h3>
+<p>The News Browser talks to a <b>web API</b>, not directly to a database.
+That is why it never asks for a server name, user name or password. All it
+needs is one <b>API URL</b>.</p>
 <ol>
-<li>Panel-ന്റെ മുകളിലുള്ള <b>⚙</b> (Settings) button അമർത്തുക.</li>
-<li>Password ചോദിക്കും — ഇത് system administrator-ന്റെ പക്കൽ ഉണ്ട്.
-    തെറ്റായ password ആണെങ്കിൽ settings തുറക്കില്ല.</li>
-<li><b>API URL</b> കൊടുക്കുക (workflow server-ന്റെ വിലാസം).
-    ഇത് ഒരിക്കൽ set ചെയ്താൽ മതി; അടുത്ത തവണ ഓർത്തുവയ്ക്കും.</li>
-<li>വേണമെങ്കിൽ ഒരു <b>default edition</b> കൊടുക്കാം — എന്നും ഒരേ edition-ൽ
-    ജോലി ചെയ്യുന്നവർക്ക് സമയം ലാഭിക്കാൻ.</li>
+<li>Click the <b>⚙</b> (Settings) button at the top of the panel.</li>
+<li>It asks for a password. Your system administrator has it. If the password
+    is wrong, the settings will not open.</li>
+<li>Enter the <b>API URL</b> — the address of the workflow server. You only
+    need to do this once; it is remembered for next time.</li>
+<li>You can also set a <b>default edition</b>. If you always work on the same
+    edition, this saves choosing it every day.</li>
 </ol>
-<p><b>ശരിയായോ എന്ന് എങ്ങനെ അറിയാം:</b> settings അടച്ചതിനു ശേഷം
-<b>Edition</b> dropdown-ൽ edition-കളുടെ പേരുകൾ വരും. താഴെ status വരിയിൽ
-ഏത് edition ആണ് ഉപയോഗിക്കുന്നത് എന്നും കാണിക്കും. Dropdown ശൂന്യമാണെങ്കിൽ
-connect ആയിട്ടില്ല.</p>
+<p><b>How to tell it worked:</b> close the settings and look at the
+<b>Edition</b> dropdown. If the connection is good, it fills with edition
+names, and the status line below shows which edition is in use. An empty
+dropdown means it did not connect.</p>
 
-<h3>ഉപയോഗിക്കുന്ന രീതി</h3>
+<h3>Placing a story</h3>
 <ol>
-<li><b>Edition</b> തിരഞ്ഞെടുക്കുക.</li>
-<li><b>Page</b> തിരഞ്ഞെടുക്കുക.</li>
-<li><b>Date</b> — സ്വതവേ നാളത്തെ തീയതി വരും; വേണമെങ്കിൽ മാറ്റാം.</li>
-<li><b>Fetch News</b> അമർത്തുക. താഴെ വാർത്തകളുടെ list വരും.</li>
-<li>ഒരു വാർത്തയിൽ click ചെയ്താൽ അതിന്റെ preview കാണാം.</li>
-<li>വേണ്ട വാർത്തകൾ checkbox ഇട്ട് തിരഞ്ഞെടുക്കുക
-    (എല്ലാം വേണമെങ്കിൽ <b>Select All</b>).</li>
-<li>ഏത് text frame-ലേക്കാണ് വേണ്ടത് എന്ന് canvas-ൽ select ചെയ്യുക.</li>
-<li><b>Place Selected</b> അമർത്തുക — വാർത്ത frame-ൽ വരും.
-    ചിത്രം ഉണ്ടെങ്കിൽ അതും വരും, text wrap സഹിതം.</li>
+<li>Choose the <b>Edition</b>.</li>
+<li>Choose the <b>Page</b>.</li>
+<li>Check the <b>Date</b>. It defaults to tomorrow's date, not today's.</li>
+<li>Click <b>Fetch News</b>. The stories appear in the list below.</li>
+<li>Click any story to see a preview of it.</li>
+<li>Tick the stories you want. <b>Select All</b> ticks every one.</li>
+<li>On the page, select the text frame the copy should go into.</li>
+<li>Click <b>Place Selected</b>. The copy flows into the frame. If the story
+    has a picture, that is placed too, with text wrap already set.</li>
 </ol>
 
 <div class="note">
-<b>ശ്രദ്ധിക്കുക:</b> Place ചെയ്യുന്നതിനു മുൻപ് text frame select ചെയ്തിരിക്കണം.
-ഒന്നും select ചെയ്തിട്ടില്ലെങ്കിൽ വാർത്ത എവിടെ ഇടണമെന്ന് Scribus-ന് അറിയില്ല.
+<b>Remember:</b> select a text frame before you click Place Selected. With
+nothing selected, Scribus has no way to know where the copy should go.
 </div>
 
-<h3>പ്രശ്നങ്ങളും പരിഹാരവും</h3>
+<h3>When something goes wrong</h3>
 <div class="trouble">
-<p><b>Edition dropdown ശൂന്യം / "connection refused"</b><br />
-⚙ Settings-ലെ API URL ശരിയാണോ എന്ന് നോക്കുക. Network ഉണ്ടോ എന്ന് നോക്കുക.
-Server പ്രതികരിക്കാൻ 5 സെക്കൻഡ് മാത്രമേ കാത്തിരിക്കൂ — server പതുക്കെയാണെങ്കിൽ
-വീണ്ടും <b>🔄 Refresh</b> അമർത്തി നോക്കുക.</p>
+<p><b>The Edition dropdown is empty, or you get "connection refused"</b><br />
+Check the API URL under <b>⚙</b> Settings. Check that the machine is on the
+network. The panel waits only 5 seconds for the server to answer, so if the
+server is slow, click <b>🔄 Refresh</b> and try again.</p>
 
-<p><b>Fetch ചെയ്തിട്ടും list ശൂന്യം</b><br />
-ആ edition-ൽ, ആ page-ൽ, ആ തീയതിക്ക് വാർത്ത ഇല്ല എന്നാണ് അർത്ഥം.
-Date ശരിയാണോ എന്ന് ആദ്യം നോക്കുക — സ്വതവേ <i>നാളത്തെ</i> തീയതിയാണ് വരുന്നത്,
-ഇന്നത്തേതല്ല. എന്നിട്ട് edition, page മാറ്റി നോക്കുക.</p>
+<p><b>Fetch News works but the list is empty</b><br />
+There are no stories for that combination of edition, page and date. Check the
+date first — it defaults to <i>tomorrow</i>, which catches people out. Then try
+a different edition or page.</p>
 
-<p><b>അക്ഷരങ്ങൾ തെറ്റി വരുന്നു / ചതുരക്കട്ടകൾ കാണുന്നു</b><br />
-വാർത്ത ശരിയായി വന്നിട്ടുണ്ട്, പക്ഷേ frame-ന്റെ font-ന് മലയാളം അക്ഷരങ്ങൾ ഇല്ല.
-Text frame-ന്റെ paragraph style-ൽ ഒരു Malayalam Unicode font
-(ഉദാ: DBI Text) കൊടുക്കുക. Copy ചെയ്ത് വേറെ എവിടെയെങ്കിലും ഒട്ടിച്ചാൽ
-അക്ഷരം ശരിയാണെങ്കിൽ പ്രശ്നം font ആണ്, വാർത്തയല്ല.</p>
+<p><b>The text comes in as boxes or garbled characters</b><br />
+The copy arrived correctly, but the frame's font has no Malayalam characters.
+Set the paragraph style on that frame to a Malayalam Unicode font, such as
+DBI Text. To confirm, copy the text and paste it somewhere else: if it reads
+correctly there, the problem is the font, not the story.</p>
 
-<p><b>Place Selected അമർത്തിയിട്ട് ഒന്നും സംഭവിക്കുന്നില്ല</b><br />
-Text frame select ചെയ്തിട്ടുണ്ടോ? ഒന്നിലധികം object select ചെയ്തിട്ടുണ്ടെങ്കിൽ
-ഒരെണ്ണം മാത്രമാക്കുക.</p>
+<p><b>Place Selected does nothing</b><br />
+Check that a text frame is selected. If several objects are selected, reduce it
+to one.</p>
 </div>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="styles-tab"></a>
 <h2>Styles tab</h2>
-<p>Document-ലെ എല്ലാ paragraph style-കളും ഇവിടെ കാണാം. Style-ന്റെ പേരിൽ
-click ചെയ്താൽ, cursor നിൽക്കുന്ന paragraph-ന് (അല്ലെങ്കിൽ select ചെയ്ത
-paragraphs-ന്) ആ style apply ആകും.</p>
+<p>This tab lists every paragraph style in the document. Click a style name to
+apply it to the paragraph the cursor is in, or to all the paragraphs you have
+selected.</p>
 
-<h3>തിരയാൻ</h3>
-<p>മുകളിലെ <b>Search styles…</b> box-ൽ ടൈപ്പ് ചെയ്താൽ list ചുരുങ്ങും.
-നൂറിലധികം style ഉള്ള newspaper document-ൽ ഇത് വേഗത്തിൽ എത്താൻ സഹായിക്കും.</p>
+<h3>Finding a style</h3>
+<p>Type in the <b>Search styles…</b> box at the top and the list narrows as you
+type. In a newspaper document with a hundred styles, this is much faster than
+scrolling.</p>
 
-<h3>Chain icon — Next Style</h3>
-<p>ചില style-കളുടെ വലതുവശത്ത് ഒരു <b>chain icon</b> കാണാം. ആ style-ന് ഒരു
-<b>next style</b> നിശ്ചയിച്ചിട്ടുണ്ട് എന്നാണ് അതിന്റെ അർത്ഥം — ഉദാഹരണത്തിന്
-<tt>07 Byline</tt>-ന് ശേഷം <tt>01 Dateline</tt>, അതിനു ശേഷം
-<tt>03 BodyNoInd</tt>.</p>
-<p>Chain icon ഉള്ള ഒരു style-ൽ click ചെയ്താൽ, ആ chain തുടർച്ചയായ
-paragraphs-ന് ഒരുമിച്ച് apply ആകും: ആദ്യത്തെ paragraph-ന് തിരഞ്ഞെടുത്ത style,
-രണ്ടാമത്തേതിന് അതിന്റെ next style, എന്നിങ്ങനെ. ഒരു headline block മുഴുവൻ
-ഒറ്റ click-ൽ format ചെയ്യാം.</p>
+<h3>The chain icon — Next Style</h3>
+<p>Some styles show a <b>chain icon</b> on the right of the list. That means
+the style has a <b>next style</b> set — for example <tt>07 Byline</tt> is
+followed by <tt>01 Dateline</tt>, which is followed by <tt>03 BodyNoInd</tt>.</p>
+<p>Click a style that has a chain icon and the whole chain is applied down the
+frame: the first paragraph gets the style you clicked, the second gets its next
+style, and so on. A full headline block can be formatted in one click.</p>
 <div class="note">
-Chain apply മുഴുവൻ <b>ഒറ്റ undo step</b> ആണ് — തെറ്റിയാൽ ഒരു Ctrl+Z മതി,
-ഓരോ paragraph-നും വെവ്വേറെ വേണ്ട.
+Applying a chain is a <b>single undo step</b>. If it goes wrong, one Ctrl+Z
+puts everything back — you do not have to undo paragraph by paragraph.
 </div>
 
 <h3>Style shortcuts</h3>
-<p>ഓരോ style-നും keyboard shortcut കൊടുക്കാം. Panel-ലെ settings-ൽ
-<b>Set Key</b> അമർത്തി key അമർത്തുക. അതിനു ശേഷം text-ൽ എവിടെയായാലും ആ key
-അമർത്തിയാൽ style apply ആകും.</p>
+<p>Any style can be given a keyboard shortcut. In the panel's settings, click
+<b>Set Key</b> and press the key you want. From then on, pressing that key
+while editing text applies the style.</p>
 <div class="note">
-ഒരേ key രണ്ട് സ്ഥലത്ത് കൊടുത്താൽ Scribus ഒന്നും ചെയ്യില്ല (രണ്ടും fire ചെയ്യില്ല).
-അങ്ങനെ വന്നാൽ <b>Preferences &rarr; Keyboard Shortcuts</b>-ൽ പോയി conflict
-പരിഹരിക്കുക — ഏത് action ആണ് ആ key കൈവശം വച്ചിരിക്കുന്നത് എന്ന് അവിടെ കാണിക്കും.
+If the same key is assigned to two different things, Scribus fires neither of
+them. When that happens, go to <b>Preferences &rarr; Keyboard Shortcuts</b> and
+sort out the clash — that page shows which action currently holds the key.
 </div>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="design-style"></a>
 <h2>Design Style tab</h2>
-<p>ഒരു വാർത്തയുടെ <b>മുഴുവൻ രൂപവും</b> ഒറ്റ click-ൽ ഉണ്ടാക്കാനുള്ള preset ആണിത്.
-ഓരോ Design Style-ലും ഇവ ഉൾപ്പെടാം:</p>
+<p>A Design Style builds the whole look of a story in one click. Each one can
+include:</p>
 <ul>
-<li>തുടർച്ചയായ paragraphs-ന് കൊടുക്കേണ്ട <b>style sequence</b>
-    (ഉദാ: headline &rarr; byline &rarr; dateline &rarr; body)</li>
-<li>ഏത് style-ന് ശേഷം <b>column break</b> വരണം</li>
-<li>Frame-ന്റെ <b>column config</b> — എത്ര column, gutter എത്ര</li>
-<li>ഒരു <b>image frame</b> വേണോ, വേണമെങ്കിൽ എവിടെ (ഇടത്/വലത്/മുകളിൽ),
-    text wrap സഹിതം</li>
-<li>ചിത്രത്തിന് ഒരു <b>caption frame</b></li>
+<li>the <b>sequence of paragraph styles</b> to run down the story
+    (headline &rarr; byline &rarr; dateline &rarr; body, for example)</li>
+<li>which style should be followed by a <b>column break</b></li>
+<li>the frame's <b>column setup</b> — how many columns, and the gutter</li>
+<li>whether to add a <b>picture frame</b>, and where it sits (left, right or
+    top), with text wrap already applied</li>
+<li>a <b>caption frame</b> for that picture</li>
 </ul>
-<p>ഉപയോഗിക്കാൻ: text frame select ചെയ്യുക, എന്നിട്ട് Design Style-ന്റെ
-button അമർത്തുക. Style-കൾ, column break, column config, image frame,
-caption frame — എല്ലാം ഒരുമിച്ച് വരും.</p>
-<p>Preset-കൾ ഉണ്ടാക്കാനും മാറ്റാനും tab-ലെ settings button ഉപയോഗിക്കുക.</p>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p>To use one: select the text frame, then click the Design Style button. The
+paragraph styles, column breaks, column setup, picture frame and caption are
+all applied together.</p>
+<p>Use the settings button on the tab to create and edit the presets.</p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="paragraph-rules"></a>
-<h2>Paragraph Rules — വരകൾ</h2>
-<p>ഒരു paragraph-ന്റെ <b>മുകളിലും താഴെയും</b> വര വരയ്ക്കാനുള്ള സൗകര്യം.
-Section heading-ന് താഴെ ഒരു വര, kicker-ന് മുകളിൽ ഒരു വര — ഇതൊക്കെ
-ഓരോ പ്രാവശ്യവും line object വരച്ചുണ്ടാക്കേണ്ട; style-ന്റെ ഭാഗമാക്കാം.
-Text നീങ്ങിയാൽ വരയും കൂടെ നീങ്ങും.</p>
-<p><b>Rule Above</b> (മുകളിൽ), <b>Rule Below</b> (താഴെ) — രണ്ടിനും ഒരേ
-settings ഉണ്ട്:</p>
+<h2>Paragraph Rules</h2>
+<p>Paragraph Rules draw a line <b>above or below a paragraph</b>. A rule under
+a section heading, or above a kicker, no longer needs a separate line object
+drawn by hand — it becomes part of the style. When the text moves, the rule
+moves with it.</p>
+<p>There are two independent rules, <b>Rule Above</b> and <b>Rule Below</b>,
+and both have the same settings:</p>
 <table border="1" cellspacing="0" width="100%">
-<tr><th width="30%">Setting</th><th>എന്ത് ചെയ്യും</th></tr>
-<tr><td>On / Off</td><td>ആ വര ഉണ്ടോ ഇല്ലയോ</td></tr>
-<tr><td>Weight</td><td>വരയുടെ കനം (points-ൽ)</td></tr>
-<tr><td>Colour</td><td>വരയുടെ നിറം</td></tr>
-<tr><td>Tint</td><td>നിറത്തിന്റെ ശതമാനം — 100% എന്നാൽ മുഴുവൻ നിറം,
-    20% എന്നാൽ ഇളം നിറം</td></tr>
-<tr><td>Type</td><td>solid, dashed, dotted — വരയുടെ രീതി</td></tr>
-<tr><td>Gap Colour</td><td>dashed/dotted ആണെങ്കിൽ വിടവിൽ വരേണ്ട നിറം.
-    None ഇട്ടാൽ വിടവ് സുതാര്യം</td></tr>
-<tr><td>Gap Tint</td><td>ആ വിടവ് നിറത്തിന്റെ ശതമാനം</td></tr>
-<tr><td>Width Type</td><td><b>Text width</b> = എഴുത്തിന്റെ നീളത്തിന് മാത്രം വര.
-    <b>Column width</b> = column മുഴുവൻ വര</td></tr>
-<tr><td>Offset</td><td>Text-ൽ നിന്ന് വര എത്ര അകലെ</td></tr>
-<tr><td>Left Indent</td><td>ഇടതുവശത്ത് നിന്ന് വര എത്ര ഉള്ളിലേക്ക്</td></tr>
-<tr><td>Right Indent</td><td>വലതുവശത്ത് നിന്ന് വര എത്ര ഉള്ളിലേക്ക്</td></tr>
-<tr><td>Keep in Frame</td><td>വര frame-ന് പുറത്തേക്ക് പോകരുത് എന്ന്
-    ഉറപ്പാക്കും</td></tr>
-<tr><td>Overprint</td><td>Printing-ന് വേണ്ടി — press-കാർ പറഞ്ഞാൽ മാത്രം
-    മാറ്റുക</td></tr>
+<tr><th width="30%">Setting</th><th>What it does</th></tr>
+<tr><td>On / Off</td><td>Whether the rule is drawn at all</td></tr>
+<tr><td>Weight</td><td>Thickness of the line, in points</td></tr>
+<tr><td>Colour</td><td>Colour of the line</td></tr>
+<tr><td>Tint</td><td>Strength of that colour. 100% is full strength;
+    20% gives a pale line</td></tr>
+<tr><td>Type</td><td>Solid, dashed or dotted</td></tr>
+<tr><td>Gap Colour</td><td>For dashed and dotted rules, the colour in the gaps.
+    Set it to None to leave the gaps clear</td></tr>
+<tr><td>Gap Tint</td><td>Strength of that gap colour</td></tr>
+<tr><td>Width Type</td><td><b>Text width</b> draws the rule only as wide as the
+    text. <b>Column width</b> draws it across the full column</td></tr>
+<tr><td>Offset</td><td>How far the rule sits from the text</td></tr>
+<tr><td>Left Indent</td><td>How far the rule is pulled in from the left</td></tr>
+<tr><td>Right Indent</td><td>How far the rule is pulled in from the right</td></tr>
+<tr><td>Keep in Frame</td><td>Stops the rule being drawn outside the frame</td></tr>
+<tr><td>Overprint</td><td>A press setting. Leave it alone unless the printer
+    asks you to change it</td></tr>
 </table>
 <div class="note">
-Rule Above-ഉം Rule Below-ഉം വെവ്വേറെ on ചെയ്യാം. Headline-ന് മുകളിൽ കട്ടിയുള്ള
-വരയും താഴെ നേർത്ത വരയും — രണ്ടും ഒരേ style-ൽ സാധിക്കും.
+Rule Above and Rule Below are switched on separately, so one style can carry a
+heavy rule above the headline and a hairline below it.
 </div>
-<p>ഈ വരകൾ canvas-ൽ കാണുന്നത് പോലെ തന്നെ PDF-ലും print-ലും വരും.</p>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p>Rules print and export to PDF exactly as they appear on screen.</p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="paragraph-shading"></a>
-<h2>Paragraph Shading — പശ്ചാത്തല ബാൻഡ്</h2>
-<p>Paragraph-ന്റെ പുറകിൽ ഒരു നിറമുള്ള ബാൻഡ് ഇടാനുള്ള സൗകര്യം.
-Blurb, box item, "പ്രത്യേക ലേഖകൻ" പോലുള്ള ഭാഗങ്ങൾക്ക് ഉപയോഗിക്കാം.
-Text നീങ്ങിയാൽ ബാൻഡും കൂടെ നീങ്ങും — വേറെ rectangle വരയ്ക്കേണ്ട.</p>
+<h2>Paragraph Shading</h2>
+<p>Paragraph Shading puts a coloured band behind a paragraph. Use it for
+blurbs, boxed items, or standfirst lines. As with rules, the band belongs to
+the style, so it grows and moves with the text — there is no rectangle to keep
+re-drawing.</p>
 <table border="1" cellspacing="0" width="100%">
-<tr><th width="30%">Setting</th><th>എന്ത് ചെയ്യും</th></tr>
-<tr><td>Shade On</td><td>ബാൻഡ് ഉണ്ടോ ഇല്ലയോ</td></tr>
-<tr><td>Colour + Tint</td><td>ബാൻഡിന്റെ നിറവും അതിന്റെ ശതമാനവും.
-    എഴുത്ത് വായിക്കാൻ പറ്റണമെങ്കിൽ 10–20% tint മതി</td></tr>
-<tr><td>Width Type</td><td>Text width അല്ലെങ്കിൽ Column width —
-    Rules-ലേത് പോലെ തന്നെ</td></tr>
+<tr><th width="30%">Setting</th><th>What it does</th></tr>
+<tr><td>Shade On</td><td>Whether the band is drawn at all</td></tr>
+<tr><td>Colour + Tint</td><td>Colour of the band and its strength. For text to
+    stay readable, 10–20% tint is usually enough</td></tr>
+<tr><td>Width Type</td><td>Text width or column width, the same choice as for
+    rules</td></tr>
 <tr><td>Top / Bottom / Left / Right Padding</td>
-    <td>എഴുത്തിനും ബാൻഡിന്റെ അരികിനും ഇടയിലുള്ള ഇട</td></tr>
-<tr><td>Corner Radius</td><td>ബാൻഡിന്റെ മൂലകൾ എത്ര ഉരുണ്ടതാകണം.
-    0 എന്നാൽ കൂർത്ത മൂല</td></tr>
-<tr><td>Merge Adjacent</td><td>തുടർച്ചയായ paragraphs-ന് ഒരേ shading
-    ഉണ്ടെങ്കിൽ, അവയെ <b>ഒറ്റ ബാൻഡ്</b> ആക്കും. Off ആക്കിയാൽ ഓരോ
-    paragraph-നും വെവ്വേറെ ബാൻഡ്, ഇടയിൽ വിടവോടെ</td></tr>
+    <td>Space between the text and the edge of the band</td></tr>
+<tr><td>Corner Radius</td><td>How rounded the corners are. 0 gives square
+    corners</td></tr>
+<tr><td>Merge Adjacent</td><td>When consecutive paragraphs share the same
+    shading, draws them as <b>one continuous band</b>. Switch it off to give
+    each paragraph its own band with a gap between them</td></tr>
 </table>
 
-<h3>Paper-masking — ബാൻഡിൽ വെട്ട് ഉണ്ടാക്കാൻ</h3>
-<p>ബാൻഡിന്റെ ഒരു മൂലയിൽ ചിത്രത്തിനോ logo-യ്ക്കോ വേണ്ടി ഒരു "വെട്ട്"
-(notch) വേണമെങ്കിൽ: ആ ഭാഗത്ത് <b>Paper</b> (വെള്ള) നിറമുള്ള ഒരു ചെറിയ
-shape വരച്ചിടുക. അത് ബാൻഡിന് മുകളിൽ വരും, ബാൻഡ് മുറിഞ്ഞതു പോലെ തോന്നും.
-ബാൻഡിന്റെ ആകൃതി മാറ്റാൻ പറ്റാത്തിടത്ത് ഇത് എളുപ്പവഴിയാണ്.</p>
+<h3>Masking a notch with Paper</h3>
+<p>If you need a notch cut out of the band — to clear a logo or a picture
+corner — draw a small shape filled with the <b>Paper</b> colour over that part.
+It sits on top of the band and makes it look cut away. This is the quick way to
+get a shape the band itself cannot make.</p>
 <div class="note">
-Paper നിറം page-ന്റെ നിറമാണ് — വെള്ള കടലാസിൽ അച്ചടിക്കുമ്പോൾ അത്
-അദൃശ്യമാകും. നിറമുള്ള background-ൽ ഈ വിദ്യ ശരിയാകില്ല.
+Paper is the page colour, so this only disappears on white stock. On a coloured
+background the masking shape will show.
 </div>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="nested-styles"></a>
 <h2>Nested Styles</h2>
-<p>ഒരു paragraph-ന്റെ <b>തുടക്കത്തിലെ ഒരു ഭാഗത്തിന് മാത്രം</b> വേറൊരു
-character style കൊടുക്കാനുള്ള സൗകര്യം — ഓരോ പ്രാവശ്യവും കൈകൊണ്ട്
-select ചെയ്ത് bold ആക്കേണ്ട. Style-ന്റെ ഭാഗമായതുകൊണ്ട് എല്ലാ വാർത്തയിലും
-ഒരേപോലെ വരും.</p>
+<p>A nested style applies a different character style to the <b>first part of a
+paragraph</b>, up to a marker you choose. It saves selecting and bolding the
+same run of words in every story, and because it lives in the paragraph style,
+every story comes out the same.</p>
 
-<h3>ഉദാഹരണം</h3>
-<p>Dateline ഇങ്ങനെയാണ് എന്ന് കരുതുക:</p>
-<p><tt>കോഴിക്കോട് | സ്വന്തം ലേഖകൻ</tt></p>
-<p>ഇവിടെ സ്ഥലപ്പേര് (<tt>കോഴിക്കോട്</tt>) bold വേണം, ബാക്കി സാധാരണ.
-അതിന് ഒരു nested style rule ഇടുക:</p>
+<h3>Worked example</h3>
+<p>Take a dateline that reads:</p>
+<p class="sample"><tt>സ്ഥലം | ലേഖകൻ</tt></p>
+<p>Here the place name (<tt>സ്ഥലം</tt>) should be bold and the reporter's name
+after the pipe should stay plain. Set up one nested style rule:</p>
 <ul>
-<li><b>Character style:</b> Bold (നിങ്ങൾ ഉണ്ടാക്കിയ style)</li>
-<li><b>Delimiter:</b> <tt>|</tt> (pipe ചിഹ്നം)</li>
-<li><b>Count:</b> 1 — ആദ്യത്തെ <tt>|</tt> വരെ</li>
-<li><b>Up To / Through:</b> താഴെ കാണുക</li>
+<li><b>Character style:</b> the Bold style you created</li>
+<li><b>Delimiter:</b> <tt>|</tt> — the pipe character</li>
+<li><b>Count:</b> 1 — stop at the first pipe</li>
+<li><b>Up To / Through:</b> see below</li>
 </ul>
 
-<h3>Up To vs Through</h3>
+<h3>Up To versus Through</h3>
 <table border="1" cellspacing="0" width="100%">
-<tr><th width="20%"></th><th>അർത്ഥം</th><th>ഫലം</th></tr>
+<tr><th width="20%"></th><th>Meaning</th><th>Result</th></tr>
 <tr><td><b>Up To</b></td>
-    <td>Delimiter-ന് <i>തൊട്ടു മുൻപ് വരെ</i> — delimiter ഉൾപ്പെടില്ല</td>
-    <td><b>കോഴിക്കോട്</b> <tt>| സ്വന്തം ലേഖകൻ</tt></td></tr>
+    <td>Stops just <i>before</i> the delimiter — the pipe stays plain</td>
+    <td><b>സ്ഥലം</b> <tt>| ലേഖകൻ</tt></td></tr>
 <tr><td><b>Through</b></td>
-    <td>Delimiter <i>ഉൾപ്പെടെ</i></td>
-    <td><b>കോഴിക്കോട് |</b> <tt> സ്വന്തം ലേഖകൻ</tt></td></tr>
+    <td>Includes the delimiter — the pipe is bold too</td>
+    <td><b>സ്ഥലം |</b> <tt> ലേഖകൻ</tt></td></tr>
 </table>
-<p>Pipe ചിഹ്നവും bold വേണോ എന്നതാണ് വ്യത്യാസം. സാധാരണയായി
-<b>Up To</b> ആണ് വേണ്ടത്.</p>
+<p>The only difference is whether the pipe itself takes the character style.
+<b>Up To</b> is what you normally want.</p>
 
-<h3>ഒന്നിലധികം rule</h3>
-<p>Rule-കൾ മുകളിൽ നിന്ന് താഴേക്ക് ക്രമത്തിൽ പ്രവർത്തിക്കും. ആദ്യത്തെ rule
-നിർത്തിയിടത്ത് നിന്ന് രണ്ടാമത്തേത് തുടങ്ങും. ഉദാഹരണത്തിന് സ്ഥലപ്പേര് bold,
-അതിനു ശേഷമുള്ള ലേഖകന്റെ പേര് italic — രണ്ട് rule ഇട്ടാൽ മതി.</p>
+<h3>More than one rule</h3>
+<p>Rules run in order from the top of the list down. The second rule starts
+where the first one stopped. So to make the place name bold and the reporter's
+name italic, you use two rules.</p>
 <div class="note">
-Delimiter കണ്ടെത്തിയില്ലെങ്കിൽ ആ rule ഒന്നും ചെയ്യില്ല — paragraph
-പഴയപടി തന്നെ കാണും. Text-ൽ ശരിക്കും ആ ചിഹ്നം ഉണ്ടോ എന്ന് നോക്കുക.
+If the delimiter is not found in the paragraph, the rule simply does nothing and
+the text looks unchanged. Check that the character really is in the copy —
+a similar-looking character will not match.
 </div>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 
 <a name="image-bullets"></a>
 <h2>Image Bullets</h2>
-<p>Bulleted list-ന്റെ ബുള്ളറ്റായി ഒരു <b>ചിത്രം</b> (PNG അല്ലെങ്കിൽ SVG)
-ഉപയോഗിക്കാനുള്ള സൗകര്യം — <tt>•</tt> ചിഹ്നത്തിന് പകരം പത്രത്തിന്റെ
-logo-യോ അമ്പടയാളമോ ഇടാം. <b>Lists &amp;&amp; Drop Caps</b> tab-ൽ ആണിത്.</p>
+<p>Image Bullets let a bulleted list use a <b>picture</b> — a PNG or SVG — in
+place of the usual <tt>•</tt> character. Use it for a masthead device, an arrow,
+or a section marker. The controls are on the <b>Lists &amp; Drop Caps</b> tab.</p>
 <ol>
-<li>Style-ന്റെ list type <b>Bulleted</b> ആക്കുക.</li>
-<li><b>Use image</b> tick ചെയ്യുക.</li>
-<li><b>Browse</b> അമർത്തി PNG/SVG file തിരഞ്ഞെടുക്കുക.</li>
+<li>Set the style's list type to <b>Bulleted</b>.</li>
+<li>Tick <b>Use image</b>.</li>
+<li>Click <b>Browse</b> and choose the PNG or SVG file.</li>
 </ol>
 <table border="1" cellspacing="0" width="100%">
-<tr><th width="30%">Setting</th><th>എന്ത് ചെയ്യും</th></tr>
+<tr><th width="30%">Setting</th><th>What it does</th></tr>
 <tr><td>Size mode — <b>Auto</b></td>
-    <td>അക്ഷരത്തിന്റെ ഉയരത്തിന് (x-height) അനുസരിച്ച് ചിത്രം താനേ
-    വലുതാകും/ചെറുതാകും. Font size മാറ്റിയാലും ബുള്ളറ്റ് ചേർന്നു നിൽക്കും —
-    സാധാരണ ഇതാണ് നല്ലത്</td></tr>
+    <td>Scales the picture to the height of the lower-case letters (the
+    x-height). Change the font size and the bullet keeps pace. This is usually
+    the right choice</td></tr>
 <tr><td>Size mode — <b>Scale %</b></td>
-    <td>അക്ഷര ഉയരത്തിന്റെ എത്ര ശതമാനം എന്ന് നിങ്ങൾ പറയും</td></tr>
+    <td>You set the size as a percentage of that automatic size</td></tr>
 <tr><td>Size mode — <b>Fixed</b></td>
-    <td>കൃത്യമായ അളവ് points-ൽ. Font size മാറിയാലും ചിത്രം മാറില്ല</td></tr>
+    <td>An exact size in points. The bullet stays that size whatever the font
+    size is</td></tr>
 <tr><td>V-Offset</td>
-    <td>ബുള്ളറ്റ് മുകളിലേക്കോ താഴേക്കോ നീക്കാൻ. അക്ഷരത്തോട് ചേർന്ന്
-    നിൽക്കുന്നില്ലെങ്കിൽ ഇത് ചെറുതായി മാറ്റി നോക്കുക</td></tr>
+    <td>Nudges the bullet up or down. If it does not sit level with the text,
+    adjust this in small steps</td></tr>
 </table>
 <div class="note">
-ചിത്രം <b>.sla file-ന് ഉള്ളിൽ തന്നെ</b> സൂക്ഷിക്കും (base64). അതുകൊണ്ട്
-file വേറൊരു കമ്പ്യൂട്ടറിലേക്ക് കൊണ്ടുപോയാലും ബുള്ളറ്റ് നഷ്ടപ്പെടില്ല —
-ചിത്രത്തിന്റെ original file കൂടെ കൊണ്ടുപോകേണ്ട. പകരം file size
-അല്പം കൂടും, അതുകൊണ്ട് ചെറിയ ചിത്രം ഉപയോഗിക്കുക.
+The picture is stored <b>inside the .sla file</b>. Move the document to another
+machine and the bullet still appears — you do not have to carry the image file
+with it. The trade-off is a slightly larger document, so use a small image.
 </div>
-<p class="back"><a href="#top">↑ ഉള്ളടക്കം</a></p>
+<p class="back"><a href="#top">↑ Contents</a></p>
 
 </body>
 </html>
