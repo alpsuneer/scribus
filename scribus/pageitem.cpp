@@ -4512,6 +4512,26 @@ void PageItem::suneerCopyFrameLayoutFrom(const PageItem* src)
 
 void PageItem::setWrapOffsets(double top, double bottom, double left, double right)
 {
+	// The four offsets are only ever set together, so one state covers them all.
+	// Reuses the SUNEER_WRAPOFFSETS marker that restoreWrapOffsets() already
+	// handles; that state used to be recorded by the one caller that cared, which
+	// left the control bar's padding buttons with no undo at all.
+	if (UndoManager::undoEnabled()
+		&& (m_wrapOffsetTop != top || m_wrapOffsetBottom != bottom
+			|| m_wrapOffsetLeft != left || m_wrapOffsetRight != right))
+	{
+		auto *ss = new SimpleState(Um::TextFrame, QString(), Um::ITextFrame);
+		ss->set("SUNEER_WRAPOFFSETS");
+		ss->set("OLD_WT", m_wrapOffsetTop);
+		ss->set("OLD_WB", m_wrapOffsetBottom);
+		ss->set("OLD_WL", m_wrapOffsetLeft);
+		ss->set("OLD_WR", m_wrapOffsetRight);
+		ss->set("NEW_WT", top);
+		ss->set("NEW_WB", bottom);
+		ss->set("NEW_WL", left);
+		ss->set("NEW_WR", right);
+		undoManager->action(this, ss);
+	}
 	m_wrapOffsetTop    = top;
 	m_wrapOffsetBottom = bottom;
 	m_wrapOffsetLeft   = left;
