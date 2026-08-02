@@ -1,5 +1,7 @@
 #include "hyphenator.h"
 #include <QScrollArea>
+#include "ui/faircodehelpviewer.h"
+#include <QToolButton>
 #include <QAbstractItemView>
 #include <QItemSelectionModel>
 #include <QSignalBlocker>
@@ -806,6 +808,27 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 
 	tabWidget->addTab(stylesTab, "Styles");
 	tabWidget->addTab(designTab, "Design Style");
+
+	// One help button in the tab bar corner rather than one per feature area:
+	// it follows the current tab, so it stays in one place and adds no clutter.
+	QToolButton* helpBtn = FaircodeHelpViewer::makeHelpButton(tabWidget, tr("Help for this tab"));
+	tabWidget->setCornerWidget(helpBtn, Qt::TopRightCorner);
+	connect(helpBtn, &QToolButton::clicked, this, [this]() {
+		QString anchor = QStringLiteral("top");
+		if (m_tabWidget)
+		{
+			QWidget* page = m_tabWidget->currentWidget();
+			// The News Browser arrives via addExtraTab(), which wraps its guest in
+			// a scroll area and tags it; the two built-in tabs go by index.
+			if (qobject_cast<QScrollArea*>(page) && page->property("suneerExtraTabPage").isValid())
+				anchor = QStringLiteral("news-browser");
+			else if (m_tabWidget->currentIndex() == 1)
+				anchor = QStringLiteral("design-style");
+			else if (m_tabWidget->currentIndex() == 0)
+				anchor = QStringLiteral("styles-tab");
+		}
+		FaircodeHelpViewer::showTopic(this, anchor);
+	});
 	layout->addWidget(tabWidget);
 	setWidget(mainWidget);
 
