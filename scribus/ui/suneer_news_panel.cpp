@@ -20,6 +20,8 @@
 #include <QStandardPaths>
 #include <QEventLoop>
 #include <QTimer>
+#include <QToolButton>
+#include "ui/faircodehelpviewer.h"
 #include <QInputDialog>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -51,9 +53,14 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
     m_refreshBtn->setToolTip("Refresh");
     m_refreshBtn->setStyleSheet("font-size:14px;");
     connect(m_refreshBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onRefresh);
+    QToolButton* helpBtn = FaircodeHelpViewer::makeHelpButton(w, tr("How to use the News Browser"));
+    connect(helpBtn, &QToolButton::clicked, w, [w]() {
+        FaircodeHelpViewer::showTopic(w, QStringLiteral("news-browser"));
+    });
     QLabel* title = new QLabel("<b>Faircode News Browser</b>", w);
     title->setStyleSheet("color:#1565C0;");
     topBar->addWidget(title);
+    topBar->addWidget(helpBtn);
     topBar->addStretch();
     topBar->addWidget(m_refreshBtn);
     topBar->addWidget(m_settingsBtn);

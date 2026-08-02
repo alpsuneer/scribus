@@ -152,6 +152,7 @@ if(HAVE_OSG)
 		${SCRIBUS_MAIN_CPP}
 		${SCRIBUS_SOURCES}
 		ui/ParagraphStylesPanel.cpp
+		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
@@ -195,6 +196,7 @@ else()
 		${SCRIBUS_MAIN_CPP}
 		${SCRIBUS_SOURCES}
 		ui/ParagraphStylesPanel.cpp
+		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp

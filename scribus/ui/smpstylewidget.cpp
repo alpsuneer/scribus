@@ -5,7 +5,9 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 
+#include "ui/faircodehelpviewer.h"
 #include <QDir>
+#include <QToolButton>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -36,6 +38,26 @@ SMPStyleWidget::SMPStyleWidget(ScribusDoc* doc, StyleSet<CharStyle> *cstyles) :
 	m_cstyles(cstyles)
 {
 	setupUi(this);
+
+	// Corner help button: the anchor follows whichever tab is showing, so the
+	// four Faircode-specific tabs each reach their own section of the manual.
+	QToolButton* helpBtn = FaircodeHelpViewer::makeHelpButton(tabWidget, tr("Help for this tab"));
+	tabWidget->setCornerWidget(helpBtn, Qt::TopRightCorner);
+	connect(helpBtn, &QToolButton::clicked, this, [this]() {
+		// Keyed on object name, not index: tab order has changed before and the
+		// names are stable.
+		const QString page = tabWidget->currentWidget() ? tabWidget->currentWidget()->objectName() : QString();
+		QString anchor = QStringLiteral("top");
+		if (page == QLatin1String("tabParagraphRules"))
+			anchor = QStringLiteral("paragraph-rules");
+		else if (page == QLatin1String("tabParagraphShading"))
+			anchor = QStringLiteral("paragraph-shading");
+		else if (page == QLatin1String("tabNestedStyles"))
+			anchor = QStringLiteral("nested-styles");
+		else if (page == QLatin1String("tabParagraphEffects"))
+			anchor = QStringLiteral("image-bullets");
+		FaircodeHelpViewer::showTopic(this, anchor);
+	});
 
 	//Not used yet
 // 	optMarginCheckLeftProtruding->setVisible(false);
