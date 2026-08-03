@@ -916,6 +916,13 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "toolsToolbarView";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	// The File and Edit toolbars had no toggle at all: without one they can only
+	// be brought back through Qt's toolbar context menu, which matters now that
+	// they start hidden on a new profile.
+	name = "toolsToolbarFile";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "toolsToolbarEdit";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 
 	//toolbar only items
 	name = "toolsSelect";
@@ -1036,6 +1043,8 @@ void ActionManager::initToolsMenuActions()
 	(*scrActions)["toolsToolbarTools"]->setToggleAction(true);
 	(*scrActions)["toolsToolbarPDF"]->setToggleAction(true);
 	(*scrActions)["toolsToolbarView"]->setToggleAction(true);
+	(*scrActions)["toolsToolbarFile"]->setToggleAction(true);
+	(*scrActions)["toolsToolbarEdit"]->setToggleAction(true);
 
 	(*scrActions)["toolsDocumentLog"]->setChecked(false);
 
@@ -1876,6 +1885,8 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsToolbarTools"]->setTexts( tr("&Tools"));
 	(*scrActions)["toolsToolbarPDF"]->setTexts( tr("P&DF Tools"));
 	(*scrActions)["toolsToolbarView"]->setTexts( tr("&View Tools"));
+	(*scrActions)["toolsToolbarFile"]->setTexts( tr("F&ile Tools"));
+	(*scrActions)["toolsToolbarEdit"]->setTexts( tr("Ed&it Tools"));
 
 	//toolbar only items
 	(*scrActions)["toolsSelect"]->setTexts( tr("Select Item"));
@@ -2610,7 +2621,9 @@ void ActionManager::createDefaultMenus()
 		<< "toolsInline"
 		<< "toolsToolbarTools"
 		<< "toolsToolbarPDF"
-		<< "toolsToolbarView";
+		<< "toolsToolbarView"
+		<< "toolsToolbarFile"
+		<< "toolsToolbarEdit";
 	//Help
 	++itmenu;
 	itmenu->second

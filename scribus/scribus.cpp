@@ -627,6 +627,10 @@ void ScribusMainWindow::initToolBars()
 	connect(scrActions["toolsToolbarTools"], SIGNAL(toggled(bool)), modeToolBar, SLOT(setVisible(bool)) );
 	connect(viewToolBar, SIGNAL(visibilityChanged(bool)), scrActions["toolsToolbarView"], SLOT(setChecked(bool)));
 	connect(scrActions["toolsToolbarView"], SIGNAL(toggled(bool)), viewToolBar, SLOT(setVisible(bool)) );
+	connect(fileToolBar, SIGNAL(visibilityChanged(bool)), scrActions["toolsToolbarFile"], SLOT(setChecked(bool)));
+	connect(scrActions["toolsToolbarFile"], SIGNAL(toggled(bool)), fileToolBar, SLOT(setVisible(bool)) );
+	connect(editToolBar, SIGNAL(visibilityChanged(bool)), scrActions["toolsToolbarEdit"], SLOT(setChecked(bool)));
+	connect(scrActions["toolsToolbarEdit"], SIGNAL(toggled(bool)), editToolBar, SLOT(setVisible(bool)) );
 }
 
 void ScribusMainWindow::setStyleSheet()
@@ -1627,6 +1631,8 @@ void ScribusMainWindow::addDefaultWindowMenuItems()
 	scrMenuMgr->addMenuItemString("toolsToolbarTools", "Windows");
 	scrMenuMgr->addMenuItemString("toolsToolbarPDF", "Windows");
 	scrMenuMgr->addMenuItemString("toolsToolbarView", "Windows");
+	scrMenuMgr->addMenuItemString("toolsToolbarFile", "Windows");
+	scrMenuMgr->addMenuItemString("toolsToolbarEdit", "Windows");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Windows");
 	scrMenuMgr->addMenuItemStringsToMenuBar("Windows", scrActions);
 }
@@ -7561,10 +7567,20 @@ int ScribusMainWindow::ShowSubs()
 	dockManager->restoreWorkspaceFromPrefs();
 
 	// init the toolbars
-	fileToolBar->initVisibility();
-	editToolBar->initVisibility();
+	// On a new user profile (nothing restored by restoreState) the stock
+	// toolbars start hidden, leaving the control bar and the Tools side bar.
+	// Only the *default* changes: once a toolbar has been toggled, ScToolBar
+	// has stored IsVisible and that choice wins here and on every later start.
+	// Existing profiles already have the key, so their layout is untouched.
+	bool newProfile = m_prefsManager.appPrefs.uiPrefs.mainWinState.isEmpty();
+	fileToolBar->initVisibility(!newProfile);
+	editToolBar->initVisibility(!newProfile);
 	modeToolBar->initVisibility();
-	pdfToolBar->initVisibility();
+	pdfToolBar->initVisibility(!newProfile);
+	// viewToolBar never had its visibility restored from prefs at all; seed it
+	// from whatever the restored window state produced so existing profiles
+	// keep their current layout, and hide it on a new one.
+	viewToolBar->initVisibility(newProfile ? false : viewToolBar->isVisible());
 
 	activateWindow();
 	if (!scriptIsRunning())
