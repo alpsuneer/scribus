@@ -5072,9 +5072,15 @@ void PageItem_TextFrame::updateBulletsNum()
 				{
 					// image bullet: single placeholder char; the shaper
 					// attaches the image item to this cluster. Falls back
-					// to the character bullet if the image is unusable.
+					// to the character bullet if the image is unusable — and
+					// if that character is empty (Use Image disables the char
+					// editor, so it easily stays empty), to a plain bullet.
+					// The list gutter is indented either way; leaving it
+					// blank hides the failure from the operator entirely.
 					if (style.bulletUseImage() && (m_Doc->bulletImageFrameId(style) >= 0))
 						mark->setString(QString(SpecialChars::OBJECT));
+					else if (style.bulletUseImage() && style.bulletStr().isEmpty())
+						mark->setString(QString(QChar(0x2022)));
 					else
 						mark->setString(style.bulletStr());
 				}
