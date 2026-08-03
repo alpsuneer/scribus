@@ -1169,6 +1169,11 @@ void SMPStyleWidget::setBulletImagePreview(const QString& path)
 	if (path.endsWith(QLatin1String(".svg"), Qt::CaseInsensitive) ||
 	    path.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive))
 		previewPath = rasterizeSvgBullet(path);
+	// Same downscaled cache the renderer uses: a multi-megapixel original is
+	// decoded once ever, not once per Style Manager visit — and the preview
+	// shows the same bytes the page will.
+	if (!previewPath.isEmpty())
+		previewPath = downscaleBulletImage(previewPath);
 	QPixmap pm(previewPath);
 	if (pm.isNull())
 		bulletImagePreview->setPixmap(QPixmap());

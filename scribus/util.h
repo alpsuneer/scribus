@@ -73,6 +73,13 @@ QString SCRIBUS_API materializeBulletImage(const QString& base64Data, const QStr
 /*! \brief Rasterize an SVG bullet file to a cached 1024px PNG (content-addressed
 in applicationDataDir()/bulletimages/) and return the PNG path; empty on failure. */
 QString SCRIBUS_API rasterizeSvgBullet(const QString& svgPath);
+/*! \brief If the image's long edge exceeds maxEdge pixels, downscale it once to
+a cached PNG (content-addressed in applicationDataDir()/bulletimages/, alpha
+preserved) and return the cached path. Bullets render at a few points tall, so
+feeding a multi-megapixel original into the layout costs decode time and PDF
+size for nothing. Returns the original path when it is already small enough or
+cannot be decoded (the caller's own load error handling then reports it). */
+QString SCRIBUS_API downscaleBulletImage(const QString& path, int maxEdge = 512);
 char SCRIBUS_API *toAscii85( quint32 value, bool& allZero );
 char SCRIBUS_API *toHex( uchar u );
 QString SCRIBUS_API String2Hex(QString *in, bool lang = true);
