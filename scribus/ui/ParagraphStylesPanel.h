@@ -27,6 +27,7 @@ class ParagraphStylesPanel : public QDockWidget
 public:
 	explicit ParagraphStylesPanel(QWidget* parent = nullptr);
 	bool eventFilter(QObject* obj, QEvent* event) override;
+	void changeEvent(QEvent* event) override;
 	
 	void setDocument(ScribusDoc* doc);
 	void setMainWindow(ScribusMainWindow* mw);

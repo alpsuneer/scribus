@@ -569,14 +569,17 @@ public:
 		{
 			painter->save();
 			bool selected = (option.state & QStyle::State_Selected);
-			QColor iconColor = selected ? Qt::white : QColor("#1a5fb4");
+			// Colors from the option's palette at paint time: the theme can
+			// change while we run, and cached colors would go stale.
+			QColor iconColor = option.palette.color(selected ? QPalette::HighlightedText : QPalette::Link);
 
 			// Draw shortcut text left of icon
 			QString styleName = index.data(Qt::UserRole).toString();
 			QKeySequence sc = s_styleShortcuts.value(styleName);
 			if (!sc.isEmpty())
 			{
-				painter->setPen(selected ? Qt::white : QColor("#888"));
+				painter->setPen(selected ? option.palette.color(QPalette::HighlightedText)
+				                         : option.palette.color(QPalette::Disabled, QPalette::Text));
 				QFont sf = painter->font();
 				sf.setPointSize(8);
 				painter->setFont(sf);
@@ -663,9 +666,13 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	loadColumnConfigs();
 	QTimer::singleShot(500, this, &ParagraphStylesPanel::rebuildShortcuts);
 
+	// Theme-aware: palette() roles resolve against the active light or dark
+	// palette and re-resolve when it changes, so nothing here can go
+	// dark-on-dark. Hardcoded pairs are only allowed where BOTH foreground and
+	// background are set together (the colored action buttons).
 	setStyleSheet(
-		"QDockWidget { background: #f5f5f5; }"
-		"QDockWidget::title { background: #cce0ff; color: #0055aa; padding: 8px; font-weight: bold; }"
+		"QDockWidget { background: palette(window); }"
+		"QDockWidget::title { background: palette(highlight); color: palette(highlighted-text); padding: 8px; font-weight: bold; }"
 	);
 
 	QWidget* mainWidget = new QWidget(this);
@@ -677,9 +684,9 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	QTabWidget* tabWidget = new QTabWidget(this);
 	m_tabWidget = tabWidget;
 	tabWidget->setStyleSheet(
-		"QTabWidget::pane { border: 1px solid #ddd; }"
-		"QTabBar::tab { padding: 6px 12px; font-size: 10pt; }"
-		"QTabBar::tab:selected { background: #3498db; color: white; }"
+		"QTabWidget::pane { border: 1px solid palette(mid); }"
+		"QTabBar::tab { padding: 6px 12px; font-size: 10pt; background: palette(window); color: palette(window-text); }"
+		"QTabBar::tab:selected { background: palette(highlight); color: palette(highlighted-text); }"
 	);
 
 	// Tab 1: Styles
@@ -691,26 +698,26 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	m_searchBox = new QLineEdit(this);
 	m_searchBox->setPlaceholderText("Search styles...");
 	m_searchBox->setStyleSheet(
-		"QLineEdit { padding: 8px; border: 2px solid #ddd; border-radius: 4px;"
-		"  background: white; font-size: 11pt; }"
-		"QLineEdit:focus { border-color: #3498db; }"
+		"QLineEdit { padding: 8px; border: 2px solid palette(mid); border-radius: 4px;"
+		"  background: palette(base); color: palette(text); font-size: 11pt; }"
+		"QLineEdit:focus { border-color: palette(highlight); }"
 	);
 	stylesLayout->addWidget(m_searchBox);
 
 	m_stylesList = new QListWidget(this);
 	m_stylesList->setAlternatingRowColors(false);
 	m_stylesList->setStyleSheet(
-		"QListWidget { background: white; border: 1px solid #ddd; border-radius: 4px; outline: none; }"
-		"QListWidget::item { padding: 12px 12px; border-bottom: 1px solid #f0f0f0; font-size: 11pt; }"
-		"QListWidget::item:hover { background: #e8f4f8; }"
-		"QListWidget::item:selected { background: #3498db; color: white; border: none; }"
+		"QListWidget { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 4px; outline: none; }"
+		"QListWidget::item { padding: 12px 12px; border-bottom: 1px solid palette(alternate-base); font-size: 11pt; }"
+		"QListWidget::item:hover { background: palette(alternate-base); }"
+		"QListWidget::item:selected { background: palette(highlight); color: palette(highlighted-text); border: none; }"
 	);
 	stylesLayout->addWidget(m_stylesList);
 
 	QLabel* infoLabel = new QLabel("Frame: Para1->Style, Para2->Next\nEdit: From cursor down", this);
 	infoLabel->setWordWrap(true);
 	infoLabel->setStyleSheet(
-		"QLabel { color: #7f8c8d; font-size: 9pt; padding: 8px; background: #ecf0f1; border-radius: 4px; }"
+		"QLabel { color: palette(text); font-size: 9pt; padding: 8px; background: palette(alternate-base); border-radius: 4px; }"
 	);
 	stylesLayout->addWidget(infoLabel);
 
@@ -998,6 +1005,16 @@ void ParagraphStylesPanel::setMainWindow(ScribusMainWindow* mw)
 	m_mainWindow = mw;
 }
 
+void ParagraphStylesPanel::changeEvent(QEvent* event)
+{
+	QDockWidget::changeEvent(event);
+	// The stylesheet's palette() references re-resolve on repolish, but the
+	// chained-style item foregrounds were read from the palette when the list
+	// was filled — refresh them so a live light/dark switch recolors them too.
+	if (event->type() == QEvent::PaletteChange)
+		updateStylesList();
+}
+
 void ParagraphStylesPanel::updateStylesList()
 {
 	// Skip the clear()+rebuild while the user is pressing on the list: a
@@ -1043,7 +1060,7 @@ void ParagraphStylesPanel::updateStylesList()
 			QFont f = item->font();
 			f.setBold(true);
 			item->setFont(f);
-			item->setForeground(QColor("#1a5fb4"));
+			item->setForeground(m_stylesList->palette().color(QPalette::Link));
 			QStringList chainList = nextStyle.split(";");
 			item->setToolTip("Next style: " + chainList.join(" -> "));
 		}
