@@ -5093,6 +5093,13 @@ void PageItem_TextFrame::updateBulletsNum()
 
 		if (!bullet && mark && mark->isType(MARKBullNumType))
 		{
+			// Fallback only: style changes through the itemSelection_*ParagraphStyle
+			// functions remove orphaned marks transactionally (ScribusDoc::
+			// removeOrphanedBulNumMarks). Removing here shortens the story with no
+			// undo state, so any recorded undo position past this point goes stale —
+			// warn so the path that got us here can be found and fixed.
+			qWarning("PageItem_TextFrame::layout: removing orphaned bullet mark at %d outside undo (story %s)",
+			         index, qPrintable(itemName()));
 			itemText.removeChars(index, 1);
 			index--;
 			continue;
