@@ -807,6 +807,25 @@ public: // Start public functions
 	void setVerticalAlignment(int);
 	FirstLineOffsetPolicy firstLineOffset()const;
 	void setFirstLineOffset(FirstLineOffsetPolicy);
+
+	/**
+	 * @brief Auto Fit Text: keep the story inside this frame by fitting the
+	 * typography, never by moving or resizing the frame.
+	 *
+	 * When on, PageItem_TextFrame::autoFitTextToFrame() shrinks font size,
+	 * then glyph scaling, then tracking, then word spacing, by the least
+	 * amount that stops the frame overflowing. The reductions are baked into
+	 * the character styles; the factors below record how much was applied so
+	 * the original typography can be recovered exactly before each re-fit.
+	 * A factor of 1.0 (0.0 for tracking) means "nothing applied".
+	 */
+	bool autoFitText() const { return m_autoFitText; }
+	void setAutoFitText(bool);
+	double autoFitFontScale() const { return m_autoFitFontScale; }
+	double autoFitGlyphScale() const { return m_autoFitGlyphScale; }
+	double autoFitTracking() const { return m_autoFitTracking; }
+	double autoFitWordScale() const { return m_autoFitWordScale; }
+	void setAutoFitFactors(double fontScale, double glyphScale, double tracking, double wordScale);
 	/**
 	 * \brief Set the text to frame distances all at once
 	 * @param newLeft left distance
@@ -1928,6 +1947,13 @@ protected: // Start protected variables
 	double m_imageRotation {0.0}; ///< Image rotation in frame
 	FirstLineOffsetPolicy m_firstLineOffset;
 	bool m_groupClips {true};
+
+	//! \brief Auto Fit Text state; see autoFitText() for what the factors mean.
+	bool   m_autoFitText {false};
+	double m_autoFitFontScale {1.0};
+	double m_autoFitGlyphScale {1.0};
+	double m_autoFitTracking {0.0};
+	double m_autoFitWordScale {1.0};
 
 	int m_startArrowIndex {0};
 	int m_endArrowIndex {0};

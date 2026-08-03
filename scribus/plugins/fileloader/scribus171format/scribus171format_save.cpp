@@ -2902,6 +2902,11 @@ void Scribus171Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 		docu.writeAttribute("TextToFrameDistanceRight", item->textToFrameDistRight());
 		docu.writeAttribute("VerticalAlignment", item->verticalAlignment());
 		docu.writeAttribute("FirstLineOffset", item->firstLineOffset()); // here I think this FLOP "cher à mon cœur" is legitimate!
+		docu.writeAttribute("AutoFitText", item->autoFitText() ? 1 : 0);
+		docu.writeAttribute("AutoFitFontScale", item->autoFitFontScale());
+		docu.writeAttribute("AutoFitGlyphScale", item->autoFitGlyphScale());
+		docu.writeAttribute("AutoFitTracking", item->autoFitTracking());
+		docu.writeAttribute("AutoFitWordScale", item->autoFitWordScale());
 		docu.writeAttribute("PathTextShowPath", item->PoShow ? 1 : 0);
 		docu.writeAttribute("PathTextDistanceFromPath", item->BaseOffs);
 		docu.writeAttribute("TextPathType", item->textPathType);

@@ -26,6 +26,8 @@ for which a new license (GPL+exception) is in place.
 #include <QDebug>
 #include <QList>
 #include <QTransform>
+#include <functional>
+#include <limits>
 #include <QPalette>
 #include <QPoint>
 #include <QPolygon>
@@ -45,6 +47,8 @@ for which a new license (GPL+exception) is in place.
 #include "pageitem.h"
 #include "pageitem_group.h"
 #include "pageitem_noteframe.h"
+#include "prefscontext.h"
+#include "prefsfile.h"
 #include "prefsmanager.h"
 #include "prefsstructs.h"
 #include "scconfig.h"
@@ -3172,6 +3176,21 @@ NoRoom:
 	}
 //	qDebug("textframe: len=%d, done relayout (no room %d)", itemText.length(), MaxChars);
 	itemText.blockSignals(false);
+
+	// Auto Fit Text: re-queue only when something that can break the fit has
+	// actually moved since the last pass, so a settled fit never re-triggers
+	// itself. The work happens off the event loop; see scheduleAutoFitText().
+	if (m_autoFitText && !m_autoFitRunning && m_Doc && !m_Doc->isLoading())
+	{
+		const bool overflowNow = frameOverflows();
+		if (itemText.length() != m_autoFitStampLength
+		    || m_width != m_autoFitStampWidth
+		    || m_height != m_autoFitStampHeight
+		    || overflowNow != m_autoFitStampOverflow)
+		{
+			m_Doc->scheduleAutoFitText(this);
+		}
+	}
 }
 
 void PageItem_TextFrame::invalidateLayout(bool wholeChain)
@@ -6284,4 +6303,369 @@ void PageItem_TextFrame::autoFitFrameHeight()
 	m_Doc->changed();
 	m_Doc->regionsChanged()->update(QRect());
 	m_Doc->changedPagePreview();
+}
+
+// ---------------------------------------------------------------------------
+// Auto Fit Text
+//
+// Keeps a story inside its own frame by fitting the typography, never the
+// geometry. The frame's position and size are left exactly as the operator set
+// them, and the text is never allowed to spill onward: instead the type is
+// tightened by the least amount that stops the overflow.
+//
+// Order is fixed by design — size first, because a slightly smaller face reads
+// better than a squeezed or crammed one, then glyph scaling, then tracking,
+// then word spacing. Each stage runs only if the ones before it, taken to
+// their readability floor, were not enough, and every stage stops at the
+// largest value that fits rather than the smallest that is allowed.
+//
+// The reductions are baked into the character styles, applied proportionally
+// per style run so a frame holding a headline over body text keeps its
+// relative sizes. Before the search begins the operator's own typography is
+// snapshotted run by run, and every trial is computed from that snapshot
+// rather than from the previous trial's output — otherwise the rounding that
+// keeps each value representable in the file would accumulate over the
+// seventy-odd passes a four-stage search makes, and "turn it off again" would
+// not give the original type back.
+//
+// Complex scripts are safe here: font size feeds HarfBuzz's scale so the text
+// is re-shaped at the new size and ligatures re-form correctly, glyph scaling
+// and word spacing are applied after shaping, and tracking is added per
+// GlyphCluster, so a Malayalam conjunct is never split from the inside.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	//! Readability floors. Editable in the "autofit_text" preference context
+	//! without a rebuild; the defaults below are used when a key is absent.
+	struct AutoFitLimits
+	{
+		double minFontSizePt;   //!< never set a run smaller than this
+		double maxFontScale;    //!< upper bound on the size factor
+		double minFontScale;    //!< lower bound on the size factor
+		double minGlyphScale;   //!< lower bound on horizontal/vertical scaling
+		double minTracking;     //!< most negative tracking, in 1/10 % of em
+		double minWordScale;    //!< lower bound on the word spacing factor
+	};
+
+	AutoFitLimits autoFitLimits()
+	{
+		AutoFitLimits l { 6.0, 1.0, 0.75, 0.90, -50.0, 0.80 };
+		PrefsContext* p = PrefsManager::instance().prefsFile
+		                ? PrefsManager::instance().prefsFile->getContext("autofit_text")
+		                : nullptr;
+		if (!p)
+			return l;
+		l.minFontSizePt = p->getDouble("min_font_size_pt", l.minFontSizePt);
+		l.maxFontScale  = p->getDouble("max_font_scale",   l.maxFontScale);
+		l.minFontScale  = p->getDouble("min_font_scale",   l.minFontScale);
+		l.minGlyphScale = p->getDouble("min_glyph_scale",  l.minGlyphScale);
+		l.minTracking   = p->getDouble("min_tracking",     l.minTracking);
+		l.minWordScale  = p->getDouble("min_word_scale",   l.minWordScale);
+		return l;
+	}
+}
+
+bool PageItem_TextFrame::autoFitTextEligible() const
+{
+	// A frame with somewhere to send its overflow is meant to send it there;
+	// squeezing the type would defeat the chain the operator built.
+	return itemText.length() > 0 && m_nextBox == nullptr;
+}
+
+void PageItem_TextFrame::autoFitBaselineExtremes(double& minFontSize, double& minScaleH,
+                                                 double& maxTracking, double& minWordTracking) const
+{
+	// Read straight off the snapshot: it already holds the operator's values.
+	// The floors are set from the most exposed run, so the smallest type in the
+	// frame is what decides how far the whole frame may be reduced.
+	minFontSize = std::numeric_limits<double>::max();
+	minScaleH = std::numeric_limits<double>::max();
+	maxTracking = -std::numeric_limits<double>::max();
+	minWordTracking = std::numeric_limits<double>::max();
+
+	for (const AutoFitRun& run : std::as_const(m_autoFitBaseline))
+	{
+		minFontSize = qMin(minFontSize, run.fontSize);
+		minScaleH = qMin(minScaleH, qMin(run.scaleH, run.scaleV));
+		maxTracking = qMax(maxTracking, run.tracking);
+		minWordTracking = qMin(minWordTracking, run.wordTracking);
+	}
+	if (m_autoFitBaseline.isEmpty())
+	{
+		minFontSize = 120.0;
+		minScaleH = 1000.0;
+		maxTracking = 0.0;
+		minWordTracking = 1.0;
+	}
+}
+
+void PageItem_TextFrame::autoFitEnsureBaseline()
+{
+	// A snapshot we already hold is exact — it was taken from the operator's
+	// own numbers. Re-deriving it would divide the rounded, reduced values back
+	// out and lose a grid step, so only recapture when the story has actually
+	// changed underneath it.
+	if (!m_autoFitBaseline.isEmpty() && m_autoFitBaselineLength == itemText.length())
+		return;
+
+	if (!m_autoFitBaseline.isEmpty())
+	{
+		// The text was edited. Put the runs we still know about back to their
+		// captured values first: that leaves the factors at 1, so the capture
+		// below reads the operator's numbers straight off instead of dividing.
+		applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, false);
+	}
+	autoFitCaptureBaseline();
+}
+
+void PageItem_TextFrame::autoFitCaptureBaseline()
+{
+	m_autoFitBaseline.clear();
+	m_autoFitBaselineLength = itemText.length();
+
+	// The one and only place the recorded factors are divided back out. Doing
+	// it once, here, is what keeps the search honest: every trial afterwards is
+	// computed from these numbers, never from the previous trial's already
+	// rounded output, so seventy iterations leave the baseline bit-identical.
+	const double fs = m_autoFitFontScale;
+	const double gs = m_autoFitGlyphScale;
+	const double tr = m_autoFitTracking;
+	const double ws = m_autoFitWordScale;
+
+	const int len = itemText.length();
+	if (len <= 0)
+		return;
+
+	CharStyle lastParent = itemText.charStyle(0);
+	int lastPos = 0;
+	for (int i = 0; i <= len; ++i)
+	{
+		const bool atEnd = (i == len);
+		if (!atEnd && itemText.charStyle(i).equiv(lastParent))
+			continue;
+		if (i > lastPos)
+		{
+			const CharStyle& cur = itemText.charStyle(lastPos);
+			AutoFitRun run;
+			run.start  = lastPos;
+			run.length = i - lastPos;
+			// Font size, scaling and tracking are whole units of 1/10 pt and
+			// 1/10 % on disk — every loader does qRound(value * 10). Snap the
+			// baseline to that same grid so a value written to the file reads
+			// back as the value we captured.
+			run.fontSize     = qRound(cur.fontSize() / fs);
+			run.scaleH       = qRound(cur.scaleH() / gs);
+			run.scaleV       = qRound(cur.scaleV() / gs);
+			run.tracking     = qRound(cur.tracking() - tr);
+			run.wordTracking = cur.wordTracking() / ws;
+			m_autoFitBaseline.append(run);
+		}
+		lastPos = i;
+		if (!atEnd)
+			lastParent = itemText.charStyle(i);
+	}
+}
+
+void PageItem_TextFrame::applyAutoFitFactors(double fontScale, double glyphScale,
+                                             double tracking, double wordScale, bool withUndo)
+{
+	const double oldFontScale  = m_autoFitFontScale;
+	const double oldGlyphScale = m_autoFitGlyphScale;
+	const double oldTracking   = m_autoFitTracking;
+	const double oldWordScale  = m_autoFitWordScale;
+
+	for (const AutoFitRun& run : std::as_const(m_autoFitBaseline))
+	{
+		if (run.start + run.length > itemText.length())
+			continue;   // the story was edited under us; the next pass recaptures
+		CharStyle ns;
+		ns.setFontSize(qMax(1.0, (double) qRound(run.fontSize * fontScale)));
+		ns.setScaleH(qMax(1.0, (double) qRound(run.scaleH * glyphScale)));
+		ns.setScaleV(qMax(1.0, (double) qRound(run.scaleV * glyphScale)));
+		ns.setTracking(qRound(run.tracking + tracking));
+		ns.setWordTracking(run.wordTracking * wordScale);
+
+		if (withUndo && UndoManager::undoEnabled())
+		{
+			auto* is = new ScOldNewState<CharStyle>(Um::ApplyTextStyle);
+			is->set("APPLY_CHARSTYLE");
+			is->set("START", run.start);
+			is->set("LENGTH", run.length);
+			is->setStates(itemText.charStyle(run.start), ns);
+			undoManager->action(this, is);
+		}
+		itemText.applyCharStyle(run.start, run.length, ns);
+	}
+
+	if (withUndo && UndoManager::undoEnabled())
+	{
+		auto* ss = new SimpleState(Um::ApplyTextStyle, QString(), Um::IFont);
+		ss->set("AUTOFIT_FACTORS");
+		ss->set("OLD_FONTSCALE", oldFontScale);
+		ss->set("OLD_GLYPHSCALE", oldGlyphScale);
+		ss->set("OLD_TRACKING", oldTracking);
+		ss->set("OLD_WORDSCALE", oldWordScale);
+		ss->set("NEW_FONTSCALE", fontScale);
+		ss->set("NEW_GLYPHSCALE", glyphScale);
+		ss->set("NEW_TRACKING", tracking);
+		ss->set("NEW_WORDSCALE", wordScale);
+		undoManager->action(this, ss);
+	}
+
+	m_autoFitFontScale  = fontScale;
+	m_autoFitGlyphScale = glyphScale;
+	m_autoFitTracking   = tracking;
+	m_autoFitWordScale  = wordScale;
+	invalid = true;
+}
+
+bool PageItem_TextFrame::autoFitTrialFits(double fontScale, double glyphScale,
+                                          double tracking, double wordScale)
+{
+	applyAutoFitFactors(fontScale, glyphScale, tracking, wordScale, false);
+	layout();
+	return !frameOverflows();
+}
+
+bool PageItem_TextFrame::autoFitTextToFrame(bool withUndo)
+{
+	if (!autoFitTextEligible())
+		return !frameOverflows();
+	if (m_autoFitRunning)
+		return !frameOverflows();
+
+	// Suppresses the re-queue at the end of layout() for every trial pass.
+	m_autoFitRunning = true;
+	struct RunGuard
+	{
+		bool& flag;
+		~RunGuard() { flag = false; }
+	} guard { m_autoFitRunning };
+
+	const AutoFitLimits lim = autoFitLimits();
+
+	// The search rewrites the story many times over; none of that belongs on
+	// the undo stack. Only the winning set is recorded, once, at the end.
+	const bool undoWasOn = UndoManager::undoEnabled();
+	if (undoWasOn)
+		undoManager->setUndoEnabled(false);
+
+	// Snapshot the operator's typography before anything is touched. Every
+	// trial below is derived from this, never from the last trial's output.
+	autoFitEnsureBaseline();
+
+	double baseMinFontSize = 0.0, baseMinScaleH = 0.0, baseMaxTracking = 0.0, baseMinWordTracking = 0.0;
+	autoFitBaselineExtremes(baseMinFontSize, baseMinScaleH, baseMaxTracking, baseMinWordTracking);
+
+	// Floors, expressed as factors on the operator's own values so that every
+	// run keeps its relative weight and no run can cross an absolute limit.
+	const double fontFloor = qBound(0.05,
+	                                qMax(lim.minFontScale, (lim.minFontSizePt * 10.0) / qMax(1.0, baseMinFontSize)),
+	                                1.0);
+	const double glyphFloor = qBound(0.05, lim.minGlyphScale, 1.0);
+	const double wordFloor = qBound(0.05, lim.minWordScale, 1.0);
+	// Tracking is a delta, not a factor, and may not drag any run past the floor.
+	const double trackFloor = qMin(0.0, lim.minTracking - baseMaxTracking);
+	const double fontCeiling = qBound(1.0, lim.maxFontScale, 4.0);
+
+	// Start from the operator's typography every time, so a re-fit after an
+	// edit is measured against the original and never compounds.
+	applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, false);
+	layout();
+	if (!frameOverflows())
+	{
+		// It fits at full size: leave it there. This is also how a frame
+		// recovers its original type after text is deleted.
+		if (undoWasOn)
+			undoManager->setUndoEnabled(true);
+		if (withUndo && (m_autoFitFontScale != 1.0 || m_autoFitGlyphScale != 1.0
+		                 || m_autoFitTracking != 0.0 || m_autoFitWordScale != 1.0))
+			applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, true);
+		autoFitStamp(false);
+		return true;
+	}
+
+	// Largest value in [floor, start] that still fits, or the floor if none
+	// does. Bisection converges to the least reduction that works.
+	auto searchStage = [&](double floor, double start, std::function<bool(double)> fits) -> std::pair<bool, double>
+	{
+		if (floor >= start)
+			return { fits(floor), floor };
+		if (!fits(floor))
+			return { false, floor };
+		double lo = floor, hi = start;
+		for (int i = 0; i < 18; ++i)
+		{
+			const double mid = (lo + hi) / 2.0;
+			if (fits(mid))
+				lo = mid;
+			else
+				hi = mid;
+		}
+		return { true, lo };
+	};
+
+	double fontScale = 1.0, glyphScale = 1.0, trackDelta = 0.0, wordScale = 1.0;
+	bool fits = false;
+
+	// Stage 1 — font size.
+	{
+		auto [ok, value] = searchStage(fontFloor, fontCeiling,
+			[&](double f) { return autoFitTrialFits(f, 1.0, 0.0, 1.0); });
+		fontScale = value;
+		fits = ok;
+	}
+	// Stage 2 — glyph scaling, with the size already at its floor.
+	if (!fits)
+	{
+		auto [ok, value] = searchStage(glyphFloor, 1.0,
+			[&](double g) { return autoFitTrialFits(fontScale, g, 0.0, 1.0); });
+		glyphScale = value;
+		fits = ok;
+	}
+	// Stage 3 — tracking.
+	if (!fits)
+	{
+		auto [ok, value] = searchStage(trackFloor, 0.0,
+			[&](double t) { return autoFitTrialFits(fontScale, glyphScale, t, 1.0); });
+		trackDelta = value;
+		fits = ok;
+	}
+	// Stage 4 — word spacing.
+	if (!fits)
+	{
+		auto [ok, value] = searchStage(wordFloor, 1.0,
+			[&](double w) { return autoFitTrialFits(fontScale, glyphScale, trackDelta, w); });
+		wordScale = value;
+		fits = ok;
+	}
+
+	// Put the story back to the operator's typography, then lay the winning
+	// set down once with undo on, so a single Ctrl+Z reverts the whole fit.
+	applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, false);
+	if (undoWasOn)
+		undoManager->setUndoEnabled(true);
+	applyAutoFitFactors(fontScale, glyphScale, trackDelta, wordScale, withUndo);
+	layout();
+	autoFitStamp(!frameOverflows());
+	return fits;
+}
+
+void PageItem_TextFrame::autoFitStamp(bool fitted)
+{
+	m_autoFitStampLength = itemText.length();
+	m_autoFitStampWidth = m_width;
+	m_autoFitStampHeight = m_height;
+	m_autoFitStampOverflow = !fitted;
+}
+
+void PageItem_TextFrame::autoFitTextRestore(bool withUndo)
+{
+	if (m_autoFitFontScale == 1.0 && m_autoFitGlyphScale == 1.0
+	    && m_autoFitTracking == 0.0 && m_autoFitWordScale == 1.0)
+		return;
+	autoFitEnsureBaseline();
+	applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, withUndo);
+	layout();
 }

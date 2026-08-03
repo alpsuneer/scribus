@@ -16,6 +16,8 @@ for which a new license (GPL+exception) is in place.
 
 #include <algorithm>
 
+#include <QSignalBlocker>
+
 #include "appmodehelper.h"
 #include "appmodes.h"
 #include "canvasmode.h"
@@ -468,6 +470,7 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["editEditRenderSource"]->setEnabled(isImageFrame && currItem && (currItem->isLatexFrame() || currItem->isOSGFrame()));
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(SelectedType == PageItem::TextFrame && currItem->itemText.isNotEmpty());
 	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["suneerAutoFitText"]->setEnabled(SelectedType == PageItem::TextFrame);
 	(*a_scrActions)["extrasAutoflowToNewPages"]->setEnabled(SelectedType == PageItem::TextFrame && currItem && currItem->nextInChain() == nullptr && currItem->frameOverflows());
 	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
 	(*a_scrActions)["suneerApplyChain"]->setEnabled(true);
@@ -980,6 +983,12 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 		{
 			(*a_scrActions)["itemSendToPattern"]->setEnabled(false);
 			(*a_scrActions)["itemSendToInline"]->setEnabled(false);
+		}
+		// Reflect the frame's own setting without firing the toggle handler,
+		// which would re-fit (or un-fit) the frame just because it was selected.
+		{
+			QSignalBlocker blocker((*a_scrActions)["suneerAutoFitText"]);
+			(*a_scrActions)["suneerAutoFitText"]->setChecked(currItem->autoFitText());
 		}
 		(*a_scrActions)["itemLock"]->setChecked(currItem->locked());
 		(*a_scrActions)["itemLockSize"]->setChecked(currItem->sizeLocked());
@@ -1959,6 +1968,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemSendToInline"]->setEnabled(false);
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(false);
 	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(false);
+	(*a_scrActions)["suneerAutoFitText"]->setEnabled(false);
 	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
 	(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(false);
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(false);

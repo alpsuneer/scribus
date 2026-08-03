@@ -6863,6 +6863,11 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		currItem->setFirstLineOffset(static_cast<FirstLineOffsetPolicy>(attrs.valueAsInt("FLOP")));
 	else
 		currItem->setFirstLineOffset(static_cast<FirstLineOffsetPolicy>(attrs.valueAsInt("FirstLineOffset")));
+	currItem->setAutoFitText(attrs.valueAsInt("AutoFitText", 0) != 0);
+	currItem->setAutoFitFactors(attrs.valueAsDouble("AutoFitFontScale", 1.0),
+	                            attrs.valueAsDouble("AutoFitGlyphScale", 1.0),
+	                            attrs.valueAsDouble("AutoFitTracking", 0.0),
+	                            attrs.valueAsDouble("AutoFitWordScale", 1.0));
 	//Remove uppercase in 1.8
 	if (attrs.hasAttribute("PLINEART"))
 	{

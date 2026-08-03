@@ -595,6 +595,28 @@ selected item is used.\n\
 PyObject *scribus_settextstroke(PyObject * /*self*/, PyObject* args);
 
 /*! docstring */
+/*! docstring */
+PyDoc_STRVAR(scribus_setautofittext__doc__,
+QT_TR_NOOP("setAutoFitText(state, [\"name\"])\n\
+\n\
+Turns Auto Fit Text on or off for the text frame \"name\". When on, the frame\n\
+keeps its text inside itself by shrinking the typography - font size first,\n\
+then glyph scaling, tracking and word spacing - instead of growing the frame\n\
+or spilling into the next one. The frame is fitted immediately.\n\
+Returns True if the text fits within the readability limits.\n\
+If \"name\" is not given the currently selected item is used.\n\
+"));
+PyObject *scribus_setautofittext(PyObject * /*self*/, PyObject* args);
+
+/*! docstring */
+PyDoc_STRVAR(scribus_getautofittext__doc__,
+QT_TR_NOOP("getAutoFitText([\"name\"]) -> bool\n\
+\n\
+Returns True if Auto Fit Text is on for the text frame \"name\".\n\
+If \"name\" is not given the currently selected item is used.\n\
+"));
+PyObject *scribus_getautofittext(PyObject * /*self*/, PyObject* args);
+
 PyDoc_STRVAR(scribus_settextscalingv__doc__,
 QT_TR_NOOP("setTextScalingV(scale, [\"name\"])\n\
 \n\

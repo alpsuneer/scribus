@@ -19096,3 +19096,65 @@ void ScribusDoc::itemSelection_ImageScaleDown(Selection *customSelection)
 	changed();
 	changedPagePreview();
 }
+
+// ---------------------------------------------------------------------------
+// Auto Fit Text scheduling
+//
+// A fit re-composes the frame up to seventy times, so it cannot run from
+// inside layout(). Frames that need one are parked here and fitted when the
+// event loop next comes free, which also folds a burst of typing into a single
+// pass instead of one fit per keystroke.
+// ---------------------------------------------------------------------------
+
+void ScribusDoc::scheduleAutoFitText(PageItem* item)
+{
+	if (!item || !item->isTextFrame() || isLoading())
+		return;
+	m_autoFitTextQueue.insert(item);
+	if (!m_autoFitTextTimer)
+	{
+		m_autoFitTextTimer = new QTimer(this);
+		m_autoFitTextTimer->setSingleShot(true);
+		connect(m_autoFitTextTimer, &QTimer::timeout, this, &ScribusDoc::runScheduledAutoFitText);
+	}
+	m_autoFitTextTimer->start(250);
+}
+
+void ScribusDoc::runScheduledAutoFitText()
+{
+	if (m_autoFitTextQueue.isEmpty())
+		return;
+
+	// Take the queue first: fitting lays the frames out again, which can put
+	// them straight back on it.
+	const QSet<PageItem*> pending = m_autoFitTextQueue;
+	m_autoFitTextQueue.clear();
+
+	QList<PageItem_TextFrame*> targets;
+	for (PageItem* item : pending)
+	{
+		// A queued frame may have been deleted, ungrouped or unlinked since.
+		if (!DocItems.contains(item) && !MasterItems.contains(item)
+		    && !FrameItems.values().contains(item) && !EditFrameItems.contains(item))
+			continue;
+		if (!item->autoFitText() || !item->isTextFrame())
+			continue;
+		PageItem_TextFrame* tf = item->asTextFrame();
+		if (tf && tf->autoFitTextEligible())
+			targets.append(tf);
+	}
+	if (targets.isEmpty())
+		return;
+
+	UndoTransaction trans;
+	if (UndoManager::undoEnabled())
+		trans = m_undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::ApplyTextStyle,
+		                                        QObject::tr("Auto fit text to frame"), Um::IFont);
+	for (PageItem_TextFrame* tf : std::as_const(targets))
+		tf->autoFitTextToFrame(true);
+	if (trans)
+		trans.commit();
+
+	regionsChanged()->update(QRectF());
+	changed();
+}
