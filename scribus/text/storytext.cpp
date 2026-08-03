@@ -1718,8 +1718,17 @@ void StoryText::applyStyle(int pos, const ParagraphStyle& style, bool rmDirectFo
 	if (pos < 0)
 		pos += length();
 
-	assert(pos >= 0);
-	assert(pos <= length());
+	// A stale position (e.g. an undo state recorded before layout removed
+	// bullet/number mark chars) must not abort: asserts in this file are live
+	// even in release builds (index.h does #undef NDEBUG). Q_ASSERT keeps the
+	// hard stop for debug builds; release builds clamp and complain.
+	Q_ASSERT(pos >= 0);
+	Q_ASSERT(pos <= length());
+	if (pos < 0 || pos > length())
+	{
+		qWarning("StoryText::applyStyle: position %d outside story (length %d), clamping", pos, length());
+		pos = qBound(0, pos, length());
+	}
 
 	int i = pos;
 	while (i < length() && d->at(i)->ch != SpecialChars::PARSEP)
@@ -1758,10 +1767,16 @@ void StoryText::eraseStyle(int pos, const ParagraphStyle& style)
 {
 	if (pos < 0)
 		pos += length();
-	
-	assert(pos >= 0);
-	assert(pos <= length());
-		
+
+	// See applyStyle: stale undo positions clamp instead of aborting.
+	Q_ASSERT(pos >= 0);
+	Q_ASSERT(pos <= length());
+	if (pos < 0 || pos > length())
+	{
+		qWarning("StoryText::eraseStyle: position %d outside story (length %d), clamping", pos, length());
+		pos = qBound(0, pos, length());
+	}
+
 	int i = pos;
 	while (i < length() && d->at(i)->ch != SpecialChars::PARSEP)
 		++i;
