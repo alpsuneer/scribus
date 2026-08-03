@@ -508,6 +508,25 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 	if (idIt != m_bulletImageIds.constEnd())
 		return idIt.value();
 
+	// Failures are remembered with the file's identity stamp, not forever:
+	// as long as the file on disk is unchanged, a repeat call answers from
+	// here (updateBulNumStrings asks once per paragraph, and a broken 20 MB
+	// file must not be re-decoded 200 times a relayout). The moment the file
+	// changes, appears, or disappears, the stamp mismatches and we retry, so
+	// restoring a moved image still heals the document mid-session.
+	struct FailureStamp { bool existed; QDateTime mtime; qint64 size; };
+	static QHash<QString, FailureStamp> s_failures;
+	const QFileInfo pathInfo(path);
+	auto failIt = s_failures.constFind(key);
+	if (failIt != s_failures.constEnd())
+	{
+		const FailureStamp& st = failIt.value();
+		if (st.existed == pathInfo.exists()
+		    && (!st.existed || (st.mtime == pathInfo.lastModified() && st.size == pathInfo.size())))
+			return -1;
+		s_failures.remove(key);
+	}
+
 	int newId = -1;
 	bool wasLoading = isLoading();
 	setLoading(true); // no undo states, no dirty flags for the hidden item
@@ -517,10 +536,30 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 	if (path.endsWith(QLatin1String(".svg"), Qt::CaseInsensitive) ||
 		path.endsWith(QLatin1String(".svgz"), Qt::CaseInsensitive))
 		loadPath = rasterizeSvgBullet(path);
+	// A bullet is a few points tall; a multi-megapixel photo behind it costs
+	// decode time on every open, memory for the session, and megabytes in any
+	// exported PDF. Downscale once to a cached copy and use that everywhere.
+	if (!loadPath.isEmpty())
+		loadPath = downscaleBulletImage(loadPath);
 	auto* item = new PageItem_ImageFrame(this, 0, 0, 1, 1, 0, CommonStrings::None, CommonStrings::None);
-	if (!loadPath.isEmpty() && QFile::exists(loadPath) && item->loadImage(loadPath, false, 72, false) && (item->OrigW > 0) && (item->OrigH > 0))
+	const bool loaded = !loadPath.isEmpty() && QFile::exists(loadPath)
+	                 && item->loadImage(loadPath, false, 72, false)
+	                 && (item->OrigW > 0) && (item->OrigH > 0);
+	// An extreme-aspect image cannot work as a bullet: scaled to line height
+	// it is wider than the column (layout then drops the cluster entirely),
+	// and clamped to the column it thins to an invisible hairline. Refuse it
+	// loudly and let the character fallback take over instead.
+	const bool usableAspect = loaded
+	                       && (item->OrigW <= 20.0 * item->OrigH)
+	                       && (item->OrigH <= 20.0 * item->OrigW);
+	if (loaded && usableAspect)
 	{
 		double w = sizePt * double(item->OrigW) / double(item->OrigH);
+		// Mirror of the 3 em height clamp: keep the bullet inside a line. The
+		// frame preserves the image's aspect ratio inside the box, so this
+		// cannot distort, and with aspect capped at 20:1 the drawn height
+		// stays comfortably visible.
+		w = qBound(0.5, w, 6.0 * emPt);
 		item->setWidthHeight(w, sizePt);
 		item->SetRectFrame();
 		item->setFitImageToFrame(true);
@@ -536,25 +575,24 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 	}
 	else
 	{
-		delete item;
 		// Never silent: a style asked for an image bullet and did not get one.
-		// Logged once per key so a relayout loop cannot flood the console.
-		static QSet<QString> loggedFailures;
-		if (!loggedFailures.contains(key))
-		{
-			loggedFailures.insert(key);
-			if (loadPath.isEmpty())
-				qWarning() << "Image bullet: could not rasterize SVG" << path;
-			else if (!QFile::exists(loadPath))
-				qWarning() << "Image bullet: file does not exist:" << loadPath;
-			else
-				qWarning() << "Image bullet: file exists but could not be loaded as an image:" << loadPath;
-		}
+		if (loaded && !usableAspect)
+			qWarning() << "Image bullet: aspect ratio" << item->OrigW << "x" << item->OrigH
+			           << "is unsuitable for a bullet (limit 20:1), using the character bullet:" << path;
+		else if (loadPath.isEmpty())
+			qWarning() << "Image bullet: could not rasterize SVG" << path;
+		else if (!QFile::exists(loadPath))
+			qWarning() << "Image bullet: file does not exist:" << loadPath;
+		else
+			qWarning() << "Image bullet: file exists but could not be loaded as an image:" << loadPath;
+		delete item;
+		// Stamp the failure so repeat calls stay cheap and quiet until the
+		// file on disk actually changes (see the check above).
+		s_failures.insert(key, { pathInfo.exists(), pathInfo.lastModified(), pathInfo.size() });
 	}
 	setLoading(wasLoading);
-	// Cache successes only. A failure is re-tried on the next relayout, so
-	// restoring a moved or renamed image file heals the document mid-session
-	// instead of staying broken until Scribus is restarted.
+	// Successes are cached for good; failures live in s_failures with a file
+	// stamp, so a restored image heals the document on the next relayout.
 	if (newId >= 0)
 		m_bulletImageIds.insert(key, newId);
 	return newId;

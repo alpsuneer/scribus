@@ -1531,6 +1531,49 @@ QString rasterizeSvgBullet(const QString& svgPath)
 	return pngPath;
 }
 
+QString downscaleBulletImage(const QString& path, int maxEdge)
+{
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly))
+		return path;
+	QByteArray fileData = f.readAll();
+	f.close();
+	if (fileData.isEmpty())
+		return path;
+
+	// Content-addressed: hash the source bytes, so replacing the file with a
+	// different image of the same name re-scales instead of reusing stale data.
+	QString dirPath = ScPaths::applicationDataDir(true) + QStringLiteral("bulletimages/");
+	QString sha1(QCryptographicHash::hash(fileData, QCryptographicHash::Sha1).toHex());
+	QString pngPath = dirPath + sha1 + QStringLiteral("-") + QString::number(maxEdge) + QStringLiteral(".png");
+	if (QFile::exists(pngPath))
+		return pngPath;
+
+	QImage img;
+	if (!img.loadFromData(fileData))
+		return path;   // undecodable here; the caller's loader will report it
+	const int longEdge = qMax(img.width(), img.height());
+	if (longEdge <= maxEdge || longEdge <= 0)
+		return path;   // already small enough — decode once and use as-is
+
+	if (!QDir().mkpath(dirPath))
+		return path;
+
+	// Target size in floating point first; integers only at the very end and
+	// clamped so no aspect ratio, however extreme, can truncate a side to zero.
+	const double factor = double(maxEdge) / double(longEdge);
+	const int tw = qMax(1, qRound(img.width() * factor));
+	const int th = qMax(1, qRound(img.height() * factor));
+	QImage scaled = img.scaled(tw, th, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+	// PNG output keeps the alpha channel; force a format that has one, so an
+	// RGBA source stays RGBA through canvas and PDF alike.
+	if (img.hasAlphaChannel())
+		scaled = scaled.convertToFormat(QImage::Format_ARGB32);
+	if (!scaled.save(pngPath, "PNG"))
+		return path;
+	return pngPath;
+}
+
 QString materializeBulletImage(const QString& base64Data, const QString& origPath)
 {
 	QByteArray data = QByteArray::fromBase64(base64Data.toLatin1());
