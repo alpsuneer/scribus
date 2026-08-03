@@ -565,6 +565,14 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 		item->setFitImageToFrame(true);
 		item->setKeepAspectRatio(true);
 		item->adjustPictScale();
+		// A bullet is style decoration like a glyph, not a placed photo, so it
+		// must not obey the screen-only Show Images toggle. The PageItem ctor
+		// seeds imageVisible from guidesPrefs().showPic — in a document saved
+		// with Show Images off the bullet was born invisible on canvas while
+		// PDF export (which ignores the flag) still drew it. And the View
+		// toggle only walks DocItems/MasterItems, so it could never turn this
+		// hidden item back on.
+		item->setImageVisible(true);
 		item->isEmbedded = true;
 		item->gXpos = 0.0;
 		item->gYpos = 0.0;
