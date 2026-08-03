@@ -3698,6 +3698,9 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 			QString cachedPath = materializeBulletImage(attrs.valueAsString(BulletImageData), bulletPath);
 			if (!cachedPath.isEmpty())
 				newStyle.setBulletImagePath(cachedPath);
+			else
+				qWarning() << "Image bullet: original file" << bulletPath
+				           << "is missing and the embedded copy could not be extracted";
 		}
 	}
 
@@ -6785,6 +6788,9 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 			QString cachedPath = materializeBulletImage(attrs.valueAsString("BulletImageData"), bulletPath);
 			if (!cachedPath.isEmpty())
 				pstyle.setBulletImagePath(cachedPath);
+			else
+				qWarning() << "Image bullet: original file" << bulletPath
+				           << "is missing and the embedded copy could not be extracted";
 		}
 	}
 	if (attrs.hasAttribute("Numeration"))

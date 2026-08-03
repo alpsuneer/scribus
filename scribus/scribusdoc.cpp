@@ -535,9 +535,28 @@ int ScribusDoc::bulletImageFrameId(const ParagraphStyle& style)
 		m_bulletImageItems.insert(newId, item);
 	}
 	else
+	{
 		delete item;
+		// Never silent: a style asked for an image bullet and did not get one.
+		// Logged once per key so a relayout loop cannot flood the console.
+		static QSet<QString> loggedFailures;
+		if (!loggedFailures.contains(key))
+		{
+			loggedFailures.insert(key);
+			if (loadPath.isEmpty())
+				qWarning() << "Image bullet: could not rasterize SVG" << path;
+			else if (!QFile::exists(loadPath))
+				qWarning() << "Image bullet: file does not exist:" << loadPath;
+			else
+				qWarning() << "Image bullet: file exists but could not be loaded as an image:" << loadPath;
+		}
+	}
 	setLoading(wasLoading);
-	m_bulletImageIds.insert(key, newId);
+	// Cache successes only. A failure is re-tried on the next relayout, so
+	// restoring a moved or renamed image file heals the document mid-session
+	// instead of staying broken until Scribus is restarted.
+	if (newId >= 0)
+		m_bulletImageIds.insert(key, newId);
 	return newId;
 }
 

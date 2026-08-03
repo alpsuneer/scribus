@@ -861,6 +861,12 @@ void Scribus150Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 			QString bulletData = bulletImageDataFor(style.bulletImagePath());
 			if (!bulletData.isEmpty())
 				docu.writeAttribute("BulletImageData", bulletData);
+			else
+				// The document will still render this session (the loaded image is
+				// cached), so without this warning the loss surfaces only on the
+				// next machine, as a silently blank or character bullet.
+				qWarning() << "Image bullet: could not embed" << style.bulletImagePath()
+				           << "in the saved file; the image will be missing if the file is opened elsewhere";
 		}
 	}
 	if ( ! style.isInhBulletImageSize())
