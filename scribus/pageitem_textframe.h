@@ -194,6 +194,9 @@ public:
 	//! the typography the operator set.
 	void autoFitTextRestore(bool withUndo = true);
 
+	QString autoFitBaselineToString() const override;
+	void autoFitBaselineFromString(const QString& packed) override;
+
 private:
 	/**
 	 * @brief One style run of the story as the operator wrote it, before any

@@ -5812,6 +5812,7 @@ PageItem* Scribus170Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	                            attrs.valueAsDouble("AutoFitGlyphScale", 1.0),
 	                            attrs.valueAsDouble("AutoFitTracking", 0.0),
 	                            attrs.valueAsDouble("AutoFitWordScale", 1.0));
+	currItem->autoFitBaselineFromString(attrs.valueAsString("AutoFitBaseline", QString()));
 
 	currItem->PLineArt  = Qt::PenStyle(attrs.valueAsInt("PLINEART", 0));
 	currItem->PLineEnd  = Qt::PenCapStyle(attrs.valueAsInt("PLINEEND", 0));
