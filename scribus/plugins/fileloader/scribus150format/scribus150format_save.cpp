@@ -2945,6 +2945,8 @@ void Scribus150Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 		docu.writeAttribute("AutoFitGlyphScale", item->autoFitGlyphScale());
 		docu.writeAttribute("AutoFitTracking", item->autoFitTracking());
 		docu.writeAttribute("AutoFitWordScale", item->autoFitWordScale());
+		if (item->autoFitText() && !item->autoFitBaselineToString().isEmpty())
+			docu.writeAttribute("AutoFitBaseline", item->autoFitBaselineToString());
 		docu.writeAttribute("PLTSHOW", item->PoShow ? 1 : 0);
 		docu.writeAttribute("BASEOF", item->BaseOffs);
 		docu.writeAttribute("textPathType", item->textPathType);

@@ -6669,3 +6669,77 @@ void PageItem_TextFrame::autoFitTextRestore(bool withUndo)
 	applyAutoFitFactors(1.0, 1.0, 0.0, 1.0, withUndo);
 	layout();
 }
+
+// The baseline travels in the file as one attribute per frame: the runs tile
+// the story from the start, so only each run's length is needed, and the four
+// values that are almost always at their defaults are left off unless one of
+// them differs. A uniform 11 pt frame packs to "352,110".
+QString PageItem_TextFrame::autoFitBaselineToString() const
+{
+	if (m_autoFitBaseline.isEmpty())
+		return QString();
+
+	QStringList runs;
+	runs.reserve(m_autoFitBaseline.count());
+	for (const AutoFitRun& run : std::as_const(m_autoFitBaseline))
+	{
+		QString packed = QString::number(run.length) + QLatin1Char(',')
+		               + QString::number(qRound(run.fontSize));
+		if (run.scaleH != 1000.0 || run.scaleV != 1000.0
+		    || run.tracking != 0.0 || run.wordTracking != 1.0)
+		{
+			packed += QLatin1Char(',') + QString::number(qRound(run.scaleH))
+			        + QLatin1Char(',') + QString::number(qRound(run.scaleV))
+			        + QLatin1Char(',') + QString::number(qRound(run.tracking))
+			        + QLatin1Char(',') + QString::number(run.wordTracking, 'g', 8);
+		}
+		runs.append(packed);
+	}
+	return runs.join(QLatin1Char(';'));
+}
+
+void PageItem_TextFrame::autoFitBaselineFromString(const QString& packed)
+{
+	m_autoFitBaseline.clear();
+	m_autoFitBaselineLength = -1;
+	if (packed.isEmpty())
+		return;
+
+	QList<AutoFitRun> runs;
+	int cursor = 0;
+	const QStringList parts = packed.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+	for (const QString& part : parts)
+	{
+		const QStringList fields = part.split(QLatin1Char(','));
+		if (fields.count() != 2 && fields.count() != 6)
+			return;   // not ours, or damaged: fall back to recovering by division
+		bool okLength = false, okSize = false;
+		AutoFitRun run;
+		run.start  = cursor;
+		run.length = fields.at(0).toInt(&okLength);
+		run.fontSize = fields.at(1).toDouble(&okSize);
+		if (!okLength || !okSize || run.length <= 0 || run.fontSize <= 0.0)
+			return;
+		if (fields.count() == 6)
+		{
+			run.scaleH       = fields.at(2).toDouble();
+			run.scaleV       = fields.at(3).toDouble();
+			run.tracking     = fields.at(4).toDouble();
+			run.wordTracking = fields.at(5).toDouble();
+		}
+		else
+		{
+			run.scaleH = 1000.0;
+			run.scaleV = 1000.0;
+			run.tracking = 0.0;
+			run.wordTracking = 1.0;
+		}
+		cursor += run.length;
+		runs.append(run);
+	}
+
+	m_autoFitBaseline = runs;
+	// autoFitEnsureBaseline() checks this against the story it actually finds;
+	// a mismatch means the text moved on without us and the snapshot is dropped.
+	m_autoFitBaselineLength = cursor;
+}

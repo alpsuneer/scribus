@@ -826,6 +826,19 @@ public: // Start public functions
 	double autoFitTracking() const { return m_autoFitTracking; }
 	double autoFitWordScale() const { return m_autoFitWordScale; }
 	void setAutoFitFactors(double fontScale, double glyphScale, double tracking, double wordScale);
+
+	/**
+	 * @brief The operator's own typography, run by run, as one compact string.
+	 *
+	 * Saved alongside the factors so a reopened frame can be returned to the
+	 * exact type it started from. Without it the baseline has to be recovered
+	 * by dividing the recorded factors out of the reduced values, which are
+	 * rounded to the file's grid, and that costs up to a tenth of a point.
+	 * Frames that carry no such attribute keep the old behaviour.
+	 * Empty for anything that is not a text frame.
+	 */
+	virtual QString autoFitBaselineToString() const { return QString(); }
+	virtual void autoFitBaselineFromString(const QString& /*packed*/) {}
 	/**
 	 * \brief Set the text to frame distances all at once
 	 * @param newLeft left distance
