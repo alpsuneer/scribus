@@ -7130,6 +7130,13 @@ void PageItem::restoreParagraphStyle(SimpleState *ss, bool isUndo)
 	}
 
 	int pos = is->getInt("POS");
+	int storyLen = itemText.length();
+	if (pos < 0 || pos > storyLen)
+	{
+		qWarning("PageItem::restoreParagraphStyle: stale undo position %d (story length %d) in '%s', clamping",
+		         pos, storyLen, qPrintable(is->getName()));
+		pos = qBound(0, pos, storyLen);
+	}
 	if (isUndo)
 	{
 		itemText.eraseStyle(pos, is->getNewState());
