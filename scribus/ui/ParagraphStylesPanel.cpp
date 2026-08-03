@@ -1134,6 +1134,27 @@ void ParagraphStylesPanel::setNextStyle()
 	updateStylesList();
 }
 
+namespace
+{
+	// StoryText records no undo of its own, so a paragraph style written straight
+	// into it is invisible to Ctrl+Z. This mirrors the state that
+	// ScribusDoc::itemSelection_ApplyParagraphStyle() records and that
+	// PageItem::restoreParagraphStyle() already knows how to reverse.
+	void suneerRecordAndApplyParaStyle(PageItem* item, StoryText& text,
+	                                   int pos, const ParagraphStyle& ps)
+	{
+		if (UndoManager::undoEnabled())
+		{
+			auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+			is->set("APPLY_PARASTYLE");
+			is->set("POS", pos);
+			is->setStates(text.paragraphStyle(pos), ps);
+			UndoManager::instance()->action(item, is);
+		}
+		text.applyStyle(pos, ps);
+	}
+}
+
 void ParagraphStylesPanel::applyChainFromStyle(const QString& startStyle)
 {
 	if (!m_doc || !m_mainWindow) return;
@@ -1465,6 +1486,13 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 		}
 	}
 
+	// One undo step for the whole config: column count, gap, frame width and the
+	// paragraph styles below all belong to a single button press.
+	UndoTransaction cfgTransaction;
+	if (UndoManager::undoEnabled())
+		cfgTransaction = UndoManager::instance()->beginTransaction(tf->getUName(), tf->getUPixmap(),
+		                                                           Um::SetStyle, QString(), Um::IFont);
+
 	// Apply styles to paragraphs
 	int len = tf->itemText.length();
 	int pos = 0;
@@ -1480,8 +1508,10 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 					if (!sn.isEmpty() && m_doc->paragraphStyles().contains(sn))
 			{
 				const ParagraphStyle& ps = m_doc->paragraphStyles().get(sn);
-				for (int p = pos; p <= pEnd && p < len; ++p)
-					tf->itemText.applyStyle(p, ps);
+				// applyStyle() scans forward to the paragraph terminator, so one call
+				// per paragraph does the whole paragraph and keeps one undo state.
+				if (pos < len)
+					suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ps);
 						}
 		}
 		pos = pEnd + 1;
@@ -1493,9 +1523,11 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 	tf->update();
 	m_doc->changed();
 	m_doc->regionsChanged()->update(QRectF());
-	// AutoFit
+	// AutoFit — inside the transaction so the height change undoes with the rest.
 	if (e.autoFit)
 		tf->autoFitFrameHeight();
+	if (cfgTransaction)
+		cfgTransaction.commit();
 	// Force redraw
 }
 
