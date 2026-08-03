@@ -1995,6 +1995,7 @@ public:
 	int  updateLocalNums(StoryText& itemText); //return first invalidated char
 	void updateNumbers(bool updateNumerations = false);
 	void itemSelection_ClearBulNumStrings(Selection *customSelection);
+	void removeOrphanedBulNumMarks(PageItem *item);
 /* Functions for PDF Form Actions */
 
 public:
