@@ -15,6 +15,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "undomanager.h"
 #include "util_math.h"
 
 
@@ -138,6 +139,12 @@ PyObject *scribus_createtable(PyObject* /* self */, PyObject* args)
 		PyErr_SetString(PyExc_ValueError, QObject::tr("Both numRows and numColumns must be greater than 0.","python error").toUtf8().constData());
 		return nullptr;
 	}
+	// One undo step for the whole table; see the same grouping in
+	// CanvasMode_Create (row/column inserts and the fit-to-frame resizes each
+	// record their own state).
+	UndoTransaction tableTransaction;
+	if (UndoManager::undoEnabled())
+		tableTransaction = UndoManager::instance()->beginTransaction();
 	int i = ScCore->primaryMainWindow()->doc->itemAdd(PageItem::Table, PageItem::Unspecified,
 								pageUnitXToDocX(x),
 								pageUnitYToDocY(y),
@@ -157,6 +164,9 @@ PyObject *scribus_createtable(PyObject* /* self */, PyObject* args)
 		if (!ItemExists(objName))
 			ScCore->primaryMainWindow()->doc->Items->at(i)->setItemName(objName);
 	}
+	if (tableTransaction)
+		tableTransaction.commit(table->getUName(), table->getUPixmap(),
+		                        Um::Create + " " + table->getUName(), "", Um::ICreate);
 	return PyUnicode_FromString(table->itemName().toUtf8());
 }
 

@@ -787,8 +787,14 @@ PageItem* CreateMode::doCreateNewObject()
 			int numColumns = dia->Cols->value();
 			delete dia;
 			dia = nullptr;
-			// Add the table item.
-			// TODO: This should be done in an undo transaction.
+			// Add the table item. Every row/column insert and every resize done
+			// by adjustTableToFrame() records its own undo state, so without a
+			// transaction removing a freshly inserted table took dozens of
+			// Ctrl+Z presses. Group them into the single "Create" step the user
+			// expects.
+			UndoTransaction tableTransaction;
+			if (UndoManager::undoEnabled())
+				tableTransaction = UndoManager::instance()->beginTransaction();
 			m_doc->dontResize = true;
 			z = m_doc->itemAdd(PageItem::Table, PageItem::Unspecified,
 						   tableRect.x(),
@@ -805,6 +811,9 @@ PageItem* CreateMode::doCreateNewObject()
 			table->adjustFrameToTable();
 			m_doc->dontResize = false;
 			m_doc->setRedrawBounding(table);
+			if (tableTransaction)
+				tableTransaction.commit(table->getUName(), table->getUPixmap(),
+				                        Um::Create + " " + table->getUName(), "", Um::ICreate);
 		}
 		break;
 	case modeInsertPDF3DAnnotation:
