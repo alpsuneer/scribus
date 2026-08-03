@@ -5027,6 +5027,19 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreInsertFrameText(ss, isUndo);
 		else if (ss->contains("APPLY_CHARSTYLE"))
 			restoreCharStyle(ss, isUndo);
+		else if (ss->contains("AUTOFIT_TEXT"))
+			m_autoFitText = isUndo ? ss->getBool("OLD") : ss->getBool("NEW");
+		else if (ss->contains("AUTOFIT_FACTORS"))
+		{
+			// The style changes travel as their own APPLY_CHARSTYLE states; this
+			// only keeps the recorded factors in step so the next re-fit still
+			// divides out the right amount.
+			const QString p = isUndo ? QString("OLD_") : QString("NEW_");
+			m_autoFitFontScale  = ss->getDouble(p + "FONTSCALE");
+			m_autoFitGlyphScale = ss->getDouble(p + "GLYPHSCALE");
+			m_autoFitTracking   = ss->getDouble(p + "TRACKING");
+			m_autoFitWordScale  = ss->getDouble(p + "WORDSCALE");
+		}
 		else if (ss->contains("SET_CHARSTYLE"))
 			restoreSetCharStyle(ss, isUndo);
 		else if (ss->contains("SET_PARASTYLE"))
@@ -11233,6 +11246,30 @@ void PageItem::setFirstLineOffset(FirstLineOffsetPolicy flop)
 		undoManager->action(this, is);
 	}
 	m_firstLineOffset = flop;
+}
+
+void PageItem::setAutoFitText(bool enabled)
+{
+	if (m_autoFitText == enabled)
+		return;
+
+	if (UndoManager::undoEnabled())
+	{
+		auto *ss = new SimpleState(Um::TextFrame, QString(), Um::IFont);
+		ss->set("AUTOFIT_TEXT");
+		ss->set("OLD", m_autoFitText);
+		ss->set("NEW", enabled);
+		undoManager->action(this, ss);
+	}
+	m_autoFitText = enabled;
+}
+
+void PageItem::setAutoFitFactors(double fontScale, double glyphScale, double tracking, double wordScale)
+{
+	m_autoFitFontScale  = fontScale;
+	m_autoFitGlyphScale = glyphScale;
+	m_autoFitTracking   = tracking;
+	m_autoFitWordScale  = wordScale;
 }
 
 void PageItem::setInlineData(const QString& data, const QString& ext)

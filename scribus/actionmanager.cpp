@@ -849,6 +849,9 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerAutoFitHeight";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerAutoFitText";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	(*scrActions)["suneerAutoFitText"]->setCheckable(true);
 	name="suneerGetImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerFocusFontCombo";
@@ -1841,6 +1844,7 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsNewsPanel"]->setTexts( tr("News Browser"));
 	(*scrActions)["suneerApplyChain"]->setTexts( tr("Apply Chain Style"));
 	(*scrActions)["suneerAutoFitHeight"]->setTexts( tr("Auto Fit Frame Height"));
+	(*scrActions)["suneerAutoFitText"]->setTexts( tr("Auto Fit Text to Frame"));
 	(*scrActions)["suneerGetImage"]->setTexts( tr("Get Image"));
 	(*scrActions)["suneerScaleUp"]->setTexts( tr("Scale Up / Font Size Up"));
 	(*scrActions)["suneerScaleDown"]->setTexts( tr("Scale Down / Font Size Down"));
@@ -2782,6 +2786,7 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "suneerFocusFontCombo";
 	itnmenua->second << "suneerApplyChain";
 	itnmenua->second << "suneerAutoFitHeight";
+	itnmenua->second << "suneerAutoFitText";
 	itnmenua->second << "suneerGetImage";
 	itnmenua->second << "alignLeft";
 	itnmenua->second << "alignCenter";

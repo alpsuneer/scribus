@@ -5807,6 +5807,11 @@ PageItem* Scribus170Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 								attrs.valueAsDouble("BEXTRA", 0.0));
 	currItem->setVerticalAlignment(attrs.valueAsInt("VAlign", 0));
 	currItem->setFirstLineOffset(static_cast<FirstLineOffsetPolicy>(attrs.valueAsInt("FLOP")));
+	currItem->setAutoFitText(attrs.valueAsInt("AutoFitText", 0) != 0);
+	currItem->setAutoFitFactors(attrs.valueAsDouble("AutoFitFontScale", 1.0),
+	                            attrs.valueAsDouble("AutoFitGlyphScale", 1.0),
+	                            attrs.valueAsDouble("AutoFitTracking", 0.0),
+	                            attrs.valueAsDouble("AutoFitWordScale", 1.0));
 
 	currItem->PLineArt  = Qt::PenStyle(attrs.valueAsInt("PLINEART", 0));
 	currItem->PLineEnd  = Qt::PenCapStyle(attrs.valueAsInt("PLINEEND", 0));

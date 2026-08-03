@@ -618,6 +618,8 @@ PyMethodDef scribus_methods[] = {
 	{ "setTextFlowMode", scribus_settextflowmode, METH_VARARGS, tr(scribus_settextflowmode__doc__)},
 	{ "setTextScalingH", scribus_settextscalingh, METH_VARARGS, tr(scribus_settextscalingh__doc__)},
 	{ "setTextScalingV", scribus_settextscalingv, METH_VARARGS, tr(scribus_settextscalingv__doc__)},
+	{ "setAutoFitText", scribus_setautofittext, METH_VARARGS, tr(scribus_setautofittext__doc__)},
+	{ "getAutoFitText", scribus_getautofittext, METH_VARARGS, tr(scribus_getautofittext__doc__)},
 	{ "setTextShade", scribus_settextshade, METH_VARARGS, tr(scribus_settextshade__doc__)},
 	{ "setTextStroke", scribus_settextstroke, METH_VARARGS, tr(scribus_settextstroke__doc__)},
 	{ "setTextVerticalAlignment", scribus_settextverticalalignment, METH_VARARGS, tr(scribus_settextverticalalignment__doc__)},

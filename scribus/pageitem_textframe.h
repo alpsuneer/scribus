@@ -173,6 +173,86 @@ protected:
 public:
 	void setTextFrameHeight();
 	void autoFitFrameHeight();
+
+	/**
+	 * @brief Fit the story inside this frame by adjusting typography alone.
+	 *
+	 * Shrinks, in order and only as far as it has to: font size, glyph
+	 * scaling, tracking, word spacing. Never touches the frame's position or
+	 * size, and never lets the text flow onward. Stops at the first stage that
+	 * makes the text fit. Every reduction is bounded by the readability floors
+	 * in the "autofit_text" preference context.
+	 *
+	 * @param withUndo record the style changes so one Ctrl+Z reverts them
+	 * @return true if the text now fits
+	 */
+	bool autoFitTextToFrame(bool withUndo = true);
+	//! \brief True if Auto Fit Text can run here: a text frame carrying text
+	//! that nothing downstream is waiting for.
+	bool autoFitTextEligible() const;
+	//! \brief Undo every reduction Auto Fit has applied, returning the story to
+	//! the typography the operator set.
+	void autoFitTextRestore(bool withUndo = true);
+
+private:
+	/**
+	 * @brief One style run of the story as the operator wrote it, before any
+	 * Auto Fit reduction, snapped to the 1/10 pt and 1/10 % grid the file
+	 * format stores.
+	 *
+	 * Captured once per fit. Every trial in the search is computed from these
+	 * numbers rather than from the previous trial's output, so the rounding
+	 * that keeps the values file-representable cannot accumulate across the
+	 * seventy-odd passes a four-stage search makes.
+	 */
+	struct AutoFitRun
+	{
+		int    start {0};
+		int    length {0};
+		double fontSize {0.0};
+		double scaleH {0.0};
+		double scaleV {0.0};
+		double tracking {0.0};
+		double wordTracking {1.0};
+	};
+	QList<AutoFitRun> m_autoFitBaseline;
+
+	//! \brief Story length the snapshot was taken at; a mismatch means the
+	//! text was edited and the snapshot has to be retaken.
+	int m_autoFitBaselineLength {-1};
+
+	//! \brief Take a snapshot only if we do not already hold a valid one.
+	void autoFitEnsureBaseline();
+	//! \brief Recover the operator's own typography by dividing the recorded
+	//! factors out of the current styles — the only place that division happens.
+	void autoFitCaptureBaseline();
+	//! \brief Lay the given factors over the captured baseline, per style run,
+	//! and record them on the item.
+	void applyAutoFitFactors(double fontScale, double glyphScale, double tracking, double wordScale, bool withUndo);
+	//! \brief Apply the factors with undo off, recompose, and report whether
+	//! the frame still overflows.
+	bool autoFitTrialFits(double fontScale, double glyphScale, double tracking, double wordScale);
+	//! \brief Smallest font size and glyph scale, and largest tracking, read off
+	//! the captured baseline; these set how far the whole frame may be reduced.
+	void autoFitBaselineExtremes(double& minFontSize, double& minScaleH, double& maxTracking, double& minWordTracking) const;
+
+	/**
+	 * @brief What the frame looked like when Auto Fit last ran on it.
+	 *
+	 * layout() re-queues a fit only when one of these has moved, so a fit that
+	 * settles cannot re-trigger itself. The overflow flag is part of the stamp
+	 * on purpose: a frame that could not be fitted within the readability
+	 * floors records that it is still overflowing and is left alone, while a
+	 * later style change that newly overflows a fitted frame does re-queue it.
+	 */
+	int    m_autoFitStampLength {-1};
+	double m_autoFitStampWidth {-1.0};
+	double m_autoFitStampHeight {-1.0};
+	bool   m_autoFitStampOverflow {false};
+	//! \brief Set while the fit's trial layouts run, so they never re-queue.
+	bool   m_autoFitRunning {false};
+	//! \brief Record the frame's state after a fit pass, fitted or not.
+	void autoFitStamp(bool fitted);
 };
 
 #endif

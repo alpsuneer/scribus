@@ -817,6 +817,7 @@ void ScribusMainWindow::initPalettes()
 	stylesDock->setToggleViewAction(scrActions["toolsParagraphStyles"]);
 	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
+	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
 		if (flag == reqTextStylesUpdate || flag == reqCharStylesUpdate || flag == 0)
@@ -8858,6 +8859,66 @@ void ScribusMainWindow::suneerAutoFitHeight()
 
 	if (fitTransaction)
 		fitTransaction.commit();
+}
+
+void ScribusMainWindow::suneerAutoFitTextToggled(bool enabled)
+{
+	if (!HaveDoc || !doc)
+		return;
+	const int count = doc->m_Selection->count();
+	if (count == 0)
+		return;
+
+	UndoTransaction fitTransaction;
+	if (UndoManager::undoEnabled())
+		fitTransaction = m_undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::ApplyTextStyle,
+		                                                 enabled ? tr("Auto fit text to frame")
+		                                                         : tr("Stop auto fitting text"),
+		                                                 Um::IFont);
+
+	int fitted = 0, refused = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		PageItem* item = doc->m_Selection->itemAt(i);
+		if (!item || !item->isTextFrame() || item->asTextFrame()->isTableItem)
+			continue;
+		PageItem_TextFrame* tf = item->asTextFrame();
+		item->setAutoFitText(enabled);
+		if (enabled)
+		{
+			if (!tf->autoFitTextEligible())
+			{
+				++refused;
+				continue;
+			}
+			if (tf->autoFitTextToFrame(true))
+				++fitted;
+			else
+				++refused;
+		}
+		else
+		{
+			// Give the operator their own typography back.
+			tf->autoFitTextRestore(true);
+		}
+	}
+
+	if (fitTransaction)
+		fitTransaction.commit();
+
+	doc->changed();
+	doc->regionsChanged()->update(QRectF());
+	view->DrawNew();
+
+	if (!enabled)
+	{
+		setStatusBarInfoText(tr("Auto Fit Text off; original typography restored"));
+		return;
+	}
+	QString msg = tr("Auto fitted %1 frame(s)").arg(fitted);
+	if (refused > 0)
+		msg += tr("; %1 could not be fitted within the readability limits").arg(refused);
+	setStatusBarInfoText(msg);
 }
 
 void ScribusMainWindow::suneerAutoflowToNewPages()

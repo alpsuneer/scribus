@@ -1533,6 +1533,10 @@ public:
 	};
 	QList<OpenNodesList> OpenNodes;
 	QTimer *CurTimer {nullptr};
+	//! \brief Frames waiting for an Auto Fit Text pass, and the debounce that
+	//! keeps a burst of typing from triggering one fit per keystroke.
+	QSet<PageItem*> m_autoFitTextQueue;
+	QTimer *m_autoFitTextTimer {nullptr};
 	QMap<int, errorCodes> pageErrors;
 	QMap<int, errorCodes> docLayerErrors;
 	QMap<PageItem*, errorCodes> docItemErrors;
@@ -1574,6 +1578,19 @@ signals:
 	void addBookmark(PageItem *);
 	void deleteBookmark(PageItem *);
 	
+public:
+	/**
+	 * @brief Queue a text frame for an Auto Fit Text pass.
+	 *
+	 * The fit re-composes the frame many times over, so it must not run inside
+	 * layout(). Frames are collected here and fitted once the event loop is
+	 * free, which also coalesces a burst of keystrokes into a single pass.
+	 */
+	void scheduleAutoFitText(PageItem* item);
+
+private slots:
+	void runScheduledAutoFitText();
+
 public slots:
 	void selectionChanged();
 	void itemSelection_ToggleLock();

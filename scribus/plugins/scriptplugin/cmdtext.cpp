@@ -1425,6 +1425,57 @@ PyObject *scribus_settextscalingh(PyObject* /* self */, PyObject* args)
 }
 
 
+static PageItem_TextFrame* autoFitTargetFrame(const PyESString& name)
+{
+	PageItem* item = GetUniqueItem(QString::fromUtf8(name.c_str()));
+	if (item == nullptr)
+		return nullptr;
+	if (!item->isTextFrame())
+	{
+		PyErr_SetString(WrongFrameTypeError, QObject::tr("Cannot use Auto Fit Text on a non-text frame.","python error").toUtf8().constData());
+		return nullptr;
+	}
+	return item->asTextFrame();
+}
+
+PyObject *scribus_setautofittext(PyObject* /* self */, PyObject* args)
+{
+	PyESString name;
+	int state = 1;
+	if (!PyArg_ParseTuple(args, "i|es", &state, "utf-8", name.ptr()))
+		return nullptr;
+	if (!checkHaveDocument())
+		return nullptr;
+	PageItem_TextFrame* frame = autoFitTargetFrame(name);
+	if (frame == nullptr)
+		return nullptr;
+
+	frame->setAutoFitText(state != 0);
+	bool fits = true;
+	if (state != 0)
+		fits = frame->autoFitTextToFrame(true);
+	else
+		frame->autoFitTextRestore(true);
+
+	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	return PyBool_FromLong(static_cast<long>(fits));
+}
+
+PyObject *scribus_getautofittext(PyObject* /* self */, PyObject* args)
+{
+	PyESString name;
+	if (!PyArg_ParseTuple(args, "|es", "utf-8", name.ptr()))
+		return nullptr;
+	if (!checkHaveDocument())
+		return nullptr;
+	PageItem_TextFrame* frame = autoFitTargetFrame(name);
+	if (frame == nullptr)
+		return nullptr;
+	return PyBool_FromLong(static_cast<long>(frame->autoFitText()));
+}
+
 PyObject *scribus_settextscalingv(PyObject* /* self */, PyObject* args)
 {
 	PyESString name;
@@ -1808,6 +1859,8 @@ void cmdtextdocwarnings()
 	  << scribus_settextalignment__doc__
 	  << scribus_settextfill__doc__
 	  << scribus_settextscalingh__doc__
+	  << scribus_setautofittext__doc__
+	  << scribus_getautofittext__doc__
 	  << scribus_settextscalingv__doc__
 	  << scribus_settextshade__doc__
 	  << scribus_settextstroke__doc__
