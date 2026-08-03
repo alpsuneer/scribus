@@ -4072,8 +4072,11 @@ void Scribus171Format::readCellStyle(ScribusDoc *doc, ScXmlStreamReader& reader,
 		reader.readNext();
 		if (reader.isEndElement() && reader.name() == tagName)
 			break;
+		// The writer indents the file, so the first node inside <CellStyle> is
+		// whitespace: breaking here dropped every border on load (readTableStyle
+		// gets this right, which is why table borders survived and cell ones did not).
 		if (!reader.isStartElement())
-			break;
+			continue;
 		if (reader.name() == QLatin1String("TableBorderLeft"))
 		{
 			TableBorder border;

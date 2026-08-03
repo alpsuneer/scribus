@@ -3540,8 +3540,10 @@ void Scribus150Format::readCellStyle(ScribusDoc *doc, ScXmlStreamReader& reader,
 		reader.readNext();
 		if (reader.isEndElement() && reader.name() == tagName)
 			break;
+		// Indentation whitespace is the first node inside <CellStyle>; breaking
+		// here dropped every cell border on load. See the 1.7.1 loader.
 		if (!reader.isStartElement())
-			break;
+			continue;
 		if (reader.name() == QLatin1String("TableBorderLeft"))
 		{
 			TableBorder border;
