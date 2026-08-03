@@ -5208,6 +5208,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreUnWeldItem(ss, isUndo);
 		else if (ss->contains("CLEARMARKSTRING"))
 			restoreMarkString(ss, isUndo);
+		else if (ss->contains("REMOVE_BULNUM_MARK"))
+			restoreBulNumMarkRemoval(ss, isUndo);
 		else if (ss->contains("SOFT_SHADOW"))
 			restoreSoftShadow(ss, isUndo);
 		else if (ss->contains("SOFT_SHADOW_COLOR"))
@@ -5402,6 +5404,35 @@ void PageItem::restoreSoftShadowBlendMode(SimpleState *state, bool isUndo)
 	else
 		m_softShadowBlendMode = state->getInt("NEW_VALUE");
 	update();
+}
+
+void PageItem::restoreBulNumMarkRemoval(SimpleState *state, bool isUndo)
+{
+	const auto *is = dynamic_cast<ScItemState< QPair<int, QString> >*>(state);
+	if (!is)
+		return;
+	int pos = is->getItem().first;
+	if (isUndo)
+	{
+		// Re-insert the mark char removed when the paragraph lost its
+		// bullet/numbering, so positions recorded by earlier states in the
+		// same transaction are valid again when they replay.
+		if (pos < 0 || pos > itemText.length())
+		{
+			qWarning("PageItem::restoreBulNumMarkRemoval: stale position %d (story length %d), clamping",
+			         pos, itemText.length());
+			pos = qBound(0, pos, itemText.length());
+		}
+		auto *mark = new BulNumMark();
+		mark->setString(is->getItem().second);
+		itemText.insertMark(mark, pos);
+	}
+	else if (pos >= 0 && pos < itemText.length()
+		&& itemText.hasMark(pos) && itemText.mark(pos)->isType(MARKBullNumType))
+	{
+		itemText.removeChars(pos, 1);
+	}
+	invalid = true;
 }
 
 void PageItem::restoreMarkString(SimpleState *state, bool isUndo)

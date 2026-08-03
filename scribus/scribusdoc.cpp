@@ -9569,6 +9569,7 @@ void ScribusDoc::itemSelection_SetParagraphStyle(const ParagraphStyle & newStyle
 				}
 			}
 			currItem->itemText.setStyle(stop, newStyle);
+			removeOrphanedBulNumMarks(currItem);
 			currItem->invalid = true;
 		}
 		else
@@ -9643,6 +9644,7 @@ void ScribusDoc::itemSelection_EraseParagraphStyle(Selection* customSelection)
 				m_undoManager->action(currItem, is);
 			}
 			currItem->itemText.setStyle(stop, newStyle2);
+			removeOrphanedBulNumMarks(currItem);
 		}
 		else
 		{
@@ -9752,6 +9754,45 @@ void ScribusDoc::itemSelection_ClearBulNumStrings(Selection* customSelection)
 	flag_Renumber = true;
 }
 
+void ScribusDoc::removeOrphanedBulNumMarks(PageItem *item)
+{
+	// Layout deletes the BulNumMark char of any paragraph whose style has no
+	// bullet/numbering (PageItem_TextFrame::layout), silently shortening the
+	// story: undo states recorded before that hold positions past the new end.
+	// Remove the chars here instead, inside the style change's transaction, so
+	// the removal is undoable and reverse replay re-inserts them before the
+	// style states need their recorded positions. Layout's own removal remains
+	// as a fallback for paths that bypass this (e.g. style redefinition).
+	if (!item->isTextFrame() && !item->isPathText())
+		return;
+	if (UndoManager::undoEnabled() && !m_undoManager->isTransactionMode())
+		qWarning("ScribusDoc::removeOrphanedBulNumMarks: no open transaction, mark removal becomes its own undo step");
+	StoryText& text = item->itemText;
+	int pos = 0;
+	while (pos < text.length())
+	{
+		bool paraStart = (pos == 0) || (text.text(pos - 1) == SpecialChars::PARSEP);
+		if (paraStart && text.hasMark(pos))
+		{
+			Mark* mark = text.mark(pos);
+			const ParagraphStyle& style = text.paragraphStyle(pos);
+			if (mark->isType(MARKBullNumType) && !style.hasBullet() && !style.hasNum())
+			{
+				if (UndoManager::undoEnabled())
+				{
+					auto *is = new ScItemState<QPair<int, QString> >(Um::SetStyle);
+					is->set("REMOVE_BULNUM_MARK");
+					is->setItem(qMakePair(pos, mark->getString()));
+					m_undoManager->action(item, is);
+				}
+				text.removeChars(pos, 1);
+				continue;
+			}
+		}
+		++pos;
+	}
+}
+
 void ScribusDoc::itemSelection_ApplyParagraphStyle(const ParagraphStyle & newStyle, Selection* customSelection, bool rmDirectFormatting)
 {
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
@@ -9826,6 +9867,7 @@ void ScribusDoc::itemSelection_ApplyParagraphStyle(const ParagraphStyle & newSty
 				m_undoManager->action(currItem, is);
 			}
 			currItem->itemText.applyStyle(stop, newStyle, rmDirectFormatting);
+			removeOrphanedBulNumMarks(currItem);
 			currItem->invalid = true;
 		}
 		if (currItem->isPathText())
