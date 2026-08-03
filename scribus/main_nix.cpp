@@ -103,6 +103,10 @@ int mainApp(int argc, char **argv)
 
 void initCrashHandler()
 {
+	// Leave fatal signals at SIG_DFL so the OS writes a core dump and
+	// debuggers see the real fault, instead of the dialog + exit(255) below.
+	if (qEnvironmentVariableIsSet("SCRIBUS_NO_CRASH_HANDLER"))
+		return;
 	typedef void (*HandlerType)(int);
 	HandlerType handler	= nullptr;
 	handler = defaultCrashHandler;
