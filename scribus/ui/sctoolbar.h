@@ -55,7 +55,12 @@ public:
 // 	int position();
 // 	void storeDockPosition();
 // 	void moveDock();
-	void initVisibility();
+	/**
+	 * Show or hide according to the stored IsVisible preference.
+	 * @param defaultVisible visibility to use when this toolbar has no stored
+	 * preference yet (i.e. on a new user profile).
+	 */
+	void initVisibility(bool defaultVisible = true);
 
 public slots:
 	void languageChange();
