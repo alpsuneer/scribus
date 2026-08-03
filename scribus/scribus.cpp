@@ -79,7 +79,9 @@ for which a new license (GPL+exception) is in place.
 #include <QStyleFactory>
 #include <QStyleHints>
 #include <QTableWidget>
+#include <QTimer>
 #include <QTranslator>
+#include <QCheckBox>
 #include <QWindow>
 #include <QWheelEvent>
 
@@ -3755,6 +3757,9 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 		}
 	}
 	UndoBlocker undoBlocker;
+	//! Which native SLA generation wrote this file. Captured while the loader is
+	//! still alive; used after loadDoc() returns to offer the legacy fix.
+	int loadedFormatID = -1;
 	if (!fileName.isEmpty())
 	{
 		FileLoader *fileLoader = new FileLoader(filename);
@@ -4080,6 +4085,7 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 		}
 		view->reformPages(false);
 		doc->setLoading(false);
+		loadedFormatID = fileLoader->fileType();
 		delete fileLoader;
 		view->updatesOn(true);
 		w->setUpdatesEnabled(true);
@@ -4127,6 +4133,12 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 	doc->setModified(false);
 	foreach (NotesStyle* NS, doc->m_docNotesStylesList)
 		doc->updateNotesFramesStyles(NS);
+	// Deferred deliberately: undoBlocker above kills undo for the whole of this
+	// function, so a fix run inline here would record nothing and Ctrl+Z would
+	// not revert it. Firing on the next event loop pass also lets the window
+	// paint before the dialog appears.
+	if (ret && HaveDoc && doc)
+		QTimer::singleShot(0, this, [this, loadedFormatID] { suneerMaybeOfferLegacyOverflowFix(loadedFormatID); });
 #ifdef DEBUG_LOAD_TIMES
 	times(&tms2);
 	double ticks = sysconf(_SC_CLK_TCK);
@@ -9153,6 +9165,224 @@ void ScribusMainWindow::suneerFixOverflowFramesRun(bool wholeDocument)
 	view->deselectItems(true);
 	doc->m_Selection->delaySignalsOn();
 	for (PageItem* item : std::as_const(tooBig))
+		doc->m_Selection->addItem(item);
+	doc->m_Selection->delaySignalsOff();
+	view->DrawNew();
+}
+
+// ---------------------------------------------------------------------------
+// On-open prompt for legacy documents.
+//
+// 1.7.3 measures text a little taller than 1.5.6 did, so pages laid out by an
+// older Scribus can open with frames a fraction of a line short. This offers to
+// nudge them on open. It is stricter than the manual Extras command: the
+// operator did not ask for this one, so the growth cap is tighter and a frame
+// that would grow onto a neighbour is left alone and reported.
+// ---------------------------------------------------------------------------
+
+//! Tighter than SUNEER_OVERFLOW_GROWTH_CAP because this runs unprompted. Raise
+//! it to match the manual command if legacy pages routinely need more.
+static const double SUNEER_LEGACY_OVERFLOW_CAP = 0.05;
+
+bool ScribusMainWindow::suneerGrowthWouldCollide(PageItem_TextFrame* tf, double newHeight) const
+{
+	if (!tf || !doc)
+		return false;
+
+	// Neighbours whose composition the grow could disturb, with the overflow
+	// state they start from. A frame that is already overset is not our doing.
+	QList<PageItem_TextFrame*> neighbours;
+	QList<bool> wasOverflowing;
+	for (PageItem* other : std::as_const(doc->DocItems))
+	{
+		if (other == tf || other->OwnPage != tf->OwnPage)
+			continue;
+		PageItem_TextFrame* ntf = other->asTextFrame();
+		if (!ntf)
+			continue;
+		neighbours.append(ntf);
+		wasOverflowing.append(ntf->frameOverflows());
+	}
+
+	// Probed on the real geometry so rotation, clip and text flow all count,
+	// with undo suspended so the probe leaves nothing on the stack.
+	const bool undoWasOn = UndoManager::undoEnabled();
+	if (undoWasOn)
+		m_undoManager->setUndoEnabled(false);
+
+	const double origHeight = tf->height();
+	const QRectF before = tf->getVisualBoundingRect();
+	tf->setHeight(newHeight);
+	tf->updateClip();
+	const QRectF after = tf->getVisualBoundingRect();
+
+	// A grown frame pushes text flow around it, so a neighbour can lose room
+	// and go overset without the two boxes ever newly touching. Recompose them
+	// at the trial height and see. This is the damage the geometric test below
+	// is a proxy for, so it is worth the extra layout passes: the run happens
+	// once, on open.
+	bool damages = false;
+	for (int i = 0; i < neighbours.count(); ++i)
+	{
+		PageItem_TextFrame* ntf = neighbours.at(i);
+		ntf->invalid = true;
+		ntf->layout();
+		if (ntf->frameOverflows() && !wasOverflowing.at(i))
+			damages = true;
+	}
+
+	tf->setHeight(origHeight);
+	tf->updateClip();
+	for (PageItem_TextFrame* ntf : std::as_const(neighbours))
+	{
+		ntf->invalid = true;
+		ntf->layout();
+	}
+
+	if (undoWasOn)
+		m_undoManager->setUndoEnabled(true);
+
+	if (damages)
+		return true;
+
+	for (const PageItem* other : std::as_const(doc->DocItems))
+	{
+		// Same page only; pasteboard items (OwnPage -1) compare against each
+		// other. An overlap that already existed is the operator's layout, not
+		// damage we caused, so only newly created ones count.
+		if (other == tf || other->OwnPage != tf->OwnPage)
+			continue;
+		const QRectF r = other->getVisualBoundingRect();
+		if (after.intersects(r) && !before.intersects(r))
+			return true;
+	}
+	return false;
+}
+
+void ScribusMainWindow::suneerMaybeOfferLegacyOverflowFix(int loadedFormatID)
+{
+	if (!HaveDoc || !doc || !view || m_suneerLegacyOverflowAsked)
+		return;
+	// Native SLA format ids run newest to oldest (171 = 45 ... 12x = 50), so a
+	// file written by an older Scribus sorts *above* the current id. Past the
+	// native range is a foreign importer, which is not a legacy Scribus file.
+	if (loadedFormatID <= FORMATID_CURRENTIMPORT || loadedFormatID > FORMATID_NATIVEIMPORTEND)
+		return;
+	PrefsContext* prefs = PrefsManager::instance().prefsFile->getContext("suneer_legacy_overflow");
+	if (prefs && !prefs->getBool("ask_on_open", true))
+		return;
+
+	// DocItems rather than *doc->Items: it is unambiguous right after load and
+	// it includes the pasteboard, where OwnPage is -1.
+	QList<PageItem_TextFrame*> overflowing;
+	for (PageItem* item : std::as_const(doc->DocItems))
+	{
+		if (suneerOverflowFrameIneligible(item))
+			continue;
+		PageItem_TextFrame* tf = item->asTextFrame();
+		if (tf && tf->frameOverflows())
+			overflowing.append(tf);
+	}
+	if (overflowing.isEmpty())
+		return;
+
+	ScMessageBox box(QMessageBox::Question, tr("Legacy Document"),
+	                 tr("This file was created in an older Scribus version."),
+	                 QMessageBox::NoButton, this);
+	box.setInformativeText(tr("%n text frame(s) overflow. Fix them now?", "", overflowing.count()));
+	QPushButton* fixButton = box.addButton(tr("Fix"), QMessageBox::AcceptRole);
+	box.addButton(tr("Skip"), QMessageBox::RejectRole);
+	box.setDefaultButton(fixButton);
+	QCheckBox* dontAsk = new QCheckBox(tr("Don't ask again this session"), &box);
+	box.setCheckBox(dontAsk);
+	box.exec();
+	if (dontAsk->isChecked())
+		m_suneerLegacyOverflowAsked = true;
+	if (box.clickedButton() != fixButton)
+		return;
+
+	QList<PageItem*> tooBig;
+	QList<PageItem*> wouldCollide;
+	int fixed = 0;
+
+	UndoTransaction batch;
+	if (UndoManager::undoEnabled())
+		batch = m_undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize,
+		                                        tr("Fix legacy overflow"), Um::IResize);
+
+	for (PageItem_TextFrame* tf : std::as_const(overflowing))
+	{
+		const double origHeight = tf->height();
+		const double needed = suneerMeasureFitHeight(tf);
+		if (needed <= 0.0 || needed > origHeight * (1.0 + SUNEER_LEGACY_OVERFLOW_CAP))
+		{
+			tooBig.append(tf);
+			continue;
+		}
+		if (suneerGrowthWouldCollide(tf, needed))
+		{
+			wouldCollide.append(tf);
+			continue;
+		}
+		// Same call the manual command and Ctrl+Alt+C use, so the result is
+		// identical to fixing the frame by hand. It nests inside the batch.
+		tf->autoFitFrameHeight();
+		++fixed;
+	}
+
+	if (batch)
+		batch.commit();
+
+	if (fixed > 0)
+	{
+		// Mark dirty and redraw only. Never save on the operator's behalf: this
+		// ran on open, and the file on disk is still their original.
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		view->DrawNew();
+	}
+
+	const int capPercent = qRound(SUNEER_LEGACY_OVERFLOW_CAP * 100.0);
+	QString summary = tr("Fixed %1 overflowing frame(s)").arg(fixed);
+	const int skipped = tooBig.count() + wouldCollide.count();
+	if (skipped > 0)
+		summary += tr("; %1 left alone").arg(skipped);
+	setStatusBarInfoText(summary);
+
+	if (skipped == 0)
+		return;
+
+	// Anything we refused is an editorial call, so name it and offer to select
+	// it rather than leaving the operator to hunt for it.
+	QStringList details;
+	if (!tooBig.isEmpty())
+	{
+		QStringList names;
+		for (const PageItem* item : std::as_const(tooBig))
+			names << item->itemName();
+		details << tr("Would grow more than %1%: %2").arg(capPercent).arg(names.join(", "));
+	}
+	if (!wouldCollide.isEmpty())
+	{
+		QStringList names;
+		for (const PageItem* item : std::as_const(wouldCollide))
+			names << item->itemName();
+		details << tr("Would overlap or reflow another object: %1").arg(names.join(", "));
+	}
+
+	ScMessageBox info(QMessageBox::Information, tr("Legacy Document"), summary, QMessageBox::NoButton, this);
+	info.setInformativeText(details.join("\n\n"));
+	QPushButton* selectButton = info.addButton(tr("Select Them"), QMessageBox::AcceptRole);
+	info.addButton(QMessageBox::Close);
+	info.exec();
+	if (info.clickedButton() != selectButton)
+		return;
+
+	view->deselectItems(true);
+	doc->m_Selection->delaySignalsOn();
+	for (PageItem* item : std::as_const(tooBig))
+		doc->m_Selection->addItem(item);
+	for (PageItem* item : std::as_const(wouldCollide))
 		doc->m_Selection->addItem(item);
 	doc->m_Selection->delaySignalsOff();
 	view->DrawNew();

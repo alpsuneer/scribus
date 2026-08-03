@@ -671,6 +671,15 @@ private:
 	//! \brief Smallest height at which the frame stops overflowing, or -1 if it
 	//! never does. Leaves the frame at its original height.
 	double suneerMeasureFitHeight(PageItem_TextFrame* tf) const;
+	//! \brief True if growing the frame to newHeight would cover something it
+	//! does not already touch, or push a neighbouring frame into overflow.
+	//! Leaves the frame at its original height.
+	bool suneerGrowthWouldCollide(PageItem_TextFrame* tf, double newHeight) const;
+	//! \brief Offer to fix overflowing frames in a file written by an older
+	//! Scribus. Must run outside loadDoc() so undo is live; see the call site.
+	void suneerMaybeOfferLegacyOverflowFix(int loadedFormatID);
+	//! \brief Set by the prompt's "Don't ask again this session" checkbox.
+	bool m_suneerLegacyOverflowAsked { false };
     /** init methods */
 	void initSplash(bool showSplash);
 	void initMdiArea();
