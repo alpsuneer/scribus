@@ -54,6 +54,7 @@
 #include <QPushButton>
 #include "colorcombo.h"
 #include <QToolButton>
+#include "util_printer.h"
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QComboBox>
@@ -538,6 +539,23 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	row1->addWidget(m_imgRaiseBtn);      m_textWrapWidgets << m_imgRaiseBtn;
 	row1->addWidget(m_imgLowerBtn);      m_textWrapWidgets << m_imgLowerBtn;
 	row1->addWidget(m_imgToBackBtn);     m_textWrapWidgets << m_imgToBackBtn;
+
+	// Proof Print: always visible, whatever is selected, because a proof is a
+	// document action rather than a text or image one. A plain click is the
+	// zero-dialog fast path; the tooltip says where it will go.
+	m_proofBtn = makeButton(tr("Proof"), QString(), false);
+	// makeButton() sizes for a one-glyph icon button; "Proof" elides to "P...f"
+	// at that width.
+	m_proofBtn->setFixedSize(52, 22);
+	connect(m_proofBtn, &QToolButton::clicked, this, []() {
+		ScribusMainWindow* mw = ScCore->primaryMainWindow();
+		if (mw && mw->scrActions.contains("fileProofPrint"))
+			mw->scrActions["fileProofPrint"]->trigger();
+	});
+	// First position, not last: row 1 already overflows a 1600px window, and a
+	// button pushed off the end of the toolbar cannot be clicked at all.
+	row1->insertWidget(0, m_proofBtn);
+	refreshProofTooltip();
 
 	row1->addStretch();
 	vlay->addLayout(row1);
@@ -1542,8 +1560,25 @@ void SuneerControlBar::blockAllSignals(bool block)
 	for (QObject* o : all) o->blockSignals(block);
 }
 
+void SuneerControlBar::refreshProofTooltip()
+{
+	if (!m_proofBtn)
+		return;
+	QString printer;
+	ScribusMainWindow* mw = ScCore->primaryMainWindow();
+	if (mw && mw->doc)
+		printer = mw->doc->Print_Options.printer;
+	if (printer.isEmpty())
+		printer = PrinterUtil::getDefaultPrinterName();
+	if (printer.isEmpty())
+		m_proofBtn->setToolTip(tr("Proof Print - no printer set up yet"));
+	else
+		m_proofBtn->setToolTip(tr("Proof to %1 (auto paper)").arg(printer));
+}
+
 void SuneerControlBar::updateFromSelection()
 {
+	refreshProofTooltip();
 	// Set icons once
 
 	if (!m_doc) return;
