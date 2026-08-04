@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include "scprintengine_ps.h"
 #include "scribusstructs.h"
 #include "scribusdoc.h"
+#include "util_printer.h"
 #include "scribuscore.h"
 #include "pslib.h"
 #include "util_file.h"
@@ -75,14 +76,31 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 		cmd += "'";
 		if (options.copies > 1)
 			cmd += " -#" + cc.setNum(options.copies);
-		// Page size
-		double pw = m_doc.pageWidth()  / 2.8346456693;
-		double ph = m_doc.pageHeight() / 2.8346456693;
-		cmd += " -o media=Custom.";
-		cmd += QByteArray::number((int)pw);
-		cmd += "x";
-		cmd += QByteArray::number((int)ph);
-		cmd += "mm";
+		// Page size. Production keeps asking for the document's own size so the
+		// output is 1:1. A proof goes onto whatever sheet the proof printer
+		// actually holds: ask for that media and let fit-to-page scale the
+		// broadsheet down proportionally and centred (it never crops or
+		// stretches). If the printer reports a size we do not recognise we fall
+		// back to A4, which is what the proof dialog reports too.
+		QString proofMedia;
+		if (options.isProofPrint && PrinterUtil::getDefaultPaperSize(options.printer, proofMedia))
+		{
+			cmd += " -o media=" + proofMedia.toLocal8Bit();
+		}
+		else if (options.isProofPrint)
+		{
+			cmd += " -o media=A4";
+		}
+		else
+		{
+			double pw = m_doc.pageWidth()  / 2.8346456693;
+			double ph = m_doc.pageHeight() / 2.8346456693;
+			cmd += " -o media=Custom.";
+			cmd += QByteArray::number((int)pw);
+			cmd += "x";
+			cmd += QByteArray::number((int)ph);
+			cmd += "mm";
+		}
 		cmd += " -o fit-to-page=true";
 		if (options.isProofPrint)
 		{

@@ -73,6 +73,42 @@ QStringList PrinterUtil::getPrinterNames()
 	return QPrinterInfo::availablePrinterNames();
 }
 
+bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& mediaName)
+{
+	if (printerName.isEmpty())
+		return false;
+	QPrinterInfo pInfo = QPrinterInfo::printerInfo(printerName);
+	if (pInfo.isNull())
+		return false;
+
+	QPageSize pageSize = pInfo.defaultPageSize();
+	if (!pageSize.isValid())
+		return false;
+
+	// A named standard size gives a media keyword lpr understands directly.
+	// Anything custom or unrecognised is reported as unknown so the caller can
+	// fall back and tell the user, rather than sending a size the printer will
+	// silently reinterpret.
+	QString name;
+	switch (pageSize.id())
+	{
+		case QPageSize::A3:     name = "A3"; break;
+		case QPageSize::A4:     name = "A4"; break;
+		case QPageSize::A5:     name = "A5"; break;
+		case QPageSize::B4:     name = "B4"; break;
+		case QPageSize::B5:     name = "B5"; break;
+		case QPageSize::Letter: name = "Letter"; break;
+		case QPageSize::Legal:  name = "Legal"; break;
+		case QPageSize::Tabloid: name = "Tabloid"; break;
+		default: break;
+	}
+	if (name.isEmpty())
+		return false;
+
+	mediaName = name;
+	return true;
+}
+
 #if defined(_WIN32)
 bool PrinterUtil::getDefaultSettings(QString printerName, QByteArray& devModeA)
 {
