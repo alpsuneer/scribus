@@ -830,6 +830,31 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 	PutStream("save\n");
 	if ((pg->orientation() == 1) && (m_outputFormat == OutputPS))
 		PutStream("90 rotate 0 " + IToStr(qRound(maxBoxY)) + " neg translate\n");
+		// A proof sheet is smaller than the page: content is drawn in document
+		// coordinates, so without this a broadsheet runs off an A4 sheet and the
+		// printer clips it. The job-level fit-to-page option cannot be relied on:
+		// it is a filter feature, and a PostScript queue can pass the job through
+		// unscaled. Scale here instead, centred, so the geometry is right
+		// whatever the queue does downstream.
+		if ((m_outputFormat == OutputPS) && Options.isProofPrint
+			&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0))
+		{
+			double srcW = (pg->orientation() == 0) ? maxBoxX : maxBoxY;
+			double srcH = (pg->orientation() == 0) ? maxBoxY : maxBoxX;
+			const double proofMargin = 12.0;
+			double availW = qMax(1.0, Options.proofPaperWidth  - proofMargin * 2.0);
+			double availH = qMax(1.0, Options.proofPaperHeight - proofMargin * 2.0);
+			double proofScale = qMin(availW / srcW, availH / srcH);
+			if ((proofScale > 0.0) && (proofScale < 1.0))
+			{
+				double offX = (Options.proofPaperWidth  - srcW * proofScale) / 2.0;
+				double offY = (Options.proofPaperHeight - srcH * proofScale) / 2.0;
+				PutStream(ToStr(offX) + " " + ToStr(offY) + " translate\n");
+				PutStream(ToStr(proofScale) + " " + ToStr(proofScale) + " scale\n");
+				qDebug("Proof print: paper %.1fx%.1f pt, page %.1fx%.1f pt, scale %.1f%%",
+				       Options.proofPaperWidth, Options.proofPaperHeight, srcW, srcH, proofScale * 100.0);
+			}
+		}
 	PutStream("/DeviceCMYK setcolorspace\n");
 	// Clip to bleeds
 	QString clipStr;

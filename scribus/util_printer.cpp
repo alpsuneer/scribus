@@ -73,7 +73,7 @@ QStringList PrinterUtil::getPrinterNames()
 	return QPrinterInfo::availablePrinterNames();
 }
 
-bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& mediaName)
+bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& mediaName, QSizeF* sizePoints)
 {
 	if (printerName.isEmpty())
 		return false;
@@ -106,6 +106,8 @@ bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& media
 		return false;
 
 	mediaName = name;
+	if (sizePoints)
+		*sizePoints = pageSize.size(QPageSize::Point);
 	return true;
 }
 

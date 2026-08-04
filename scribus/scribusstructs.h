@@ -449,6 +449,11 @@ struct PrintOptions
 	//! DPI at which placed images are rasterised into the print stream.
 	//! 300 is the production value; proof printing drops it (see isProofPrint).
 	int  imageResolution { 300 };
+	//! Target sheet for a proof, in points, 0 when unknown. The page is scaled
+	//! onto this inside the PostScript: relying on the queue's fit-to-page is
+	//! not enough, a PostScript printer receives the job unscaled and clips it.
+	double proofPaperWidth { 0.0 };
+	double proofPaperHeight { 0.0 };
 	PrintLanguage prnLanguage { PrintLanguage::PostScript3 };
 	double markLength { 20.0 };
 	double markOffset { 0.0 };
