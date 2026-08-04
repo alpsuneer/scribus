@@ -4834,10 +4834,19 @@ void ScribusMainWindow::slotFileProofPrint()
 {
 	if (!HaveDoc)
 		return;
-	if (doc->Print_Options.printer.isEmpty() && PDef.Pname.isEmpty())
+	// PDef.Pname is only filled in after a print has happened, so on a profile
+	// that has not printed yet it is empty even when the system has a perfectly
+	// good default queue. Ask for that before falling back to a dialog,
+	// otherwise the first proof of every session is not one-click at all.
+	QString proofPrinter = doc->Print_Options.printer;
+	if (proofPrinter.isEmpty())
+		proofPrinter = PDef.Pname;
+	if (proofPrinter.isEmpty())
+		proofPrinter = PrinterUtil::getDefaultPrinterName();
+	if (proofPrinter.isEmpty())
 	{
-		// Nothing to print to yet: fall back to the normal dialog so the user
-		// can pick a printer once. Proofs are one-click from then on.
+		// Genuinely nothing to print to: let the user pick a printer once.
+		// Proofs are one-click from then on.
 		slotFilePrint();
 		return;
 	}
@@ -4860,8 +4869,7 @@ void ScribusMainWindow::slotFileProofPrint()
 	proof.colorMarks = false;
 	proof.useDocBleeds = false;
 	proof.bleeds.resetToZero();
-	if (proof.printer.isEmpty())
-		proof.printer = PDef.Pname;
+	proof.printer = proofPrinter;
 	// Scale the page onto whatever sheet this printer holds. Unknown sizes fall
 	// back to A4, which is what the printer command asks for too.
 	QString proofMedia;
