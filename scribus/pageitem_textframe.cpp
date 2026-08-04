@@ -4651,20 +4651,10 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 					undoManager->action(undoTarget, ss);
 				}
 			}
-			{
-                    int iPos = itemText.cursorPosition();
-                    CharStyle prevStyle;
-                    bool hasPrev = (iPos > 0 && itemText.charStyle(iPos - 1).fontSize() != itemText.paragraphStyle(iPos).charStyle().fontSize());
-                    if (hasPrev)
-                        prevStyle = itemText.charStyle(iPos - 1);
-                    itemText.insertChars(uc, true);
-                    if (hasPrev)
-                    {
-                        CharStyle cs;
-                        cs.setFontSize(prevStyle.fontSize());
-                        itemText.applyCharStyle(iPos, 1, cs);
-                    }
-                }
+			// StoryText::insertChars() now inherits the whole CharStyle of the
+			// preceding character at a paragraph end, so the font-size-only
+			// patch that used to live here is redundant.
+			itemText.insertChars(uc, true);
 			if ((m_Doc->docHyphenator->autoCheck()) && (itemText.cursorPosition() > 1))
 			{
 				Twort = "";

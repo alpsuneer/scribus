@@ -710,9 +710,34 @@ void StoryText::insertChars(int pos, const QString& txt, bool applyNeighbourStyl
 	ScText clone;
 	if (applyNeighbourStyle)
 	{
-		int referenceChar = qMax(0, qMin(pos, length()-1));
-		clone.applyCharStyle(charStyle(referenceChar));
-		clone.setEffects(ScStyle_Default);
+		// Inherit from the character BEFORE the caret when sitting at the end of
+		// a paragraph. The character at pos is the paragraph separator there,
+		// and a PARSEP carries the paragraph's base style (see insertParSep),
+		// so copying it silently drops the colour, font or size applied to the
+		// text itself. Mid-paragraph the character at pos belongs to the same
+		// run, so that case is deliberately left as it was.
+		int referenceChar = qMax(0, qMin(pos, length() - 1));
+		bool inheritStyle = (length() > 0);
+		if (inheritStyle && (pos > 0))
+		{
+			bool atParagraphEnd = (pos >= length()) || (text(pos) == SpecialChars::PARSEP);
+			if (atParagraphEnd)
+			{
+				int prevChar = pos - 1;
+				// Never reach back into the previous paragraph, and never take
+				// formatting from a bullet or numbering mark: a mark is a layout
+				// artefact, not something the operator styled.
+				if ((text(prevChar) == SpecialChars::PARSEP) || hasMark(prevChar))
+					inheritStyle = false;
+				else
+					referenceChar = prevChar;
+			}
+		}
+		if (inheritStyle)
+		{
+			clone.applyCharStyle(charStyle(referenceChar));
+			clone.setEffects(ScStyle_Default);
+		}
 	}
 
 	for (int i = 0; i < txt.length(); ++i)
@@ -753,9 +778,34 @@ void StoryText::insertCharsWithSoftHyphens(int pos, const QString& txt, bool app
 	ScText clone;
 	if (applyNeighbourStyle)
 	{
+		// Inherit from the character BEFORE the caret when sitting at the end of
+		// a paragraph. The character at pos is the paragraph separator there,
+		// and a PARSEP carries the paragraph's base style (see insertParSep),
+		// so copying it silently drops the colour, font or size applied to the
+		// text itself. Mid-paragraph the character at pos belongs to the same
+		// run, so that case is deliberately left as it was.
 		int referenceChar = qMax(0, qMin(pos, length() - 1));
-		clone.applyCharStyle(charStyle(referenceChar));
-		clone.setEffects(ScStyle_Default);
+		bool inheritStyle = (length() > 0);
+		if (inheritStyle && (pos > 0))
+		{
+			bool atParagraphEnd = (pos >= length()) || (text(pos) == SpecialChars::PARSEP);
+			if (atParagraphEnd)
+			{
+				int prevChar = pos - 1;
+				// Never reach back into the previous paragraph, and never take
+				// formatting from a bullet or numbering mark: a mark is a layout
+				// artefact, not something the operator styled.
+				if ((text(prevChar) == SpecialChars::PARSEP) || hasMark(prevChar))
+					inheritStyle = false;
+				else
+					referenceChar = prevChar;
+			}
+		}
+		if (inheritStyle)
+		{
+			clone.applyCharStyle(charStyle(referenceChar));
+			clone.setEffects(ScStyle_Default);
+		}
 	}
 
 	int inserted = 0;
