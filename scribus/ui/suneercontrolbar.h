@@ -193,6 +193,9 @@ public:
 	StyleSelect*    m_styleSelect         {nullptr};
 	ColorCombo*     m_outlineStrokeColorCombo {nullptr};
 	QToolButton*    m_outlineIncBtn       {nullptr};
+	QToolButton*    m_proofBtn            {nullptr};
+	//! Keep the Proof tooltip showing the printer a plain click would use.
+	void refreshProofTooltip();
 	QToolButton*    m_outlineDecBtn       {nullptr};
 	QCheckBox*      m_outlineOutwardChk   {nullptr};
 	QToolButton*    m_padResetBtn         {nullptr};
