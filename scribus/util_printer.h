@@ -28,6 +28,21 @@ class SCRIBUS_API PrinterUtil
 		QString static getDefaultPrinterName();
 		QStringList static getPrinterNames();
 
+		/**
+		 * @brief The paper a printer is set up to use.
+		 *
+		 * Reads the printer's default page size (CUPS DefaultPageSize by way of
+		 * QPrinterInfo). Proof printing sends this as the media instead of the
+		 * document's own size, so a broadsheet lands on whatever sheet the proof
+		 * printer actually holds.
+		 *
+		 * @param printerName printer to query
+		 * @param mediaName receives a CUPS media keyword, e.g. "A4" or "A3"
+		 * @return false if the printer is unknown or reports no usable size, in
+		 * which case mediaName is left untouched and the caller should fall back.
+		 */
+		bool static getDefaultPaperSize(const QString& printerName, QString& mediaName);
+
 #if defined(_WIN32)
 		/**
 		 * @brief Get the defaults settings for a specified printer (Windows only)
