@@ -157,6 +157,10 @@ class SCRIBUS_API PSLib : public QObject
 		void PutStream (const QByteArray& array, bool hexEnc);
 		void PutStream (const char* in, int length, bool hexEnc);
 
+		//! Scale applied to the current proof page, 0 when not proofing.
+		//! Kept so PS_end_page() can print it in the slug line.
+		double m_proofScale { 0.0 };
+
 		bool PutImageToStream(const ScImage& image, int plate);
 		bool PutImageToStream(const ScImage& image, const QByteArray& mask, int plate);
 
