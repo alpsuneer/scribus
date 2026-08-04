@@ -4874,7 +4874,9 @@ void ScribusMainWindow::slotFileProofPrint()
 	// back to A4, which is what the printer command asks for too.
 	QString proofMedia;
 	QSizeF proofSheet;
-	if (!PrinterUtil::getDefaultPaperSize(proof.printer, proofMedia, &proofSheet) || proofSheet.isEmpty())
+	bool paperDetected = PrinterUtil::getDefaultPaperSize(proof.printer, proofMedia, &proofSheet)
+	                  && !proofSheet.isEmpty();
+	if (!paperDetected)
 		proofSheet = QSizeF(595.276, 841.89);   // A4 in points
 	proof.proofPaperWidth = proofSheet.width();
 	proof.proofPaperHeight = proofSheet.height();
@@ -4895,7 +4897,27 @@ void ScribusMainWindow::slotFileProofPrint()
 			message += QString("\n%1").arg(printError);
 		ScMessageBox::warning(this, CommonStrings::trWarning, message);
 	}
-	m_mainWindowStatusLabel->setText( tr("Ready"));
+	// Say what just went out. The fast path must stay free of dialogs and
+	// clicks, so this goes to the status bar and simply stays there instead of
+	// being reset to "Ready". Marks and bleeds are off for proofs, so the page
+	// box here is the same one PSLib scales, and this figure matches the slug.
+	if (done)
+	{
+		double srcW = doc->currentPage()->width();
+		double srcH = doc->currentPage()->height();
+		int scalePercent = 100;
+		if ((srcW > 0.0) && (srcH > 0.0))
+		{
+			double fit = qMin((proof.proofPaperWidth - 24.0) / srcW,
+			                  (proof.proofPaperHeight - 24.0) / srcH);
+			scalePercent = qRound(qMin(1.0, fit) * 100.0);
+		}
+		QString paperText = paperDetected ? proofMedia : tr("paper unknown - assumed A4");
+		m_mainWindowStatusLabel->setText(tr("Proof -> %1 (%2) at %3%")
+			.arg(proof.printer, paperText, QString::number(scalePercent)));
+	}
+	else
+		m_mainWindowStatusLabel->setText( tr("Ready"));
 }
 
 bool ScribusMainWindow::doPrint(PrintOptions &options, QString& error)
