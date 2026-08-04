@@ -1214,6 +1214,68 @@ void PSLib::PS_showSub(uint chr, const QString& font, double size, bool stroke)
 	PutStream(stroke ? "shgs\n" : "shgf\n");
 }
 
+bool PSLib::resampleImageForOutput(const PageItem* item, const QString& ext, ScImage& image, QByteArray& maskArray, double* scalex, double* scaley) const
+{
+	int targetDpi = Options.imageResolution;
+	if (targetDpi <= 0)
+		return false;
+	// Ghostscript already rendered these at the requested resolution, and a
+	// LaTeX frame carries its own dpi: resampling them again would only blur.
+	if (item->isLatexFrame() || (item->pixm.imgInfo.type == ImageType7))
+		return false;
+	if (extensionIndicatesPDF(ext) || extensionIndicatesEPS(ext))
+		return false;
+
+	// A source pixel drawn at scale s covers s/72 inch, so the placed
+	// resolution is 72/s dpi. The axes are treated separately so a
+	// non-uniformly scaled image lands on target in both directions.
+	double sx = item->imageXScale();
+	double sy = item->imageYScale();
+	if ((sx <= 0.0) || (sy <= 0.0))
+		return false;
+	double dpiX = 72.0 / sx;
+	double dpiY = 72.0 / sy;
+	if ((dpiX <= targetDpi) && (dpiY <= targetDpi))
+		return false;
+
+	int oldW = image.width();
+	int oldH = image.height();
+	if ((oldW <= 0) || (oldH <= 0))
+		return false;
+	int newW = qMax(1, qRound(oldW * qMin(1.0, targetDpi / dpiX)));
+	int newH = qMax(1, qRound(oldH * qMin(1.0, targetDpi / dpiY)));
+	if ((newW >= oldW) && (newH >= oldH))
+		return false;
+
+	// The mask is consumed one byte per image pixel (see
+	// ScImage::writePSImageToFilter), so it has to land on exactly the same
+	// grid. An unexpected mask size means we do not understand the data:
+	// leave the image alone rather than risk a corrupt job.
+	if (!maskArray.isEmpty())
+	{
+		if (maskArray.size() < (oldW * oldH))
+			return false;
+		QImage maskImage((const uchar*) maskArray.constData(), oldW, oldH, oldW, QImage::Format_Grayscale8);
+		QImage scaledMask = maskImage.scaled(newW, newH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		if (scaledMask.isNull())
+			return false;
+		QByteArray newMask;
+		newMask.reserve(newW * newH);
+		for (int y = 0; y < newH; ++y)
+			newMask.append((const char*) scaledMask.constScanLine(y), newW);
+		maskArray = newMask;
+	}
+
+	image.scaleImage(newW, newH);
+	// Hand the discarded pixels back to the scale factors: the emitted
+	// "scalex*w scaley*h sc" must describe the same size on the page.
+	if (scalex)
+		*scalex *= double(oldW) / double(image.width());
+	if (scaley)
+		*scaley *= double(oldH) / double(image.height());
+	return true;
+}
+
 bool PSLib::PS_ImageData(PageItem *item, const QString& fn, const QString& Name, const QString& Prof, bool UseEmbedded)
 {
 	bool dummy;
@@ -1271,6 +1333,9 @@ bool PSLib::PS_ImageData(PageItem *item, const QString& fn, const QString& Name,
 			return false;
 		}
 	}
+	// Must match PS_image() exactly: this writes the samples, PS_image() writes
+	// the /Width and /Height that describe them.
+	resampleImageForOutput(item, ext, image, maskArray);
 	if ((maskArray.size() > 0) && (item->pixm.imgInfo.type != ImageType7))
 	{
 		PutStream("currentfile /ASCII85Decode filter /FlateDecode filter /ReusableStreamDecode filter\n");
@@ -1362,20 +1427,10 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 		return false;
 	}
 	image.applyEffect(item->effectsInUse, colorsToUse, true);
-	int w = image.width();
-	int h = image.height();
-	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
-	PutStream("0 " + ToStr(h*scaley) + " tr\n");
-	PutStream(ToStr(-item->imageRotation()) + " ro\n");
-	PutStream("0 " + ToStr(-h*scaley) + " tr\n");
-	if ((extensionIndicatesPDF(ext)) && (!item->isLatexFrame()))
-	{
-		scalex *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
-		scaley *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
-	}
-	//	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
-	PutStream(ToStr(qRound(scalex*w)) + " " + ToStr(qRound(scaley*h)) + " sc\n");
-	PutStream(((!DoSep) && (!GraySc)) ? "/DeviceCMYK setcolorspace\n" : "/DeviceGray setcolorspace\n");
+
+	// The mask is loaded before anything is emitted: resampling below has to
+	// resize image and mask together, and every PutStream that follows depends
+	// on the final pixel dimensions.
 	QByteArray maskArray;
 	ScImage img2;
 	img2.imgInfo.clipPath = "";
@@ -1392,6 +1447,22 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 			return false;
 		}
 	}
+	resampleImageForOutput(item, ext, image, maskArray, &scalex, &scaley);
+
+	int w = image.width();
+	int h = image.height();
+	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
+	PutStream("0 " + ToStr(h*scaley) + " tr\n");
+	PutStream(ToStr(-item->imageRotation()) + " ro\n");
+	PutStream("0 " + ToStr(-h*scaley) + " tr\n");
+	if ((extensionIndicatesPDF(ext)) && (!item->isLatexFrame()))
+	{
+		scalex *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
+		scaley *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
+	}
+	//	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
+	PutStream(ToStr(qRound(scalex*w)) + " " + ToStr(qRound(scaley*h)) + " sc\n");
+	PutStream(((!DoSep) && (!GraySc)) ? "/DeviceCMYK setcolorspace\n" : "/DeviceGray setcolorspace\n");
 	if ((maskArray.size() > 0) && (item->pixm.imgInfo.type != ImageType7))
 	{
 		int plate = DoSep ? Plate : (GraySc ? -2 : -1);
