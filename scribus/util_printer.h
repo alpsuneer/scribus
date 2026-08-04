@@ -41,7 +41,7 @@ class SCRIBUS_API PrinterUtil
 		 * @return false if the printer is unknown or reports no usable size, in
 		 * which case mediaName is left untouched and the caller should fall back.
 		 */
-		bool static getDefaultPaperSize(const QString& printerName, QString& mediaName);
+		bool static getDefaultPaperSize(const QString& printerName, QString& mediaName, QSizeF* sizePoints = nullptr);
 
 #if defined(_WIN32)
 		/**

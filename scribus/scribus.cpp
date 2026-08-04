@@ -273,6 +273,7 @@ for which a new license (GPL+exception) is in place.
 #include "util.h"
 #include "util_file.h"
 #include "util_formats.h"
+#include "util_printer.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
 #include "third_party/Qt-Advanced-Docking-System/src/IconProvider.h"
 
@@ -4787,6 +4788,19 @@ void ScribusMainWindow::slotReallyPrint()
 		// the printer is being told to do. Colour is left to the dialog's own
 		// Color/Grayscale setting — an explicit choice there must win.
 		doc->Print_Options.imageResolution = printer->isProofPrint() ? 150 : 300;
+		// Same paper adaptation as the one-click proof: without the target sheet
+		// the page is emitted at document size and an A4 printer just clips it.
+		doc->Print_Options.proofPaperWidth = 0.0;
+		doc->Print_Options.proofPaperHeight = 0.0;
+		if (printer->isProofPrint())
+		{
+			QString dlgMedia;
+			QSizeF dlgSheet;
+			if (!PrinterUtil::getDefaultPaperSize(doc->Print_Options.printer, dlgMedia, &dlgSheet) || dlgSheet.isEmpty())
+				dlgSheet = QSizeF(595.276, 841.89);   // A4 in points
+			doc->Print_Options.proofPaperWidth = dlgSheet.width();
+			doc->Print_Options.proofPaperHeight = dlgSheet.height();
+		}
 		done = doPrint(doc->Print_Options, printError);
 		QApplication::restoreOverrideCursor();
 		if (!done)
@@ -4848,6 +4862,14 @@ void ScribusMainWindow::slotFileProofPrint()
 	proof.bleeds.resetToZero();
 	if (proof.printer.isEmpty())
 		proof.printer = PDef.Pname;
+	// Scale the page onto whatever sheet this printer holds. Unknown sizes fall
+	// back to A4, which is what the printer command asks for too.
+	QString proofMedia;
+	QSizeF proofSheet;
+	if (!PrinterUtil::getDefaultPaperSize(proof.printer, proofMedia, &proofSheet) || proofSheet.isEmpty())
+		proofSheet = QSizeF(595.276, 841.89);   // A4 in points
+	proof.proofPaperWidth = proofSheet.width();
+	proof.proofPaperHeight = proofSheet.height();
 	proof.pageNumbers.clear();
 	proof.pageNumbers.push_back(doc->currentPage()->pageNr() + 1);
 
