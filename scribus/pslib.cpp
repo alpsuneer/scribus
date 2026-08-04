@@ -21,6 +21,7 @@ for which a new license (GPL+exception) is in place.
  *                                                                         *
  ***************************************************************************/
 
+#include <QDateTime>
 #include "pslib.h"
 
 #include <cstdlib>
@@ -851,6 +852,7 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 				double offY = (Options.proofPaperHeight - srcH * proofScale) / 2.0;
 				PutStream(ToStr(offX) + " " + ToStr(offY) + " translate\n");
 				PutStream(ToStr(proofScale) + " " + ToStr(proofScale) + " scale\n");
+				m_proofScale = proofScale;
 				qDebug("Proof print: paper %.1fx%.1f pt, page %.1fx%.1f pt, scale %.1f%%",
 				       Options.proofPaperWidth, Options.proofPaperHeight, srcW, srcH, proofScale * 100.0);
 			}
@@ -882,6 +884,26 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 void PSLib::PS_end_page()
 {
 	PutStream("%%PageTrailer\nrestore\n");
+	// Proof slug. Drawn after the restore, so it is in sheet coordinates at a
+	// readable size however far the page was scaled down, and it sits in the
+	// letterbox margin rather than over the layout. A scaled proof must never
+	// be mistakeable for a final.
+	if (Options.isProofPrint && (m_proofScale > 0.0))
+	{
+		QString slug = QString("PROOF %1%  -  p.%2  -  %3")
+			.arg(qRound(m_proofScale * 100.0))
+			.arg(m_currentPage->pageNr() + 1)
+			.arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm"));
+		slug.replace("\\", "\\\\");
+		slug.replace("(", "\\(");
+		slug.replace(")", "\\)");
+		PutStream("gs\n");
+		PutStream("0 setgray\n");
+		PutStream("/Helvetica findfont 8 scalefont setfont\n");
+		PutStream("14 8 moveto\n");
+		PutStream("(" + slug + ") show\n");
+		PutStream("gr\n");
+	}
 	double markOffs = 0.0;
 	if ((Options.cropMarks) || (Options.bleedMarks) || (Options.registrationMarks) || (Options.colorMarks))
 		markOffs = Options.markLength + Options.markOffset;
