@@ -160,6 +160,22 @@ class SCRIBUS_API PSLib : public QObject
 		bool PutImageToStream(const ScImage& image, int plate);
 		bool PutImageToStream(const ScImage& image, const QByteArray& mask, int plate);
 
+		/**
+		 * @brief Resample a placed raster down to Options.imageResolution.
+		 *
+		 * Placed rasters otherwise enter the job at their full source size:
+		 * loadPicture()'s resolution argument is Ghostscript's rendering dpi
+		 * and does nothing for a JPEG or PNG. The target pixel size is derived
+		 * from the item's own image scale so that PS_image() and PS_ImageData()
+		 * always agree - one writes the dimensions, the other the data, and a
+		 * mismatch would corrupt the output.
+		 *
+		 * @param scalex,scaley if given, multiplied by the pixels removed so
+		 * that the drawn size on the page is unchanged.
+		 * @return true if the image (and its mask) were resampled.
+		 */
+		bool resampleImageForOutput(const PageItem* item, const QString& ext, ScImage& image, QByteArray& maskArray, double* scalex = nullptr, double* scaley = nullptr) const;
+
 		bool PutImageDataToStream(const QByteArray& image);
 		bool PutInterleavedImageMaskToStream(const QByteArray& image, const QByteArray& mask, bool gray);
 
