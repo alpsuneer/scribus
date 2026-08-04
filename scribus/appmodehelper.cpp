@@ -1210,6 +1210,7 @@ void AppModeHelper::setSymbolEditMode(bool b, const ScribusDoc* doc)
 	(*a_scrActions)["fileRevert"]->setEnabled(b2);
 	(*a_scrActions)["fileDocSetup150"]->setEnabled(b2);
 	(*a_scrActions)["filePrint"]->setEnabled(b2);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(b2);
 	(*a_scrActions)["fileCollect"]->setEnabled(b2);
 	(*a_scrActions)["fileSaveAs"]->setEnabled(b2);
 	(*a_scrActions)["fileExportAsEPS"]->setEnabled(b2);
@@ -1265,6 +1266,7 @@ void AppModeHelper::setInlineEditMode(bool b, const ScribusDoc *doc)
 	(*a_scrActions)["fileRevert"]->setEnabled(b2);
 	(*a_scrActions)["fileDocSetup150"]->setEnabled(b2);
 	(*a_scrActions)["filePrint"]->setEnabled(b2);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(b2);
 	(*a_scrActions)["fileCollect"]->setEnabled(b2);
 	(*a_scrActions)["fileSaveAs"]->setEnabled(b2);
 	(*a_scrActions)["fileExportAsEPS"]->setEnabled(b2);
@@ -1324,6 +1326,7 @@ void AppModeHelper::setMasterPageEditMode(bool b, const ScribusDoc* doc)
 	(*a_scrActions)["fileRevert"]->setEnabled(b2);
 	(*a_scrActions)["fileDocSetup150"]->setEnabled(b2);
 	(*a_scrActions)["filePrint"]->setEnabled(b2);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(b2);
 	if (ScCore->haveGS() || ScCore->isWinGUI())
 		(*a_scrActions)["PrintPreview"]->setEnabled(b2);
 	if (ScCore->haveGS())
@@ -1480,6 +1483,7 @@ void AppModeHelper::mainWindowHasNewDoc(const ScribusDoc *doc, bool clipScrapHav
 	bool layerUnlocked = !doc->layerLocked(doc->activeLayer());
 
 	(*a_scrActions)["filePrint"]->setEnabled(true);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(true);
 	(*a_scrActions)["fileSave"]->setEnabled(!doc->isConverted);
 	(*a_scrActions)["fileClose"]->setEnabled(true);
 	(*a_scrActions)["fileDocSetup150"]->setEnabled(true);
@@ -1703,6 +1707,7 @@ void AppModeHelper::mainWindowCloseLastDoc()
 	(*a_scrActions)["fileImportText2"]->setEnabled(false);
 	(*a_scrActions)["fileImportVector"]->setEnabled(false);
 	(*a_scrActions)["filePrint"]->setEnabled(false);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(false);
 	(*a_scrActions)["fileRevert"]->setEnabled(false);
 	(*a_scrActions)["fileSave"]->setEnabled(false);
 	(*a_scrActions)["fileSaveAs"]->setEnabled(false);
@@ -1881,6 +1886,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	Q_UNUSED(enabled);
 	(*a_scrActions)["fileDocSetup150"]->setEnabled(false);
 	(*a_scrActions)["filePrint"]->setEnabled(false);
+	(*a_scrActions)["fileProofPrint"]->setEnabled(false);
 	(*a_scrActions)["fileSave"]->setEnabled(false);
 	(*a_scrActions)["fileSaveAs"]->setEnabled(false);
 	(*a_scrActions)["fileRevert"]->setEnabled(false);

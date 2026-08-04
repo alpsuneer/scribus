@@ -1255,7 +1255,7 @@ bool PSLib::PS_ImageData(PageItem *item, const QString& fn, const QString& Name,
 	CMSettings cms(item->doc(), Prof, item->ImageIntent);
 	cms.allowColorManagement(true);
 	cms.setUseEmbeddedProfile(UseEmbedded);
-	if (!image.loadPicture(fn, item->pixm.imgInfo.actualPageNumber, cms, ScImage::CMYKData, 300, &dummy))
+	if (!image.loadPicture(fn, item->pixm.imgInfo.actualPageNumber, cms, ScImage::CMYKData, Options.imageResolution, &dummy))
 	{
 		PS_Error_ImageLoadFailure(fn);
 		return false;
@@ -1350,7 +1350,7 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 	CMSettings cms(item->doc(), Prof, item->ImageIntent);
 	cms.allowColorManagement(true);
 	cms.setUseEmbeddedProfile(UseEmbedded);
-	int resolution = 300;
+	int resolution = Options.imageResolution;
 	if (item->isLatexFrame())
 		resolution = item->asLatexFrame()->realDpi();
 	else if (item->pixm.imgInfo.type == ImageType7)

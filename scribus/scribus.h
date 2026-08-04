@@ -416,6 +416,8 @@ public slots:
 	/** \brief print the actual file */
 	void slotFilePrint();
 	void slotReallyPrint();
+	//! One-click proof: 150dpi grayscale to the last/default printer, no dialog.
+	void slotFileProofPrint();
 	void slotEndSpecialEdit();
 	/*!
 	\author Franz Schmid

@@ -446,6 +446,9 @@ struct PrintOptions
 	bool colorMarks { false };
 	bool includePDFMarks { true };
 	int  copies { 1 };
+	//! DPI at which placed images are rasterised into the print stream.
+	//! 300 is the production value; proof printing drops it (see isProofPrint).
+	int  imageResolution { 300 };
 	PrintLanguage prnLanguage { PrintLanguage::PostScript3 };
 	double markLength { 20.0 };
 	double markOffset { 0.0 };
