@@ -1161,6 +1161,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("filePreferences150", "File");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "File");
 	scrMenuMgr->addMenuItemString("filePrint", "File");
+	scrMenuMgr->addMenuItemString("fileProofPrint", "File");
 	if (ScCore->haveGS() || ScCore->isWinGUI())
 		scrMenuMgr->addMenuItemString("PrintPreview", "File");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "File");
@@ -4780,6 +4781,12 @@ void ScribusMainWindow::slotReallyPrint()
 		}
 		m_PrinterUsed = true;
 		doc->Print_Options.isProofPrint = printer->isProofPrint();
+		// Proof print already asks the printer for draft/150dpi; without this
+		// Scribus still rasterised every placed image at 300dpi CMYK into the
+		// job (measured: ~61MB of PostScript per photo). Match the data to what
+		// the printer is being told to do. Colour is left to the dialog's own
+		// Color/Grayscale setting — an explicit choice there must win.
+		doc->Print_Options.imageResolution = printer->isProofPrint() ? 150 : 300;
 		done = doPrint(doc->Print_Options, printError);
 		QApplication::restoreOverrideCursor();
 		if (!done)
@@ -4807,6 +4814,58 @@ void ScribusMainWindow::slotEndSpecialEdit()
 		editInlineEnd();
 	else if (doc->masterPageMode())
 		editMasterPagesEnd();
+}
+
+void ScribusMainWindow::slotFileProofPrint()
+{
+	if (!HaveDoc)
+		return;
+	if (doc->Print_Options.printer.isEmpty() && PDef.Pname.isEmpty())
+	{
+		// Nothing to print to yet: fall back to the normal dialog so the user
+		// can pick a printer once. Proofs are one-click from then on.
+		slotFilePrint();
+		return;
+	}
+
+	// A proof checks layout, not colour or detail, so it goes out at half
+	// resolution in grayscale. This is a throwaway copy of the document's
+	// print options: production settings (300dpi, colour, separations, marks)
+	// are never modified.
+	PrintOptions proof = doc->Print_Options;
+	proof.isProofPrint = true;
+	proof.imageResolution = 150;
+	proof.useColor = false;
+	proof.outputSeparations = false;
+	proof.separationName = "All";
+	proof.toFile = false;
+	proof.copies = 1;
+	proof.cropMarks = false;
+	proof.bleedMarks = false;
+	proof.registrationMarks = false;
+	proof.colorMarks = false;
+	proof.useDocBleeds = false;
+	proof.bleeds.resetToZero();
+	if (proof.printer.isEmpty())
+		proof.printer = PDef.Pname;
+	proof.pageNumbers.clear();
+	proof.pageNumbers.push_back(doc->currentPage()->pageNr() + 1);
+
+	m_mainWindowStatusLabel->setText( tr("Proof printing..."));
+	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+	ReOrderText(doc, view);
+	QString printError;
+	bool done = doPrint(proof, printError);
+	QApplication::restoreOverrideCursor();
+	m_PrinterUsed = true;
+	if (!done)
+	{
+		QString message = tr("Proof printing failed!");
+		if (!printError.isEmpty())
+			message += QString("\n%1").arg(printError);
+		ScMessageBox::warning(this, CommonStrings::trWarning, message);
+	}
+	m_mainWindowStatusLabel->setText( tr("Ready"));
 }
 
 bool ScribusMainWindow::doPrint(PrintOptions &options, QString& error)

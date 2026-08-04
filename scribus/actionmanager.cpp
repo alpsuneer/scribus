@@ -163,6 +163,11 @@ void ActionManager::initFileMenuActions()
 	(*scrActions)[name]->setMenuRole(QAction::PreferencesRole);
 	name = "filePrint";
 	scrActions->insert(name, new ScrAction("document-print", "document-print", "", defaultKey(name), mainWindow));
+	// No default shortcut on purpose: every obvious combination is already
+	// taken (Ctrl+Shift+P = Export as PDF, Ctrl+Alt+P = Preview Mode), and a
+	// silent duplicate is hard to notice here. Bind it in Preferences.
+	name = "fileProofPrint";
+	scrActions->insert(name, new ScrAction("document-print", "document-print", "", defaultKey(name), mainWindow));
 	name = "PrintPreview";
 	scrActions->insert(name, new ScrAction("document-print-preview", "document-print-preview", "", defaultKey(name), mainWindow));
 	name = "OutputPreviewPDF";
@@ -180,6 +185,7 @@ void ActionManager::initFileMenuActions()
 	connect( (*scrActions)["fileOpen"], SIGNAL(triggered()), mainWindow, SLOT(slotFileOpen()) );
 	connect( (*scrActions)["fileClose"], SIGNAL(triggered()), mainWindow, SLOT(slotFileClose()) );
 	connect( (*scrActions)["filePrint"], SIGNAL(triggered()), mainWindow, SLOT(slotFilePrint()) );
+	connect( (*scrActions)["fileProofPrint"], SIGNAL(triggered()), mainWindow, SLOT(slotFileProofPrint()) );
 	connect( (*scrActions)["PrintPreview"], SIGNAL(triggered()), mainWindow, SLOT(printPreview()) );
 	connect( (*scrActions)["OutputPreviewPDF"], SIGNAL(triggered()), mainWindow, SLOT(outputPreviewPDF()) );
 	connect( (*scrActions)["OutputPreviewPS"], SIGNAL(triggered()), mainWindow, SLOT(outputPreviewPS()) );
@@ -1656,6 +1662,7 @@ void ActionManager::languageChange()
 //	(*scrActions)["filePreferences"]->setTexts( tr("P&references (old)..."));
 	(*scrActions)["filePreferences150"]->setTexts( tr("P&references..."));
 	(*scrActions)["filePrint"]->setTexts( tr("&Print..."));
+	(*scrActions)["fileProofPrint"]->setTexts( tr("Pr&oof Print"));
 	(*scrActions)["PrintPreview"]->setTexts( tr("Print Previe&w..."));
 	(*scrActions)["OutputPreviewPDF"]->setTexts( tr("PDF..."));
 	(*scrActions)["OutputPreviewPS"]->setTexts( tr("PostScript..."));
@@ -2311,6 +2318,7 @@ void ActionManager::createDefaultMenus()
 //		<< "filePreferences"
 		<< "filePreferences150"
 		<< "filePrint"
+		<< "fileProofPrint"
 		<< "PrintPreview"
 		<< "OutputPreviewPDF"
 		<< "OutputPreviewPS"
