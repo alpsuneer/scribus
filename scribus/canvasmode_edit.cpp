@@ -1292,20 +1292,15 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 		}
 	}
 
-	// Insert committed text permanently
+	// Insert committed text permanently.
+	// Text arriving through an input method (Malayalam and other complex
+	// scripts) must inherit the caret's formatting exactly as directly typed
+	// text does: pass applyNeighbourStyle so StoryText::insertChars() applies
+	// the one shared rule. Without it a letter typed at the end of a coloured
+	// heading came out in the paragraph's default colour.
 	if (!event->commitString().isEmpty()) {
 		int pos = currItem->itemText.cursorPosition();
-		CharStyle prevStyle;
-		bool hasPrev = (pos > 0 && currItem->itemText.charStyle(pos - 1).fontSize() != currItem->itemText.paragraphStyle(pos).charStyle().fontSize());
-		if (hasPrev)
-			prevStyle = currItem->itemText.charStyle(pos - 1);
-		currItem->itemText.insertChars(pos, event->commitString());
-		if (hasPrev)
-		{
-			CharStyle cs;
-			cs.setFontSize(prevStyle.fontSize());
-			currItem->itemText.applyCharStyle(pos, event->commitString().length(), cs);
-		}
+		currItem->itemText.insertChars(pos, event->commitString(), true);
 		currItem->itemText.setCursorPosition(pos + event->commitString().length());
 	}
 
@@ -1314,7 +1309,9 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 	if (!event->preeditString().isEmpty()) {
 		m_preeditPos = currItem->itemText.cursorPosition();
 		m_preeditText = event->preeditString();
-		currItem->itemText.insertChars(m_preeditPos, m_preeditText);
+		// Same style as the committed text will get, so what is on screen while
+		// composing matches what ends up in the document.
+		currItem->itemText.insertChars(m_preeditPos, m_preeditText, true);
 		currItem->itemText.setCursorPosition(m_preeditPos + m_preeditText.length());
 	}
 
