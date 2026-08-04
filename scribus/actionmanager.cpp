@@ -163,9 +163,8 @@ void ActionManager::initFileMenuActions()
 	(*scrActions)[name]->setMenuRole(QAction::PreferencesRole);
 	name = "filePrint";
 	scrActions->insert(name, new ScrAction("document-print", "document-print", "", defaultKey(name), mainWindow));
-	// No default shortcut on purpose: every obvious combination is already
-	// taken (Ctrl+Shift+P = Export as PDF, Ctrl+Alt+P = Preview Mode), and a
-	// silent duplicate is hard to notice here. Bind it in Preferences.
+	// F9: the print-shaped combinations were already taken (Ctrl+Shift+P is
+	// Export as PDF, Ctrl+Alt+P is Preview Mode), so this uses a free key.
 	name = "fileProofPrint";
 	scrActions->insert(name, new ScrAction("document-print", "document-print", "", defaultKey(name), mainWindow));
 	name = "PrintPreview";
@@ -2116,6 +2115,9 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("fileImportText", QKeySequence());
 	defKeys.insert("fileImportImage", QKeySequence());
 	defKeys.insert("filePrint", QKeySequence::Print);
+	// F9 is free in the shipped keysets (including malayalam-dtp) and in the
+	// compiled defaults; the palettes take F2/F3/F6/F8/F11/F12 around it.
+	defKeys.insert("fileProofPrint", QKeySequence(Qt::Key_F9));
 	defKeys.insert("fileExportAsPDF", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
 	defKeys.insert("fileQuit", QKeySequence(Qt::CTRL | Qt::Key_Q));
 	//Edit Menu
