@@ -219,6 +219,7 @@ struct ItemToolPrefs
 {
 	/* Texttool */
 	QString textFont; //! Default font for text frames, should be default font for default style
+	bool malayalamFontMigrated {true}; //! One-time switch of textFont to a Malayalam-capable face (a from-scratch prefs already picks one, so nothing to migrate)
 	int textSize; //! Default font size
 	QString textColor; //! Default text color
 	int textShade; //! Default text color shade

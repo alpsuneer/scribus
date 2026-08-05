@@ -117,6 +117,89 @@ void PrefsManager::setup()
 	//>>CB
 }
 
+namespace
+{
+	//! U+0D15 MALAYALAM LETTER KA. Present in every font that can set Malayalam
+	//! at all, absent from every Latin-only one, so it is a reliable probe.
+	const QChar MalayalamProbeChar(0x0D15);
+
+	//! Preferred default faces, best first. "DZ DB Text Bold" is the production
+	//! newspaper face; note its Regular file (DZDBTextRg.otf) registers itself
+	//! as Bold in the name table, so "DZ DB Text Regular" does not exist.
+	QStringList malayalamDefaultFontCandidates()
+	{
+		return { QStringLiteral("DZ DB Text Bold"),
+		         QStringLiteral("Noto Sans Malayalam Regular"),
+		         QStringLiteral("Manjari Regular"),
+		         QStringLiteral("Meera Regular") };
+	}
+
+	//! A named font is only good if it is installed, loadable AND actually has
+	//! the glyph — a face can carry a Malayalam-sounding name and no coverage.
+	bool fontCanSetMalayalam(const SCFonts& fonts, const QString& fontName)
+	{
+		if (fontName.isEmpty() || !fonts.contains(fontName))
+			return false;
+		const ScFace face = fonts.value(fontName);
+		return face.usable() && face.canRender(MalayalamProbeChar);
+	}
+
+	//! First installed candidate that really renders Malayalam, else empty.
+	//! Bounded: probes at most the handful of names above, so it is cheap
+	//! enough to run on every startup.
+	QString firstMalayalamCapableCandidate(const SCFonts& fonts)
+	{
+		const QStringList candidates = malayalamDefaultFontCandidates();
+		for (const QString& candidate : candidates)
+		{
+			if (fontCanSetMalayalam(fonts, candidate))
+				return candidate;
+		}
+		return QString();
+	}
+
+	//! Same, but falls back to scanning every installed face. That forces a
+	//! FreeType load of each one, so it is only for the one-shot migration —
+	//! never for a path that runs on every startup.
+	QString anyMalayalamCapableFont(const SCFonts& fonts)
+	{
+		const QString candidate = firstMalayalamCapableCandidate(fonts);
+		if (!candidate.isEmpty())
+			return candidate;
+		for (auto it = fonts.constBegin(); it != fonts.constEnd(); ++it)
+		{
+			if (it.value().usable() && it.value().canRender(MalayalamProbeChar))
+				return it.key();
+		}
+		return QString();
+	}
+}
+
+void PrefsManager::applyMalayalamDefaultFontMigration()
+{
+	if (appPrefs.itemToolPrefs.malayalamFontMigrated)
+		return;
+	// Once, whatever the outcome: if the operator later picks a Latin default on
+	// purpose, this must not keep overriding them on every launch.
+	appPrefs.itemToolPrefs.malayalamFontMigrated = true;
+
+	const SCFonts& availableFonts = appPrefs.fontPrefs.AvailFonts;
+	const QString currentFont = appPrefs.itemToolPrefs.textFont;   // copy: the member is reassigned below
+	if (fontCanSetMalayalam(availableFonts, currentFont))
+		return;   // already fine — leave the operator's choice alone
+
+	const QString replacement = anyMalayalamCapableFont(availableFonts);
+	if (replacement.isEmpty())
+	{
+		qWarning("PrefsManager: default font '%s' cannot set Malayalam and no Malayalam-capable font is installed",
+		         currentFont.toLocal8Bit().constData());
+		return;
+	}
+	qDebug("PrefsManager: default text font '%s' cannot set Malayalam, switching to '%s'",
+	       currentFont.toLocal8Bit().constData(), replacement.toLocal8Bit().constData());
+	appPrefs.itemToolPrefs.textFont = replacement;
+}
+
 void PrefsManager::initDefaults()
 {
 	/** Default font and size **/
@@ -132,7 +215,18 @@ void PrefsManager::initDefaults()
 
 	bool goodFont = false;
 	const SCFonts& availableFonts = appPrefs.fontPrefs.AvailFonts;
-	for (int i = 0; i < defaultFonts.count(); ++i)
+	// Malayalam first: this build sets Malayalam newspapers, and Scribus has no
+	// per-glyph font fallback, so a Latin-only default puts a .notdef box in
+	// every new frame. Verified by glyph coverage, not by name — a face can be
+	// installed under a Malayalam-sounding name with no Malayalam in it. Falls
+	// through to the stock list when nothing capable is installed.
+	const QString malayalamFont = firstMalayalamCapableCandidate(availableFonts);
+	if (!malayalamFont.isEmpty())
+	{
+		appPrefs.itemToolPrefs.textFont = malayalamFont;
+		goodFont = true;
+	}
+	for (int i = 0; !goodFont && i < defaultFonts.count(); ++i)
 	{
 		const QString& defCandidate = defaultFonts.at(i);
 		if (availableFonts.contains(defCandidate))
@@ -1595,6 +1689,7 @@ bool PrefsManager::writePref(const QString& filePath)
 	dcItemTools.setAttribute("LineStartArrow", appPrefs.itemToolPrefs.lineStartArrow);
 	dcItemTools.setAttribute("LineEndArrow", appPrefs.itemToolPrefs.lineEndArrow);
 	dcItemTools.setAttribute("FontFace", appPrefs.itemToolPrefs.textFont);
+	dcItemTools.setAttribute("MalayalamFontMigrated", appPrefs.itemToolPrefs.malayalamFontMigrated);
 	dcItemTools.setAttribute("FontSize", appPrefs.itemToolPrefs.textSize / 10.0);
 	dcItemTools.setAttribute("CalligraphicPenFillColor", appPrefs.itemToolPrefs.calligraphicPenFillColor);
 	dcItemTools.setAttribute("CalligraphicPenLineColor", appPrefs.itemToolPrefs.calligraphicPenLineColor);
@@ -2331,6 +2426,9 @@ bool PrefsManager::readPref(const QString& filePath)
 					newFont = tmpf;
 				if (!newFont.isEmpty())
 					appPrefs.itemToolPrefs.textFont = newFont;
+				// Absent attribute = a prefs file written before the migration
+				// existed, so it still has to run once.
+				appPrefs.itemToolPrefs.malayalamFontMigrated = static_cast<bool>(dc.attribute("MalayalamFontMigrated", "0").toInt());
 				appPrefs.itemToolPrefs.textSize = qRound( ScCLocale::toDoubleC(dc.attribute("FontSize"), 12.0) * 10.0 );
 			}
 		}

@@ -60,6 +60,15 @@ public:
 	Must be run after: PrefsManager::GetAllFonts()
 	*/
 	void initDefaults();
+	/*!
+	\brief One-time repair of a default text font that cannot render Malayalam.
+	Scribus has no per-glyph font fallback, so a Latin-only default font shows
+	every Malayalam letter as a .notdef box in new frames. Runs once per prefs
+	file, only touches the application default-font preference, and leaves a
+	default that already renders Malayalam alone.
+	Must be run after: PrefsManager::readPrefs()
+	*/
+	void applyMalayalamDefaultFontMigration();
 	void initDefaultGUIFont(const QFont&);
 	void initDefaultCheckerPrefs(CheckerPrefsList& cp);
 	void initDefaultActionKeys();
