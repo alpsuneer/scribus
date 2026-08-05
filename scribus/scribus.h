@@ -445,12 +445,6 @@ public slots:
 	//! \brief Add or remove the News Browser tab in the Paragraph Styles docker.
 	void suneerSetNewsBrowserTabVisible(bool visible);
 	void suneerFixOverflowFramesDoc();
-	//! \brief Suneer: auto-detect "Label: text" paragraphs in the selection and apply mapped paragraph styles
-	void suneerAutoStyleNews();
-	//! \brief Suneer: step the current headline paragraph to the next larger size in the headline cycle
-	void suneerHeadlineSizeUp();
-	//! \brief Suneer: step the current headline paragraph to the next smaller size in the headline cycle
-	void suneerHeadlineSizeDown();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor
