@@ -178,6 +178,9 @@ int ScribusCore::initScribusCore(bool showSplash, bool showFontInfo, bool showPr
 	m_prefsManager.initDefaultActionKeys();
 	setSplashStatus( tr("Reading Preferences") );
 	m_prefsManager.readPrefs();
+	// After readPrefs, since it is the saved default font that has to be
+	// checked, and fonts are already scanned by initFonts() above.
+	m_prefsManager.applyMalayalamDefaultFontMigration();
 
 	// This is a very basic implemenation of the UI theme palette.
 	// If necessary implement platform specific theme configurations here.
