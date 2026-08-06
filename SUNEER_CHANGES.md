@@ -131,6 +131,19 @@
   Paragraph Rules-നൊപ്പം ഒരേ style-ൽ ഉപയോഗിക്കാം (shade താഴെ, rule മുകളിൽ)
 - എല്ലാ .sla format-ലും save ആകും; copy/paste, scrapbook-ലും travel ചെയ്യും
 
+**Control Bar popup** — Style Manager തുറക്കാതെ, control bar-ലെ ▤ button
+click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട്ട് shading കൊടുക്കാം:
+- Paragraph style-നെ ഒരിക്കലും edit ചെയ്യില്ല — override ആ paragraph-ന്
+  മാത്രം. ഒരേ style ഉപയോഗിക്കുന്ന വേറെ paragraph-കൾക്ക് മാറ്റമില്ല
+- Popup തുറക്കുമ്പോൾ ആ paragraph-ന്റെ ഇപ്പോഴത്തെ shading കാണിക്കും —
+  style-ൽ നിന്ന് വന്നതായാലും നേരത്തെ override ചെയ്തതായാലും
+- മാറ്റുന്ന value മാത്രം override ആകും; ബാക്കിയുള്ളവ style-നെ follow
+  ചെയ്തുകൊണ്ടിരിക്കും (style പിന്നീട് മാറ്റിയാൽ അത് വരും)
+- "Reset to style" — override കളഞ്ഞ് style പറയുന്നതിലേക്ക് തിരികെ
+- മുഴുവൻ popup interaction-നും ഒറ്റ Ctrl+Z
+- Multi-paragraph selection-ൽ വർക്ക് ചെയ്യും
+- Panel-ൽ Style Manager-ലെ അതേ controls തന്നെ (ഒരേ widget reuse ചെയ്യുന്നു)
+
 ### 11. Image Resize / DPI Tools
 - Toolbar-ൽ "RS" button → **Resize Image** dialog: ഇപ്പോഴത്തെ pixel size,
   file size, frame size-ലെ effective DPI കാണിക്കും

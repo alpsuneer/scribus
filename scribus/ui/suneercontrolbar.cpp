@@ -31,6 +31,12 @@
 #include "selection.h"
 #include "styles/paragraphstyle.h"
 #include "styles/charstyle.h"
+#include "ui/smcheckbox.h"
+#include "ui/smcolorcombo.h"
+#include "ui/smpshadewidget.h"
+#include "ui/smsccombobox.h"
+#include "ui/smscrspinbox.h"
+#include "ui/smspinbox.h"
 #include "propertywidget_distance.h"
 #include "resizeimagedialog.h"
 #include <QAction>
@@ -540,23 +546,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	row1->addWidget(m_imgLowerBtn);      m_textWrapWidgets << m_imgLowerBtn;
 	row1->addWidget(m_imgToBackBtn);     m_textWrapWidgets << m_imgToBackBtn;
 
-	// Proof Print: always visible, whatever is selected, because a proof is a
-	// document action rather than a text or image one. A plain click is the
-	// zero-dialog fast path; the tooltip says where it will go.
-	m_proofBtn = makeButton(tr("Proof"), QString(), false);
-	// makeButton() sizes for a one-glyph icon button; "Proof" elides to "P...f"
-	// at that width.
-	m_proofBtn->setFixedSize(52, 22);
-	connect(m_proofBtn, &QToolButton::clicked, this, []() {
-		ScribusMainWindow* mw = ScCore->primaryMainWindow();
-		if (mw && mw->scrActions.contains("fileProofPrint"))
-			mw->scrActions["fileProofPrint"]->trigger();
-	});
-	// First position, not last: row 1 already overflows a 1600px window, and a
-	// button pushed off the end of the toolbar cannot be clicked at all.
-	row1->insertWidget(0, m_proofBtn);
-	refreshProofTooltip();
-
 	row1->addStretch();
 	vlay->addLayout(row1);
 
@@ -719,6 +708,48 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	}
 	row2->addWidget(m_textBoxBtn);
 	m_textWidgets << m_textBoxBtn;
+
+	// ── Paragraph Shading ──
+	// Click-to-open panel, same QWidget+Qt::Popup pattern as the corner-radius
+	// popup above. The panel hosts the Style Manager's own SMPShadeWidget, so
+	// the toolbar and the style editor can never drift apart; everything it
+	// writes is a LOCAL override on the selected paragraphs — the paragraph
+	// style itself is never touched.
+	m_shadingBtn = makeButton("▤", "Paragraph Shading");
+	m_shadingBtn->setFixedSize(34, 22);
+	m_shadingBtn->setToolTip(tr("Paragraph background shading for the selected paragraphs"));
+	row2->addWidget(m_shadingBtn);
+	m_textWidgets << m_shadingBtn;
+
+	m_shadingPopup = new QWidget(this, Qt::Popup);
+	m_shadingPopup->setWindowTitle(tr("Paragraph Shading"));
+	{
+		QVBoxLayout* shadeVlay = new QVBoxLayout(m_shadingPopup);
+		shadeVlay->setContentsMargins(10, 10, 10, 10);
+		shadeVlay->setSpacing(6);
+		shadeVlay->addWidget(new QLabel(tr("<b>Paragraph Shading</b>"), m_shadingPopup));
+
+		m_shadeWidget = new SMPShadeWidget(m_shadingPopup);
+		shadeVlay->addWidget(m_shadeWidget);
+
+		QHBoxLayout* shadeBtns = new QHBoxLayout();
+		m_shadingResetBtn = new QPushButton(tr("Reset to style"), m_shadingPopup);
+		m_shadingResetBtn->setToolTip(tr("Drop the override and go back to what the "
+		                                 "paragraph style specifies"));
+		QPushButton* shadeCloseBtn = new QPushButton(tr("Close"), m_shadingPopup);
+		shadeBtns->addWidget(m_shadingResetBtn);
+		shadeBtns->addStretch(1);
+		shadeBtns->addWidget(shadeCloseBtn);
+		shadeVlay->addLayout(shadeBtns);
+
+		connect(shadeCloseBtn, &QPushButton::clicked, m_shadingPopup, &QWidget::close);
+		connect(m_shadingResetBtn, &QPushButton::clicked, this, &SuneerControlBar::onParagraphShadingReset);
+		connect(m_shadeWidget, &SMPShadeWidget::shadeChanged, this, &SuneerControlBar::onParagraphShadingChanged);
+		// Qt::Popup closes itself on a click outside; that is where the undo
+		// transaction has to be sealed, so watch the popup's own hide event.
+		m_shadingPopup->installEventFilter(this);
+	}
+	connect(m_shadingBtn, &QToolButton::clicked, this, &SuneerControlBar::onParagraphShadingShow);
 
 	// ── Text-frame Gap controls (mirrors image frame pad buttons) ──
 	{ auto* s = makeSep(); row2->addWidget(s); m_textWidgets << s; }
@@ -1560,25 +1591,8 @@ void SuneerControlBar::blockAllSignals(bool block)
 	for (QObject* o : all) o->blockSignals(block);
 }
 
-void SuneerControlBar::refreshProofTooltip()
-{
-	if (!m_proofBtn)
-		return;
-	QString printer;
-	ScribusMainWindow* mw = ScCore->primaryMainWindow();
-	if (mw && mw->doc)
-		printer = mw->doc->Print_Options.printer;
-	if (printer.isEmpty())
-		printer = PrinterUtil::getDefaultPrinterName();
-	if (printer.isEmpty())
-		m_proofBtn->setToolTip(tr("Proof Print - no printer set up yet"));
-	else
-		m_proofBtn->setToolTip(tr("Proof to %1 (auto paper)").arg(printer));
-}
-
 void SuneerControlBar::updateFromSelection()
 {
-	refreshProofTooltip();
 	// Set icons once
 
 	if (!m_doc) return;
@@ -2021,6 +2035,11 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 		restoreFontPreview();
 		endFontPreview();
 	}
+	// The shading popup is a Qt::Popup: it closes on Escape or a click outside
+	// with no signal of its own, and that is exactly when the one-step undo
+	// transaction has to be sealed.
+	if (m_shadingPopup && obj == m_shadingPopup && ev->type() == QEvent::Hide)
+		endParagraphShadingTransaction();
 	return QToolBar::eventFilter(obj, ev);
 }
 
@@ -2309,6 +2328,164 @@ void SuneerControlBar::onTextColorChanged()
 	m_doc->itemSelection_SetFillColor(m_textColorBtn->colorName());
 	m_doc->itemSelection_SetFillShade(m_textColorBtn->colorData().Shade);
 	m_doc->changed();
+}
+
+// ─────────────────────────── Paragraph Shading ───────────────────────────
+// Everything here writes a LOCAL override onto the selected paragraphs via the
+// merge-only itemSelection_ApplyParagraphStyle(). The named paragraph style is
+// never edited, so other paragraphs sharing it are untouched.
+
+PageItem* SuneerControlBar::shadingTargetItem() const
+{
+	if (!m_doc || m_doc->m_Selection->isEmpty())
+		return nullptr;
+	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (item && item->isTable())
+	{
+		PageItem_Table* tbl = item->asTable();
+		if (tbl && tbl->activeCell().textFrame())
+			item = tbl->activeCell().textFrame();
+	}
+	return item;
+}
+
+void SuneerControlBar::loadParagraphShading()
+{
+	PageItem* item = shadingTargetItem();
+	if (!item || !m_shadeWidget)
+		return;
+
+	// Whichever paragraph the caret or the start of the selection sits in.
+	int pos = 0;
+	if (item->itemText.length() > 0)
+	{
+		pos = item->itemText.hasSelection()
+		    ? item->itemText.startOfSelection()
+		    : item->itemText.normalizedCursorPosition();
+		pos = qBound(0, pos, item->itemText.length());
+	}
+
+	// paragraphStyle() resolves through the parent, so this shows the EFFECTIVE
+	// shading whether it came from the style or from an earlier override, and
+	// isInh*() drives the widget's inherited-vs-overridden display.
+	const ParagraphStyle& pstyle = (item->itemText.length() > 0)
+	                             ? item->itemText.paragraphStyle(pos)
+	                             : item->itemText.defaultStyle();
+	const auto* parent = dynamic_cast<const ParagraphStyle*>(pstyle.parentStyle());
+
+	m_shadeHasParent  = (pstyle.hasParent() && parent != nullptr);
+	m_shadeOpenStyle  = pstyle;
+	m_shadeParentStyle = m_shadeHasParent ? *parent : pstyle;
+
+	m_shadingLoading = true;
+	m_shadeWidget->setDoc(m_doc);
+	m_shadeWidget->unitChange(m_doc->unitIndex());
+	m_shadeWidget->showShade(&pstyle, parent, m_shadeHasParent, m_doc->unitIndex());
+	m_shadingLoading = false;
+}
+
+void SuneerControlBar::onParagraphShadingShow()
+{
+	if (!m_doc || !m_shadingPopup)
+		return;
+	PageItem* item = shadingTargetItem();
+	if (!item || !item->isTextFrame())
+		return;
+
+	loadParagraphShading();
+	m_shadingResetBtn->setEnabled(true);
+
+	// One undo step for the whole popup session — a dozen spinbox ticks must
+	// not become a dozen entries in the Undo palette.
+	m_shadingTouched = false;
+	if (UndoManager::undoEnabled() && !m_shadingTrans)
+		m_shadingTrans = UndoManager::instance()->beginTransaction(
+			item->getUName(), item->getUPixmap(), Um::ApplyTextStyle,
+			tr("Paragraph Shading"), Um::IFont);
+
+	QPoint pos = m_shadingBtn->mapToGlobal(QPoint(0, m_shadingBtn->height()));
+	m_shadingPopup->move(pos);
+	m_shadingPopup->show();
+}
+
+void SuneerControlBar::endParagraphShadingTransaction()
+{
+	if (!m_shadingTrans)
+		return;
+	// An untouched session must not leave an empty entry in the Undo palette.
+	if (m_shadingTouched)
+		m_shadingTrans.commit();
+	else
+		m_shadingTrans.cancel();
+	m_shadingTrans = UndoTransaction();
+	m_shadingTouched = false;
+}
+
+void SuneerControlBar::onParagraphShadingChanged()
+{
+	if (m_updating || m_shadingLoading || !m_doc || !m_shadeWidget)
+		return;
+
+	const double unitRatio = unitGetRatioFromIndex(m_doc->unitIndex());
+
+	// An attribute is written as a local override when the user has moved it
+	// away from what the paragraph would otherwise inherit, or when it was
+	// already an override before the popup opened. Everything else is left
+	// unset so it keeps tracking the paragraph style — edit the style later and
+	// the change still flows through.
+	//
+	// The comparison is against a snapshot rather than SMPShadeWidget's
+	// useParentValue(), which clears its own flag when read and so cannot
+	// survive the repeated reads live preview does.
+	const bool inh = m_shadeHasParent;
+	auto changed = [](double a, double b) { return qAbs(a - b) > 1e-6; };
+
+	ParagraphStyle ps;
+	if (!inh || !m_shadeOpenStyle.isInhShadeOn()
+	         || m_shadeWidget->on->isChecked() != m_shadeParentStyle.shadeOn())
+		ps.setShadeOn(m_shadeWidget->on->isChecked());
+	if (!inh || !m_shadeOpenStyle.isInhShadeColor()
+	         || m_shadeWidget->color->currentColor() != m_shadeParentStyle.shadeColor())
+		ps.setShadeColor(m_shadeWidget->color->currentColor());
+	if (!inh || !m_shadeOpenStyle.isInhShadeTint()
+	         || m_shadeWidget->tint->value() != m_shadeParentStyle.shadeTint())
+		ps.setShadeTint(m_shadeWidget->tint->value());
+	if (!inh || !m_shadeOpenStyle.isInhShadeWidthType()
+	         || m_shadeWidget->widthType->currentIndex() != static_cast<int>(m_shadeParentStyle.shadeWidthType()))
+		ps.setShadeWidthType(static_cast<ParagraphStyle::RuleWidthType>(m_shadeWidget->widthType->currentIndex()));
+	if (!inh || !m_shadeOpenStyle.isInhShadeTopPadding()
+	         || changed(m_shadeWidget->padTop->value() / unitRatio, m_shadeParentStyle.shadeTopPadding()))
+		ps.setShadeTopPadding(m_shadeWidget->padTop->value() / unitRatio);
+	if (!inh || !m_shadeOpenStyle.isInhShadeBottomPadding()
+	         || changed(m_shadeWidget->padBottom->value() / unitRatio, m_shadeParentStyle.shadeBottomPadding()))
+		ps.setShadeBottomPadding(m_shadeWidget->padBottom->value() / unitRatio);
+	if (!inh || !m_shadeOpenStyle.isInhShadeLeftPadding()
+	         || changed(m_shadeWidget->padLeft->value() / unitRatio, m_shadeParentStyle.shadeLeftPadding()))
+		ps.setShadeLeftPadding(m_shadeWidget->padLeft->value() / unitRatio);
+	if (!inh || !m_shadeOpenStyle.isInhShadeRightPadding()
+	         || changed(m_shadeWidget->padRight->value() / unitRatio, m_shadeParentStyle.shadeRightPadding()))
+		ps.setShadeRightPadding(m_shadeWidget->padRight->value() / unitRatio);
+	if (!inh || !m_shadeOpenStyle.isInhShadeCornerRadius()
+	         || changed(m_shadeWidget->cornerRadius->value() / unitRatio, m_shadeParentStyle.shadeCornerRadius()))
+		ps.setShadeCornerRadius(m_shadeWidget->cornerRadius->value() / unitRatio);
+	if (!inh || !m_shadeOpenStyle.isInhShadeMergeAdjacent()
+	         || m_shadeWidget->mergeAdjacent->isChecked() != m_shadeParentStyle.shadeMergeAdjacent())
+		ps.setShadeMergeAdjacent(m_shadeWidget->mergeAdjacent->isChecked());
+
+	m_shadingTouched = true;
+	m_doc->itemSelection_ApplyParagraphStyle(ps);   // merge-only: never clobbers the style
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+}
+
+void SuneerControlBar::onParagraphShadingReset()
+{
+	if (!m_doc)
+		return;
+	m_shadingTouched = true;
+	m_doc->itemSelection_ResetParagraphShading();
+	// Re-read: the paragraph now shows whatever its style specifies again.
+	loadParagraphShading();
 }
 
 void SuneerControlBar::onBgColorChanged()

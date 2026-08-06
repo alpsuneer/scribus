@@ -9750,6 +9750,88 @@ void ScribusDoc::itemSelection_EraseParagraphStyle(Selection* customSelection)
 	changedPagePreview();
 }
 
+void ScribusDoc::itemSelection_ResetParagraphShading(Selection* customSelection)
+{
+	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
+	assert(itemSelection != nullptr);
+	int selectedItemCount = itemSelection->count();
+	if (selectedItemCount == 0)
+		return;
+
+	UndoTransaction activeTransaction;
+	if (UndoManager::undoEnabled())
+		activeTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::RemoveTextStyle, tr("paragraph shading"), Um::IFont);
+
+	// Only the ten shade attributes; every other override on the paragraph is
+	// left exactly as it was.
+	auto clearShading = [](ParagraphStyle& s)
+	{
+		s.resetShadeOn();
+		s.resetShadeColor();
+		s.resetShadeTint();
+		s.resetShadeWidthType();
+		s.resetShadeTopPadding();
+		s.resetShadeBottomPadding();
+		s.resetShadeLeftPadding();
+		s.resetShadeRightPadding();
+		s.resetShadeCornerRadius();
+		s.resetShadeMergeAdjacent();
+	};
+
+	for (int i = 0; i < selectedItemCount; ++i)
+	{
+		PageItem* currItem = itemSelection->itemAt(i);
+		if (currItem->isTable() && appMode == modeEditTable)
+			currItem = currItem->asTable()->activeCell().textFrame();
+		if ((currItem == nullptr) || (currItem->itemText.length() == 0))
+			continue;
+
+		int start = currItem->firstInFrame();
+		int stop  = currItem->lastInFrame() + 1;
+		if ((appMode == modeEdit) || (appMode == modeEditTable))
+		{
+			start = currItem->itemText.startOfSelection();
+			stop  = currItem->itemText.endOfSelection();
+			if (start >= stop)
+				start = stop = currItem->itemText.normalizedCursorPosition();
+		}
+
+		auto resetAt = [&](int pos)
+		{
+			// paragraphStyle() hands back the STORED local style, inherit flags
+			// intact — the getters resolve through the parent on access. So
+			// copying it keeps the paragraph's other overrides and bakes
+			// nothing in; only the shade resets land.
+			ParagraphStyle newStyle(currItem->itemText.paragraphStyle(pos));
+			clearShading(newStyle);
+			if (UndoManager::undoEnabled())
+			{
+				auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+				is->set("SET_PARASTYLE");
+				is->set("POS", pos);
+				is->setStates(currItem->itemText.paragraphStyle(pos), newStyle);
+				m_undoManager->action(currItem, is);
+			}
+			currItem->itemText.setStyle(pos, newStyle);
+		};
+
+		for (int pos = start; pos < stop; ++pos)
+		{
+			if (currItem->itemText.text(pos) == SpecialChars::PARSEP)
+				resetAt(pos);
+		}
+		// The paragraph the selection ends in carries its style at `stop`.
+		resetAt(stop);
+
+		currItem->invalid = true;
+	}
+
+	if (activeTransaction)
+		activeTransaction.commit();
+	changed();
+	regionsChanged()->update(QRectF());
+}
+
 void ScribusDoc::itemSelection_ClearBulNumStrings(Selection* customSelection)
 {
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;

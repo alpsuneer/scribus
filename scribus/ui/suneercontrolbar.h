@@ -16,6 +16,7 @@
 
 #include "alignselect.h"
 #include "styleselect.h"
+#include "undotransaction.h"
 #include "ui/widgets/color_button.h"
 #include "ui/propertiespalette_line.h"
 
@@ -23,6 +24,8 @@ class ScribusMainWindow;
 class ScribusDoc;
 class PageItem;
 class ColorCombo;
+class SMPShadeWidget;
+class QPushButton;
 
 class SuneerControlBar : public QToolBar
 {
@@ -127,6 +130,10 @@ private slots:
 	void onTextColorChanged();
 	void onBgColorChanged();
 	void onParaStyleChanged(int idx);
+	// Paragraph Shading popup (local override, never edits the paragraph style)
+	void onParagraphShadingShow();
+	void onParagraphShadingChanged();
+	void onParagraphShadingReset();
 	// Line
 	void onLineColorChanged();
 	void onLineMaskChanged();
@@ -161,6 +168,12 @@ private:
 	void showTextWrapWidgets(bool show);
 	void updateTextWrapControls(PageItem* item);
 	void showLineWidgets(bool show);
+	/// Text frame the paragraph controls act on (unwraps an active table cell).
+	PageItem* shadingTargetItem() const;
+	/// Loads the paragraph's EFFECTIVE shading into the popup, whether that
+	/// came from its paragraph style or from an earlier override.
+	void loadParagraphShading();
+	void endParagraphShadingTransaction();
 
 	ScribusMainWindow* m_scmw {nullptr};
 	QPointer<ScribusDoc> m_doc;
@@ -193,9 +206,6 @@ public:
 	StyleSelect*    m_styleSelect         {nullptr};
 	ColorCombo*     m_outlineStrokeColorCombo {nullptr};
 	QToolButton*    m_outlineIncBtn       {nullptr};
-	QToolButton*    m_proofBtn            {nullptr};
-	//! Keep the Proof tooltip showing the printer a plain click would use.
-	void refreshProofTooltip();
 	QToolButton*    m_outlineDecBtn       {nullptr};
 	QCheckBox*      m_outlineOutwardChk   {nullptr};
 	QToolButton*    m_padResetBtn         {nullptr};
@@ -300,6 +310,26 @@ public:
 	QToolButton*    m_featherBtn           {nullptr};
 	QToolButton*    m_textFeatherBtn       {nullptr};
 	QToolButton*    m_textBoxBtn           {nullptr};
+	// Paragraph Shading — same QWidget+Qt::Popup pattern as m_cornerPopup,
+	// hosting the Style Manager's own shading page so the two cannot drift.
+	QToolButton*    m_shadingBtn           {nullptr};
+	QWidget*        m_shadingPopup         {nullptr};
+	SMPShadeWidget* m_shadeWidget          {nullptr};
+	QPushButton*    m_shadingResetBtn      {nullptr};
+	// Guards re-entry while the popup is being loaded from the selection.
+	bool            m_shadingLoading       {false};
+	// Snapshot taken when the popup opens, so the apply can tell "the user
+	// changed this" from "this is still inherited". SMPShadeWidget's own
+	// useParentValue() cannot answer that here: it is a one-shot consuming
+	// read (it clears the flag), fine for the Style Manager's single
+	// write-back but wrong for live preview, which reads on every keystroke.
+	ParagraphStyle  m_shadeOpenStyle;      ///< the paragraph's local style, inherit flags intact
+	ParagraphStyle  m_shadeParentStyle;    ///< what it would inherit if left alone
+	bool            m_shadeHasParent       {false};
+	// One undo step per popup session: opened on show, committed on close, so a
+	// dozen spinbox ticks collapse into a single "Paragraph Shading" entry.
+	UndoTransaction m_shadingTrans;
+	bool            m_shadingTouched       {false};
 	QCheckBox*      m_borderTopChk         {nullptr};
 	QCheckBox*      m_borderBottomChk      {nullptr};
 	QCheckBox*      m_borderLeftChk        {nullptr};
