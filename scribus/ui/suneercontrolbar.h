@@ -318,14 +318,21 @@ public:
 	QPushButton*    m_shadingResetBtn      {nullptr};
 	// Guards re-entry while the popup is being loaded from the selection.
 	bool            m_shadingLoading       {false};
-	// Snapshot taken when the popup opens, so the apply can tell "the user
-	// changed this" from "this is still inherited". SMPShadeWidget's own
-	// useParentValue() cannot answer that here: it is a one-shot consuming
-	// read (it clears the flag), fine for the Style Manager's single
-	// write-back but wrong for live preview, which reads on every keystroke.
-	ParagraphStyle  m_shadeOpenStyle;      ///< the paragraph's local style, inherit flags intact
-	ParagraphStyle  m_shadeParentStyle;    ///< what it would inherit if left alone
-	bool            m_shadeHasParent       {false};
+	// Which controls the user actually moved during this popup session. Only
+	// these are written back, so every selected paragraph keeps inheriting the
+	// rest from ITS OWN style — which is what makes a selection spanning
+	// several different paragraph styles behave sanely.
+	//
+	// Tracked here rather than read from SMPShadeWidget::useParentValue(),
+	// which is a one-shot consuming read (it clears its own flag): fine for the
+	// Style Manager's single write-back, useless for live preview.
+	enum ShadeAttr
+	{
+		SA_On = 0, SA_Color, SA_Tint, SA_WidthType,
+		SA_PadTop, SA_PadBottom, SA_PadLeft, SA_PadRight,
+		SA_Radius, SA_Merge, SA_COUNT
+	};
+	bool            m_shadeTouched[SA_COUNT] {};
 	// One undo step per popup session: opened on show, committed on close, so a
 	// dozen spinbox ticks collapse into a single "Paragraph Shading" entry.
 	UndoTransaction m_shadingTrans;

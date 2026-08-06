@@ -139,6 +139,10 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   style-ൽ നിന്ന് വന്നതായാലും നേരത്തെ override ചെയ്തതായാലും
 - മാറ്റുന്ന value മാത്രം override ആകും; ബാക്കിയുള്ളവ style-നെ follow
   ചെയ്തുകൊണ്ടിരിക്കും (style പിന്നീട് മാറ്റിയാൽ അത് വരും)
+- വ്യത്യസ്ത style-കളുള്ള paragraph-കൾ ഒരുമിച്ച് select ചെയ്ത് colour
+  മാത്രം മാറ്റിയാൽ, ഓരോ paragraph-ലും colour മാത്രമേ override ആകൂ —
+  padding, width, corner radius എല്ലാം അതത് paragraph-ന്റെ സ്വന്തം
+  style-നെ follow ചെയ്യും
 - "Reset to style" — override കളഞ്ഞ് style പറയുന്നതിലേക്ക് തിരികെ
 - മുഴുവൻ popup interaction-നും ഒറ്റ Ctrl+Z
 - Multi-paragraph selection-ൽ വർക്ക് ചെയ്യും
