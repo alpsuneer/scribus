@@ -205,12 +205,14 @@ int ScribusCore::initScribusCore(bool showSplash, bool showFontInfo, bool showPr
 	if (m_prefsManager.appPrefs.uiPrefs.stylePalette == "dark" && QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Light)
 	{
 		scStyle->setApplicationTheme(ScribusProxyStyle::ApplicationTheme::Dark);
-		m_SplashScreen->setPixmap(m_iconManager.splashScreen());
+		if (m_SplashScreen != nullptr)
+			m_SplashScreen->setPixmap(m_iconManager.splashScreen());
 	}
 	else if (m_prefsManager.appPrefs.uiPrefs.stylePalette == "light" && QApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark)
 	{
 		scStyle->setApplicationTheme(ScribusProxyStyle::ApplicationTheme::Light);
-		m_SplashScreen->setPixmap(m_iconManager.splashScreen());
+		if (m_SplashScreen != nullptr)
+			m_SplashScreen->setPixmap(m_iconManager.splashScreen());
 	}
 	else
 		scStyle->setApplicationTheme(ScribusProxyStyle::ApplicationTheme::System);
