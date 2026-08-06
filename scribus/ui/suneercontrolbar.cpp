@@ -744,7 +744,29 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 		connect(shadeCloseBtn, &QPushButton::clicked, m_shadingPopup, &QWidget::close);
 		connect(m_shadingResetBtn, &QPushButton::clicked, this, &SuneerControlBar::onParagraphShadingReset);
-		connect(m_shadeWidget, &SMPShadeWidget::shadeChanged, this, &SuneerControlBar::onParagraphShadingChanged);
+
+		// Each control is wired individually rather than through
+		// SMPShadeWidget::shadeChanged(), because the apply has to know WHICH
+		// control moved. shadeChanged() is emitted from SMPShadeWidget's own
+		// constructor-time connections, i.e. before any handler connected here
+		// could record it, so listening to it cannot tell the attributes apart.
+		auto touch = [this](ShadeAttr attr)
+		{
+			if (m_shadingLoading)
+				return;                 // showShade() moves the controls itself
+			m_shadeTouched[attr] = true;
+			onParagraphShadingChanged();
+		};
+		connect(m_shadeWidget->on, &QCheckBox::toggled, this, [touch]{ touch(SA_On); });
+		connect(m_shadeWidget->mergeAdjacent, &QCheckBox::toggled, this, [touch]{ touch(SA_Merge); });
+		connect(m_shadeWidget->color, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [touch]{ touch(SA_Color); });
+		connect(m_shadeWidget->widthType, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [touch]{ touch(SA_WidthType); });
+		connect(m_shadeWidget->tint, QOverload<int>::of(&QSpinBox::valueChanged), this, [touch]{ touch(SA_Tint); });
+		connect(m_shadeWidget->padTop, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [touch]{ touch(SA_PadTop); });
+		connect(m_shadeWidget->padBottom, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [touch]{ touch(SA_PadBottom); });
+		connect(m_shadeWidget->padLeft, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [touch]{ touch(SA_PadLeft); });
+		connect(m_shadeWidget->padRight, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [touch]{ touch(SA_PadRight); });
+		connect(m_shadeWidget->cornerRadius, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [touch]{ touch(SA_Radius); });
 		// Qt::Popup closes itself on a click outside; that is where the undo
 		// transaction has to be sealed, so watch the popup's own hide event.
 		m_shadingPopup->installEventFilter(this);
@@ -2373,14 +2395,12 @@ void SuneerControlBar::loadParagraphShading()
 	                             : item->itemText.defaultStyle();
 	const auto* parent = dynamic_cast<const ParagraphStyle*>(pstyle.parentStyle());
 
-	m_shadeHasParent  = (pstyle.hasParent() && parent != nullptr);
-	m_shadeOpenStyle  = pstyle;
-	m_shadeParentStyle = m_shadeHasParent ? *parent : pstyle;
-
+	// m_shadingLoading keeps the controls' own signals from being mistaken for
+	// the user touching them: showShade() writes every one of them.
 	m_shadingLoading = true;
 	m_shadeWidget->setDoc(m_doc);
 	m_shadeWidget->unitChange(m_doc->unitIndex());
-	m_shadeWidget->showShade(&pstyle, parent, m_shadeHasParent, m_doc->unitIndex());
+	m_shadeWidget->showShade(&pstyle, parent, pstyle.hasParent() && parent != nullptr, m_doc->unitIndex());
 	m_shadingLoading = false;
 }
 
@@ -2391,6 +2411,10 @@ void SuneerControlBar::onParagraphShadingShow()
 	PageItem* item = shadingTargetItem();
 	if (!item || !item->isTextFrame())
 		return;
+
+	// A fresh session owns nothing until the user moves something.
+	for (int i = 0; i < SA_COUNT; ++i)
+		m_shadeTouched[i] = false;
 
 	loadParagraphShading();
 	m_shadingResetBtn->setEnabled(true);
@@ -2428,48 +2452,32 @@ void SuneerControlBar::onParagraphShadingChanged()
 
 	const double unitRatio = unitGetRatioFromIndex(m_doc->unitIndex());
 
-	// An attribute is written as a local override when the user has moved it
-	// away from what the paragraph would otherwise inherit, or when it was
-	// already an override before the popup opened. Everything else is left
-	// unset so it keeps tracking the paragraph style — edit the style later and
-	// the change still flows through.
-	//
-	// The comparison is against a snapshot rather than SMPShadeWidget's
-	// useParentValue(), which clears its own flag when read and so cannot
-	// survive the repeated reads live preview does.
-	const bool inh = m_shadeHasParent;
-	auto changed = [](double a, double b) { return qAbs(a - b) > 1e-6; };
-
+	// ONLY the controls the user moved in this popup session are written. Every
+	// other attribute is left unset, so each selected paragraph goes on
+	// inheriting it from its own paragraph style — change just the colour on a
+	// selection spanning three different styles and all three keep their own
+	// padding, width and corner radius. Edit a style later and that still
+	// reaches its paragraphs.
 	ParagraphStyle ps;
-	if (!inh || !m_shadeOpenStyle.isInhShadeOn()
-	         || m_shadeWidget->on->isChecked() != m_shadeParentStyle.shadeOn())
+	if (m_shadeTouched[SA_On])
 		ps.setShadeOn(m_shadeWidget->on->isChecked());
-	if (!inh || !m_shadeOpenStyle.isInhShadeColor()
-	         || m_shadeWidget->color->currentColor() != m_shadeParentStyle.shadeColor())
+	if (m_shadeTouched[SA_Color])
 		ps.setShadeColor(m_shadeWidget->color->currentColor());
-	if (!inh || !m_shadeOpenStyle.isInhShadeTint()
-	         || m_shadeWidget->tint->value() != m_shadeParentStyle.shadeTint())
+	if (m_shadeTouched[SA_Tint])
 		ps.setShadeTint(m_shadeWidget->tint->value());
-	if (!inh || !m_shadeOpenStyle.isInhShadeWidthType()
-	         || m_shadeWidget->widthType->currentIndex() != static_cast<int>(m_shadeParentStyle.shadeWidthType()))
+	if (m_shadeTouched[SA_WidthType])
 		ps.setShadeWidthType(static_cast<ParagraphStyle::RuleWidthType>(m_shadeWidget->widthType->currentIndex()));
-	if (!inh || !m_shadeOpenStyle.isInhShadeTopPadding()
-	         || changed(m_shadeWidget->padTop->value() / unitRatio, m_shadeParentStyle.shadeTopPadding()))
+	if (m_shadeTouched[SA_PadTop])
 		ps.setShadeTopPadding(m_shadeWidget->padTop->value() / unitRatio);
-	if (!inh || !m_shadeOpenStyle.isInhShadeBottomPadding()
-	         || changed(m_shadeWidget->padBottom->value() / unitRatio, m_shadeParentStyle.shadeBottomPadding()))
+	if (m_shadeTouched[SA_PadBottom])
 		ps.setShadeBottomPadding(m_shadeWidget->padBottom->value() / unitRatio);
-	if (!inh || !m_shadeOpenStyle.isInhShadeLeftPadding()
-	         || changed(m_shadeWidget->padLeft->value() / unitRatio, m_shadeParentStyle.shadeLeftPadding()))
+	if (m_shadeTouched[SA_PadLeft])
 		ps.setShadeLeftPadding(m_shadeWidget->padLeft->value() / unitRatio);
-	if (!inh || !m_shadeOpenStyle.isInhShadeRightPadding()
-	         || changed(m_shadeWidget->padRight->value() / unitRatio, m_shadeParentStyle.shadeRightPadding()))
+	if (m_shadeTouched[SA_PadRight])
 		ps.setShadeRightPadding(m_shadeWidget->padRight->value() / unitRatio);
-	if (!inh || !m_shadeOpenStyle.isInhShadeCornerRadius()
-	         || changed(m_shadeWidget->cornerRadius->value() / unitRatio, m_shadeParentStyle.shadeCornerRadius()))
+	if (m_shadeTouched[SA_Radius])
 		ps.setShadeCornerRadius(m_shadeWidget->cornerRadius->value() / unitRatio);
-	if (!inh || !m_shadeOpenStyle.isInhShadeMergeAdjacent()
-	         || m_shadeWidget->mergeAdjacent->isChecked() != m_shadeParentStyle.shadeMergeAdjacent())
+	if (m_shadeTouched[SA_Merge])
 		ps.setShadeMergeAdjacent(m_shadeWidget->mergeAdjacent->isChecked());
 
 	m_shadingTouched = true;
