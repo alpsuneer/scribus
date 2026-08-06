@@ -1163,6 +1163,14 @@ public:
 	void itemSelection_ApplyCharStyle(const CharStyle & newstyle, Selection* customSelection = nullptr, const QString& ETEA = "");
 	void itemSelection_SetCharStyle(const CharStyle & newstyle, Selection* customSelection = nullptr);
 	void itemSelection_EraseParagraphStyle(Selection* customSelection = nullptr);
+	/**
+	 Clears ONLY the paragraph-shading overrides on the selected paragraphs so
+	 they fall back to whatever their paragraph style specifies. Deliberately
+	 narrower than itemSelection_EraseParagraphStyle(), which drops every direct
+	 paragraph override (indents, spacing, alignment) and would take unrelated
+	 work with it. Backs the control bar's "Reset to style".
+	 */
+	void itemSelection_ResetParagraphShading(Selection* customSelection = nullptr);
 	void itemSelection_EraseCharStyle(Selection* customSelection = nullptr);
 	void itemSelection_SetNamedParagraphStyle(const QString & name, Selection* customSelection = nullptr);
 	void itemSelection_SetNamedCharStyle(const QString & name, Selection* customSelection = nullptr);
