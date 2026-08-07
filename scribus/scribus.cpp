@@ -11109,65 +11109,21 @@ void ScribusMainWindow::slotAutoArrangeFrames()
 	if (!HaveDoc)
 		return;
 
+	// Dry run first, always: the dialog computes and displays the plan, and the
+	// document is only written if the operator presses Apply. There is no code
+	// path that moves a frame without showing the move first.
 	AutoArrangeDialog dlg(doc, this);
 	if (dlg.exec() != QDialog::Accepted)
 		return;
 
-	ArrangeOptions opts = dlg.options();
-
-	// TEMPORARY SAFETY GUARD — remove when the compact-and-align rewrite lands.
-	//
-	// The current engine re-lays out the page instead of compacting it and has
-	// destroyed a production broadsheet (see NOTES.md). The menu entries are
-	// gone, but the action is still connected and any shortcut still saved in an
-	// existing scribus172.rc will fire it, so refusing to write is the only
-	// guard that actually holds. Forcing dryRun makes every invocation report
-	// its plan and change nothing.
-	const bool guardEngaged = !opts.dryRun;
-	opts.dryRun = true;
-
 	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
-	const ArrangeResult res = AutoArrangeEngine::arrange(doc, opts);
+	const int moved = AutoArrangeEngine::applyPlan(doc, dlg.plan());
 	QApplication::restoreOverrideCursor();
 
-	if (guardEngaged)
-	{
+	if (moved > 0)
 		ScMessageBox::information(this, tr("Auto Arrange Frames"),
-			tr("Auto Arrange is running in dry-run mode only and did not change the page.\n\n"
-			   "Its layout engine is being rewritten: the current one re-stacks every "
-			   "frame from the top of its column instead of compacting frames where "
-			   "they are, which can overlap frames and empty the lower half of a page.\n\n"
-			   "Detected %1 column(s); %2 frame(s) would have been arranged.\n"
-			   "The full plan is on the console.")
-			.arg(res.columnsFound).arg(res.framesArranged));
-		return;
-	}
-
-	if (opts.dryRun)
-	{
-		ScMessageBox::information(this, tr("Auto Arrange Frames"),
-			tr("Dry run complete — nothing was changed.\n\n"
-			   "Detected %1 column(s); %2 frame(s) would be arranged.\n"
-			   "See the console/terminal for the full plan.")
-			.arg(res.columnsFound).arg(res.framesArranged));
-	}
-	else if (res.columnsFound == 0)
-	{
-		ScMessageBox::warning(this, tr("Auto Arrange Frames"),
-			tr("No column guides were found on the page.\n"
-			   "Add vertical guides (Page → Manage Guides) to define columns, then try again."));
-	}
-	else if (res.framesArranged == 0 && res.framesOverflowed == 0)
-	{
-		ScMessageBox::information(this, tr("Auto Arrange Frames"),
-			tr("No arrangeable frames were found in the columns.\n"
-			   "(Master-page items, locked frames, and frames on locked layers are never moved.)"));
-	}
-	else if (res.framesOverflowed > 0)
-	{
-		ScMessageBox::information(this, tr("Auto Arrange Frames"),
-			tr("%1 frame(s) overflowed their column and were left in place.").arg(res.framesOverflowed));
-	}
+			tr("%1 frame(s) moved. This is a single undo step — press Ctrl+Z to put "
+			   "them all back.").arg(moved));
 }
 
 void ScribusMainWindow::PutToInline(const QString& buffer)

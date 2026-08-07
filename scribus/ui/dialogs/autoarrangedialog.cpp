@@ -4,17 +4,18 @@ to the COPYING file provided with the program. Following this notice may exist
 a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
-#include "autoarrangedialog.h"
+#include "ui/dialogs/autoarrangedialog.h"
 
-#include <QCheckBox>
 #include <QDialogButtonBox>
-#include <QGroupBox>
+#include <QDoubleSpinBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
-#include <QRadioButton>
+#include <QPushButton>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
-#include "autoarrangeengine.h"
-#include "scpage.h"
+#include "pageitem.h"
 #include "scribusdoc.h"
 #include "units.h"
 
@@ -24,117 +25,99 @@ AutoArrangeDialog::AutoArrangeDialog(ScribusDoc* doc, QWidget* parent)
 	setWindowTitle(tr("Auto Arrange Frames"));
 	setModal(true);
 
-	auto* main = new QVBoxLayout(this);
+	auto* lay = new QVBoxLayout(this);
+	lay->setSpacing(8);
 
-	// Detected summary for the current page.
-	ArrangeOptions probe;   // defaults: both frame types, all protections on
-	int columns = 0, frames = 0;
-	double areaWmm = 0.0, areaHmm = 0.0;
-	if (m_doc && m_doc->currentPage())
-	{
-		ScPage* page = m_doc->currentPage();
-		const QRectF area = AutoArrangeEngine::detectContentArea(page);
-		columns = AutoArrangeEngine::detectColumns(m_doc, page, area).count();
-		frames  = AutoArrangeEngine::gatherFrames(m_doc, page, probe).count();
-		areaWmm = value2value(area.width(),  SC_PT, SC_MM);
-		areaHmm = value2value(area.height(), SC_PT, SC_MM);
-	}
+	auto* intro = new QLabel(tr(
+		"<b>Nothing has been changed yet.</b><br>"
+		"Only the frames you selected are considered, and only their vertical "
+		"position changes — never their size, never their column."), this);
+	intro->setWordWrap(true);
+	lay->addWidget(intro);
 
-	auto* detGroup = new QGroupBox(tr("Detected on current page"), this);
-	auto* detLay = new QVBoxLayout(detGroup);
-	detLay->addWidget(new QLabel(tr("Columns: %1").arg(columns), this));
-	detLay->addWidget(new QLabel(tr("Frames to arrange: %1").arg(frames), this));
-	detLay->addWidget(new QLabel(tr("Content area: %1 × %2 mm")
-		.arg(areaWmm, 0, 'f', 0).arg(areaHmm, 0, 'f', 0), this));
-	main->addWidget(detGroup);
+	auto* gl = new QHBoxLayout();
+	gl->addWidget(new QLabel(tr("Gutter between stacked blocks:"), this));
+	m_gutter = new QDoubleSpinBox(this);
+	m_gutter->setRange(0.0, 200.0);
+	m_gutter->setDecimals(1);
+	m_gutter->setSingleStep(1.0);
+	m_gutter->setSuffix(tr(" pt"));
+	m_gutter->setValue(AutoArrangeEngine::DefaultGutter);
+	gl->addWidget(m_gutter);
+	gl->addStretch(1);
+	lay->addLayout(gl);
 
-	if (columns == 0)
-	{
-		auto* warn = new QLabel(tr("⚠ No column guides found on this page.\n"
-		                           "Add vertical guides (Page → Manage Guides) to define columns."), this);
-		warn->setWordWrap(true);
-		main->addWidget(warn);
-	}
+	m_summary = new QLabel(this);
+	m_summary->setWordWrap(true);
+	lay->addWidget(m_summary);
 
-	// Behaviour
-	auto* behGroup = new QGroupBox(tr("Behaviour"), this);
-	auto* behLay = new QVBoxLayout(behGroup);
-	m_preserveColumn = new QCheckBox(tr("Preserve original column"), this);
-	m_preserveColumn->setChecked(true);
-	m_preserveColumn->setToolTip(tr("Each frame stays in the column its centre falls into; frames never cross columns."));
-	m_zeroGap = new QCheckBox(tr("Zero vertical gap"), this);
-	m_zeroGap->setChecked(true);
-	m_zeroGap->setToolTip(tr("Stack frames so the bottom of one frame touches the top of the next."));
-	m_includeGroups = new QCheckBox(tr("Include grouped articles"), this);
-	m_includeGroups->setChecked(true);
-	m_includeGroups->setToolTip(tr("Arrange grouped articles as whole units (re-stacked vertically, layout preserved). "
-	                               "Most newspaper articles are groups — leave this on."));
-	m_dryRun = new QCheckBox(tr("Dry run (log to console, change nothing)"), this);
-	m_dryRun->setToolTip(tr("Print the detected columns and planned moves to the console without modifying the document."));
-	behLay->addWidget(m_preserveColumn);
-	behLay->addWidget(m_zeroGap);
-	behLay->addWidget(m_includeGroups);
-	behLay->addWidget(m_dryRun);
-	main->addWidget(behGroup);
+	m_table = new QTableWidget(0, 5, this);
+	m_table->setHorizontalHeaderLabels(QStringList()
+		<< tr("Block") << tr("Frame") << tr("Type") << tr("From (x, y)") << tr("To (x, y)"));
+	m_table->horizontalHeader()->setStretchLastSection(true);
+	m_table->verticalHeader()->setVisible(false);
+	m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+	m_table->setMinimumSize(620, 260);
+	lay->addWidget(m_table, 1);
 
-	// Frame height behaviour
-	auto* heightGroup = new QGroupBox(tr("Frame Height Behaviour"), this);
-	auto* heightLay = new QVBoxLayout(heightGroup);
-	m_heightFit  = new QRadioButton(tr("Fit to text (keeps frames auto-sizing) — recommended"), this);
-	m_heightFill = new QRadioButton(tr("Fill column (sets a fixed height)"), this);
-	m_heightKeep = new QRadioButton(tr("Keep original height (sets a fixed height)"), this);
-	m_heightFit->setChecked(true);
-	m_heightFit->setToolTip(tr("Each text frame is fitted to its own text (via Adjust Frame Height to Text), so it keeps auto-adjusting when you edit. Recommended for newspaper workflow."));
-	m_heightFill->setToolTip(tr("Stretch frames to fill the column. This sets a FIXED height — frames no longer auto-size to text until you re-run Adjust Frame Height to Text."));
-	m_heightKeep->setToolTip(tr("Keep each frame's current height. This sets a FIXED height — frames no longer auto-size to text until you re-run Adjust Frame Height to Text."));
-	heightLay->addWidget(m_heightFit);
-	heightLay->addWidget(m_heightFill);
-	heightLay->addWidget(m_heightKeep);
-	main->addWidget(heightGroup);
+	auto* bb = new QDialogButtonBox(this);
+	m_apply = bb->addButton(tr("Apply These Moves"), QDialogButtonBox::AcceptRole);
+	bb->addButton(QDialogButtonBox::Cancel)->setText(tr("Close, Change Nothing"));
+	lay->addWidget(bb);
 
-	// Protected (always on — informational)
-	auto* protGroup = new QGroupBox(tr("Protected (never moved)"), this);
-	auto* protLay = new QVBoxLayout(protGroup);
-	protLay->addWidget(new QLabel(tr("● Master page items (border, guides, masthead, page number)"), this));
-	protLay->addWidget(new QLabel(tr("● Locked frames"), this));
-	protLay->addWidget(new QLabel(tr("● Frames on locked or hidden layers"), this));
-	main->addWidget(protGroup);
+	connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+	connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+	connect(m_gutter, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+	        this, &AutoArrangeDialog::recompute);
 
-	// Scope
-	auto* scopeGroup = new QGroupBox(tr("Apply To"), this);
-	auto* scopeLay = new QVBoxLayout(scopeGroup);
-	m_scopeCurrent = new QRadioButton(tr("Current page only"), this);
-	m_scopeAll     = new QRadioButton(tr("All pages"), this);
-	m_scopeCurrent->setChecked(true);
-	scopeLay->addWidget(m_scopeCurrent);
-	scopeLay->addWidget(m_scopeAll);
-	main->addWidget(scopeGroup);
-
-	auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-	connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-	main->addWidget(buttons);
+	recompute();
 }
 
-ArrangeOptions AutoArrangeDialog::options() const
+void AutoArrangeDialog::recompute()
 {
-	ArrangeOptions o;
-	o.preserveColumn    = m_preserveColumn->isChecked();
-	o.zeroGap           = m_zeroGap->isChecked();
-	o.includeGroups     = m_includeGroups->isChecked();
-	o.dryRun            = m_dryRun->isChecked();
-	if (m_heightKeep->isChecked())
-		o.heightMode = ArrangeOptions::KeepOriginal;
-	else if (m_heightFit->isChecked())
-		o.heightMode = ArrangeOptions::FitToText;
+	m_plan = AutoArrangeEngine::planForSelection(m_doc, m_gutter->value());
+	populate();
+}
+
+void AutoArrangeDialog::populate()
+{
+	m_table->setRowCount(0);
+
+	const double ratio = m_doc ? unitGetRatioFromIndex(m_doc->unitIndex()) : 1.0;
+	const QString suffix = m_doc ? unitGetSuffixFromIndex(m_doc->unitIndex()) : QString();
+
+	int row = 0;
+	for (const ArrangeMove& mv : m_plan.moves)
+	{
+		if (!mv.item)
+			continue;
+		m_table->insertRow(row);
+		auto put = [&](int col, const QString& text) {
+			m_table->setItem(row, col, new QTableWidgetItem(text));
+		};
+		put(0, QString::number(mv.block + 1));
+		put(1, mv.item->itemName());
+		put(2, mv.item->isTextFrame() ? tr("Text")
+		     : mv.item->isImageFrame() ? tr("Image")
+		     : mv.item->isGroup() ? tr("Group") : tr("Other"));
+		put(3, QString("%1, %2%3").arg(mv.from.x() * ratio, 0, 'f', 1)
+		                          .arg(mv.from.y() * ratio, 0, 'f', 1).arg(suffix));
+		put(4, QString("%1, %2%3").arg(mv.to.x() * ratio, 0, 'f', 1)
+		                          .arg(mv.to.y() * ratio, 0, 'f', 1).arg(suffix));
+		++row;
+	}
+	m_table->resizeColumnsToContents();
+
+	if (!m_plan.note.isEmpty())
+		m_summary->setText(QString("<i>%1</i>").arg(m_plan.note));
 	else
-		o.heightMode = ArrangeOptions::FillColumn;
-	// Master / locked / locked-layer protection is always on; both frame types.
-	o.protectMasterPageItems = true;
-	o.protectLockedFrames    = true;
-	o.protectLockedLayers    = true;
-	o.includeTextFrames  = true;
-	o.includeImageFrames = true;
-	o.scope = m_scopeAll->isChecked() ? ArrangeOptions::AllPages : ArrangeOptions::CurrentPage;
-	return o;
+		m_summary->setText(tr("%1 frame(s) in %2 block(s) would move. "
+		                      "%3 frame(s) selected, %4 skipped as protected.")
+			.arg(m_plan.moves.count())
+			.arg(m_plan.blocks.count())
+			.arg(m_plan.framesConsidered)
+			.arg(m_plan.framesSkipped));
+
+	m_apply->setEnabled(!m_plan.isEmpty());
 }
