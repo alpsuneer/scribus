@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — **DISABLED, pending rewrite.** `autoarrangeengine.{h,cpp}` + dialog | `c58f023` ⚠, disabled in `2cb46b0` | |
+| **Auto Arrange Frames** — **BEING REWRITTEN** (compact-and-align). Temporarily dry-run-only; core workflow, not abandoned. `autoarrangeengine.{h,cpp}` + dialog | `c58f023` ⚠, fenced in `2cb46b0` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
@@ -73,10 +73,14 @@ version control"* (2026-07-28, a sweep of several untracked files), so
 `git log -- scribus/autoarrangeengine.cpp` returns one commit whose message says
 nothing about auto-arrange. Search by symbol, not by commit message.
 
-⚠ **Auto Arrange destroyed a production broadsheet and is now unreachable from
-the UI.** The engine does not compact frames in place — it *re-lays out* the
-page, discarding every position and re-stacking each column from `area.top()`.
-Three structural faults, all in `autoarrangeengine.cpp`:
+⚠ **Auto Arrange destroyed a production broadsheet. It is being rewritten, not
+retired** — dropping stories and images roughly onto the page and clicking once
+to arrange them is a core part of the operator's workflow, so the goal is a
+working engine, not removal.
+
+The current engine does not compact frames in place — it *re-lays out* the page,
+discarding every position and re-stacking each column from `area.top()`. Three
+structural faults, all in `autoarrangeengine.cpp`:
 
 1. **Overlap.** `analyzeFrame()` computes a `columnSpan`, but the stacking loop
    buckets frames by `startColumn` only. A frame spanning four columns sits in
@@ -103,17 +107,34 @@ Undo is *not* the problem: `arrange()` wraps the whole run in one
 `checkChanges()`/`moveUndoAction()`, so one Ctrl+Z reverts the geometry. Text
 redistributed across a linked chain may not come back, though.
 
-Disabled by unbinding the default shortcut (it was **Ctrl+Shift+F**, one shift
-key from Ctrl+F Search/Replace) and removing the Item-menu and context-menu
-entries. The action and its Preferences → Keyboard Shortcuts entry survive, so
-it can still be bound deliberately. **A shortcut saved in an existing
-`scribus172.rc` overrides the compiled default** — clear it in Preferences or
-the old binding stays live.
+**Current fencing (temporary).** The default **Ctrl+Shift+F** binding was cleared
+(it sat one shift key from Ctrl+F Search/Replace) and the Item-menu and
+context-menu entries removed. Crucially, `slotAutoArrangeFrames()` now **forces
+`opts.dryRun = true`**: the action is still connected, and **a shortcut saved in
+an existing `scribus172.rc` overrides the compiled default**, so a stale profile
+can still fire it — refusing to write is the only guard that actually holds.
+All three of these come out when the rewrite is verified.
 
-The intended replacement is *compact and align to the grid*: keep each story in
-its column region and reading order, move each story's text+image as one block,
-snap to column guides, close vertical gaps, leave the ad alone, preserve spans.
-Dry-run-first, per the operator.
+**The specification — compact and align, not re-lay-out.** Derived from an
+operator before/after pair (messy page vs. hand-tidied page):
+
+* each news item — text frame plus its image frame(s) — moves as ONE block
+* blocks snap to the column guides and stack top-down, closing vertical gaps
+  with consistent gutters
+* frames spanning multiple columns keep their span
+* the advertisement keeps its position and size
+* reading order and column region are preserved; nothing crosses into a column
+  it did not already occupy
+
+The block-identification question — explicit groups vs. spatial containment — is
+answered from the diff, not assumed: `~/scribus-crashlogs/tabletest/sla_layout_diff.py`
+reports which frames share an identical delta (so travelled as a unit) and
+whether those members are group children, chained frames, or neither.
+
+**Plan:** derive the rule from the before/after diff → rewrite around news-item
+blocks fixing the three faults above → dry-run reporting a (frame, from, to)
+plan in the UI, not just `qDebug` → verify plans on several real pages → then
+re-enable the apply path, restore Ctrl+Shift+F, and put the menu entries back.
 
 ### UI and panels
 
