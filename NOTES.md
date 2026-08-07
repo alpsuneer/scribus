@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — REWRITTEN as selection-scoped compaction, dry-run-first. Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `f577c19` | |
+| **Auto Arrange Frames** — selection-scoped compaction, dry-run-first (Ctrl+Shift+F, Item + context menu). Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `f577c19` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
@@ -73,10 +73,11 @@ version control"* (2026-07-28, a sweep of several untracked files), so
 `git log -- scribus/autoarrangeengine.cpp` returns one commit whose message says
 nothing about auto-arrange. Search by symbol, not by commit message.
 
-⚠ **Auto Arrange destroyed a production broadsheet. It is being rewritten, not
-retired** — dropping stories and images roughly onto the page and clicking once
-to arrange them is a core part of the operator's workflow, so the goal is a
-working engine, not removal.
+⚠ **Auto Arrange once destroyed a production broadsheet. It has been rewritten,
+not retired** — dropping stories and images roughly onto the page and tidying
+them in one action is a core part of the operator's workflow. What ships now is
+selection-scoped and dry-run-first; the history below is kept because it is the
+list of ways this feature can go wrong.
 
 The **original** engine (`c58f023`, now replaced) did not compact frames in place
 — it *re-laid out* the page, discarding every position and re-stacking each
@@ -109,15 +110,20 @@ Undo was *not* the problem, then or now: the run is wrapped in one
 the old engine, text redistributed across a linked chain might not come back;
 the new one never resizes, so no reflow can occur.)
 
-**Current fencing (temporary).** The default **Ctrl+Shift+F** binding is cleared
-(it sat one shift key from Ctrl+F Search/Replace) and the Item-menu and
-context-menu entries are removed, so the only way in is a key bound by hand under
-Preferences → Keyboard Shortcuts — the action is deliberately still listed there.
-Note **a shortcut saved in an existing `scribus172.rc` overrides the compiled
-default**, so a stale profile keeps whatever it had. An earlier forced-dry-run
-guard in `slotAutoArrangeFrames()` is gone, made redundant by the rewrite: the
-dialog now computes and displays the plan and writes nothing unless Apply is
-pressed, so there is no path that moves a frame without showing it first.
+**Fencing history (now lifted).** While the old engine was live the default
+**Ctrl+Shift+F** binding was cleared and the Item-menu and context-menu entries
+removed, leaving only a hand-bound key under Preferences → Keyboard Shortcuts;
+`slotAutoArrangeFrames()` also force-set `dryRun`. All of that is gone. The
+guard became redundant when the dialog itself turned into the dry run — it
+computes and displays the plan and writes nothing unless Apply is pressed, so no
+path moves a frame without showing it first — and the entries and shortcut were
+restored at the operator's request. Ctrl+Shift+F is safe to bind again for the
+same reason: mistyping it for Ctrl+F now opens a plan dialog instead of silently
+re-stacking the page.
+
+Worth remembering if this is ever fenced again: **a shortcut saved in an existing
+`scribus172.rc` overrides the compiled default**, so clearing `defKeys` alone
+does not disarm an existing profile.
 
 **Whole-page arrangement is DEFERRED pending more samples. Do not fit a
 heuristic to one page.** Diffing the operator's before/after pair produced a
