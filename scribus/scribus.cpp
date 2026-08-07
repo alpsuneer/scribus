@@ -1341,10 +1341,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editMark", "Marks");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Item");
 	scrMenuMgr->addMenuItemString("itemAttributes", "Item");
-	// "itemsAutoArrange" is intentionally NOT added to the Item menu — see the
-	// note in ContextMenu. The action and its Preferences > Keyboard Shortcuts
-	// entry survive, so it stays bindable on purpose but is unreachable by
-	// accident until the engine is rewritten.
+	scrMenuMgr->addMenuItemString("itemsAutoArrange", "Item");
 
 	scrActions["itemPrintingEnabled"]->setEnabled(false);
 	scrMenuMgr->setMenuEnabled("ItemConvertTo", false);

@@ -508,13 +508,9 @@ void ContextMenu::createMenuItems_Selection()
 	{
 		if (m_Sel.objectsLayer() != -1)
 			addAction(m_ScMW->scrActions["itemGroup"]);
-		// "Auto Arrange Frames" is deliberately absent here and from the Item
-		// menu: the current engine re-stacks every frame from the top of its
-		// column rather than compacting them in place, which destroyed a
-		// production broadsheet. The action still exists and is still listed in
-		// Preferences > Keyboard Shortcuts, so it can be bound deliberately —
-		// it is just no longer one stray click away. Restore both entries when
-		// the engine is rewritten to compact-and-align.
+		// Auto Arrange belongs on a multi-item selection: it compacts the
+		// SELECTED frames vertically and nothing else on the page.
+		addAction(m_ScMW->scrActions["itemsAutoArrange"]);
 	}
 	if (selectedItemCount > 0 && m_doc->m_Selection->containsItemType(PageItem::Group))
 	{

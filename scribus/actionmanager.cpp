@@ -2151,13 +2151,13 @@ void ActionManager::createDefaultShortcuts()
 	//Item Menu
 	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
 	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
-	// Auto Arrange has NO default shortcut. It used to be Ctrl+Shift+F, one shift
-	// key away from Ctrl+F (Search/Replace, bound a few lines above) — a single
-	// mistyped chord silently re-stacked every frame on the page, which wrecked a
-	// production broadsheet. It stays unbound until the engine is rewritten to
-	// compact-and-align rather than re-lay-out, and the user can still bind it
-	// from Preferences if they want it back.
-	defKeys.insert("itemsAutoArrange", QKeySequence());
+	// Ctrl+Shift+A is already Edit > Deselect All, so Auto Arrange uses Ctrl+Shift+F ("Frames").
+	// This was unbound for a while: the old engine re-stacked every frame on the
+	// page, so a chord mistyped for Ctrl+F (Search/Replace, bound a few lines
+	// above) silently wrecked a production broadsheet. Safe to bind again now
+	// that the action only ever opens a plan dialog — it acts on the selection
+	// alone and writes nothing until Apply is pressed.
+	defKeys.insert("itemsAutoArrange", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
 	defKeys.insert("itemDelete", QKeySequence::Delete);
 	defKeys.insert("itemGroup", QKeySequence(Qt::CTRL | Qt::Key_G));
 	defKeys.insert("itemUngroup", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_G));
