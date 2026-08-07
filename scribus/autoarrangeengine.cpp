@@ -6,8 +6,11 @@ for which a new license (GPL+exception) is in place.
 */
 #include "autoarrangeengine.h"
 
+#include <QMap>
 #include <QObject>
+#include <QVector>
 #include <algorithm>
+#include <functional>
 
 #include "pageitem.h"
 #include "sclayer.h"
