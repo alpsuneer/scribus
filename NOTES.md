@@ -251,7 +251,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | Paragraph Shading popup on the control bar — local override, never edits the style; embeds the Style Manager's `SMPShadeWidget`; `itemSelection_ResetParagraphShading()` ⚠ | `7a02607` | feature/paragraph-shading-popup |
 | Stock toolbars start hidden on a new profile | `e8a34ae` | autofit-typography |
 | Text Distances section hidden from content properties | `505a048` | |
-| Control-bar keyboard navigation — Tab/Shift+Tab walk the bar, Enter applies, Esc cancels, both returning the caret | `3b1d012` + `<pending>` | |
+| Control-bar keyboard navigation — Tab/Shift+Tab walk the bar, Enter applies, Esc cancels, both returning the caret | `3b1d012`, `e705ed0` | |
 
 ⚠ Three traps from making Tab work in the SuneerControlBar, each of which cost a
 wrong diagnosis before being measured:
