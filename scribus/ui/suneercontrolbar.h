@@ -174,6 +174,8 @@ private:
 	/// came from its paragraph style or from an earlier override.
 	void loadParagraphShading();
 	void endParagraphShadingTransaction();
+	/// True when \a w is a control-bar focus-chain widget or a child of one.
+	bool isInFocusChain(QWidget* w) const;
 
 	ScribusMainWindow* m_scmw {nullptr};
 	QPointer<ScribusDoc> m_doc;
@@ -200,7 +202,9 @@ private:
 	void restoreFontPreview();
 	void endFontPreview();
 public:
-	void focusFontCombo() { m_fontCombo->setFocus(); m_fontCombo->lineEdit()->selectAll(); }
+	void focusFontCombo();
+	/// Hands the caret back to the text frame (Enter applies, Esc cancels).
+	void returnFocusToCanvas();
 	QDoubleSpinBox* m_fontSizeSpin        {nullptr};
 	AlignSelect*    m_alignSelect         {nullptr};
 	StyleSelect*    m_styleSelect         {nullptr};
@@ -316,6 +320,11 @@ public:
 	QWidget*        m_shadingPopup         {nullptr};
 	SMPShadeWidget* m_shadeWidget          {nullptr};
 	QPushButton*    m_shadingResetBtn      {nullptr};
+	// The controls Tab walks, in order. Esc/Enter are intercepted for exactly
+	// these, however focus arrived — keying off the shortcut instead would mean
+	// Esc worked after Ctrl+Shift+F but silently did nothing after a mouse
+	// click into the same field.
+	QList<QWidget*> m_focusChain;
 	// Guards re-entry while the popup is being loaded from the selection.
 	bool            m_shadingLoading       {false};
 	// Which controls the user actually moved during this popup session. Only
