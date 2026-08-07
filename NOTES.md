@@ -285,6 +285,20 @@ wrong diagnosis before being measured:
    filter now covers every descendant of the bar (excluding the shading popup,
    which owns Escape) and tests ancestry.
 
+⚠ **Three STOCK labels are renamed locally** in `actionmanager.cpp` (~1681):
+`editCopyContents`, `editPasteContents`, `editPasteContentsAbs` were `&Copy`,
+`&Paste`, `Paste (&Absolute)` — identical strings to `editCopy`/`editPaste`.
+That reads fine inside the **Edit → Contents** submenu, but Preferences →
+Keyboard Shortcuts flattens the menu path away, so the list showed "Copy" and
+"Paste" twice each with nothing to tell them apart. They are now
+`&Copy Image Contents` / `&Paste Image Contents` /
+`Paste Image Contents (&Absolute)`; mnemonics stay C/P/A, distinct within the
+submenu. Menu and shortcut editor cannot diverge — both read the same
+`setTexts()`. Expect these three to conflict on any upstream rebase, and note
+the 75 shipped `.ts` files still carry the old source strings, so those entries
+orphan and fall back to English in a translated UI (no `.qm` is built here and
+the operator runs English, so no practical effect today).
+
 ⚠ **`enforceClipboardShortcuts()` (`scribus.cpp`) re-asserts the styled
 clipboard chords on every startup, so a wrong target there is self-healing in the
 WRONG direction.** It bound `Ctrl+Shift+V` to `editPasteOriginalPosition` rather

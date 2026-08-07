@@ -1678,9 +1678,15 @@ void ActionManager::languageChange()
 	(*scrActions)["editPaste"]->setTexts( tr("&Paste"));
 	(*scrActions)["editPasteOriginalPosition"]->setTexts( tr("Paste in Original Position"));
 	(*scrActions)["editPastePlainText"]->setTexts( tr("Paste P&lain Text"));
-	(*scrActions)["editCopyContents"]->setTexts( tr("&Copy"));
-	(*scrActions)["editPasteContents"]->setTexts( tr("&Paste"));
-	(*scrActions)["editPasteContentsAbs"]->setTexts( tr("Paste (&Absolute)"));
+	// Renamed from the stock "&Copy" / "&Paste" / "Paste (&Absolute)". Those read
+	// fine inside the Edit > Contents submenu, but Preferences > Keyboard
+	// Shortcuts flattens the menu path away and showed "Copy" and "Paste" twice
+	// each, with nothing to tell them from editCopy/editPaste. These act only on
+	// an image frame's contents, so the labels now say so. Mnemonics stay C/P/A,
+	// distinct within the submenu.
+	(*scrActions)["editCopyContents"]->setTexts( tr("&Copy Image Contents"));
+	(*scrActions)["editPasteContents"]->setTexts( tr("&Paste Image Contents"));
+	(*scrActions)["editPasteContentsAbs"]->setTexts( tr("Paste Image Contents (&Absolute)"));
 	(*scrActions)["editPasteImageFromClipboard"]->setTexts( tr("Paste Image from Clipboard"));
 	(*scrActions)["editStyledCopy"]->setTexts( tr("Styled Cop&y"));
 	(*scrActions)["editStyledPaste"]->setTexts( tr("St&yled Paste"));
