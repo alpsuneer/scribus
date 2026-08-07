@@ -274,6 +274,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_file.h"
 #include "util_formats.h"
 #include "util_printer.h"
+#include "ui/proofprintdialog.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
 #include "third_party/Qt-Advanced-Docking-System/src/IconProvider.h"
 
@@ -425,7 +426,7 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 		ScCore->setSplashStatus( tr("Applying User Shortcuts") );
 	m_prefsManager.applyLoadedShortCuts();
 	initKeyboardShortcuts();
-	enforceStyledClipboardShortcuts();
+	enforceClipboardShortcuts();
 	resize(800, 600);
 	connect(mdiArea, SIGNAL(subWindowActivated(QMdiSubWindow*)), this, SLOT(newActWin(QMdiSubWindow*)));
 	//Connect windows cascade and tile actions to the workspace after its created. Only depends on mdiArea created.
@@ -1188,6 +1189,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editCut", "Edit");
 	scrMenuMgr->addMenuItemString("editCopy", "Edit");
 	scrMenuMgr->addMenuItemString("editPaste", "Edit");
+	scrMenuMgr->addMenuItemString("editPasteOriginalPosition", "Edit");
 	scrMenuMgr->addMenuItemString("editPastePlainText", "Edit");
 	scrMenuMgr->addMenuItemString("editStyledCopy", "Edit");
 	scrMenuMgr->addMenuItemString("editStyledPaste", "Edit");
@@ -1339,7 +1341,10 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editMark", "Marks");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Item");
 	scrMenuMgr->addMenuItemString("itemAttributes", "Item");
-	scrMenuMgr->addMenuItemString("itemsAutoArrange", "Item");
+	// "itemsAutoArrange" is intentionally NOT added to the Item menu — see the
+	// note in ContextMenu. The action and its Preferences > Keyboard Shortcuts
+	// entry survive, so it stays bindable on purpose but is unreachable by
+	// accident until the engine is rewritten.
 
 	scrActions["itemPrintingEnabled"]->setEnabled(false);
 	scrMenuMgr->setMenuEnabled("ItemConvertTo", false);
@@ -4834,22 +4839,19 @@ void ScribusMainWindow::slotFileProofPrint()
 {
 	if (!HaveDoc)
 		return;
-	// PDef.Pname is only filled in after a print has happened, so on a profile
-	// that has not printed yet it is empty even when the system has a perfectly
-	// good default queue. Ask for that before falling back to a dialog,
-	// otherwise the first proof of every session is not one-click at all.
-	QString proofPrinter = doc->Print_Options.printer;
-	if (proofPrinter.isEmpty())
-		proofPrinter = PDef.Pname;
-	if (proofPrinter.isEmpty())
-		proofPrinter = PrinterUtil::getDefaultPrinterName();
-	if (proofPrinter.isEmpty())
+	if (PrinterUtil::getPrinterNames().isEmpty())
 	{
-		// Genuinely nothing to print to: let the user pick a printer once.
-		// Proofs are one-click from then on.
-		slotFilePrint();
+		ScMessageBox::warning(this, CommonStrings::trWarning,
+			tr("No printers are set up, so there is nothing to proof to."));
 		return;
 	}
+
+	// F9 opens this: the paper a proof is scaled onto depends on what is
+	// actually loaded in the tray, which only the operator knows.
+	ProofPrintDialog dialog(this);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+	dialog.saveChoices();
 
 	// A proof checks layout, not colour or detail, so it goes out at half
 	// resolution in grayscale. This is a throwaway copy of the document's
@@ -4862,26 +4864,26 @@ void ScribusMainWindow::slotFileProofPrint()
 	proof.outputSeparations = false;
 	proof.separationName = "All";
 	proof.toFile = false;
-	proof.copies = 1;
+	proof.copies = dialog.copies();
 	proof.cropMarks = false;
 	proof.bleedMarks = false;
 	proof.registrationMarks = false;
 	proof.colorMarks = false;
 	proof.useDocBleeds = false;
 	proof.bleeds.resetToZero();
-	proof.printer = proofPrinter;
-	// Scale the page onto whatever sheet this printer holds. Unknown sizes fall
-	// back to A4, which is what the printer command asks for too.
-	QString proofMedia;
-	QSizeF proofSheet;
-	bool paperDetected = PrinterUtil::getDefaultPaperSize(proof.printer, proofMedia, &proofSheet)
-	                  && !proofSheet.isEmpty();
-	if (!paperDetected)
-		proofSheet = QSizeF(595.276, 841.89);   // A4 in points
-	proof.proofPaperWidth = proofSheet.width();
-	proof.proofPaperHeight = proofSheet.height();
+	proof.printer = dialog.printerName();
+	proof.proofMedia = dialog.paperName();
+	proof.inputSlot = dialog.inputSlot();
 	proof.pageNumbers.clear();
 	proof.pageNumbers.push_back(doc->currentPage()->pageNr() + 1);
+
+	// Scaling follows the paper that was chosen, not the biggest the queue
+	// could take: an A3 printer fed A4 must scale to A4.
+	QSizeF sheet = dialog.paperSizePoints();
+	if (sheet.isEmpty())
+		sheet = QSizeF(595.276, 841.89);   // A4 in points
+	proof.proofPaperWidth = sheet.width();
+	proof.proofPaperHeight = sheet.height();
 
 	m_mainWindowStatusLabel->setText( tr("Proof printing..."));
 	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
@@ -4897,10 +4899,11 @@ void ScribusMainWindow::slotFileProofPrint()
 			message += QString("\n%1").arg(printError);
 		ScMessageBox::warning(this, CommonStrings::trWarning, message);
 	}
-	// Say what just went out. The fast path must stay free of dialogs and
-	// clicks, so this goes to the status bar and simply stays there instead of
-	// being reset to "Ready". Marks and bleeds are off for proofs, so the page
-	// box here is the same one PSLib scales, and this figure matches the slug.
+
+	// Say what just went out. Status bar rather than a message box: the dialog
+	// is already the interaction, nothing should follow it. Marks and bleeds
+	// are off for proofs, so the page box here is the same one PSLib scales and
+	// this figure matches the slug.
 	if (done)
 	{
 		double srcW = doc->currentPage()->width();
@@ -4912,9 +4915,12 @@ void ScribusMainWindow::slotFileProofPrint()
 			                  (proof.proofPaperHeight - 24.0) / srcH);
 			scalePercent = qRound(qMin(1.0, fit) * 100.0);
 		}
-		QString paperText = paperDetected ? proofMedia : tr("paper unknown - assumed A4");
-		m_mainWindowStatusLabel->setText(tr("Proof -> %1 (%2) at %3%")
-			.arg(proof.printer, paperText, QString::number(scalePercent)));
+		QString paperText = dialog.paperAssumed()
+			? tr("%1 - paper unknown, assumed").arg(proof.proofMedia)
+			: proof.proofMedia;
+		QString slotText = proof.inputSlot.isEmpty() ? QString() : QString(", %1").arg(proof.inputSlot);
+		m_mainWindowStatusLabel->setText(tr("Proof -> %1 (%2%3) at %4%")
+			.arg(proof.printer, paperText, slotText, QString::number(scalePercent)));
 	}
 	else
 		m_mainWindowStatusLabel->setText( tr("Ready"));
@@ -5055,6 +5061,7 @@ void ScribusMainWindow::slotEditCut()
 	slotDocCh();
 	slotPreviewCh();
 	scrActions["editPaste"]->setEnabled(true);
+	scrActions["editPasteOriginalPosition"]->setEnabled(true);
 	scrActions["editPastePlainText"]->setEnabled(true);
 	scrMenuMgr->setMenuEnabled("EditPasteRecent", scrapbookPalette->tempBView->objectMap.count() != 0);
 	if (activeTransaction)
@@ -5144,23 +5151,22 @@ static void suneerFlattenStoryText(StoryText& clip, const StoryText& src, int sr
 	}
 }
 
-void ScribusMainWindow::enforceStyledClipboardShortcuts()
+void ScribusMainWindow::enforceClipboardShortcuts()
 {
 	const QKeySequence copySeq(Qt::CTRL | Qt::SHIFT | Qt::Key_C);
 	const QKeySequence pasteSeq(Qt::CTRL | Qt::SHIFT | Qt::Key_V);
 	auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
 
-	// A user's saved keymap (or a loaded keyset) can bind Ctrl+Shift+C/V to other actions
-	// (e.g. alignCenter, editPastePlainText), which collides with the styled clipboard
-	// actions and makes Qt fire neither ("Ambiguous shortcut overload"). Clear those combos
-	// from every other action so the styled ones are the sole owners.
+	// A user's saved keymap (or a loaded keyset) can bind Ctrl+Shift+C/V to other
+	// actions. Clear those combinations so the two clipboard actions remain the
+	// sole owners and Qt cannot report an ambiguous shortcut.
 	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
 	{
 		const QString& name = it.key();
 		ScrAction* a = it.value();
 		if (!a)
 			continue;
-		if (name == "editStyledCopy" || name == "editStyledPaste")
+		if (name == "editStyledCopy" || name == "editPasteOriginalPosition")
 			continue;
 		if (a->shortcut() == copySeq || a->shortcut() == pasteSeq)
 		{
@@ -5169,15 +5175,15 @@ void ScribusMainWindow::enforceStyledClipboardShortcuts()
 				keyActions[name].keySequence = QKeySequence();
 		}
 	}
-	// Re-assert the styled shortcuts in case a keyset cleared or changed them.
+	// Re-assert the clipboard shortcuts in case a keyset cleared or changed them.
 	if (ScrAction* c = scrActions.value("editStyledCopy"))
 		c->setShortcut(copySeq);
-	if (ScrAction* v = scrActions.value("editStyledPaste"))
+	if (ScrAction* v = scrActions.value("editPasteOriginalPosition"))
 		v->setShortcut(pasteSeq);
 	if (keyActions.contains("editStyledCopy"))
 		keyActions["editStyledCopy"].keySequence = copySeq;
-	if (keyActions.contains("editStyledPaste"))
-		keyActions["editStyledPaste"].keySequence = pasteSeq;
+	if (keyActions.contains("editPasteOriginalPosition"))
+		keyActions["editPasteOriginalPosition"].keySequence = pasteSeq;
 }
 
 void ScribusMainWindow::slotEditStyledCopy()
@@ -5480,12 +5486,23 @@ void ScribusMainWindow::slotEditCopy()
 	if (!internalCopy)
 	{
 		scrActions["editPaste"]->setEnabled(true);
+	scrActions["editPasteOriginalPosition"]->setEnabled(true);
 		scrActions["editPastePlainText"]->setEnabled(true);
 		scrMenuMgr->setMenuEnabled("EditPasteRecent", scrapbookPalette->tempBView->objectMap.count() != 0);
 	}
 }
 
 void ScribusMainWindow::slotEditPaste(bool forcePlainText)
+{
+	doEditPaste(forcePlainText, false);
+}
+
+void ScribusMainWindow::slotEditPasteOriginalPosition()
+{
+	doEditPaste(false, true);
+}
+
+void ScribusMainWindow::doEditPaste(bool forcePlainText, bool pasteInOriginalPosition)
 {
 	if (!HaveDoc)
 		return;
@@ -5731,13 +5748,19 @@ void ScribusMainWindow::slotEditPaste(bool forcePlainText)
 		if (doc->m_Selection->count() > 1)
 			doc->m_Selection->setGroupRect();
 
-		// ✅ Move to cursor (dragX/dragY = mouse position in doc)
-		double targetX = view->dragX;
-		double targetY = view->dragY;
-		if ((targetX > 0 || targetY > 0) && doc->m_Selection->count() > 0) {
-			double gx, gy, gw, gh;
-			doc->m_Selection->getGroupRect(&gx, &gy, &gw, &gh);
-			doc->moveGroup(targetX - gx, targetY - gy, doc->m_Selection);
+		// Ctrl+V moves the pasted selection to the current canvas position.
+		// Original-position paste reuses the same loader path but leaves its
+		// page-relative coordinates untouched.
+		if (!pasteInOriginalPosition && doc->m_Selection->count() > 0)
+		{
+			double targetX = view->dragX;
+			double targetY = view->dragY;
+			if (targetX > 0 || targetY > 0)
+			{
+				double gx, gy, gw, gh;
+				doc->m_Selection->getGroupRect(&gx, &gy, &gw, &gh);
+				doc->moveGroup(targetX - gx, targetY - gy, doc->m_Selection);
+			}
 		}
 	}
 	else if (ScMimeData::clipboardHasKnownData())
@@ -5981,6 +6004,7 @@ void ScribusMainWindow::ClipChange()
 		tableEditMode = ((doc->appMode == modeEditTable) && (currItem->isTable()));
 	}
 	scrActions["editPaste"]->setEnabled(HaveDoc && (hasScribusData || textFrameEditMode || tableEditMode || hasExternalData));
+	scrActions["editPasteOriginalPosition"]->setEnabled(HaveDoc && (hasScribusData || textFrameEditMode || tableEditMode || hasExternalData));
 	scrActions["editPastePlainText"]->setEnabled(HaveDoc && (hasScribusData || textFrameEditMode || tableEditMode || hasExternalData));
 	// Suneer: styled paste is available whenever a document is open and the styled buffer
 	// has content. The edit-mode key handler only triggers *enabled* actions, so we must not
@@ -7435,7 +7459,7 @@ void ScribusMainWindow::slotPrefsOrg()
 	struct ApplicationPrefs newPrefs(prefsDialog.prefs());
 	m_prefsManager.setNewPrefs(newPrefs);
 	m_prefsManager.applyLoadedShortCuts();
-	enforceStyledClipboardShortcuts();
+	enforceClipboardShortcuts();
 	// News Browser tab added/removed live — no restart needed.
 	suneerSetNewsBrowserTabVisible(newPrefs.experimentalFeaturePrefs.newsBrowserEnabled);
 
@@ -10250,7 +10274,7 @@ void ScribusMainWindow::applyKeySetFromFile(const QString& path)
 			scrActions[it.value().actionName]->setShortcut(it.value().keySequence);
 	}
 	// Keep the styled clipboard actions as the sole owners of Ctrl+Shift+C/V.
-	enforceStyledClipboardShortcuts();
+	enforceClipboardShortcuts();
 }
 
 void ScribusMainWindow::checkMalayalamDtpFirstRun()

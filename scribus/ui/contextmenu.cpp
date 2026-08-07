@@ -508,7 +508,13 @@ void ContextMenu::createMenuItems_Selection()
 	{
 		if (m_Sel.objectsLayer() != -1)
 			addAction(m_ScMW->scrActions["itemGroup"]);
-		addAction(m_ScMW->scrActions["itemsAutoArrange"]);
+		// "Auto Arrange Frames" is deliberately absent here and from the Item
+		// menu: the current engine re-stacks every frame from the top of its
+		// column rather than compacting them in place, which destroyed a
+		// production broadsheet. The action still exists and is still listed in
+		// Preferences > Keyboard Shortcuts, so it can be bound deliberately —
+		// it is just no longer one stray click away. Restore both entries when
+		// the engine is rewritten to compact-and-align.
 	}
 	if (selectedItemCount > 0 && m_doc->m_Selection->containsItemType(PageItem::Group))
 	{
@@ -591,6 +597,7 @@ void ContextMenu::createMenuItems_Selection()
 		(ScMimeData::clipboardHasScribusText() || ScMimeData::clipboardHasScribusElem() || ScMimeData::clipboardHasPlainText()))
 	{
 		menuEdit->addAction(m_ScMW->scrActions["editPaste"]);
+		menuEdit->addAction(m_ScMW->scrActions["editPasteOriginalPosition"]);
 		menuEdit->addAction(m_ScMW->scrActions["editPastePlainText"]);
 	}
 	if (!currItem->locked() && (m_doc->appMode != modeEdit)  && (m_doc->appMode != modeEditTable) && (!(currItem->isSingleSel)))

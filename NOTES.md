@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — column-preserving, span-aware newspaper engine (Ctrl+Shift+F), `autoarrangeengine.{h,cpp}` + dialog | `c58f023` ⚠ | |
+| **Auto Arrange Frames** — **DISABLED, pending rewrite.** `autoarrangeengine.{h,cpp}` + dialog | `c58f023` ⚠, disabled in `df03538` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
@@ -72,6 +72,48 @@ Branch column = where the work was introduced. Unmarked features came from
 version control"* (2026-07-28, a sweep of several untracked files), so
 `git log -- scribus/autoarrangeengine.cpp` returns one commit whose message says
 nothing about auto-arrange. Search by symbol, not by commit message.
+
+⚠ **Auto Arrange destroyed a production broadsheet and is now unreachable from
+the UI.** The engine does not compact frames in place — it *re-lays out* the
+page, discarding every position and re-stacking each column from `area.top()`.
+Three structural faults, all in `autoarrangeengine.cpp`:
+
+1. **Overlap.** `analyzeFrame()` computes a `columnSpan`, but the stacking loop
+   buckets frames by `startColumn` only. A frame spanning four columns sits in
+   column 0's stack while columns 1–3 stack their own frames from the top of the
+   page straight through it. Any multi-column ad or headline gets overlapped.
+   `columnSpan` is used to set width and nothing else.
+2. **Empty bottom.** Only the *last flexible* frame is stretched to close a
+   column, so a column of nothing but images/groups/headlines (`lastFlexIdx ==
+   -1`) ends early. And `avail = area.height() - fixedTotal` can go negative,
+   clamping `scale` to 0.1 and collapsing every text frame in the column.
+3. **Columns silently deleted.** `minColWidth = maxW * 0.5` discards any span
+   under half the widest as a "gutter"; a page with one wide ad block loses real
+   narrow columns, and their frames fall to the nearest-left-edge fallback and
+   pile into a neighbour.
+
+Also: z-order and linked text chains are never consulted (`grep nextInChain`
+returns nothing on the engine, yet it resizes chained frames — there is a live
+`"TEXT LENGTH CHANGED … possible content loss!"` warning), and
+`ScribusDoc::OnPage()` uses `intersects`, so a pasteboard item merely touching
+the page edge is claimed and dragged into a column.
+
+Undo is *not* the problem: `arrange()` wraps the whole run in one
+`UndoTransaction` and the geometry setters record through
+`checkChanges()`/`moveUndoAction()`, so one Ctrl+Z reverts the geometry. Text
+redistributed across a linked chain may not come back, though.
+
+Disabled by unbinding the default shortcut (it was **Ctrl+Shift+F**, one shift
+key from Ctrl+F Search/Replace) and removing the Item-menu and context-menu
+entries. The action and its Preferences → Keyboard Shortcuts entry survive, so
+it can still be bound deliberately. **A shortcut saved in an existing
+`scribus172.rc` overrides the compiled default** — clear it in Preferences or
+the old binding stays live.
+
+The intended replacement is *compact and align to the grid*: keep each story in
+its column region and reading order, move each story's text+image as one block,
+snap to column guides, close vertical gaps, leave the ad alone, preserve spans.
+Dry-run-first, per the operator.
 
 ### UI and panels
 
