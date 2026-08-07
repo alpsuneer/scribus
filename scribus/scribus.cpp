@@ -5164,7 +5164,7 @@ void ScribusMainWindow::enforceClipboardShortcuts()
 		ScrAction* a = it.value();
 		if (!a)
 			continue;
-		if (name == "editStyledCopy" || name == "editPasteOriginalPosition")
+		if (name == "editStyledCopy" || name == "editStyledPaste")
 			continue;
 		if (a->shortcut() == copySeq || a->shortcut() == pasteSeq)
 		{
@@ -5174,14 +5174,18 @@ void ScribusMainWindow::enforceClipboardShortcuts()
 		}
 	}
 	// Re-assert the clipboard shortcuts in case a keyset cleared or changed them.
+	// Ctrl+Shift+V goes to editStyledPaste, the partner of editStyledCopy. It
+	// used to be asserted on editPasteOriginalPosition instead, which left
+	// Styled Paste with no shortcut at all and made the pair asymmetric — and
+	// because this runs on every startup, it re-imposed that on saved profiles.
 	if (ScrAction* c = scrActions.value("editStyledCopy"))
 		c->setShortcut(copySeq);
-	if (ScrAction* v = scrActions.value("editPasteOriginalPosition"))
+	if (ScrAction* v = scrActions.value("editStyledPaste"))
 		v->setShortcut(pasteSeq);
 	if (keyActions.contains("editStyledCopy"))
 		keyActions["editStyledCopy"].keySequence = copySeq;
-	if (keyActions.contains("editPasteOriginalPosition"))
-		keyActions["editPasteOriginalPosition"].keySequence = pasteSeq;
+	if (keyActions.contains("editStyledPaste"))
+		keyActions["editStyledPaste"].keySequence = pasteSeq;
 }
 
 void ScribusMainWindow::slotEditStyledCopy()

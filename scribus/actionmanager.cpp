@@ -2131,7 +2131,10 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editCut", QKeySequence::Cut);
 	defKeys.insert("editCopy", QKeySequence::Copy);
 	defKeys.insert("editPaste", QKeySequence::Paste);
-	defKeys.insert("editPasteOriginalPosition", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+	// Ctrl+Shift+V belongs to editStyledPaste (see below), so this keeps its menu
+	// entry with no default shortcut — the symmetric partner of Ctrl+Shift+C on
+	// editStyledCopy. Rebindable from Preferences if it is ever wanted back.
+	defKeys.insert("editPasteOriginalPosition", QKeySequence());
 	defKeys.insert("editPastePlainText", QKeySequence());
 	defKeys.insert("editClearContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Delete));
 	// Ctrl+Shift+C repurposed for editStyledCopy (see below); Copy Contents keeps its menu entry, no default shortcut
@@ -2140,7 +2143,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editPasteContentsAbs", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_V));
 	// Suneer: styled (formatting-preserving) copy/paste
 	defKeys.insert("editStyledCopy", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
-	defKeys.insert("editStyledPaste", QKeySequence());
+	defKeys.insert("editStyledPaste", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
 	defKeys.insert("editSelectAll", QKeySequence(Qt::CTRL | Qt::Key_A));
 	defKeys.insert("editSelectAllOnLayer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
 	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
