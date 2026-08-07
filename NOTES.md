@@ -266,13 +266,31 @@ wrong diagnosis before being measured:
    `QToolBar` full of parentless widgets added to layouts does not match reading
    order — and the composite selectors (`StyleSelect`, `AlignSelect`) are not
    focusable by default. Hence the explicit `setTabOrder` chain plus
-   `Qt::StrongFocus` in the constructor.
+   `Qt::StrongFocus`.
+   ⚠⚠ **`setTabOrder()` is a no-op when EITHER widget is `Qt::NoFocus`, and the
+   block must run AFTER `addWidget(container)`.** Both bit us. Setting the focus
+   policy and the tab order in one loop applied `StrongFocus` to `chain[i]` while
+   `chain[i+1]` was still `NoFocus`, so the very first pair silently did nothing
+   and Qt fell back to creation order — Tab walked the *line and image* controls.
+   Two passes now: policy for every widget first, then order. And Qt rebuilds the
+   focus chain on reparent, so a block placed mid-constructor is discarded when
+   the tree is parented into the toolbar; it lives at the end of the constructor.
+   The failure is silent in both cases — the chain simply isn't what you wrote,
+   and it can look plausible because creation order also starts at the font
+   field. Measure the real order (log `QEvent::FocusIn`) rather than assume.
 3. **An event filter installed only on the tab-order chain misses focusable
    widgets outside it.** Esc appeared to be "consumed by the filter" because the
    frame stayed in edit mode; it was actually reaching *neither* the filter nor
    the canvas, because focus had landed on a control the filter was not on. The
    filter now covers every descendant of the bar (excluding the shading popup,
    which owns Escape) and tests ancestry.
+
+⚠ Two naming traps in that toolbar, each of which cost a round: **"font style"
+is `m_styleCombo`** (tooltip "Font Style", items Regular/Bold/Italic), NOT
+`m_styleSelect`, which is the underline/strikethrough/superscript effect buttons;
+and **`m_trackingSpin` is character tracking, not leading** — line spacing is
+`m_lineSpSpin`. The tooltips are the only reliable discriminator; the variable
+names are not.
 
 ⚠ **The text caret does NOT need re-arming when focus returns to the canvas.**
 It is a blink timer owned by `CanvasMode_Edit`, armed in `activate()`

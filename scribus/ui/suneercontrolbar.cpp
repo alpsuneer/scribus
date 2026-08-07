@@ -774,57 +774,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	}
 	connect(m_shadingBtn, &QToolButton::clicked, this, &SuneerControlBar::onParagraphShadingShow);
 
-	// Esc/Enter must work wherever focus lands inside the bar, so the filter goes
-	// on every descendant, not only the tab-order chain. Measured: after two Tabs
-	// focus sat on a control outside the chain and the key reached neither the
-	// filter nor the canvas, so nothing happened at all.
-	{
-		const QList<QWidget*> all = findChildren<QWidget*>();
-		for (QWidget* w : all)
-			w->installEventFilter(this);
-	}
-
-	// ── Toolbar keyboard navigation ──
-	// Tab used to fall straight out of the font field to the canvas. Qt builds
-	// its focus chain from parent/creation order, which for a QToolBar full of
-	// parentless widgets added to layouts does not match reading order, so the
-	// order is stated explicitly here. Labels and separators are skipped: they
-	// are NoFocus and Qt steps over them.
-	{
-		QWidget* chain[] = {
-			m_fontCombo, m_fontSizeSpin, m_styleSelect, m_alignSelect,
-			m_columnsSpin, m_columnGapCombo, m_columnGapSpin,
-			m_styleCombo, m_lineSpSpin, m_lineSpModeCombo,
-			m_trackingSpin, m_baselineSpin, m_scaleHSpin, m_scaleVSpin,
-			m_firstLineIndentSpin, m_gapBeforeSpin, m_gapAfterSpin
-		};
-		const int n = int(sizeof(chain) / sizeof(chain[0]));
-		for (int i = 0; i < n; ++i)
-		{
-			if (!chain[i])
-				continue;
-			// StrongFocus so Tab can actually land on it; several of these are
-			// combos/spins that default to WheelFocus, which is fine, but the
-			// custom selector widgets are not focusable by default.
-			chain[i]->setFocusPolicy(Qt::StrongFocus);
-			chain[i]->installEventFilter(this);
-			m_focusChain.append(chain[i]);
-			// StyleSelect and AlignSelect are composites: Tab lands on the
-			// container but the focused widget is one of its child buttons, so
-			// the filter has to see those too or Esc/Enter are missed there.
-			const QList<QWidget*> kids = chain[i]->findChildren<QWidget*>();
-			for (QWidget* kid : kids)
-				kid->installEventFilter(this);
-			for (int j = i + 1; j < n; ++j)
-			{
-				if (chain[j])
-				{
-					QWidget::setTabOrder(chain[i], chain[j]);
-					break;
-				}
-			}
-		}
-	}
 
 	// ── Text-frame Gap controls (mirrors image frame pad buttons) ──
 	{ auto* s = makeSep(); row2->addWidget(s); m_textWidgets << s; }
@@ -1539,6 +1488,86 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_gapAfterSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SuneerControlBar::onGapAfterChanged);
 	connect(m_alignSelect,      &AlignSelect::State,                                   this, &SuneerControlBar::onAlignChanged);
 	connect(ScQApp, SIGNAL(iconSetChanged()), this, SLOT(iconSetChange()));
+
+	// ── Toolbar keyboard navigation — MUST run last ──
+	// addWidget(container) above parents the whole tree into the QToolBar and Qt
+	// rebuilds its focus chain on reparent, so this has to come after it. The
+	// line rows are also only built further up and did not exist earlier.
+	//
+	// Esc/Enter must work wherever focus lands inside the bar, so the filter goes
+	// on every descendant, not only the tab-order chain. Measured: after two Tabs
+	// focus sat on a control outside the chain and the key reached neither the
+	// filter nor the canvas, so nothing happened at all.
+	{
+		const QList<QWidget*> all = findChildren<QWidget*>();
+		for (QWidget* w : all)
+			w->installEventFilter(this);
+	}
+
+	// Tab used to fall straight out of the font field to the canvas. Qt builds
+	// its focus chain from parent/creation order, which for a QToolBar full of
+	// parentless widgets added to layouts does not match reading order, so the
+	// order is stated explicitly here. Labels and separators are skipped: they
+	// are NoFocus and Qt steps over them.
+	{
+		// The first four are the controls used in sequence while styling text, so
+		// they lead regardless of where they sit on the bar: font style and line
+		// spacing both live on row 2 and are promoted on the operator's
+		// instruction. Two naming traps here — "font style" is m_styleCombo
+		// (tooltip "Font Style", Regular/Bold/Italic), NOT m_styleSelect, which
+		// is the underline/strikethrough effect buttons; and the fourth slot is
+		// LINE SPACING (leading), not m_trackingSpin, which is character
+		// tracking and sits further down. Everything after follows the bar's
+		// reading order, row 1 then row 2.
+		QWidget* chain[] = {
+			// -- operator's working sequence --
+			m_fontCombo,            // font family   (row 1)
+			m_styleCombo,           // font style    (row 2 "Font Style": Regular/Bold/Italic)
+			m_fontSizeSpin,         // font size     (row 1)
+			m_lineSpSpin,           // line spacing  (row 2, promoted)
+			// -- rest of row 1, reading order --
+			m_styleSelect,          // style EFFECTS (underline, strikethrough, super/subscript)
+			m_alignSelect, m_columnsSpin, m_columnGapCombo, m_columnGapSpin,
+			// -- rest of row 2, reading order; tracking falls here naturally --
+			m_lineSpModeCombo, m_trackingSpin,
+			m_baselineSpin, m_scaleHSpin, m_scaleVSpin,
+			m_firstLineIndentSpin, m_gapBeforeSpin, m_gapAfterSpin
+		};
+		const int n = int(sizeof(chain) / sizeof(chain[0]));
+
+		// TWO passes, and the order matters. setTabOrder() is a no-op when
+		// either widget is Qt::NoFocus, and StyleSelect/AlignSelect are custom
+		// composites that default to exactly that. Doing policy and order in one
+		// loop set the policy on chain[i] while chain[i+1] was still NoFocus, so
+		// the very first pair silently did nothing and Qt fell back to creation
+		// order — Tab walked the line and image controls instead of these.
+		for (int i = 0; i < n; ++i)
+		{
+			if (!chain[i])
+				continue;
+			chain[i]->setFocusPolicy(Qt::StrongFocus);
+			chain[i]->installEventFilter(this);
+			m_focusChain.append(chain[i]);
+			// Composites focus a child, not the container, so the filter has to
+			// see those too or Esc/Enter are missed there.
+			const QList<QWidget*> kids = chain[i]->findChildren<QWidget*>();
+			for (QWidget* kid : kids)
+				kid->installEventFilter(this);
+		}
+		for (int i = 0; i < n; ++i)
+		{
+			if (!chain[i])
+				continue;
+			for (int j = i + 1; j < n; ++j)
+			{
+				if (chain[j])
+				{
+					QWidget::setTabOrder(chain[i], chain[j]);
+					break;
+				}
+			}
+		}
+	}
 }
 
 void SuneerControlBar::setDocument(ScribusDoc* doc)
