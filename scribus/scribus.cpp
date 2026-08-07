@@ -1341,7 +1341,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("editMark", "Marks");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Item");
 	scrMenuMgr->addMenuItemString("itemAttributes", "Item");
-	scrMenuMgr->addMenuItemString("itemsAutoArrange", "Item");
+	// "itemsAutoArrange" is deliberately NOT added — the feature is parked, see
+	// the note in ContextMenu and NOTES.md.
 
 	scrActions["itemPrintingEnabled"]->setEnabled(false);
 	scrMenuMgr->setMenuEnabled("ItemConvertTo", false);

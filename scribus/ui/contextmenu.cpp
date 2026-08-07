@@ -508,9 +508,12 @@ void ContextMenu::createMenuItems_Selection()
 	{
 		if (m_Sel.objectsLayer() != -1)
 			addAction(m_ScMW->scrActions["itemGroup"]);
-		// Auto Arrange belongs on a multi-item selection: it compacts the
-		// SELECTED frames vertically and nothing else on the page.
-		addAction(m_ScMW->scrActions["itemsAutoArrange"]);
+		// "Auto Arrange Frames" is parked and deliberately absent here and from
+		// the Item menu. The selection-scoped engine is correct on a synthetic
+		// page — verified plan, apply and single-step undo — but the operator
+		// found it wrong on a real broadsheet, and no more before/after samples
+		// exist yet to derive a better placement rule from. The code stays
+		// compiled; only the ways of reaching it are removed. See NOTES.md.
 	}
 	if (selectedItemCount > 0 && m_doc->m_Selection->containsItemType(PageItem::Group))
 	{
