@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — REWRITTEN as selection-scoped compaction, dry-run-first. Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `<pending>` | |
+| **Auto Arrange Frames** — REWRITTEN as selection-scoped compaction, dry-run-first. Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `f577c19` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
