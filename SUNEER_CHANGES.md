@@ -32,8 +32,13 @@
 
 **Keyboard navigation** — Ctrl+Shift+F (Focus Font Family) കൊണ്ട് toolbar-ലെ
 font field-ലേക്ക് focus പോകും. അവിടെ നിന്ന്:
-- **Tab / Shift+Tab** — toolbar-ലെ അടുത്ത/മുൻപത്തെ control-ലേക്ക് നീങ്ങും
-  (font → size → style → align → columns → line spacing → tracking … എന്ന ക്രമത്തിൽ)
+- **Tab / Shift+Tab** — toolbar-ലെ അടുത്ത/മുൻപത്തെ control-ലേക്ക് നീങ്ങും.
+  ആദ്യത്തെ നാലെണ്ണം സ്ഥിരമായി ഈ ക്രമത്തിൽ (styling-ന് പതിവായി ഉപയോഗിക്കുന്നവ):
+  **Font Family → Font Style → Font Size → Line Spacing**.
+  ബാക്കിയുള്ളവ toolbar-ന്റെ വായനാക്രമത്തിൽ — row 1: style effects, alignment,
+  columns, column gap; row 2: line spacing mode, tracking, baseline offset,
+  horizontal/vertical scale, first line indent, space above/below.
+  (17 control-കൾക്ക് ശേഷം Tab അമർത്തിയാൽ line controls-ലേക്ക് പോകും)
 - **Enter** — value apply ചെയ്ത് caret തിരികെ text frame-ൽ, ഉണ്ടായിരുന്ന
   സ്ഥാനത്തുതന്നെ
 - **Esc** — മാറ്റം വേണ്ട, caret തിരികെ text frame-ൽ
