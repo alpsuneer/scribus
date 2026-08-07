@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — **BEING REWRITTEN** (compact-and-align). Temporarily dry-run-only; core workflow, not abandoned. `autoarrangeengine.{h,cpp}` + dialog | `c58f023` ⚠, fenced in `2cb46b0` | |
+| **Auto Arrange Frames** — REWRITTEN as selection-scoped compaction, dry-run-first. Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `<pending>` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
@@ -78,9 +78,10 @@ retired** — dropping stories and images roughly onto the page and clicking onc
 to arrange them is a core part of the operator's workflow, so the goal is a
 working engine, not removal.
 
-The current engine does not compact frames in place — it *re-lays out* the page,
-discarding every position and re-stacking each column from `area.top()`. Three
-structural faults, all in `autoarrangeengine.cpp`:
+The **original** engine (`c58f023`, now replaced) did not compact frames in place
+— it *re-laid out* the page, discarding every position and re-stacking each
+column from `area.top()`. Three structural faults, recorded because they are the
+failure modes any future whole-page attempt must avoid:
 
 1. **Overlap.** `analyzeFrame()` computes a `columnSpan`, but the stacking loop
    buckets frames by `startColumn` only. A frame spanning four columns sits in
@@ -102,21 +103,64 @@ returns nothing on the engine, yet it resizes chained frames — there is a live
 `ScribusDoc::OnPage()` uses `intersects`, so a pasteboard item merely touching
 the page edge is claimed and dragged into a column.
 
-Undo is *not* the problem: `arrange()` wraps the whole run in one
+Undo was *not* the problem, then or now: the run is wrapped in one
 `UndoTransaction` and the geometry setters record through
-`checkChanges()`/`moveUndoAction()`, so one Ctrl+Z reverts the geometry. Text
-redistributed across a linked chain may not come back, though.
+`checkChanges()`/`moveUndoAction()`, so one Ctrl+Z reverts the geometry. (Under
+the old engine, text redistributed across a linked chain might not come back;
+the new one never resizes, so no reflow can occur.)
 
-**Current fencing (temporary).** The default **Ctrl+Shift+F** binding was cleared
+**Current fencing (temporary).** The default **Ctrl+Shift+F** binding is cleared
 (it sat one shift key from Ctrl+F Search/Replace) and the Item-menu and
-context-menu entries removed. Crucially, `slotAutoArrangeFrames()` now **forces
-`opts.dryRun = true`**: the action is still connected, and **a shortcut saved in
-an existing `scribus172.rc` overrides the compiled default**, so a stale profile
-can still fire it — refusing to write is the only guard that actually holds.
-All three of these come out when the rewrite is verified.
+context-menu entries are removed, so the only way in is a key bound by hand under
+Preferences → Keyboard Shortcuts — the action is deliberately still listed there.
+Note **a shortcut saved in an existing `scribus172.rc` overrides the compiled
+default**, so a stale profile keeps whatever it had. An earlier forced-dry-run
+guard in `slotAutoArrangeFrames()` is gone, made redundant by the rewrite: the
+dialog now computes and displays the plan and writes nothing unless Apply is
+pressed, so there is no path that moves a frame without showing it first.
 
-**The specification — compact and align, not re-lay-out.** Derived from an
-operator before/after pair (messy page vs. hand-tidied page):
+**Whole-page arrangement is DEFERRED pending more samples. Do not fit a
+heuristic to one page.** Diffing the operator's before/after pair produced a
+validated *block* rule but no defensible *placement* rule. A global
+"close every vertical gap to 12 pt" moved **9 of 11 blocks** where the operator
+moved 3, relocating frames that had deliberately been left alone — one had a
+**445 pt** void above it and was not touched. The operator confirmed the sideways
+moves, and two further ones, were **editorial placement, not mechanical
+compaction**. Strip those and roughly one move remains to fit a rule to. One
+sample cannot determine a whole-page algorithm, and guessing at one is exactly
+what destroyed the broadsheet. More before/after pairs are being collected; the
+whole-page version gets revisited only if a consistent rule appears across them.
+
+**What shipped instead: selection-scoped compaction.** The operator selects the
+frames to tidy; nothing unselected can move. Editorial judgement stays with the
+operator, the tool only does the arithmetic. Combined with dry-run-first, the
+catastrophic failure mode is gone by construction — the engine writes only Y,
+only for frames in the selection, and only after the moves have been displayed
+and accepted.
+
+**The block rule (validated, reusable).** Derived from the pair and confirmed
+against ground truth — all 3 hand-moved blocks reproduced exactly:
+
+* a block = a frame plus everything **fully contained** in it (image, caption,
+  group, headline-over-body)
+* plus a **hairline rule** immediately above whose width matches the block's to
+  within 5%. In the sample the story's own rule matched exactly (456.1 vs 456.1,
+  gap 9.2 pt) while a page-spanning divider 15% wider (797.8 vs 696.1, gap 14.0)
+  belonged to something larger and correctly stayed put.
+* ⚠ use **containment, not overlap**. Plain overlap chains transitively — A
+  touches B, B touches C — and fused a dense page into blocks of 6 and 5 where
+  the real ones were 4, 3 and 2. Containment forms a tree and cannot chain.
+* groups are *members*, never the definition: **0 of 13** moved frames were
+  group children, while **27** grouped frames never moved.
+
+Reference implementation and the tools that derived all this live in
+`~/scribus-crashlogs/tabletest/`: `sla_layout_diff.py` (per-frame deltas,
+co-moving units, grouping evidence, grid clusters) and `arrange_model.py` (the
+rule in Python, scored against the hand-tidied page). Validate rule changes
+there before touching C++ — it is far cheaper than a build cycle.
+
+**The original specification as described** (kept for reference; the diff
+showed it is only partly mechanical):
 
 * each news item — text frame plus its image frame(s) — moves as ONE block
 * blocks snap to the column guides and stack top-down, closing vertical gaps
@@ -131,10 +175,19 @@ answered from the diff, not assumed: `~/scribus-crashlogs/tabletest/sla_layout_d
 reports which frames share an identical delta (so travelled as a unit) and
 whether those members are group children, chained frames, or neither.
 
-**Plan:** derive the rule from the before/after diff → rewrite around news-item
-blocks fixing the three faults above → dry-run reporting a (frame, from, to)
-plan in the UI, not just `qDebug` → verify plans on several real pages → then
-re-enable the apply path, restore Ctrl+Shift+F, and put the menu entries back.
+**State:** the engine is rewritten (`autoarrangeengine.{h,cpp}` — `planForSelection()`
+/ `applyPlan()`, no `ArrangeOptions`/`ArrangeResult` any more) and
+`AutoArrangeDialog` is now a dry-run reporter: it lists every planned move as
+(block, frame, type, from, to) and writes nothing unless Apply is pressed.
+Changing the gutter recomputes the plan in place. `applyPlan()` writes **Y
+only** — X is never touched, because horizontal motion is what made the old
+engine destructive — as one undo transaction.
+
+**Remaining:** operator verification. The menu entries and Ctrl+Shift+F stay off
+until then, so the only way in is to bind a key under Preferences → Keyboard
+Shortcuts (the action is deliberately still listed there). Once verified: restore
+the Item-menu and context-menu entries and the default shortcut, and drop the
+note above them in `scribus.cpp` / `contextmenu.cpp`.
 
 ### UI and panels
 

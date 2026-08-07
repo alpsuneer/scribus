@@ -8,97 +8,89 @@ for which a new license (GPL+exception) is in place.
 #define AUTOARRANGEENGINE_H
 
 #include <QList>
+#include <QPointF>
 #include <QRectF>
+#include <QString>
 
 #include "scribusapi.h"
 
 class ScribusDoc;
-class ScPage;
 class PageItem;
 
 /*!
- \brief Parameters for a one-click "Auto Arrange Frames" operation.
+ \brief "Auto Arrange Frames" — selection-scoped vertical compaction.
 
- The layout is column-preserving: every content frame stays in the column its
- centre falls into (defined by the page's vertical guides) and is re-stacked
- vertically with zero gap. Master-page items, locked frames, and frames on
- locked/hidden layers are never touched.
+ This replaces an earlier engine that re-laid out whole pages by assigning every
+ frame to a guide column and re-stacking each column from the top. That approach
+ destroyed a production broadsheet: frames overlapped, an advertisement was
+ relocated to mid-page, and the lower half emptied.
+
+ The rule implemented here was derived by diffing an operator's messy page
+ against the same page tidied by hand (see NOTES.md):
+
+   * Frames are NEVER resized. In the sample not one of 78 frames changed width
+     or height — the frames are already exact column multiples, so translation
+     alone is enough. That also means no text reflow and no linked-chain risk.
+   * Horizontal position is NEVER changed. The sideways moves in the sample were
+     editorial judgement, confirmed as such by the operator.
+   * Only frames the user SELECTED are considered. Whole-page arrangement is
+     deferred: a global gap-closing rule moved 9 of 11 blocks where the operator
+     moved 3, because the hand-tidy was mostly editorial placement rather than
+     mechanical compaction. Do not fit a heuristic to a single page.
  */
-struct SCRIBUS_API ArrangeOptions
+
+/*! One frame's planned relocation. */
+struct SCRIBUS_API ArrangeMove
 {
-	bool preserveColumn { true };      //!< keep each frame in its own column (by centre X)
-	bool zeroGap { true };             //!< stack frames with no vertical gap
-	bool dryRun { false };             //!< log the plan to the console, modify nothing
+	PageItem* item { nullptr };
+	QPointF   from;
+	QPointF   to;
+	int       block { 0 };     //!< index of the block this frame belongs to
+};
 
-	//! How each frame's height is set when stacking.
-	enum HeightMode
-	{
-		KeepOriginal,   //!< preserve each frame's original height
-		FillColumn,     //!< distribute the column height among its frames (default)
-		FitToText       //!< shrink each frame to fit its own text (may leave gaps)
-	};
-	HeightMode heightMode { FillColumn };
-
-	bool includeTextFrames { true };
-	bool includeImageFrames { true };
-	bool includeGroups { true };       //!< arrange grouped articles as whole units
-
-	bool protectMasterPageItems { true };
-	bool protectLockedFrames { true };
-	bool protectLockedLayers { true };
-
-	enum Scope
-	{
-		CurrentPage,
-		AllPages
-	};
-	Scope scope { CurrentPage };
+/*! A block: frames that must travel together, and its bounding box. */
+struct SCRIBUS_API ArrangeBlock
+{
+	QList<PageItem*> members;
+	QRectF box;
 };
 
 /*!
- \brief One newspaper column: a horizontal span plus the frames assigned to it.
+ \brief A computed plan. Producing one never modifies the document.
  */
-struct SCRIBUS_API ArrangeColumn
+struct SCRIBUS_API ArrangePlan
 {
-	double left { 0.0 };
-	double right { 0.0 };
-	double width() const { return right - left; }
-	QList<PageItem*> frames;
+	QList<ArrangeMove>  moves;
+	QList<ArrangeBlock> blocks;
+	int     framesConsidered { 0 };
+	int     framesSkipped { 0 };     //!< master page / locked / locked layer
+	double  gutter { 12.0 };
+	QString note;                    //!< why the plan is empty, when it is
+
+	bool isEmpty() const { return moves.isEmpty(); }
 };
 
-/*!
- \brief Outcome of an arrange run, used to give the user feedback.
- */
-struct SCRIBUS_API ArrangeResult
-{
-	int pagesProcessed { 0 };
-	int columnsFound { 0 };
-	int framesArranged { 0 };
-	int framesOverflowed { 0 };
-};
-
-/*!
- \brief Stateless engine: stacks page frames within their guide-defined columns,
-        never touching master-page items. The whole run is one undo transaction.
- */
 class SCRIBUS_API AutoArrangeEngine
 {
 public:
-	//! Arrange the current page or all pages per \a opts (single undo step).
-	static ArrangeResult arrange(ScribusDoc* doc, const ArrangeOptions& opts);
+	//! Default vertical gutter between stacked blocks, in points.
+	static constexpr double DefaultGutter = 12.0;
 
-	//! The content rectangle (page margins, tightened by horizontal guides).
-	static QRectF detectContentArea(ScPage* page);
-	//! Columns from the page's (and its master page's) vertical guides.
-	static QList<ArrangeColumn> detectColumns(ScribusDoc* doc, ScPage* page, const QRectF& contentArea);
-	//! Frames on \a page eligible to arrange (type filter + protection rules).
-	static QList<PageItem*> gatherFrames(ScribusDoc* doc, ScPage* page, const ArrangeOptions& opts);
-	//! True if \a item may be moved (not master/locked/locked-or-hidden-layer, right type).
-	static bool canArrangeFrame(ScribusDoc* doc, PageItem* item, const ArrangeOptions& opts);
+	/*! Group the selected frames into blocks and compute their compaction.
+	    Read-only: the document is untouched. */
+	static ArrangePlan planForSelection(ScribusDoc* doc, double gutter = DefaultGutter);
 
-private:
-	static void fitTextFrameHeight(PageItem* frame);
-	static ArrangeResult arrangePage(ScribusDoc* doc, ScPage* page, const ArrangeOptions& opts);
+	/*! Apply a previously computed plan as ONE undo step named "Auto Arrange
+	    Frames". Returns the number of frames actually moved. */
+	static int applyPlan(ScribusDoc* doc, const ArrangePlan& plan);
+
+	/*! True when \a item may be moved (not master-page, locked, or on a locked
+	    or hidden layer). */
+	static bool canArrangeFrame(ScribusDoc* doc, PageItem* item);
+
+	/*! Group \a frames into blocks by containment plus matching-width rules.
+	    Exposed for testing. */
+	static QList<ArrangeBlock> findBlocks(const QList<PageItem*>& frames);
 };
 
 #endif // AUTOARRANGEENGINE_H

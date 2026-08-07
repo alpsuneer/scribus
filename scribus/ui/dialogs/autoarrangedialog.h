@@ -12,17 +12,22 @@ for which a new license (GPL+exception) is in place.
 #include "scribusapi.h"
 #include "autoarrangeengine.h"
 
-class QCheckBox;
+class QDoubleSpinBox;
 class QLabel;
-class QRadioButton;
+class QPushButton;
+class QTableWidget;
 class ScribusDoc;
 
 /*!
- \brief Minimal modal dialog for "Auto Arrange Frames".
+ \brief Dry-run reporter for "Auto Arrange Frames".
 
- Shows what was detected on the current page (columns, arrangeable frames,
- content-area size), the behaviour toggles (preserve column, auto-fit text
- heights, zero gap), the always-on protection notes, and the page scope.
+ The plan is always computed and shown BEFORE anything is written: the table
+ lists every frame that would move with its from/to position, and the document
+ is only touched if the operator presses Apply. Changing the gutter recomputes
+ the plan in place, so the numbers can be checked before committing.
+
+ This dialog replaced an options dialog whose defaults silently rewrote the
+ page; showing the work first is the point of it.
  */
 class SCRIBUS_API AutoArrangeDialog : public QDialog
 {
@@ -31,21 +36,22 @@ class SCRIBUS_API AutoArrangeDialog : public QDialog
 public:
 	AutoArrangeDialog(ScribusDoc* doc, QWidget* parent = nullptr);
 
-	ArrangeOptions options() const;
+	//! The plan as last shown — valid after exec() returns Accepted.
+	const ArrangePlan& plan() const { return m_plan; }
+
+private slots:
+	void recompute();
 
 private:
-	ScribusDoc* m_doc { nullptr };
+	void populate();
 
-	QCheckBox* m_preserveColumn { nullptr };
-	QCheckBox* m_zeroGap { nullptr };
-	QCheckBox* m_includeGroups { nullptr };
-	QCheckBox* m_dryRun { nullptr };
-	// Frame height behaviour
-	QRadioButton* m_heightKeep { nullptr };
-	QRadioButton* m_heightFill { nullptr };
-	QRadioButton* m_heightFit { nullptr };
-	QRadioButton* m_scopeCurrent { nullptr };
-	QRadioButton* m_scopeAll { nullptr };
+	ScribusDoc*     m_doc { nullptr };
+	ArrangePlan     m_plan;
+
+	QLabel*         m_summary { nullptr };
+	QDoubleSpinBox* m_gutter { nullptr };
+	QTableWidget*   m_table { nullptr };
+	QPushButton*    m_apply { nullptr };
 };
 
 #endif // AUTOARRANGEDIALOG_H
