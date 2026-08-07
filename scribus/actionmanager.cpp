@@ -229,6 +229,8 @@ void ActionManager::initEditMenuActions()
 	scrActions->insert(name, new ScrAction("edit-copy", "edit-copy", "", defaultKey(name), mainWindow));
 	name = "editPaste";
 	scrActions->insert(name, new ScrAction("edit-paste", "edit-paste", "", defaultKey(name), mainWindow));
+	name = "editPasteOriginalPosition";
+	scrActions->insert(name, new ScrAction("edit-paste", "edit-paste", "", defaultKey(name), mainWindow));
 	name = "editPastePlainText";
 	scrActions->insert(name, new ScrAction("edit-paste", "edit-paste", "", defaultKey(name), mainWindow));
 	name = "editCopyContents";
@@ -286,6 +288,7 @@ void ActionManager::initEditMenuActions()
 	connect( (*scrActions)["editCut"], SIGNAL(triggered()), mainWindow, SLOT(slotEditCut()) );
 	connect( (*scrActions)["editCopy"], SIGNAL(triggered()), mainWindow, SLOT(slotEditCopy()) );
 	connect( (*scrActions)["editPaste"], SIGNAL(triggered()), mainWindow, SLOT(slotEditPaste()) );
+	connect( (*scrActions)["editPasteOriginalPosition"], SIGNAL(triggered()), mainWindow, SLOT(slotEditPasteOriginalPosition()) );
 	connect( (*scrActions)["editPastePlainText"], SIGNAL(triggered()), mainWindow, SLOT(slotEditPastePlainText()) );
 	connect( (*scrActions)["editCopyContents"], SIGNAL(triggered()), mainWindow, SLOT(slotEditCopyContents()) );
 	connect( (*scrActions)["editPasteContents"], SIGNAL(triggeredData(int)), mainWindow, SLOT(slotEditPasteContents(int)) );
@@ -1673,6 +1676,7 @@ void ActionManager::languageChange()
 	(*scrActions)["editCut"]->setTexts( tr("Cu&t"));
 	(*scrActions)["editCopy"]->setTexts( tr("&Copy"));
 	(*scrActions)["editPaste"]->setTexts( tr("&Paste"));
+	(*scrActions)["editPasteOriginalPosition"]->setTexts( tr("Paste in Original Position"));
 	(*scrActions)["editPastePlainText"]->setTexts( tr("Paste P&lain Text"));
 	(*scrActions)["editCopyContents"]->setTexts( tr("&Copy"));
 	(*scrActions)["editPasteContents"]->setTexts( tr("&Paste"));
@@ -1973,6 +1977,7 @@ void ActionManager::languageChange()
 	(*scrActions)["editCopy"]->setStatusTextAndShortcut( tr("Copy"));
 	(*scrActions)["editCut"]->setStatusTextAndShortcut( tr("Cut"));
 	(*scrActions)["editPaste"]->setStatusTextAndShortcut( tr("Paste"));
+	(*scrActions)["editPasteOriginalPosition"]->setStatusTextAndShortcut( tr("Paste in Original Position"));
 	(*scrActions)["editPastePlainText"]->setStatusTextAndShortcut( tr("Paste Unformatted"));
 	(*scrActions)["editRedoAction"]->setStatusTextAndShortcut( tr("Redo"));
 	(*scrActions)["editUndoAction"]->setStatusTextAndShortcut( tr("Undo"));
@@ -2126,7 +2131,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editCut", QKeySequence::Cut);
 	defKeys.insert("editCopy", QKeySequence::Copy);
 	defKeys.insert("editPaste", QKeySequence::Paste);
-	// Ctrl+Shift+V repurposed for editStyledPaste (see below); Paste Plain Text keeps its menu entry, no default shortcut
+	defKeys.insert("editPasteOriginalPosition", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
 	defKeys.insert("editPastePlainText", QKeySequence());
 	defKeys.insert("editClearContents", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Delete));
 	// Ctrl+Shift+C repurposed for editStyledCopy (see below); Copy Contents keeps its menu entry, no default shortcut
@@ -2135,7 +2140,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editPasteContentsAbs", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_V));
 	// Suneer: styled (formatting-preserving) copy/paste
 	defKeys.insert("editStyledCopy", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
-	defKeys.insert("editStyledPaste", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+	defKeys.insert("editStyledPaste", QKeySequence());
 	defKeys.insert("editSelectAll", QKeySequence(Qt::CTRL | Qt::Key_A));
 	defKeys.insert("editSelectAllOnLayer", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_A));
 	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
@@ -2146,8 +2151,13 @@ void ActionManager::createDefaultShortcuts()
 	//Item Menu
 	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
 	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
-	// Ctrl+Shift+A is already Edit > Deselect All, so Auto Arrange uses Ctrl+Shift+F ("Frames").
-	defKeys.insert("itemsAutoArrange", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+	// Auto Arrange has NO default shortcut. It used to be Ctrl+Shift+F, one shift
+	// key away from Ctrl+F (Search/Replace, bound a few lines above) — a single
+	// mistyped chord silently re-stacked every frame on the page, which wrecked a
+	// production broadsheet. It stays unbound until the engine is rewritten to
+	// compact-and-align rather than re-lay-out, and the user can still bind it
+	// from Preferences if they want it back.
+	defKeys.insert("itemsAutoArrange", QKeySequence());
 	defKeys.insert("itemDelete", QKeySequence::Delete);
 	defKeys.insert("itemGroup", QKeySequence(Qt::CTRL | Qt::Key_G));
 	defKeys.insert("itemUngroup", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_G));
@@ -2334,6 +2344,7 @@ void ActionManager::createDefaultMenus()
 		<< "editCut" 
 		<< "editCopy"
 		<< "editPaste"
+		<< "editPasteOriginalPosition"
 		<< "editPastePlainText"
 		<< "editCopyContents"
 		<< "editPasteContents"
