@@ -62,7 +62,7 @@ Branch column = where the work was introduced. Unmarked features came from
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| **Auto Arrange Frames** — selection-scoped compaction, dry-run-first (Ctrl+Shift+F, Item + context menu). Whole-page deferred pending more samples. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `f577c19` | |
+| **Auto Arrange Frames** — **PARKED**: selection-scoped compaction + dry-run dialog built and validated on a synthetic page, wrong on a real broadsheet. Unreachable from the UI; code kept compiled. `autoarrangeengine.{h,cpp}` + plan dialog | `c58f023` ⚠, fenced `2cb46b0`, rewritten `f577c19` | |
 | Text-frame edge-resize band; overflow icon off the corner | `e6b0cf0` | |
 | Overflow-click on an empty page creates a source-styled linked frame | `e03d7f6` | |
 | Double-click drills into groups (text frames straight to edit) | `698507b` | |
@@ -73,11 +73,13 @@ version control"* (2026-07-28, a sweep of several untracked files), so
 `git log -- scribus/autoarrangeengine.cpp` returns one commit whose message says
 nothing about auto-arrange. Search by symbol, not by commit message.
 
-⚠ **Auto Arrange once destroyed a production broadsheet. It has been rewritten,
-not retired** — dropping stories and images roughly onto the page and tidying
-them in one action is a core part of the operator's workflow. What ships now is
-selection-scoped and dry-run-first; the history below is kept because it is the
-list of ways this feature can go wrong.
+⚠ **Auto Arrange is PARKED and unreachable from the UI — but not abandoned.**
+Dropping stories and images roughly onto the page and tidying them in one action
+is a core part of the operator's workflow, so this is worth returning to. It has
+been through two engines: the original destroyed a production broadsheet, and
+its selection-scoped replacement is right on a synthetic page but wrong on a real
+one. The whole history below is kept deliberately — it is the list of ways this
+feature can go wrong, and the next attempt should start by reading it.
 
 The **original** engine (`c58f023`, now replaced) did not compact frames in place
 — it *re-laid out* the page, discarding every position and re-stacking each
@@ -110,20 +112,34 @@ Undo was *not* the problem, then or now: the run is wrapped in one
 the old engine, text redistributed across a linked chain might not come back;
 the new one never resizes, so no reflow can occur.)
 
-**Fencing history (now lifted).** While the old engine was live the default
-**Ctrl+Shift+F** binding was cleared and the Item-menu and context-menu entries
-removed, leaving only a hand-bound key under Preferences → Keyboard Shortcuts;
-`slotAutoArrangeFrames()` also force-set `dryRun`. All of that is gone. The
-guard became redundant when the dialog itself turned into the dry run — it
-computes and displays the plan and writes nothing unless Apply is pressed, so no
-path moves a frame without showing it first — and the entries and shortcut were
-restored at the operator's request. Ctrl+Shift+F is safe to bind again for the
-same reason: mistyping it for Ctrl+F now opens a plan dialog instead of silently
-re-stacking the page.
+**PARKED as of 2026-08-07.** The selection-scoped engine is *correct on a
+synthetic page* — plan, apply and single-step undo all verified end to end:
 
-Worth remembering if this is ever fenced again: **a shortcut saved in an existing
-`scribus172.rc` overrides the compiled default**, so clearing `defKeys` alone
-does not disarm an existing profile.
+```
+plan     StoryB 150.0,320.0 -> 150.0,182.0    StoryC 150.0,520.0 -> 150.0,274.0
+applied  StoryA y=70.0  ImgA y=90.0  StoryB y=182.0  StoryC y=274.0
+undone   StoryA y=70.0  ImgA y=90.0  StoryB y=320.0  StoryC y=520.0
+```
+
+confirming containment (the image is absorbed into StoryA's block and never
+listed), topmost-block-untouched, the 12 pt arithmetic, X never being written,
+and one Ctrl+Z restoring everything. **But the operator tried it on a real
+broadsheet and the result was wrong.** The specific failure was not captured; if
+it recurs, record what looked wrong before changing anything — that detail is the
+missing input, not more code.
+
+So the feature is unreachable again: `defKeys` binds no shortcut, and the
+Item-menu and context-menu entries are gone. **Everything else is kept and
+compiled** — `autoarrangeengine.{h,cpp}`, the dry-run `AutoArrangeDialog`, and
+the derivation tools in `~/scribus-crashlogs/tabletest/` (`sla_layout_diff.py`,
+`arrange_model.py`). The action is still listed in Preferences → Keyboard
+Shortcuts, so binding a key by hand is all it takes to resume testing. None of
+this is wasted; it is the starting point when more samples arrive.
+
+⚠ **A shortcut saved in an existing `scribus172.rc` overrides the compiled
+default**, so clearing `defKeys` alone does not disarm an existing profile — the
+saved line has to be removed from the file too, with Scribus closed, because it
+rewrites its prefs on exit.
 
 **Whole-page arrangement is DEFERRED pending more samples. Do not fit a
 heuristic to one page.** Diffing the operator's before/after pair produced a
