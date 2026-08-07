@@ -251,6 +251,36 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | Paragraph Shading popup on the control bar — local override, never edits the style; embeds the Style Manager's `SMPShadeWidget`; `itemSelection_ResetParagraphShading()` ⚠ | `7a02607` | feature/paragraph-shading-popup |
 | Stock toolbars start hidden on a new profile | `e8a34ae` | autofit-typography |
 | Text Distances section hidden from content properties | `505a048` | |
+| Control-bar keyboard navigation — Tab/Shift+Tab walk the bar, Enter applies, Esc cancels, both returning the caret | `3b1d012` + `<pending>` | |
+
+⚠ Three traps from making Tab work in the SuneerControlBar, each of which cost a
+wrong diagnosis before being measured:
+
+1. **An editable `QComboBox` emits `activated()` when it commits on focus-out.**
+   `onFontChanged()` ended with an unconditional `canvas->setFocus()`, so merely
+   *tabbing out of* the font field threw the caret back into the frame. Reading
+   the code suggested Tab could not reach that slot; instrumentation showed it
+   did. Focus is now returned deliberately, never as a side effect of a value
+   change.
+2. **Qt builds its tab-focus chain from parent/creation order**, which for a
+   `QToolBar` full of parentless widgets added to layouts does not match reading
+   order — and the composite selectors (`StyleSelect`, `AlignSelect`) are not
+   focusable by default. Hence the explicit `setTabOrder` chain plus
+   `Qt::StrongFocus` in the constructor.
+3. **An event filter installed only on the tab-order chain misses focusable
+   widgets outside it.** Esc appeared to be "consumed by the filter" because the
+   frame stayed in edit mode; it was actually reaching *neither* the filter nor
+   the canvas, because focus had landed on a control the filter was not on. The
+   filter now covers every descendant of the bar (excluding the shading popup,
+   which owns Escape) and tests ancestry.
+
+⚠ **The text caret does NOT need re-arming when focus returns to the canvas.**
+It is a blink timer owned by `CanvasMode_Edit`, armed in `activate()`
+(`canvasmode_edit.cpp:452`) and stopped in `deactivate()` — both driven by
+**mode** transitions, not focus. Measured across a focus excursion into the
+toolbar: `appMode` stays `modeEdit`, `deactivate()` never runs, and the cursor
+position is unchanged (41 before, typing lands at 41 after). `canvas->setFocus()`
+alone restores typing. Do not add `requestMode(modeEdit)` calls to "fix" this.
 
 ⚠ The Style Manager's `SM*` widgets (`SMCheckBox`, `SMSpinBox`, `SMColorCombo`,
 `SMScrSpinBox`, `SMScComboBox`) expose `useParentValue()` as a **one-shot

@@ -30,6 +30,16 @@
 - Contour draw + edit
 - Text wrap offset +/- buttons
 
+**Keyboard navigation** — Ctrl+Shift+F (Focus Font Family) കൊണ്ട് toolbar-ലെ
+font field-ലേക്ക് focus പോകും. അവിടെ നിന്ന്:
+- **Tab / Shift+Tab** — toolbar-ലെ അടുത്ത/മുൻപത്തെ control-ലേക്ക് നീങ്ങും
+  (font → size → style → align → columns → line spacing → tracking … എന്ന ക്രമത്തിൽ)
+- **Enter** — value apply ചെയ്ത് caret തിരികെ text frame-ൽ, ഉണ്ടായിരുന്ന
+  സ്ഥാനത്തുതന്നെ
+- **Esc** — മാറ്റം വേണ്ട, caret തിരികെ text frame-ൽ
+- Text frame-ൽ caret ഉള്ളപ്പോൾ **Tab** പഴയപടി tab character തന്നെ ഇടും
+  (ഇതിന് മാറ്റമില്ല)
+
 ### 3. Crop Tool (Photoshop-style)
 - CR button → crop mode activate
 - Drag to select crop area
