@@ -49,7 +49,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Paragraph shading — per-paragraph background band, 10 attrs | `a4fadee` | |
 | Image bullets — PNG + SVG on bulleted list styles, base64-embedded in the SLA, size modes, x-height anchor | `971ddb5`, `af08ca1`, `8770ab3` | |
 | Image bullet robustness — never fail silently, downscale huge sources, draw with Show Images off | `072c3e8`, `d272bff`, `87bbd75` | bullet-image-fallback → autofit-typography |
-| Styled copy/paste (Ctrl+Shift+C / Ctrl+Shift+V ⚠ — the V half only became true in `<pending>`) | `8494cbf` | |
+| Styled copy/paste (Ctrl+Shift+C / Ctrl+Shift+V ⚠ — the V half only became true in `e2e218f`) | `8494cbf` | |
 | Autoflow to New Pages | `9f09088` | |
 | Typed text inherits the caret's character style at a paragraph end — **DONE, verified by the operator through the IM path** (see below) | `c895c37` | fix/caret-style-inheritance |
 | Malayalam-capable default text font — `initDefaults` prefers one, plus a one-time repair of an existing profile | `5f6be08` | print-proof |
