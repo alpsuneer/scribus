@@ -123,10 +123,39 @@ undone   StoryA y=70.0  ImgA y=90.0  StoryB y=320.0  StoryC y=520.0
 
 confirming containment (the image is absorbed into StoryA's block and never
 listed), topmost-block-untouched, the 12 pt arithmetic, X never being written,
-and one Ctrl+Z restoring everything. **But the operator tried it on a real
-broadsheet and the result was wrong.** The specific failure was not captured; if
-it recurs, record what looked wrong before changing anything — that detail is the
-missing input, not more code.
+and one Ctrl+Z restoring everything.
+
+**On a real broadsheet it was wrong: the blocks were wrong — it split one story
+into two.** That is enough to name the cause. Containment only merges a frame
+that lies *entirely inside* another. It handles a story built as one body frame
+with the image, caption and headline nested inside it — which is how the sample
+page happened to be built — but **a headline sitting directly ABOVE its body, or
+an image above its caption, is adjacent, not contained, so the story splits.**
+
+Checked against the sample page: three pairs are stacked directly above a frame
+of identical width with a small gap and are *not* in a containment relation —
+
+```
+Copy of u148 (w  87.9) ABOVE Copy of u148 (w  87.9)   gap 10.1   width diff 0.0%
+971162620    (w 340.1) ABOVE 1494689009   (w 340.1)   gap  3.8   width diff 0.0%
+738728463    (w 219.7) ABOVE 1654643222   (w 219.7)   gap  7.8   width diff 0.0%
+```
+
+Only the third survived, and only because both frames happened to sit inside a
+larger story frame that merged them indirectly. The rule was fitted to a page
+whose stories nest; most pages do not.
+
+**Direction for the next attempt** (not implemented): add a bounded adjacency
+rule alongside containment — merge P and Q when Q sits directly below P with a
+gap under ~20 pt *and* their widths match to within ~10%. That is far tighter
+than the plain-overlap rule that chained a page into mega-blocks, because it
+demands near-equal width as well as adjacency.
+
+⚠ Its known ambiguity, which the single sample cannot settle: **two separate
+one-column stories stacked with a small gap look identical to a headline above
+its body.** Adjacency would wrongly fuse them. Resolving that needs either more
+before/after pairs, or a signal beyond geometry — a paragraph style that marks
+headlines, or the operator grouping each story explicitly. Do not guess at it.
 
 So the feature is unreachable again: `defKeys` binds no shortcut, and the
 Item-menu and context-menu entries are gone. **Everything else is kept and
