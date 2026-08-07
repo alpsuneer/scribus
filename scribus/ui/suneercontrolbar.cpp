@@ -42,6 +42,7 @@
 #include <QAction>
 #include <QFont>
 #include <QDebug>
+#include <QKeyEvent>
 #include <QFrame>
 #include <QComboBox>
 #include <QImage>
@@ -772,6 +773,48 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		m_shadingPopup->installEventFilter(this);
 	}
 	connect(m_shadingBtn, &QToolButton::clicked, this, &SuneerControlBar::onParagraphShadingShow);
+
+	// ── Toolbar keyboard navigation ──
+	// Tab used to fall straight out of the font field to the canvas. Qt builds
+	// its focus chain from parent/creation order, which for a QToolBar full of
+	// parentless widgets added to layouts does not match reading order, so the
+	// order is stated explicitly here. Labels and separators are skipped: they
+	// are NoFocus and Qt steps over them.
+	{
+		QWidget* chain[] = {
+			m_fontCombo, m_fontSizeSpin, m_styleSelect, m_alignSelect,
+			m_columnsSpin, m_columnGapCombo, m_columnGapSpin,
+			m_styleCombo, m_lineSpSpin, m_lineSpModeCombo,
+			m_trackingSpin, m_baselineSpin, m_scaleHSpin, m_scaleVSpin,
+			m_firstLineIndentSpin, m_gapBeforeSpin, m_gapAfterSpin
+		};
+		const int n = int(sizeof(chain) / sizeof(chain[0]));
+		for (int i = 0; i < n; ++i)
+		{
+			if (!chain[i])
+				continue;
+			// StrongFocus so Tab can actually land on it; several of these are
+			// combos/spins that default to WheelFocus, which is fine, but the
+			// custom selector widgets are not focusable by default.
+			chain[i]->setFocusPolicy(Qt::StrongFocus);
+			chain[i]->installEventFilter(this);
+			m_focusChain.append(chain[i]);
+			// StyleSelect and AlignSelect are composites: Tab lands on the
+			// container but the focused widget is one of its child buttons, so
+			// the filter has to see those too or Esc/Enter are missed there.
+			const QList<QWidget*> kids = chain[i]->findChildren<QWidget*>();
+			for (QWidget* kid : kids)
+				kid->installEventFilter(this);
+			for (int j = i + 1; j < n; ++j)
+			{
+				if (chain[j])
+				{
+					QWidget::setTabOrder(chain[i], chain[j]);
+					break;
+				}
+			}
+		}
+	}
 
 	// ── Text-frame Gap controls (mirrors image frame pad buttons) ──
 	{ auto* s = makeSep(); row2->addWidget(s); m_textWidgets << s; }
@@ -2062,7 +2105,55 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 	// transaction has to be sealed.
 	if (m_shadingPopup && obj == m_shadingPopup && ev->type() == QEvent::Hide)
 		endParagraphShadingTransaction();
+	// While focus is parked in the control bar, Esc abandons the excursion and
+	// Enter commits it — both hand the caret back to the frame. Tab is left
+	// alone so Qt's own focus chain walks the bar (see the setTabOrder block in
+	// the constructor).
+	if (ev->type() == QEvent::KeyPress && isInFocusChain(qobject_cast<QWidget*>(obj)))
+	{
+		auto* k = static_cast<QKeyEvent*>(ev);
+		if (k->key() == Qt::Key_Escape)
+		{
+			returnFocusToCanvas();
+			return true;
+		}
+		if (k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter)
+		{
+			// The widget's own editingFinished/returnPressed applies the value
+			// first; queue the focus handover so it runs after that.
+			QMetaObject::invokeMethod(this, [this]() { returnFocusToCanvas(); }, Qt::QueuedConnection);
+			return false;
+		}
+	}
 	return QToolBar::eventFilter(obj, ev);
+}
+
+void SuneerControlBar::focusFontCombo()
+{
+	m_fontCombo->setFocus(Qt::ShortcutFocusReason);
+	m_fontCombo->lineEdit()->selectAll();
+}
+
+bool SuneerControlBar::isInFocusChain(QWidget* w) const
+{
+	if (!w)
+		return false;
+	for (QWidget* c : m_focusChain)
+		if (c == w || c->isAncestorOf(w))
+			return true;
+	return false;
+}
+
+void SuneerControlBar::returnFocusToCanvas()
+{
+	if (!ScCore->primaryMainWindow() || !ScCore->primaryMainWindow()->view)
+		return;
+	Canvas* canvas = ScCore->primaryMainWindow()->view->m_canvas;
+	if (!canvas)
+		return;
+	// The caret is state on the text frame, not on the canvas widget, so simply
+	// restoring keyboard focus puts the cursor back exactly where it was.
+	canvas->setFocus(Qt::OtherFocusReason);
 }
 
 void SuneerControlBar::onFontChanged(const QFont& font)
@@ -2116,12 +2207,12 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 		m_doc->regionsChanged()->update(QRectF());
 	}
 
-	if (ScCore->primaryMainWindow() &&
-		ScCore->primaryMainWindow()->view &&
-		ScCore->primaryMainWindow()->view->m_canvas)
-	{
-		ScCore->primaryMainWindow()->view->m_canvas->setFocus();
-	}
+	// Deliberately NOT handing focus back here. This used to call
+	// canvas->setFocus() unconditionally, and since an editable QComboBox emits
+	// activated() when it commits on focus-out, tabbing out of the font field
+	// ran this and threw the caret back into the frame — measured as
+	// "TAB -> QComboBox" immediately followed by "FocusIn -> Canvas". Focus now
+	// returns only on Enter or Esc, via returnFocusToCanvas().
 }
 
 void SuneerControlBar::onStyleChanged(int)
