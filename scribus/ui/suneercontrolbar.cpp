@@ -774,6 +774,16 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	}
 	connect(m_shadingBtn, &QToolButton::clicked, this, &SuneerControlBar::onParagraphShadingShow);
 
+	// Esc/Enter must work wherever focus lands inside the bar, so the filter goes
+	// on every descendant, not only the tab-order chain. Measured: after two Tabs
+	// focus sat on a control outside the chain and the key reached neither the
+	// filter nor the canvas, so nothing happened at all.
+	{
+		const QList<QWidget*> all = findChildren<QWidget*>();
+		for (QWidget* w : all)
+			w->installEventFilter(this);
+	}
+
 	// ── Toolbar keyboard navigation ──
 	// Tab used to fall straight out of the font field to the canvas. Qt builds
 	// its focus chain from parent/creation order, which for a QToolBar full of
@@ -2110,6 +2120,7 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 	// alone so Qt's own focus chain walks the bar (see the setTabOrder block in
 	// the constructor).
 	if (ev->type() == QEvent::KeyPress && isInFocusChain(qobject_cast<QWidget*>(obj)))
+
 	{
 		auto* k = static_cast<QKeyEvent*>(ev);
 		if (k->key() == Qt::Key_Escape)
@@ -2138,10 +2149,11 @@ bool SuneerControlBar::isInFocusChain(QWidget* w) const
 {
 	if (!w)
 		return false;
-	for (QWidget* c : m_focusChain)
-		if (c == w || c->isAncestorOf(w))
-			return true;
-	return false;
+	// The shading popup owns Escape (it closes on it and seals its undo
+	// transaction), so it is excluded rather than having focus yanked away.
+	if (m_shadingPopup && (w == m_shadingPopup || m_shadingPopup->isAncestorOf(w)))
+		return false;
+	return isAncestorOf(w);
 }
 
 void SuneerControlBar::returnFocusToCanvas()
@@ -2151,8 +2163,11 @@ void SuneerControlBar::returnFocusToCanvas()
 	Canvas* canvas = ScCore->primaryMainWindow()->view->m_canvas;
 	if (!canvas)
 		return;
-	// The caret is state on the text frame, not on the canvas widget, so simply
-	// restoring keyboard focus puts the cursor back exactly where it was.
+	// The caret is state on the text frame, not on the canvas widget: appMode
+	// stays modeEdit throughout and CanvasMode_Edit::deactivate() never runs, so
+	// the blink timer is still armed and the cursor position is untouched.
+	// Measured: cursorPos 41 before, typing lands at 41 after. Restoring keyboard
+	// focus is all that is needed — the caret does NOT need re-arming.
 	canvas->setFocus(Qt::OtherFocusReason);
 }
 
