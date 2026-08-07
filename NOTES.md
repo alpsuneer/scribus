@@ -49,7 +49,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Paragraph shading — per-paragraph background band, 10 attrs | `a4fadee` | |
 | Image bullets — PNG + SVG on bulleted list styles, base64-embedded in the SLA, size modes, x-height anchor | `971ddb5`, `af08ca1`, `8770ab3` | |
 | Image bullet robustness — never fail silently, downscale huge sources, draw with Show Images off | `072c3e8`, `d272bff`, `87bbd75` | bullet-image-fallback → autofit-typography |
-| Styled copy/paste (Ctrl+Shift+C / Ctrl+Shift+V) | `8494cbf` | |
+| Styled copy/paste (Ctrl+Shift+C / Ctrl+Shift+V ⚠ — the V half only became true in `<pending>`) | `8494cbf` | |
 | Autoflow to New Pages | `9f09088` | |
 | Typed text inherits the caret's character style at a paragraph end — **DONE, verified by the operator through the IM path** (see below) | `c895c37` | fix/caret-style-inheritance |
 | Malayalam-capable default text font — `initDefaults` prefers one, plus a one-time repair of an existing profile | `5f6be08` | print-proof |
@@ -284,6 +284,22 @@ wrong diagnosis before being measured:
    the canvas, because focus had landed on a control the filter was not on. The
    filter now covers every descendant of the bar (excluding the shading popup,
    which owns Escape) and tests ancestry.
+
+⚠ **`enforceClipboardShortcuts()` (`scribus.cpp`) re-asserts the styled
+clipboard chords on every startup, so a wrong target there is self-healing in the
+WRONG direction.** It bound `Ctrl+Shift+V` to `editPasteOriginalPosition` rather
+than `editStyledPaste`, and exempted it from the loop that strips those chords
+from every other action — so Styled Paste had no shortcut at all while Styled
+Copy had `Ctrl+Shift+C`, and clearing the stale binding by hand would not stick.
+Fixed by pointing both the assertion and the exemption at `editStyledCopy` /
+`editStyledPaste`; `editPasteOriginalPosition` is now unbound by default
+(operator's decision — rebindable from Preferences).
+
+Note this looked like "duplicate Copy/Paste entries" in Preferences → Keyboard
+Shortcuts. It was not: **no action is registered twice**, each appears once in
+`defMenus` and `defKeys`. Five distinct actions simply have confusable labels —
+`&Copy`, `&Paste`, `Paste in Original Position`, `Styled Cop&y`, `St&yled Paste`.
+Count registrations before hunting for a duplicate-registration bug.
 
 ⚠ Two naming traps in that toolbar, each of which cost a round: **"font style"
 is `m_styleCombo`** (tooltip "Font Style", items Regular/Bold/Italic), NOT
