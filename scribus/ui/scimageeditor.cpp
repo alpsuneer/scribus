@@ -972,7 +972,11 @@ namespace
 		int w = qMin(b.width(), f.width());
 		int h = qMin(b.height(), f.height());
 		if (mask.width() < w || mask.height() < h)
+		{
+			f.setDotsPerMeterX(base.dotsPerMeterX());
+			f.setDotsPerMeterY(base.dotsPerMeterY());
 			return f;   // mask too small — fall back to full application
+		}
 		for (int y = 0; y < h; ++y)
 		{
 			QRgb* bp = reinterpret_cast<QRgb*>(b.scanLine(y));
@@ -995,6 +999,9 @@ namespace
 				bp[x] = qRgba(nr, ng, nb, qAlpha(bp[x]));
 			}
 		}
+		// Preserve DPI from the original base image
+		b.setDotsPerMeterX(base.dotsPerMeterX());
+		b.setDotsPerMeterY(base.dotsPerMeterY());
 		return b;
 	}
 }
@@ -1017,6 +1024,9 @@ QImage ScImageEditor::applyEntriesTo(QImage base, const QList<StackEntry>& entri
 		ScImageEffectList one;
 		one.append(e.effect);
 		QImage effected = ImageFilterEngine::applyEffects(cur, one, colors, false);
+		// Preserve DPI through effect application and masking
+		effected.setDotsPerMeterX(cur.dotsPerMeterX());
+		effected.setDotsPerMeterY(cur.dotsPerMeterY());
 		cur = e.mask.isNull() ? effected : blendMasked(cur, effected, e.mask);
 	}
 	return cur;
@@ -1706,7 +1716,10 @@ void ScImageEditor::performCrop(const QRectF& sceneRect)
 	// effectsInUse entry — Save & Apply writes the cropped base to the file.
 	const QImage before = m_originalImage;
 	const bool beforeCropped = m_baseIsCropped;
-	const QImage after = m_originalImage.copy(r);
+	QImage after = m_originalImage.copy(r);
+	// Preserve DPI metadata from the original image
+	after.setDotsPerMeterX(m_originalImage.dotsPerMeterX());
+	after.setDotsPerMeterY(m_originalImage.dotsPerMeterY());
 	if (m_undoStack)
 		m_undoStack->push(new CropCommand(this, before, beforeCropped, after, true, tr("Crop"))); // push() → redo() → applyBaseState(after, true)
 	else

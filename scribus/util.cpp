@@ -395,7 +395,15 @@ QString writeImageToFile(const QImage& image, const QString& path, int quality)
 	QImage out = image;
 	const QString suffix = QFileInfo(path).suffix().toLower();
 	if ((suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg")) && out.hasAlphaChannel())
-		out = out.convertToFormat(QImage::Format_RGB32);
+	{
+		// JPEG doesn't support transparency. Create a white background and composite the image on it.
+		QImage temp(out.size(), QImage::Format_RGB32);
+		temp.fill(Qt::white);
+		QPainter p(&temp);
+		p.drawImage(0, 0, out);
+		p.end();
+		out = temp;
+	}
 	QImageWriter writer(path);
 	if (quality >= 0)
 		writer.setQuality(quality);

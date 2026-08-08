@@ -271,7 +271,10 @@ void CanvasSizeDialog::accept()
 	p.drawImage(xoff, yoff, m_source);
 	p.end();
 
+	// Preserve DPI metadata from the original image
 	m_result = canvas;
+	m_result.setDotsPerMeterX(m_source.dotsPerMeterX());
+	m_result.setDotsPerMeterY(m_source.dotsPerMeterY());
 	m_changed = true;
 	QDialog::accept();
 }
