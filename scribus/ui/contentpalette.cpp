@@ -259,7 +259,7 @@ void  ContentPalette::handleSelectionChanged()
 			newPanel = Panel::text;
 			break;
 		case PageItem::Table:
-			newPanel = m_doc->appMode == modeEditTable && !static_cast<PageItem_Table*>(currItem)->hasSelection() ? Panel::text : Panel::table;
+			newPanel = (m_doc->appMode == modeEditTable) ? Panel::text : Panel::table;
 			break;
 		case PageItem::Group:
 			newPanel = Panel::group;
