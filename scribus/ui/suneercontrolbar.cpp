@@ -2344,13 +2344,12 @@ void SuneerControlBar::onAlignChanged(int align)
 				for (int c = 0; c < tbl->columns(); c++) {
 					PageItem_TextFrame* tf = tbl->cellAt(r, c).textFrame();
 					if (!tf || !tf->HasSel) continue;
-					m_doc->m_Selection->clear();
-					m_doc->m_Selection->addItem(tf);
-					m_doc->itemSelection_SetAlignment(align);
+					Selection cellSel(m_doc, false);
+					cellSel.addItem(tf);
+					m_doc->itemSelection_SetAlignment(align, &cellSel);
 				}
 			}
-			m_doc->m_Selection->clear();
-			m_doc->m_Selection->addItem(tbl);
+			tbl->update();
 			m_doc->changed();
 			return;
 		}
