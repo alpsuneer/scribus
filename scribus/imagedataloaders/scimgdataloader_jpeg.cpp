@@ -210,8 +210,17 @@ bool ScImgDataLoader_JPEG::loadPicture(const QString& fn, int /*page*/, int res,
 		m_imageInfoRecord.exifDataValid = true;
 		if (cinfo.density_unit == 0)
 		{
-			xres = 72;
-			yres = 72;
+			// Fallback: if density_unit is 0 but X/Y_density are reasonable, assume DPI
+			if (cinfo.X_density > 1 && cinfo.X_density <= 3000 && cinfo.Y_density > 1 && cinfo.Y_density <= 3000)
+			{
+				xres = cinfo.X_density;
+				yres = cinfo.Y_density;
+			}
+			else
+			{
+				xres = 72;
+				yres = 72;
+			}
 		}
 		else if (cinfo.density_unit == 1)
 		{
@@ -246,10 +255,23 @@ bool ScImgDataLoader_JPEG::loadPicture(const QString& fn, int /*page*/, int res,
 
 	if (cinfo.density_unit == 0)
 	{
-		xres = 72;
-		yres = 72;
-		m_image.setDotsPerMeterX(2834);
-		m_image.setDotsPerMeterY(2834);
+		// density_unit = 0 means "no units", but some JPEG encoders incorrectly
+		// set this while storing DPI values anyway. If X/Y_density are reasonable,
+		// assume they're DPI (fallback for malformed JPEG headers).
+		if (cinfo.X_density > 1 && cinfo.X_density <= 3000 && cinfo.Y_density > 1 && cinfo.Y_density <= 3000)
+		{
+			xres = cinfo.X_density;
+			yres = cinfo.Y_density;
+			m_image.setDotsPerMeterX( int(100. * cinfo.X_density / 2.54) );
+			m_image.setDotsPerMeterY( int(100. * cinfo.Y_density / 2.54) );
+		}
+		else
+		{
+			xres = 72;
+			yres = 72;
+			m_image.setDotsPerMeterX(2834);
+			m_image.setDotsPerMeterY(2834);
+		}
 	}
 	else if (cinfo.density_unit == 1)
 	{
