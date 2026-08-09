@@ -1,0 +1,168 @@
+#!/bin/bash
+# scribus-debug — run Scribus under gdb so any crash leaves a full backtrace.
+#
+# Use this instead of "scribus" for daily work until the crash is caught.
+# Every session writes a timestamped log under ~/scribus-crashlogs/:
+#   runs/<date>/session-<ts>.log  — normal session (throwaway, expires in 7 days)
+#   runs/<date>/core-<ts>[.zst]   — core file for a crash (throwaway, the bulk)
+#   crash-<ts>.log                — session that ended in a crash (kept forever)
+#
+# Throwaway output lives in a dated runs/ folder so retention is a matter of
+# dropping whole old folders. The crash backtrace is small and is the actual
+# evidence, so it stays at the top level where nothing ages it out.
+# Retention is owned by the scribus-housekeeping.timer systemd user unit,
+# which runs @CMAKE_INSTALL_PREFIX@/libexec/scribus-debug/housekeeping.sh.
+#
+# The log contains: Scribus stdout/stderr (Qt warnings often precede a crash),
+# the command-line args, the recent-documents list at launch, a rolling record
+# of open document window titles, and on crash: siginfo, bt full, and
+# per-thread backtraces.
+#
+# This file is generated from crashcapture/scribus-debug.in at configure time;
+# edit the .in, not the installed copy.
+
+set -u
+
+PREFIX="@CMAKE_INSTALL_PREFIX@"
+
+# gdb is the whole point of this launcher; without it we would silently be a
+# slower "scribus" that captures nothing.
+if ! command -v gdb >/dev/null 2>&1; then
+	echo "scribus-debug: gdb is not installed — cannot capture a crash." >&2
+	echo "               install it (apt install gdb) or run 'scribus' instead." >&2
+	exit 127
+fi
+
+LOGDIR="$HOME/scribus-crashlogs"
+mkdir -p "$LOGDIR"
+
+TS=$(date +%Y%m%d-%H%M%S)
+RUNDIR="$LOGDIR/runs/$(date +%F)"
+mkdir -p "$RUNDIR"
+LOG="$RUNDIR/session-$TS.log"
+CORE="$RUNDIR/core-$TS"
+
+# No pruning here — housekeeping.sh owns retention for the whole folder.
+
+# Same environment the normal scribus wrapper sets.
+export QT_IM_MODULE=fcitx
+export GTK_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export QT_QPA_PLATFORM=xcb
+
+# Leave SIGSEGV & friends at SIG_DFL inside Scribus, so gdb (or the kernel +
+# systemd-coredump on non-gdb runs) sees the real signal instead of Scribus's
+# own dialog + exit(255). NOTE: this also disables Scribus's emergency save —
+# keep autosave enabled in the preferences.
+export SCRIBUS_NO_CRASH_HANDLER=1
+
+# Never hand this session's files to an already-running Scribus. A crash-capture
+# run has to BE the process that crashes, in its own gdb, with its own core and
+# session log — handing the document to the operator's normal instance would
+# leave gdb attached to an empty window and capture nothing.
+export SCRIBUS_NO_SINGLE_INSTANCE=1
+
+# For non-gdb fallback paths; systemd-coredump picks the core up.
+ulimit -c unlimited
+
+# Scribus derives ~/.config/scribus vs ~/.config/scribus.bin from argv[0]
+# (the normal wrapper uses "exec -a scribus"). gdb passes the path it is
+# given as argv[0], so run via a symlink named "scribus" to keep the same
+# preferences profile as normal runs.
+BIN="$PREFIX/libexec/scribus-debug/scribus"
+
+if [ ! -e "$BIN" ]; then
+	echo "scribus-debug: $BIN is missing — is the scribus package installed?" >&2
+	exit 127
+fi
+
+# The preferences file is version-stamped (scribus172.rc and friends), so pick
+# the newest rather than pinning a release that will change under us.
+RCFILE=$(ls -t "$HOME"/.config/scribus/scribus*.rc 2>/dev/null | head -1)
+
+{
+	echo "=== scribus-debug session $TS ==="
+	echo "date:    $(date -Is)"
+	echo "binary:  $(readlink -f "$BIN")"
+	echo "args:    ${*:-<none>}"
+	echo "display: ${DISPLAY:-unset}"
+	echo "--- recent documents at launch (newest first) ---"
+	[ -n "$RCFILE" ] && grep -o '<Recent Name="[^"]*"' "$RCFILE" 2>/dev/null \
+		| sed 's/<Recent Name="/  /; s/"$//' | head -8
+	echo "================================================="
+} >> "$LOG"
+
+# Best-effort context trail: every 20 s, log the set of Scribus window titles
+# (the title carries the open .sla name). Never allowed to break the session.
+titlewatch() {
+	local last="" titles
+	while sleep 20; do
+		titles=$(xdotool search --onlyvisible --class '^[Ss]cribus$' \
+			getwindowname %@ 2>/dev/null | sort -u | paste -sd'|' -)
+		if [ -n "$titles" ] && [ "$titles" != "$last" ]; then
+			echo "[$(date +%H:%M:%S)] windows: $titles" >> "$LOG"
+			last=$titles
+		fi
+	done
+}
+WATCHPID=""
+if command -v xdotool >/dev/null 2>&1; then
+	titlewatch & WATCHPID=$!
+fi
+
+# The crash-only commands are guarded by $_isvoid($_exitcode): gdb sets
+# $_exitcode when the program exits of its own accord and leaves it void when a
+# signal killed it, which is exactly the distinction we need.
+#
+# This used to rely on "print $_siginfo" erroring out after a clean exit and
+# making batch gdb skip the rest. It does not error on gdb 16.3 — it prints
+# "$1 = void" and gdb carries on — so every ordinary session wrote the CRASH
+# banner, got renamed to crash-<ts>.log, kept forever, and popped a "Scribus
+# crashed" notification on quit. Verified against gdb 16.3 with /bin/true and a
+# null-deref test program.
+GDBCMDS=$(mktemp) || exit 1
+trap 'rm -f "$GDBCMDS"' EXIT
+cat > "$GDBCMDS" <<GDBEOF
+set pagination off
+set confirm off
+set debuginfod enabled off
+set startup-with-shell off
+set print thread-events off
+handle SIGPIPE nostop noprint pass
+run
+if \$_isvoid(\$_exitcode)
+  echo \n==================== CRASH ====================\n
+  print \$_siginfo
+  echo \n=== backtrace (crashing thread, full) ===\n
+  bt full
+  echo \n=== backtraces (all threads) ===\n
+  thread apply all bt
+  echo \n=== registers ===\n
+  info registers
+  generate-core-file $CORE
+end
+GDBEOF
+
+gdb -quiet -batch -x "$GDBCMDS" --args "$BIN" "$@" 2>&1 | tee -a "$LOG"
+GDBEXIT=${PIPESTATUS[0]}
+
+[ -n "$WATCHPID" ] && kill "$WATCHPID" 2>/dev/null
+
+if grep -q '==================== CRASH' "$LOG"; then
+	CRASHLOG="$LOGDIR/crash-$TS.log"
+	mv "$LOG" "$CRASHLOG"
+	# Cores are huge (1-2 GB raw): compress, and keep only the newest 3.
+	# Crash logs are small and are kept forever.
+	if [ -e "$CORE" ] && command -v zstd >/dev/null 2>&1; then
+		zstd -q -T0 --rm "$CORE" && CORE="$CORE.zst"
+	fi
+	ls -t "$LOGDIR"/runs/*/core-* 2>/dev/null | tail -n +4 | xargs -r rm -f
+	echo ""
+	echo ">>> Scribus CRASHED — backtrace saved to:"
+	echo ">>>   $CRASHLOG"
+	[ -e "$CORE" ] && echo ">>>   core file: $CORE  (zstd -d it, then: gdb $PREFIX/bin/scribus.bin <core>)"
+	command -v notify-send >/dev/null 2>&1 && \
+		notify-send -u critical "Scribus crashed" "Backtrace: $CRASHLOG" 2>/dev/null
+fi
+
+exit "$GDBEXIT"

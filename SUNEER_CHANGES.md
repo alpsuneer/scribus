@@ -292,7 +292,28 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   `/usr/local/share/scribus/help/faircode/faircode-help.html`.
   അത് edit ചെയ്താൽ മതി — Scribus വീണ്ടും build ചെയ്യേണ്ട
 
-### 19. Authors
+### 19. Crash Capture (.deb package-ൽ)
+- പുതിയ ഒരു machine-ൽ `.deb` install ചെയ്താൽ crash logging **തനിയെ** set
+  ആകും. ഇനി ഓരോ machine-ലും കൈകൊണ്ട് ഒന്നും ഉണ്ടാക്കേണ്ട
+- Application menu-ൽ **"Scribus (Crash Capture)"** എന്ന ഒരു entry വരും.
+  അത് വഴി തുറന്നാൽ Scribus gdb-യുടെ ഉള്ളിൽ ഓടും
+- Crash ആയാൽ backtrace ഇവിടെ വരും:
+  `~/scribus-crashlogs/crash-<time>.log` — ഇത് **ഒരിക്കലും delete ആകില്ല**
+- സാധാരണ session-ന്റെ log: `~/scribus-crashlogs/runs/<date>/session-*.log`
+  — 7 ദിവസം കഴിഞ്ഞാൽ തനിയെ പോകും (2 GB cap-ഉം ഉണ്ട്)
+- പഴയ log തനിയെ വൃത്തിയാക്കാൻ ഒരു daily systemd timer install ആകും
+- Install ചെയ്ത user-ന് `.sla` file double-click ചെയ്താൽ Crash Capture
+  വഴി തുറക്കും
+- **സാധാരണ `scribus` launcher-ന് ഒരു മാറ്റവുമില്ല.** Crash capture
+  വേണ്ടെങ്കിൽ പഴയതുപോലെ `scribus` ഉപയോഗിച്ചാൽ മതി
+- Uninstall ചെയ്താലും `~/scribus-crashlogs` **delete ആകില്ല** —
+  backtrace-കൾ നഷ്ടപ്പെടരുത്
+- ശ്രദ്ധിക്കുക: crash capture-ൽ Scribus-ന്റെ സ്വന്തം emergency save
+  പ്രവർത്തിക്കില്ല. അതുകൊണ്ട് **autosave on ആയിരിക്കണം**
+- gdb വേണം (`apt install gdb`). ഇല്ലെങ്കിൽ scribus-debug
+  ഒരു message കാണിച്ച് നിർത്തും
+
+### 20. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

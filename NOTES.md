@@ -394,6 +394,48 @@ Malayalam DTP + Photoshop keysets and conflict detection (`2bf9c59`, `b924864`);
 crash capture via `SCRIBUS_NO_CRASH_HANDLER` (`eb27b87`); launcher wrapper
 `exec -a` + DESTDIR-aware install (`c6e9be0`, `855fb3a`).
 
+### Crash capture in the package — `crashcapture/`
+
+Everything crash capture needs now ships in the `.deb`, so a fresh machine gets
+it from `dpkg -i` instead of by hand: the `scribus-debug` gdb launcher, its
+"Scribus (Crash Capture)" desktop entry, `housekeeping.sh` in
+`libexec/scribus-debug/`, and the `scribus-housekeeping` systemd **user** units.
+`postinst` enables the timer with `systemctl --global` (so it covers users
+created later too), creates `~/scribus-crashlogs` for the installing user, and
+points the `.sla` association at `scribus-debug`. `postrm` reverses all of that
+and **deliberately leaves `~/scribus-crashlogs` alone** — an uninstall must not
+destroy the backtraces the machine was instrumented to collect.
+
+The normal `scribus` launcher is untouched: crash capture is a separate command
+and a separate desktop entry.
+
+Traps:
+
+- **Every `cpack -G DEB` package built before this was unusable.** The DEB
+  generator stages into **`/usr`** by default, ignoring `CMAKE_INSTALL_PREFIX`,
+  but `/usr/local/lib/scribus/plugins/` and `/usr/local/share/scribus/` are
+  **compiled into the binary** (`strings scribus.bin | grep /usr/local`). So the
+  package put the format loaders at `/usr/lib/scribus/plugins/`, where the
+  binary never looks: no import/export plugins, and documents that will not open
+  at all. `CPACK_PACKAGING_INSTALL_PREFIX` is now pinned to
+  `CMAKE_INSTALL_PREFIX`. Symptom to recognise: a `.deb` that installs cleanly
+  and then behaves like a Scribus with no file formats.
+  Note this did **not** affect the `checkinstall`-made package on the dev
+  machine — that one captured a real `make install` and so has the right prefix.
+- **`~/.config/systemd/user` outranks the packaged unit.** A machine that had
+  the hand-made per-user units installed keeps using them, including a stale
+  `ExecStart` pointing at a script that has since moved. Remove the per-user
+  copies to let the packaged one take over.
+- The unit uses `%h`, not a baked-in home, because one packaged unit serves
+  every user. `ConditionPathExists=%h/scribus-crashlogs` keeps it a silent
+  no-op for users who never run `scribus-debug`.
+- `scribus-debug` runs the binary through a `libexec/scribus-debug/scribus`
+  symlink so argv[0] keeps the prefs profile at `~/.config/scribus`; gdb passes
+  the path it is given as argv[0], so `exec -a` is not available here.
+- `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` was tried and **left off**: it pushes
+  packaging past 10 minutes on this tree. The `.deb` therefore declares no
+  library dependencies — the target machine needs the Qt6 runtime already.
+
 ---
 
 ## Key traps
@@ -484,6 +526,14 @@ Regression battery: `~/scribus-crashlogs/repro/run_undo_bullet_test.sh [char|ima
 
 ### Other traps that cost real time
 
+- **`print $_siginfo` does not error on a clean exit under gdb 16.3.** The
+  original `scribus-debug` chained crash-only `-ex` commands after it and relied
+  on that error to stop batch gdb from reaching them. gdb 16.3 prints
+  `$1 = void` and carries on, so **every ordinary session** wrote the CRASH
+  banner, was renamed to `crash-<ts>.log`, kept forever, and popped a "Scribus
+  crashed" notification on quit — burying the real crash in noise. Use a gdb
+  command file guarded by `if $_isvoid($_exitcode)`; that is void only when a
+  signal killed the process. Verified both ways against gdb 16.3.
 - **Plugin ABI** — plugins load from `/usr/local/lib/scribus/plugins/` even when
   running the build-dir binary. Change a shared struct, rebuild only the main
   binary, and you get SIGSEGV on document load. Full build **and**
