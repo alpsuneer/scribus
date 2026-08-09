@@ -5642,6 +5642,10 @@ PageItem* Scribus170Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	currItem->setImageFlippedH( attrs.valueAsInt("FLIPPEDH", 0));
 	currItem->setImageFlippedV( attrs.valueAsInt("FLIPPEDV", 0));
 	currItem->setCornerRadius( attrs.valueAsDouble("RADRECT", 0.0));
+	currItem->setCornerRadii(attrs.valueAsDouble("CornerRadiusTL", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusTR", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusBL", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusBR", 0.0));
 	currItem->ClipEdited = attrs.valueAsInt("CLIPEDIT", 0);
 	currItem->setFillColor(Pcolor);
 	currItem->setLineColor(Pcolor2);

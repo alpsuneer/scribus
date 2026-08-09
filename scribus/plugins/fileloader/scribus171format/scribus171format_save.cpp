@@ -2744,6 +2744,15 @@ void Scribus171Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 	docu.writeAttribute("Height", item->height());
 	if (item->cornerRadius() != 0)
 		docu.writeAttribute("CornerRadius", item->cornerRadius());
+	// Only written when the corners actually differ, so ordinary documents are
+	// byte-identical to before.
+	if (item->hasIndividualCornerRadii())
+	{
+		docu.writeAttribute("CornerRadiusTL", item->cornerRadiusTL());
+		docu.writeAttribute("CornerRadiusTR", item->cornerRadiusTR());
+		docu.writeAttribute("CornerRadiusBL", item->cornerRadiusBL());
+		docu.writeAttribute("CornerRadiusBR", item->cornerRadiusBR());
+	}
 	docu.writeAttribute("FrameType", item->FrameType);
 	docu.writeAttribute("ClipEdited", item->ClipEdited ? 1 : 0);
 	if (item->GrType != 0)
