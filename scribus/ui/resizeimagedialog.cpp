@@ -230,10 +230,9 @@ QString ResizeImageDialog::resampleImageFile(ScribusDoc* doc, PageItem* item, co
 	}
 	else
 	{
-		// name_resized.ext beside the source; never overwrite anything.
-		outPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_resized." + suffix;
-		for (int n = 2; QFileInfo::exists(outPath); ++n)
-			outPath = fi.absolutePath() + "/" + fi.completeBaseName() + QStringLiteral("_resized_%1.").arg(n) + suffix;
+		// name_resized.ext beside the source; never overwrite anything, and
+		// don't restack a tag the chain already carries.
+		outPath = derivedImagePath(item->Pfile, QStringLiteral("_resized"), suffix);
 	}
 
 	const bool isJpeg = (suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg"));

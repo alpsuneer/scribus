@@ -66,7 +66,11 @@ QString SCRIBUS_API writeImageToFile(const QImage& image, const QString& path, i
 derivedImagePath("/p/photo.jpg", "_crop", "png") -> "/p/photo_crop.png".
 Dots inside the name are kept ("photo.2.jpg" -> "photo.2_crop.png"), but a
 leading dot is dropped so deriving from a hidden source does not silently
-produce another hidden file. */
+produce another hidden file.
+Tags already present are not repeated, because each tool re-derives from the
+previous tool's output: "photo_crop.png" + "_feather" -> "photo_crop_feather",
+and + "_crop" again -> "photo_crop". The returned path never names an existing
+file; a "_2", "_3" ... uniquifier is added instead. */
 QString SCRIBUS_API derivedImagePath(const QString& sourcePath, const QString& tag, const QString& extension);
 QString SCRIBUS_API Path2Relative(const QString& Path, const QString& baseDir = QDir::currentPath());
 QString SCRIBUS_API Relative2Path(const QString& File, const QString& baseDir = QDir::currentPath());
