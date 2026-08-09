@@ -211,16 +211,23 @@ void CanvasMode_SuneerCrop::keyPressEvent(QKeyEvent* e)
         m_doc->changed();
         m_doc->regionsChanged()->update(QRectF());
 
-        // Python crop — always save file
+        // Crop the source file and relink. Done with Qt, not PIL: the old python
+        // path hardcoded dpi=(72,72) on both save() calls, so a 300 dpi photo
+        // always came back as 72, and its non-alpha branch used convert('RGB'),
+        // which composites transparency onto black.
         SuneerControlBar* cb = m_ScMW->suneerControlBar();
         if (!item->Pfile.isEmpty()) {
             bool fixedSize = cb && cb->isCropResizeEnabled();
             double targetWmm = fixedSize ? cb->imgCropW() : (cropW / 2.8346);
             double targetHmm = fixedSize ? cb->imgCropH() : (cropH / 2.8346);
-            if (targetWmm > 1 && targetHmm > 1) {
-                QString inputPath  = item->Pfile;
-                QFileInfo fi(inputPath);
-                QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.jpg";
+            QString inputPath = item->Pfile;
+            QFileInfo fi(inputPath);
+            QImage sourceImg(inputPath);
+            if (targetWmm > 1 && targetHmm > 1 && !sourceImg.isNull()) {
+                // Always PNG. Qt picks the writer from the file extension, so a
+                // .jpg path writes JPEG no matter what format string save() is
+                // handed — and JPEG carries neither alpha nor a dependable DPI.
+                QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.png";
 
                 // cropX is frame-relative pts, origOffX is image offset in pts
                 // cropX in points, origScaleX in pt/px
@@ -240,45 +247,36 @@ void CanvasMode_SuneerCrop::keyPressEvent(QKeyEvent* e)
                 cy = qMin(cy, imgH - 1);
                 cw = qMin(cw, imgW - cx);
                 ch = qMin(ch, imgH - cy);
-                int rw = qMax(1, qRound(targetWmm / 25.4 * 72));
-                int rh = qMax(1, qRound(targetHmm / 25.4 * 72));
+                // Resample at the source resolution, not at a fixed 72. The
+                // target is a physical size in mm, so the pixel count has to be
+                // derived from the dpi we mean to keep — otherwise "300 dpi"
+                // would just be a metadata label on a 72 dpi raster.
+                double srcDpiX = item->pixm.imgInfo.xres > 0 ? double(item->pixm.imgInfo.xres) : 72.0;
+                double srcDpiY = item->pixm.imgInfo.yres > 0 ? double(item->pixm.imgInfo.yres) : 72.0;
+                int rw = qMax(1, qRound(targetWmm / 25.4 * srcDpiX));
+                int rh = qMax(1, qRound(targetHmm / 25.4 * srcDpiY));
 
-                QString script = QString(
-                    "from PIL import Image\n"
-                    "img = Image.open(r'%1')\n"
-                    "iw, ih = img.size\n"
-                    "x1 = max(0, min(%2, iw-1))\n"
-                    "y1 = max(0, min(%3, ih-1))\n"
-                    "x2 = max(x1+1, min(%2+%4, iw))\n"
-                    "y2 = max(y1+1, min(%3+%5, ih))\n"
-                    "print('crop box:', x1, y1, x2, y2, 'img:', iw, ih)\n"
-                    "crop = img.crop((x1, y1, x2, y2))\n"
-                    "out = crop.resize((%6, %7), Image.LANCZOS)\n"
-                    "out = out.convert('RGB')\n"
-                    "out.save(r'%8', quality=95, dpi=(72,72))\n"
-                    "print('done')\n"
-                ).arg(inputPath).arg(cx).arg(cy).arg(cw).arg(ch).arg(rw).arg(rh).arg(outputPath);
+                QImage cropped = sourceImg.copy(cx, cy, cw, ch);
+                // Background Remove leaves an alpha channel; keep 8-bit alpha
+                // through the resample instead of letting it fall to RGB32.
+                if (sourceImg.hasAlphaChannel() && cropped.format() != QImage::Format_ARGB32)
+                    cropped = cropped.convertToFormat(QImage::Format_ARGB32);
 
-                QProcess proc;
-                proc.start("python3", QStringList() << "-c" << script);
-                proc.waitForFinished(30000);
+                QImage out = cropped.scaled(rw, rh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                // Stamp Scribus's resolution, not sourceImg's. Qt's own JPEG
+                // reader honours JFIF density_unit=0 and falls back to 96 dpi,
+                // so on exactly the files the loader fallback rescues it would
+                // write 96 here. imgInfo is what Image Properties shows.
+                out.setDotsPerMeterX(qRound(srcDpiX / 0.0254));
+                out.setDotsPerMeterY(qRound(srcDpiY / 0.0254));
 
-                if (proc.exitCode() == 0) {
+                if (out.save(outputPath, "PNG")) {
                     double mmToPt = 2.8346;
                     double newW = targetWmm * mmToPt;
                     double newH = targetHmm * mmToPt;
 
-                    // ✅ QImage ഉപയോഗിച്ച് actual pixel size read ചെയ്യൂ
-                    // (item->pixm.width() display-scaled ആയതിനാൽ reliable അല്ല)
-                    QImage checkImg(outputPath);
-                    int actualW = checkImg.width();
-                    int actualH = checkImg.height();
-
-
-                    if (actualW <= 0 || actualH <= 0) {
-                        actualW = qMax(1, rw);
-                        actualH = qMax(1, rh);
-                    }
+                    int actualW = qMax(1, out.width());
+                    int actualH = qMax(1, out.height());
 
                     // Scale: actual pixels → frame pts (exact fit)
                     double scaleX = newW / (double)actualW;

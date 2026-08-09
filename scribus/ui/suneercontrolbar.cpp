@@ -2859,6 +2859,12 @@ void SuneerControlBar::onImgRemoveBackground()
 	QFileInfo fi(inputPath);
 	QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_rembg.png";
 
+	// Carry the frame's resolution into the PNG. PIL writes a pHYs chunk only
+	// when handed dpi=, so saving bare made every background-removed image come
+	// back at Qt's 96 dpi default — and a later crop then faithfully kept 96.
+	int rembgDpiX = item->pixm.imgInfo.xres > 0 ? item->pixm.imgInfo.xres : 72;
+	int rembgDpiY = item->pixm.imgInfo.yres > 0 ? item->pixm.imgInfo.yres : 72;
+
 	QString script = QString(
 		"from rembg import remove, new_session\n"
 		"from PIL import Image\n"
@@ -2871,8 +2877,8 @@ void SuneerControlBar::onImgRemoveBackground()
 		"    r,g,b,a = result.split()\n"
 		"    a = a.filter(_IF.GaussianBlur(radius=%4))\n"
 		"    result = __import__('PIL.Image', fromlist=['Image']).merge('RGBA',(r,g,b,a))\n"
-		"result.save(r'%2')\n"
-	).arg(inputPath).arg(outputPath).arg(modelName).arg(featherPx);
+		"result.save(r'%2', dpi=(%5, %6))\n"
+	).arg(inputPath).arg(outputPath).arg(modelName).arg(featherPx).arg(rembgDpiX).arg(rembgDpiY);
 
 	QApplication::setOverrideCursor(Qt::WaitCursor);
 
@@ -3429,8 +3435,19 @@ void SuneerControlBar::onImgCropResize()
     double targetH = m_imgCropH->value();  // mm
 
     QString inputPath  = item->Pfile;
+
+    // Load source image with Qt to preserve all metadata
+    QImage sourceImg(inputPath);
+    if (sourceImg.isNull()) {
+        QMessageBox::warning(this, "Crop+Resize", "Failed to load image: " + inputPath);
+        return;
+    }
+
+    // Always PNG. Qt picks the writer from the file extension, so a .jpg path
+    // writes JPEG whatever format string save() is handed — and JPEG carries
+    // neither alpha nor a dependable DPI header.
     QFileInfo fi(inputPath);
-    QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.jpg";
+    QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.png";
 
     // Current frame crop area in image pixels
     double scaleX = item->imageXScale();
@@ -3445,30 +3462,41 @@ void SuneerControlBar::onImgCropResize()
     int cropY = qRound(offY / scaleY);
     int cropW = qRound(frameW / scaleX);
     int cropH = qRound(frameH / scaleY);
-    int resW  = qRound(targetW / 25.4 * 300); // 300 DPI
-    int resH  = qRound(targetH / 25.4 * 300);
+    // Resample at the frame's own resolution and stamp that same number, so the
+    // pixel count and the DPI header agree. Take it from imgInfo, not from
+    // sourceImg: Qt's JPEG reader honours JFIF density_unit=0 and falls back to
+    // 96 dpi on exactly the files the loader fallback rescues.
+    double srcDpiX = item->pixm.imgInfo.xres > 0 ? double(item->pixm.imgInfo.xres) : 72.0;
+    double srcDpiY = item->pixm.imgInfo.yres > 0 ? double(item->pixm.imgInfo.yres) : 72.0;
+    int resW  = qRound(targetW / 25.4 * srcDpiX);
+    int resH  = qRound(targetH / 25.4 * srcDpiY);
 
-    QString script = QString(
-        "from PIL import Image\n"
-        "img = Image.open(r'%1')\n"
-        "crop = img.crop((%2, %3, %2+%4, %3+%5))\n"
-        "out = crop.resize((%6, %7), Image.LANCZOS)\n"
-        "out.save(r'%8', quality=95)\n"
-        "print('done')\n"
-    ).arg(inputPath)
-     .arg(cropX).arg(cropY)
-     .arg(cropW).arg(cropH)
-     .arg(resW).arg(resH)
-     .arg(outputPath);
+    QImage cropped = sourceImg.copy(cropX, cropY, cropW, cropH);
+    // Background Remove leaves an alpha channel; keep 8-bit alpha through the
+    // resample instead of letting it fall back to RGB32 (transparent → black).
+    if (sourceImg.hasAlphaChannel() && cropped.format() != QImage::Format_ARGB32)
+        cropped = cropped.convertToFormat(QImage::Format_ARGB32);
 
+    QImage resized = cropped.scaled(resW, resH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    resized.setDotsPerMeterX(qRound(srcDpiX / 0.0254));
+    resized.setDotsPerMeterY(qRound(srcDpiY / 0.0254));
+
+    // Save to PNG (reliable metadata preservation for both alpha and DPI)
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    QProcess proc;
-    proc.start("python3", QStringList() << "-c" << script);
-    proc.waitForFinished(30000);
+    bool saveOk = resized.save(outputPath, "PNG");
     QApplication::restoreOverrideCursor();
 
-    if (proc.exitCode() == 0) {
+    // Debug: verify output path and file existence
+    QFileInfo checkFi(outputPath);
+    qDebug() << "Crop+Resize: Saved to:" << outputPath
+             << "exists:" << checkFi.exists()
+             << "size:" << checkFi.size()
+             << "suffix:" << checkFi.suffix();
+
+    if (saveOk) {
         m_doc->loadPict(outputPath, item, false, true);
+        // Ensure frame points to the new PNG file (not the original)
+        item->Pfile = outputPath;
         // Frame size = target
         item->setWidth(targetW * mmToPt);
         item->setHeight(targetH * mmToPt);
@@ -3482,8 +3510,7 @@ void SuneerControlBar::onImgCropResize()
         m_doc->regionsChanged()->update(QRectF());
         QMessageBox::information(this, "Crop+Resize", "Done! " + outputPath);
     } else {
-        QString err = QString::fromLocal8Bit(proc.readAllStandardError());
-        QMessageBox::warning(this, "Crop+Resize Error", err);
+        QMessageBox::warning(this, "Crop+Resize Error", "Failed to save cropped image to " + outputPath);
     }
 }
 
@@ -4103,6 +4130,11 @@ void SuneerControlBar::onImgEdgeFeather()
 	QFileInfo fi(inputPath);
 	QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_feather.png";
 
+	// Same pHYs point as the background remover: without dpi= the result comes
+	// back at Qt's 96 dpi default.
+	int featherDpiX = item->pixm.imgInfo.xres > 0 ? item->pixm.imgInfo.xres : 72;
+	int featherDpiY = item->pixm.imgInfo.yres > 0 ? item->pixm.imgInfo.yres : 72;
+
 	QString script = QString(
 		"from PIL import Image, ImageFilter\n"
 		"import numpy as np\n"
@@ -4127,8 +4159,8 @@ void SuneerControlBar::onImgEdgeFeather()
 		"        mask[:, w-1-x] *= x / feather\n"
 		"arr[:,:,3] = alpha * mask\n"
 		"result = Image.fromarray(arr.astype(np.uint8))\n"
-		"result.save(r'%4')\n"
-	).arg(inputPath).arg(featherPx).arg(direction).arg(outputPath);
+		"result.save(r'%4', dpi=(%5, %6))\n"
+	).arg(inputPath).arg(featherPx).arg(direction).arg(outputPath).arg(featherDpiX).arg(featherDpiY);
 
 	QApplication::setOverrideCursor(Qt::WaitCursor);
 	QProcess proc;
