@@ -392,7 +392,13 @@ bool overwrite(QWidget *parent, const QString& filename)
 
 QString derivedImagePath(const QString& sourcePath, const QString& tag, const QString& extension)
 {
-	QFileInfo fi(sourcePath);
+	// Tags the image tools append. Order matters only for the peel below.
+	static const QStringList knownTags {
+		QStringLiteral("_crop"), QStringLiteral("_rembg"),
+		QStringLiteral("_feather"), QStringLiteral("_resized")
+	};
+
+	const QFileInfo fi(sourcePath);
 	QString stem = fi.completeBaseName();
 	// A hidden source (".photo.jpg") would otherwise derive ".photo_crop.png",
 	// another hidden file the user cannot find in a file manager. baseName() is
@@ -402,7 +408,74 @@ QString derivedImagePath(const QString& sourcePath, const QString& tag, const QS
 		stem.remove(0, 1);
 	if (stem.isEmpty())
 		stem = QStringLiteral("image");
-	return fi.absolutePath() + "/" + stem + tag + "." + extension;
+
+	// Each tool reads item->Pfile, which is already the previous tool's output,
+	// so appending blindly grew the name without bound — the working folder
+	// ended up with "photo_feather_feather_crop_feather_feather.png". Peel the
+	// chain apart instead and rebuild it as a set, which caps the name at one
+	// occurrence of each tag.
+
+	// A previous run may have left a "_2"/"_3" uniquifier after the tags. Only
+	// treat it as one when a known tag sits in front of it, so a genuine name
+	// like "page_2.jpg" keeps its number.
+	const int usPos = stem.lastIndexOf(QLatin1Char('_'));
+	if (usPos > 0)
+	{
+		const QString tail = stem.mid(usPos + 1);
+		bool allDigits = !tail.isEmpty();
+		for (const QChar& c : tail)
+		{
+			if (!c.isDigit())
+			{
+				allDigits = false;
+				break;
+			}
+		}
+		if (allDigits)
+		{
+			const QString head = stem.left(usPos);
+			for (const QString& t : knownTags)
+			{
+				if (head.endsWith(t) && head.length() > t.length())
+				{
+					stem = head;
+					break;
+				}
+			}
+		}
+	}
+
+	QStringList tags;
+	for (bool peeled = true; peeled; )
+	{
+		peeled = false;
+		for (const QString& t : knownTags)
+		{
+			// The length guard keeps a file actually named "_crop.jpg" intact.
+			if (stem.endsWith(t) && stem.length() > t.length())
+			{
+				// Always consume it, but record it once: an existing
+				// "..._feather_feather_crop_feather_feather" has to collapse,
+				// not survive the round trip unchanged.
+				stem.chop(t.length());
+				if (!tags.contains(t))
+					tags.prepend(t);
+				peeled = true;
+				break;
+			}
+		}
+	}
+	if (!tags.contains(tag))
+		tags.append(tag);
+
+	// Never overwrite: re-cropping a frame feeds the previous output straight
+	// back in, so without this the tool would write onto the very file it is
+	// reading and the intermediate would be gone.
+	const QString dir = fi.absolutePath() + "/" + stem + tags.join(QString());
+	QString path = dir + "." + extension;
+	for (int n = 2; n < 1000 && QFileInfo::exists(path); ++n)
+		path = dir + QStringLiteral("_%1.").arg(n) + extension;
+	return path;
 }
 
 QString writeImageToFile(const QImage& image, const QString& path, int quality)
