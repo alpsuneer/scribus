@@ -1,0 +1,15 @@
+[Unit]
+Description=Prune ~/scribus-crashlogs (7-day retention, 2 GB cap)
+Documentation=file:@CMAKE_INSTALL_PREFIX@/share/doc/scribus-crashcapture/RETENTION.md
+# Enabled for every user by the package, but most users never run
+# scribus-debug. Without this the timer would fail daily on a missing folder.
+ConditionPathExists=%h/scribus-crashlogs
+
+[Service]
+Type=oneshot
+# %h, not a baked-in path: one packaged unit has to serve every user on the
+# machine. The script defaults its root to $HOME/scribus-crashlogs.
+ExecStart=@CMAKE_INSTALL_PREFIX@/libexec/scribus-debug/housekeeping.sh --apply
+# Housekeeping must never compete with a layout session or a print job.
+Nice=10
+IOSchedulingClass=idle

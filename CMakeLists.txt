@@ -557,6 +557,8 @@ add_subdirectory(resources/swatches)
 add_subdirectory(resources/templates)
 add_subdirectory(resources/translations)
 add_subdirectory(resources/unicodemap)
+# Opt-in gdb launcher, its desktop entry and the log-retention timer.
+add_subdirectory(crashcapture)
 
 #Install our READMEs etc.
 install(FILES
@@ -649,6 +651,24 @@ if(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 	set(CPACK_SOURCE_GENERATOR TBZ2)
 	set(CPACK_SYSTEM_NAME "")
 	set(CPACK_TOPLEVEL_TAG "")
+	# CPack's DEB generator stages into /usr by default, but the plugin and
+	# resource directories are compiled into the binary from CMAKE_INSTALL_PREFIX
+	# (/usr/local/lib/scribus/plugins/ and friends). A package built at the
+	# default prefix therefore installs the format loaders where the binary never
+	# looks -- documents will not open at all. Keep the package prefix equal to
+	# the build prefix so the paths in the binary and on disk agree.
+	set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+
+	# Crash capture needs post-unpack work no file list can express: the
+	# housekeeping timer has to be enabled, and the crashlogs folder and the
+	# .sla association belong to a user, not to the package. Paths are into the
+	# build tree because these are configure_file() outputs.
+	set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+		"${CMAKE_BINARY_DIR}/crashcapture/postinst;${CMAKE_BINARY_DIR}/crashcapture/postrm"
+	)
+	# gdb is what makes scribus-debug more than a slow launcher, but Scribus
+	# itself runs fine without it, so this is Recommends and not Depends.
+	set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "gdb")
 	set(CPACK_SOURCE_IGNORE_FILES
 		CMakeCache.txt
 		scribus-1.7.0.tar.bz2

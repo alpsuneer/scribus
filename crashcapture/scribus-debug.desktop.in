@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Scribus (Crash Capture)
+Comment=Scribus under gdb — writes a backtrace to ~/scribus-crashlogs if it crashes
+GenericName=Page Layout (Debug)
+TryExec=@CMAKE_INSTALL_PREFIX@/bin/scribus-debug
+Exec=@CMAKE_INSTALL_PREFIX@/bin/scribus-debug %f
+Icon=scribus
+Terminal=false
+MimeType=application/vnd.scribus;
+Categories=Qt;Graphics;Publishing;
+StartupWMClass=scribus
+StartupNotify=false

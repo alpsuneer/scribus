@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily prune of ~/scribus-crashlogs
+
+[Timer]
+OnCalendar=daily
+# Catch up a run missed while the machine was off, rather than skipping a day.
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

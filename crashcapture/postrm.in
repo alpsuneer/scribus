@@ -1,0 +1,75 @@
+#!/bin/sh
+# Debian postrm — undoes what postinst wired up.
+#
+# Deliberately NOT removed: ~/scribus-crashlogs. Those backtraces are the whole
+# reason this machine had crash capture installed, they are often the only copy,
+# and an uninstall (including an upgrade's remove half) must not destroy
+# evidence. The directory is reported, not deleted.
+set -e
+
+# See postinst: runuser is in /usr/sbin.
+PATH="$PATH:/usr/sbin:/sbin"
+
+PREFIX="@CMAKE_INSTALL_PREFIX@"
+MIMETYPE="application/vnd.scribus"
+
+installing_user() {
+	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+		echo "$SUDO_USER"; return
+	fi
+	if [ -n "${PKEXEC_UID:-}" ]; then
+		getent passwd "$PKEXEC_UID" | cut -d: -f1; return
+	fi
+	logname 2>/dev/null || true
+}
+
+case "$1" in
+remove | purge)
+	# --- housekeeping timer ------------------------------------------------
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl --global disable scribus-housekeeping.timer >/dev/null 2>&1 || true
+	fi
+	rm -f /etc/systemd/user/timers.target.wants/scribus-housekeeping.timer 2>/dev/null || true
+
+	u=$(installing_user)
+	if [ -n "$u" ]; then
+		home=$(getent passwd "$u" | cut -d: -f6)
+		uid=$(id -u "$u" 2>/dev/null || true)
+
+		if [ -n "$uid" ] && command -v systemctl >/dev/null 2>&1; then
+			runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+				systemctl --user disable --now scribus-housekeeping.timer >/dev/null 2>&1 || true
+		fi
+
+		# Hand the .sla association back to the normal launcher rather than
+		# leaving it pointing at a scribus-debug that no longer exists, which
+		# would make documents silently fail to open on double-click.
+		if [ -n "$home" ] && [ -d "$home" ] && command -v xdg-mime >/dev/null 2>&1 \
+		   && command -v runuser >/dev/null 2>&1; then
+			for d in scribus172.desktop scribus17.desktop scribus.desktop; do
+				if [ -e "$PREFIX/share/applications/$d" ]; then
+					runuser -u "$u" -- env \
+						HOME="$home" \
+						XDG_DATA_DIRS="$PREFIX/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+						xdg-mime default "$d" "$MIMETYPE" >/dev/null 2>&1 || true
+					break
+				fi
+			done
+		fi
+
+		if [ -n "$home" ] && [ -d "$home/scribus-crashlogs" ]; then
+			echo "scribus: crash logs left in $home/scribus-crashlogs (not removed)."
+		fi
+	fi
+
+	# --- caches ------------------------------------------------------------
+	if command -v update-desktop-database >/dev/null 2>&1; then
+		update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true
+	fi
+	if command -v update-mime-database >/dev/null 2>&1; then
+		update-mime-database "$PREFIX/share/mime" >/dev/null 2>&1 || true
+	fi
+	;;
+esac
+
+exit 0

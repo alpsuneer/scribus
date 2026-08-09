@@ -1,0 +1,89 @@
+#!/bin/sh
+# Debian postinst — wires up crash capture after the files are unpacked.
+#
+# Everything here is best-effort and must never fail the install: a page-layout
+# package that refuses to configure because a desktop cache could not be rebuilt
+# is worse than one whose crash logging needs a manual nudge. Hence the `|| true`
+# on every optional step and the explicit `exit 0`.
+set -e
+
+# runuser lives in /usr/sbin. dpkg does set a PATH that includes it, but this
+# script is also run by hand when debugging a deployment.
+PATH="$PATH:/usr/sbin:/sbin"
+
+PREFIX="@CMAKE_INSTALL_PREFIX@"
+MIMETYPE="application/vnd.scribus"
+HANDLER="scribus-debug.desktop"
+
+# The user who ran the install, which is who we set up. dpkg runs as root, so
+# $HOME here is root's and is useless for this.
+installing_user() {
+	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+		echo "$SUDO_USER"; return
+	fi
+	if [ -n "${PKEXEC_UID:-}" ]; then
+		getent passwd "$PKEXEC_UID" | cut -d: -f1; return
+	fi
+	# logname fails when there is no controlling terminal (unattended installs).
+	logname 2>/dev/null || true
+}
+
+case "$1" in
+configure)
+	# --- desktop / mime caches ---------------------------------------------
+	if command -v update-mime-database >/dev/null 2>&1; then
+		update-mime-database "$PREFIX/share/mime" >/dev/null 2>&1 || true
+	fi
+	if command -v update-desktop-database >/dev/null 2>&1; then
+		update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true
+	fi
+
+	# --- housekeeping timer, for every user on the machine -----------------
+	# `--global` is the packaging-correct way to enable a *user* unit: it links
+	# into /etc/systemd/user/, so it applies to users created after this install
+	# too. Enabling it per-user from here would only ever reach one of them.
+	if command -v systemctl >/dev/null 2>&1; then
+		systemctl --global enable scribus-housekeeping.timer >/dev/null 2>&1 || {
+			# Fallback for a systemd too old for `--global enable`, or a build
+			# whose unit path does not include the install prefix.
+			mkdir -p /etc/systemd/user/timers.target.wants 2>/dev/null || true
+			ln -sf "$PREFIX/lib/systemd/user/scribus-housekeeping.timer" \
+				/etc/systemd/user/timers.target.wants/scribus-housekeeping.timer 2>/dev/null || true
+		}
+	fi
+
+	# --- per-user setup for whoever ran the install ------------------------
+	u=$(installing_user)
+	if [ -n "$u" ]; then
+		home=$(getent passwd "$u" | cut -d: -f6)
+		if [ -n "$home" ] && [ -d "$home" ]; then
+			mkdir -p "$home/scribus-crashlogs/runs" 2>/dev/null || true
+			chown -R "$u" "$home/scribus-crashlogs" 2>/dev/null || true
+
+			# Default .sla handler. xdg-mime writes ~/.config/mimeapps.list, so
+			# it has to run as the user with their own HOME -- as root it would
+			# silently configure root's desktop instead. XDG_DATA_DIRS must
+			# include the prefix or xdg-mime cannot see scribus-debug.desktop.
+			if command -v xdg-mime >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+				runuser -u "$u" -- env \
+					HOME="$home" \
+					XDG_DATA_DIRS="$PREFIX/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" \
+					xdg-mime default "$HANDLER" "$MIMETYPE" >/dev/null 2>&1 || true
+			fi
+
+			# Start the timer in the user's own systemd instance so it takes
+			# effect now rather than at their next login. Fails harmlessly when
+			# the user has no running session (e.g. an unattended install).
+			uid=$(id -u "$u" 2>/dev/null || true)
+			if [ -n "$uid" ] && command -v systemctl >/dev/null 2>&1; then
+				runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+					systemctl --user daemon-reload >/dev/null 2>&1 || true
+				runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+					systemctl --user enable --now scribus-housekeeping.timer >/dev/null 2>&1 || true
+			fi
+		fi
+	fi
+	;;
+esac
+
+exit 0
