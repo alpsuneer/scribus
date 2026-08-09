@@ -44,8 +44,11 @@ exact steps and let the user perform them.
 
 ## 2. Print changes are not done until the user confirms on the real printer
 
-The real printer is **`HP_M706n`** (`ipp://<OFFICE_NETWORK_PRINTER>/ipp/print`, driverless
-`everywhere`, A3 default, the system default queue).
+The real printer is **`HP_M706n`** (`ipp://<OFFICE_NETWORK_PRINTER>/ipp/print`,
+driverless `everywhere`, A3 default, the system default queue). The actual
+address is in `CLAUDE.local.md`, which is gitignored — this repo is public, and
+internal network addresses do not belong in it. Use the queue name `HP_M706n`
+in commands; CUPS resolves it without needing the address.
 
 A captured `.ps`, a print-to-file, or a Ghostscript render is **generation-side
 evidence only**. Report it as such and then ask the user to confirm on paper.

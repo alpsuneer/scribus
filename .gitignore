@@ -1,1 +1,5 @@
 build/
+
+# Site-specific values (printer address, office API host). The public repo
+# carries placeholders; the real addresses stay on the machine.
+CLAUDE.local.md
