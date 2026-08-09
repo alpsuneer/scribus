@@ -1,4 +1,5 @@
 #include "suneercontrolbar.h"
+#include <functional>
 #include <QCompleter>
 #include <QAbstractItemView>
 #include <QTimer>
@@ -2237,6 +2238,49 @@ void SuneerControlBar::returnFocusToCanvas()
 	canvas->setFocus(Qt::OtherFocusReason);
 }
 
+namespace
+{
+	/*! \brief Runs \a apply over every cell of \a tbl as one Selection, so the
+	whole table is styled in a single undo step.
+	Only for the "table selected as an object" case — inside modeEditTable the
+	document's own apply functions already walk selectedCells(). Returns false
+	when there is nothing to do, so the caller can fall through to its normal
+	path. */
+	bool suneerApplyToWholeTable(ScribusDoc* doc, PageItem_Table* tbl,
+	                             const std::function<void(Selection&)>& apply)
+	{
+		if (!doc || !tbl)
+			return false;
+		Selection cellSel(doc, false);
+		for (int r = 0; r < tbl->rows(); ++r)
+		{
+			for (int c = 0; c < tbl->columns(); ++c)
+			{
+				PageItem_TextFrame* tf = tbl->cellAt(r, c).textFrame();
+				if (tf)
+					cellSel.addItem(tf);
+			}
+		}
+		if (cellSel.isEmpty())
+			return false;
+
+		// The inner apply opens a transaction of its own; nesting it here is what
+		// collapses the whole table into one Ctrl+Z.
+		UndoTransaction trans;
+		if (UndoManager::undoEnabled())
+			trans = UndoManager::instance()->beginTransaction(Um::Selection, Um::ITable,
+			                                                  Um::ApplyTextStyle, QString(), Um::IFont);
+		apply(cellSel);
+		if (trans)
+			trans.commit();
+
+		tbl->update();
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		return true;
+	}
+}
+
 void SuneerControlBar::onFontChanged(const QFont& font)
 {
 	if (m_updating || !m_doc) return;
@@ -2300,11 +2344,40 @@ void SuneerControlBar::onStyleChanged(int)
 {
 	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
 	PageItem* item = m_doc->m_Selection->itemAt(0);
-	QString base = item->currentCharStyle().font().scName();
+
+	// The family to restyle has to come from a cell, not from the table. A
+	// PageItem_Table has its own empty story, so currentCharStyle() there returns
+	// the default face and "Bold" would be applied on top of the wrong family --
+	// usually naming a face that does not exist, which itemSelection_SetFont then
+	// discards. Prefer the selection's first cell, then the active one.
+	PageItem* styleSrc = item;
+	if (item->isTable())
+	{
+		PageItem_Table* tbl = item->asTable();
+		PageItem_TextFrame* srcFrame = nullptr;
+		if (tbl->hasSelection() && !tbl->selectedCells().isEmpty())
+			srcFrame = tbl->selectedCells().values().first().textFrame();
+		if (!srcFrame)
+			srcFrame = tbl->activeCell().textFrame();
+		if (!srcFrame && tbl->rows() > 0 && tbl->columns() > 0)
+			srcFrame = tbl->cellAt(0, 0).textFrame();
+		if (srcFrame)
+			styleSrc = srcFrame;
+	}
+
+	QString base = styleSrc->currentCharStyle().font().scName();
 	base = base.replace(" Bold Italic","").replace(" Bold","").replace(" Italic","").trimmed();
 	QString style = m_styleCombo->currentText();
 	if (style != "Regular") base += " " + style;
-	m_doc->itemSelection_SetFont(base.trimmed());
+	const QString newFont = base.trimmed();
+
+	if (m_doc->appMode != modeEditTable && item->isTable())
+	{
+		if (suneerApplyToWholeTable(m_doc, item->asTable(),
+		        [this, newFont](Selection& sel) { m_doc->itemSelection_SetFont(newFont, &sel); }))
+			return;
+	}
+	m_doc->itemSelection_SetFont(newFont);
 	m_doc->changed();
 }
 
@@ -2356,9 +2429,20 @@ void SuneerControlBar::onFontSizeChanged(double val)
 	}
 }
 
+// In modeEditTable these go straight to the document, whose
+// itemSelection_ApplyParagraphStyle now walks selectedCells(). Only the table
+// selected as a whole object needs the cell frames handed over explicitly --
+// otherwise the style would be applied to the table item's own (empty) story.
 void SuneerControlBar::onLineSpacingChanged(double val)
 {
 	if (m_updating || !m_doc) return;
+	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	{
+		PageItem* item = m_doc->m_Selection->itemAt(0);
+		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
+		        [this, val](Selection& sel) { m_doc->itemSelection_SetLineSpacing(val, &sel); }))
+			return;
+	}
 	m_doc->itemSelection_SetLineSpacing(val);
 	m_doc->changed();
 }
@@ -2366,6 +2450,13 @@ void SuneerControlBar::onLineSpacingChanged(double val)
 void SuneerControlBar::onLineSpModeChanged(int mode)
 {
 	if (m_updating || !m_doc) return;
+	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	{
+		PageItem* item = m_doc->m_Selection->itemAt(0);
+		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
+		        [this, mode](Selection& sel) { m_doc->itemSelection_SetLineSpacingMode(mode, &sel); }))
+			return;
+	}
 	m_doc->itemSelection_SetLineSpacingMode(mode);
 	m_doc->changed();
 }
@@ -2373,22 +2464,24 @@ void SuneerControlBar::onLineSpModeChanged(int mode)
 void SuneerControlBar::onAlignChanged(int align)
 {
 	if (m_updating || !m_doc) return;
-	if (!m_doc->m_Selection->isEmpty()) {
+	// suneer: table-wide alignment.
+	// This used to walk every cell and skip any whose text frame had no HasSel.
+	// Selecting *cells* does not set that flag -- it marks a selection of
+	// characters inside a frame -- so with cells selected the loop matched
+	// nothing and alignment silently did nothing at all. It also opened one undo
+	// transaction per cell, so a nine-cell table would have needed nine Ctrl+Z.
+	// modeEditTable is now handled inside itemSelection_ApplyParagraphStyle,
+	// which walks selectedCells() and records a single transaction; only the
+	// "whole table selected as an object" case needs help here, and it gets it
+	// by handing the doc every cell frame in one Selection so undo stays atomic.
+	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	{
 		PageItem* item = m_doc->m_Selection->itemAt(0);
-		if (item->isTable()) {
-			PageItem_Table* tbl = item->asTable();
-			for (int r = 0; r < tbl->rows(); r++) {
-				for (int c = 0; c < tbl->columns(); c++) {
-					PageItem_TextFrame* tf = tbl->cellAt(r, c).textFrame();
-					if (!tf || !tf->HasSel) continue;
-					Selection cellSel(m_doc, false);
-					cellSel.addItem(tf);
-					m_doc->itemSelection_SetAlignment(align, &cellSel);
-				}
-			}
-			tbl->update();
-			m_doc->changed();
-			return;
+		if (item->isTable())
+		{
+			if (suneerApplyToWholeTable(m_doc, item->asTable(),
+			        [this, align](Selection& sel) { m_doc->itemSelection_SetAlignment(align, &sel); }))
+				return;
 		}
 	}
 	m_doc->itemSelection_SetAlignment(align);
@@ -2444,6 +2537,13 @@ void SuneerControlBar::onOutlineOutwardToggled(bool checked)
 void SuneerControlBar::onTrackingChanged(double val)
 {
 	if (m_updating || !m_doc) return;
+	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	{
+		PageItem* item = m_doc->m_Selection->itemAt(0);
+		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
+		        [this, val](Selection& sel) { m_doc->itemSelection_SetTracking(qRound(val * 10), &sel); }))
+			return;
+	}
 	m_doc->itemSelection_SetTracking(qRound(val * 10));
 	m_doc->changed();
 }

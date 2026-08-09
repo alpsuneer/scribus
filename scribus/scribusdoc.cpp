@@ -9956,11 +9956,51 @@ void ScribusDoc::itemSelection_ApplyParagraphStyle(const ParagraphStyle & newSty
 		activeTransaction = m_undoManager->beginTransaction(targetName, targetPixmap, Um::ApplyTextStyle, newStyle.displayName(), Um::IFont);
 	}
 	itemSelection_ClearBulNumStrings(itemSelection);
+
+	// suneer: table-wide selection + formatting.
+	// Mirrors the block in itemSelection_ApplyCharStyle. Without it this loop took
+	// only activeCell(), so with several cells selected a paragraph property landed
+	// on one cell -- and usually on none at all, because for a cell that is not the
+	// one being text-edited startOfSelection()==endOfSelection() and the apply range
+	// below collapses to nothing. That is why line spacing and alignment failed
+	// silently while font size (a CharStyle, hence the other funnel) worked.
+	// Fixing it here rather than per-property means every ParagraphStyle setter --
+	// alignment, line spacing and its mode, direction, word tracking, hyphenation --
+	// gains multi-cell support at once, from the Properties palette and Style
+	// Manager as well as the control bar.
+	QList<PageItem*> targetFrames;
+	QSet<PageItem*> wholeTextFrames;
 	for (int i = 0; i < selectedItemCount; ++i)
 	{
-		PageItem *currItem = itemSelection->itemAt(i);
-		if (currItem->isTable() && appMode == modeEditTable)
-			currItem = currItem->asTable()->activeCell().textFrame();
+		PageItem *selItem = itemSelection->itemAt(i);
+		if (selItem->isTable() && appMode == modeEditTable)
+		{
+			PageItem_Table* table = selItem->asTable();
+			if (table->hasSelection())
+			{
+				const QSet<TableCell>& cells = table->selectedCells();
+				for (const TableCell& cell : cells)
+				{
+					PageItem_TextFrame* cellFrame = cell.textFrame();
+					if (cellFrame)
+					{
+						targetFrames.append(cellFrame);
+						// Whole cell story, not a text range: the operator selected
+						// cells, not characters inside one.
+						wholeTextFrames.insert(cellFrame);
+					}
+				}
+			}
+			else if (table->activeCell().textFrame())
+				targetFrames.append(table->activeCell().textFrame());
+		}
+		else
+			targetFrames.append(selItem);
+	}
+
+	for (PageItem* currItem : targetFrames)
+	{
+		bool applyWholeText = wholeTextFrames.contains(currItem);
 		int currItemTextCount = currItem->itemText.length();
 		if ((currItemTextCount == 0) || ((appMode != modeEdit) && (appMode != modeEditTable)))
 		{
@@ -9983,7 +10023,14 @@ void ScribusDoc::itemSelection_ApplyParagraphStyle(const ParagraphStyle & newSty
 		{
 			int start = currItem->asPathText() ? currItem->firstInFrame() : 0;
 			int stop  = currItem->asPathText() ? currItem->lastInFrame() + 1 :  currItemTextCount;
-			if ((appMode == modeEdit) || (appMode == modeEditTable))
+			if (applyWholeText)
+			{
+				// Every paragraph in the cell, so a multi-paragraph cell is styled
+				// throughout rather than only where a caret happens to sit.
+				start = 0;
+				stop  = currItemTextCount;
+			}
+			else if ((appMode == modeEdit) || (appMode == modeEditTable))
 			{
 				start = currItem->itemText.startOfSelection();
 				stop = currItem->itemText.endOfSelection();
