@@ -390,6 +390,21 @@ bool overwrite(QWidget *parent, const QString& filename)
 	return retval;
 }
 
+QString derivedImagePath(const QString& sourcePath, const QString& tag, const QString& extension)
+{
+	QFileInfo fi(sourcePath);
+	QString stem = fi.completeBaseName();
+	// A hidden source (".photo.jpg") would otherwise derive ".photo_crop.png",
+	// another hidden file the user cannot find in a file manager. baseName() is
+	// not the fix: it returns an empty string for that name, and it truncates
+	// legitimate dotted names ("photo.2.jpg" would become "photo").
+	while (stem.startsWith(QLatin1Char('.')))
+		stem.remove(0, 1);
+	if (stem.isEmpty())
+		stem = QStringLiteral("image");
+	return fi.absolutePath() + "/" + stem + tag + "." + extension;
+}
+
 QString writeImageToFile(const QImage& image, const QString& path, int quality)
 {
 	QImage out = image;

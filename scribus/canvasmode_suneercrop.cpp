@@ -7,6 +7,7 @@
 #include "scribusdoc.h"
 #include "selection.h"
 #include "pageitem.h"
+#include "util.h"
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QPainter>
@@ -221,13 +222,12 @@ void CanvasMode_SuneerCrop::keyPressEvent(QKeyEvent* e)
             double targetWmm = fixedSize ? cb->imgCropW() : (cropW / 2.8346);
             double targetHmm = fixedSize ? cb->imgCropH() : (cropH / 2.8346);
             QString inputPath = item->Pfile;
-            QFileInfo fi(inputPath);
             QImage sourceImg(inputPath);
             if (targetWmm > 1 && targetHmm > 1 && !sourceImg.isNull()) {
                 // Always PNG. Qt picks the writer from the file extension, so a
                 // .jpg path writes JPEG no matter what format string save() is
                 // handed — and JPEG carries neither alpha nor a dependable DPI.
-                QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.png";
+                QString outputPath = derivedImagePath(inputPath, "_crop", "png");
 
                 // cropX is frame-relative pts, origOffX is image offset in pts
                 // cropX in points, origScaleX in pt/px

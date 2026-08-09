@@ -62,6 +62,12 @@ images are converted before a .jpg/.jpeg write. Permission problems are
 spelled out explicitly because QImageWriter's own message omits the OS reason.
 \a quality is passed to the writer when >= 0 (JPEG: 0-100). */
 QString SCRIBUS_API writeImageToFile(const QImage& image, const QString& path, int quality = -1);
+/*! \brief Path for an image derived from \a sourcePath, written beside it:
+derivedImagePath("/p/photo.jpg", "_crop", "png") -> "/p/photo_crop.png".
+Dots inside the name are kept ("photo.2.jpg" -> "photo.2_crop.png"), but a
+leading dot is dropped so deriving from a hidden source does not silently
+produce another hidden file. */
+QString SCRIBUS_API derivedImagePath(const QString& sourcePath, const QString& tag, const QString& extension);
 QString SCRIBUS_API Path2Relative(const QString& Path, const QString& baseDir = QDir::currentPath());
 QString SCRIBUS_API Relative2Path(const QString& File, const QString& baseDir = QDir::currentPath());
 /*! \brief Base64 of an image-bullet file for embedding in the SLA; empty on failure. */

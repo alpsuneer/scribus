@@ -26,6 +26,7 @@
 #include "prefsmanager.h"
 #include "commonstrings.h"
 #include "pageitem.h"
+#include "util.h"
 #include "pageitem_table.h"
 #include "pageitem_textframe.h"
 #include "selection.h"
@@ -2856,8 +2857,7 @@ void SuneerControlBar::onImgRemoveBackground()
 	QString modelName  = modelCombo->currentData().toString();
 	int featherPx = featherSpin->value();
 	QString inputPath  = item->Pfile;
-	QFileInfo fi(inputPath);
-	QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_rembg.png";
+	QString outputPath = derivedImagePath(inputPath, "_rembg", "png");
 
 	// Carry the frame's resolution into the PNG. PIL writes a pHYs chunk only
 	// when handed dpi=, so saving bare made every background-removed image come
@@ -3446,8 +3446,7 @@ void SuneerControlBar::onImgCropResize()
     // Always PNG. Qt picks the writer from the file extension, so a .jpg path
     // writes JPEG whatever format string save() is handed — and JPEG carries
     // neither alpha nor a dependable DPI header.
-    QFileInfo fi(inputPath);
-    QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_crop.png";
+    QString outputPath = derivedImagePath(inputPath, "_crop", "png");
 
     // Current frame crop area in image pixels
     double scaleX = item->imageXScale();
@@ -4127,8 +4126,7 @@ void SuneerControlBar::onImgEdgeFeather()
 	QString direction = dirCombo->currentData().toString();
 	int featherPx = featherSpin->value();
 	QString inputPath = item->Pfile;
-	QFileInfo fi(inputPath);
-	QString outputPath = fi.absolutePath() + "/" + fi.completeBaseName() + "_feather.png";
+	QString outputPath = derivedImagePath(inputPath, "_feather", "png");
 
 	// Same pHYs point as the background remover: without dpi= the result comes
 	// back at Qt's 96 dpi default.
