@@ -148,7 +148,10 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 void SuneerNewsPanel::loadConfig()
 {
     QSettings s("Faircode", "ScribusNews");
-    m_baseUrl        = s.value("apiUrl", "http://10.10.10.133:3011/api/v1/external").toString();
+    // Defaults to localhost, matching the Settings tab (see initSettingsTab).
+    // The office API address is site-specific and is not baked into the source;
+    // it is configured once per machine and lives in QSettings from then on.
+    m_baseUrl        = s.value("apiUrl", "http://localhost:3011/api/v1/external").toString();
     m_imageBase      = "http://localhost:9000";
     m_defaultEdition = s.value("defaultEdition", "TVM").toString();
 }
