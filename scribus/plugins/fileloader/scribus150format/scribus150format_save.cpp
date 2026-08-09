@@ -2776,6 +2776,16 @@ void Scribus150Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 	docu.writeAttribute("HEIGHT", item->height());
 	if (item->cornerRadius() != 0)
 		docu.writeAttribute("RADRECT", item->cornerRadius());
+	// Unknown attributes are ignored by readers that predate them, and the
+	// saved path still carries the shape, so older Scribus loses only the
+	// ability to re-derive the corners after a resize.
+	if (item->hasIndividualCornerRadii())
+	{
+		docu.writeAttribute("CornerRadiusTL", item->cornerRadiusTL());
+		docu.writeAttribute("CornerRadiusTR", item->cornerRadiusTR());
+		docu.writeAttribute("CornerRadiusBL", item->cornerRadiusBL());
+		docu.writeAttribute("CornerRadiusBR", item->cornerRadiusBR());
+	}
 	docu.writeAttribute("FRTYPE", item->FrameType);
 	docu.writeAttribute("CLIPEDIT", item->ClipEdited ? 1 : 0);
 	if (item->GrType != 0)

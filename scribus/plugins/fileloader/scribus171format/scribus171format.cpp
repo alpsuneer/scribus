@@ -6542,6 +6542,10 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		currItem->setCornerRadius( attrs.valueAsDouble("RADRECT", 0.0));
 	else
 		currItem->setCornerRadius( attrs.valueAsDouble("CornerRadius", 0.0));
+	currItem->setCornerRadii(attrs.valueAsDouble("CornerRadiusTL", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusTR", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusBL", 0.0),
+	                         attrs.valueAsDouble("CornerRadiusBR", 0.0));
 	if (attrs.hasAttribute("CLIPEDIT"))
 		currItem->ClipEdited = attrs.valueAsInt("CLIPEDIT", 0);
 	else

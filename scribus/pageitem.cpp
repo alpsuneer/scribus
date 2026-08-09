@@ -220,6 +220,10 @@ PageItem::PageItem(const PageItem & other)
 	OnMasterPage(other.OnMasterPage),
 	isEmbedded(other.isEmbedded),
 	m_roundedCornerRadius(other.m_roundedCornerRadius),
+	m_cornerRadiusTL(other.m_cornerRadiusTL),
+	m_cornerRadiusTR(other.m_cornerRadiusTR),
+	m_cornerRadiusBL(other.m_cornerRadiusBL),
+	m_cornerRadiusBR(other.m_cornerRadiusBR),
 	oldXpos(other.oldXpos),
 	oldYpos(other.oldYpos),
 	oldWidth(other.oldWidth),
@@ -1579,6 +1583,40 @@ void PageItem::setCornerRadius(double newRadius)
 	}
 	m_roundedCornerRadius = newRadius;
 	//emit cornerRadius(RadRect);
+}
+
+bool PageItem::hasIndividualCornerRadii() const
+{
+	// All four equal — including the all-zero default — means "uniform", and
+	// every uniform shape stays on the stock m_roundedCornerRadius path.
+	return !(m_cornerRadiusTL == m_cornerRadiusTR
+	      && m_cornerRadiusTR == m_cornerRadiusBL
+	      && m_cornerRadiusBL == m_cornerRadiusBR);
+}
+
+void PageItem::setCornerRadii(double tl, double tr, double bl, double br)
+{
+	if (m_cornerRadiusTL == tl && m_cornerRadiusTR == tr
+	 && m_cornerRadiusBL == bl && m_cornerRadiusBR == br)
+		return;
+	if (UndoManager::undoEnabled())
+	{
+		auto *state = new SimpleState(Um::RoundCorner, QString(), Um::IBorder);
+		state->set("CORNER_RADII");
+		state->set("OLD_TL", m_cornerRadiusTL);
+		state->set("OLD_TR", m_cornerRadiusTR);
+		state->set("OLD_BL", m_cornerRadiusBL);
+		state->set("OLD_BR", m_cornerRadiusBR);
+		state->set("NEW_TL", tl);
+		state->set("NEW_TR", tr);
+		state->set("NEW_BL", bl);
+		state->set("NEW_BR", br);
+		undoManager->action(this, state);
+	}
+	m_cornerRadiusTL = tl;
+	m_cornerRadiusTR = tr;
+	m_cornerRadiusBL = bl;
+	m_cornerRadiusBR = br;
 }
 
 
@@ -5062,6 +5100,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restorePastePlainText(ss, isUndo);
 		else if (ss->contains("PASTE_TEXT"))
 			restorePasteText(ss, isUndo);
+		else if (ss->contains("CORNER_RADII"))
+			restoreCornerRadii(ss, isUndo);
 		else if (ss->contains("CORNER_RADIUS"))
 			restoreCornerRadius(ss, isUndo);
 		else if (ss->contains("IMAGEFLIPH"))
@@ -7370,6 +7410,24 @@ void PageItem::restoreCornerRadius(SimpleState *state, bool isUndo)
 	*(doc()->m_Selection) = tmpSelection;
 }
 
+void PageItem::restoreCornerRadii(SimpleState *state, bool isUndo)
+{
+	const QString p = isUndo ? QStringLiteral("OLD_") : QStringLiteral("NEW_");
+	m_cornerRadiusTL = state->getDouble(p + "TL");
+	m_cornerRadiusTR = state->getDouble(p + "TR");
+	m_cornerRadiusBL = state->getDouble(p + "BL");
+	m_cornerRadiusBR = state->getDouble(p + "BR");
+	// Rebuild at the current size. When the radii are restored to all-equal we
+	// are back on the uniform path, and a uniform radius of zero has to give a
+	// plain rectangle rather than SetFrameRound()'s degenerate one.
+	if (hasIndividualCornerRadii() || m_roundedCornerRadius != 0.0)
+		SetFrameRound();
+	else
+		SetRectFrame();
+	m_Doc->setRedrawBounding(this);
+	m_Doc->regionsChanged()->update(getRedrawBounding(1.0));
+}
+
 void PageItem::restoreMove(SimpleState *state, bool isUndo)
 {
 	double ox = state->getDouble("OLD_XPOS");
@@ -9353,6 +9411,48 @@ void PageItem::SetOvalFrame()
 
 void PageItem::SetFrameRound()
 {
+	if (hasIndividualCornerRadii())
+	{
+		// The four radii are stored state, so the shape is rebuilt from them at
+		// whatever size the frame is now. That is the whole point: updateClip()
+		// calls us after every resize, and before the radii were stored this
+		// path regenerated a uniform (radius 0) rectangle and silently threw the
+		// operator's corners away.
+		const double maxR = qMin(m_width, m_height) / 2.0;
+		// Clamped for drawing only, never written back. autoFitFrameHeight()
+		// binary-searches the height down to 1pt, so storing the clamp would
+		// ratchet the radii to nearly nothing over the course of the search and
+		// they would not come back when the frame returned to its real size.
+		const double rTL = qBound(0.0, m_cornerRadiusTL, maxR);
+		const double rTR = qBound(0.0, m_cornerRadiusTR, maxR);
+		const double rBL = qBound(0.0, m_cornerRadiusBL, maxR);
+		const double rBR = qBound(0.0, m_cornerRadiusBR, maxR);
+
+		QPainterPath path;
+		path.moveTo(rTL, 0);
+		path.lineTo(m_width - rTR, 0);
+		if (rTR > 0)
+			path.arcTo(m_width - 2 * rTR, 0, 2 * rTR, 2 * rTR, 90, -90);
+		path.lineTo(m_width, m_height - rBR);
+		if (rBR > 0)
+			path.arcTo(m_width - 2 * rBR, m_height - 2 * rBR, 2 * rBR, 2 * rBR, 0, -90);
+		path.lineTo(rBL, m_height);
+		if (rBL > 0)
+			path.arcTo(0, m_height - 2 * rBL, 2 * rBL, 2 * rBL, 270, -90);
+		path.lineTo(0, rTL);
+		if (rTL > 0)
+			path.arcTo(0, 0, 2 * rTL, 2 * rTL, 180, -90);
+		path.closeSubpath();
+
+		PoLine.resize(0);
+		PoLine.fromQPainterPath(path);
+		Clip = flattenPath(PoLine, Segments);
+		// Regenerable from stored state, so this is not a hand-edited path.
+		ClipEdited = false;
+		FrameType = 2;
+		return;
+	}
+
 	setCornerRadius(qMin(m_roundedCornerRadius, qMin(m_width, m_height)/2));
 	PoLine.resize(0);
 	double rr = fabs(m_roundedCornerRadius);

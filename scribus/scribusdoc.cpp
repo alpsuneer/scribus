@@ -10508,7 +10508,9 @@ void ScribusDoc::setFrameRounded()
 	PageItem *currItem;
 	if (getItem(&currItem))
 	{
-		if (currItem->cornerRadius() == 0)
+		// A frame with individual corners has a uniform radius of zero, so
+		// testing cornerRadius() alone would flatten it back to a rectangle.
+		if (currItem->cornerRadius() == 0 && !currItem->hasIndividualCornerRadii())
 		{
 			setFrameRect();
 			return;
@@ -11893,7 +11895,13 @@ void ScribusDoc::item_setFrameShape(PageItem* item, int frameType, int count, co
 		activeTransaction = m_undoManager->beginTransaction(Um::Selection, Um::IImageFrame, Um::ChangeShapeType, QString(), Um::IBorder);
 
 	if (frameType != 0)
+	{
 		item->setCornerRadius(0);
+		// Choosing a different shape drops the rounding, and the per-corner
+		// radii have to go with it or SetFrameRound() would re-apply them the
+		// next time anything rebuilt the clip.
+		item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+	}
 	if (UndoManager::undoEnabled())
 	{
 		// Store shape info in this form:

@@ -1355,7 +1355,13 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		{
 			PageItem* item = doc->m_Selection->itemAt(i);
 			if (item)
+			{
+				// This spin means "every corner this much". Individual radii
+				// outrank the uniform one in SetFrameRound(), so leaving them
+				// set would make this control appear to do nothing.
+				item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
 				item->setCornerRadius(val / unitRatio);
+			}
 		}
 		doc->setFrameRounded();
 		doc->changed();
@@ -1991,6 +1997,36 @@ void SuneerControlBar::updateFromSelection()
 		showImageWidgets(false);
 		showLineWidgets(false);
 		showTextWrapWidgets(false);
+	}
+
+	// Corner radii were never read back from the item, so reselecting a frame
+	// left whatever was last typed sitting in the boxes. Every branch above
+	// falls through here, so this covers text, image and shape frames alike.
+	if (m_cornerRadiusSpin && m_cornerTLSpin)
+	{
+		const double ur = m_doc->unitRatio();
+		const bool individual = item->hasIndividualCornerRadii();
+		// A uniform frame has all four corners at the single radius; showing
+		// zeroes there would misreport a rounded rectangle as square.
+		const double tl = individual ? item->cornerRadiusTL() : item->cornerRadius();
+		const double tr = individual ? item->cornerRadiusTR() : item->cornerRadius();
+		const double bl = individual ? item->cornerRadiusBL() : item->cornerRadius();
+		const double br = individual ? item->cornerRadiusBR() : item->cornerRadius();
+		for (QDoubleSpinBox* sb : { m_cornerRadiusSpin, m_cornerTLSpin, m_cornerTRSpin, m_cornerBLSpin, m_cornerBRSpin })
+			if (sb) sb->blockSignals(true);
+		m_cornerRadiusSpin->setValue(item->cornerRadius() * ur);
+		m_cornerTLSpin->setValue(tl * ur);
+		m_cornerTRSpin->setValue(tr * ur);
+		m_cornerBLSpin->setValue(bl * ur);
+		m_cornerBRSpin->setValue(br * ur);
+		if (m_cornerLinkChk)
+		{
+			m_cornerLinkChk->blockSignals(true);
+			m_cornerLinkChk->setChecked(!individual);
+			m_cornerLinkChk->blockSignals(false);
+		}
+		for (QDoubleSpinBox* sb : { m_cornerRadiusSpin, m_cornerTLSpin, m_cornerTRSpin, m_cornerBLSpin, m_cornerBRSpin })
+			if (sb) sb->blockSignals(false);
 	}
 
 	blockAllSignals(false);
@@ -4008,40 +4044,42 @@ void SuneerControlBar::applyCornerRadius()
 	double bl = m_cornerBLSpin->value() / unitRatio;
 	double br = m_cornerBRSpin->value() / unitRatio;
 
+	// The radii are stored on the item rather than drawn straight into PoLine,
+	// so that SetFrameRound() can rebuild the shape after a resize. Writing the
+	// path here and nowhere else was the whole bug: updateClip() regenerates
+	// the clip on every resize and had nothing to regenerate the corners from.
+	UndoTransaction cornerTransaction;
+	if (UndoManager::undoEnabled())
+		cornerTransaction = UndoManager::instance()->beginTransaction(
+			Um::Selection, Um::IBorder, Um::RoundCorner, QString(), Um::IBorder);
+
 	for (int i = 0; i < doc->m_Selection->count(); ++i)
 	{
 		PageItem* item = doc->m_Selection->itemAt(i);
 		if (!item) continue;
-		double w = item->width();
-		double h = item->height();
 
-		// Clamp radius to half of min dimension
-		double maxR = qMin(w, h) / 2.0;
-		double rTL = qMin(tl, maxR);
-		double rTR = qMin(tr, maxR);
-		double rBL = qMin(bl, maxR);
-		double rBR = qMin(br, maxR);
-
-		QPainterPath path;
-		path.moveTo(rTL, 0);
-		path.lineTo(w - rTR, 0);
-		if (rTR > 0) path.arcTo(w - 2*rTR, 0, 2*rTR, 2*rTR, 90, -90);
-		path.lineTo(w, h - rBR);
-		if (rBR > 0) path.arcTo(w - 2*rBR, h - 2*rBR, 2*rBR, 2*rBR, 0, -90);
-		path.lineTo(rBL, h);
-		if (rBL > 0) path.arcTo(0, h - 2*rBL, 2*rBL, 2*rBL, 270, -90);
-		path.lineTo(0, rTL);
-		if (rTL > 0) path.arcTo(0, 0, 2*rTL, 2*rTL, 180, -90);
-		path.closeSubpath();
-
-		item->PoLine.resize(0);
-		item->PoLine.fromQPainterPath(path);
-		item->Clip = flattenPath(item->PoLine, item->Segments);
-		item->ClipEdited = true;
-		item->FrameType = 2;
+		if (tl == tr && tr == bl && bl == br)
+		{
+			// Uniform corners are exactly what the stock rounded rectangle is,
+			// so hand them to it and keep no individual state at all.
+			item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+			item->setCornerRadius(tl);
+			if (tl == 0.0)
+				item->SetRectFrame();
+			else
+				item->SetFrameRound();
+		}
+		else
+		{
+			item->setCornerRadii(tl, tr, bl, br);
+			item->SetFrameRound();
+		}
 		item->update();
 		doc->setRedrawBounding(item);
 	}
+
+	if (cornerTransaction)
+		cornerTransaction.commit();
 	doc->regionsChanged()->update(QRect());
 	doc->changed();
 	doc->changedPagePreview();

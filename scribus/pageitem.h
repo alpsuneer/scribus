@@ -566,6 +566,20 @@ public: // Start public functions
 	//Rounded Corners
 	double cornerRadius() const { return m_roundedCornerRadius; }
 	void setCornerRadius(double);
+	/*! \brief Per-corner radii, clockwise from the top left.
+	These are the authority for the shape whenever they are not all equal;
+	otherwise cornerRadius() is, exactly as before. Keeping them out of
+	m_roundedCornerRadius means a stock rounded rectangle behaves identically
+	to a build without this feature. */
+	double cornerRadiusTL() const { return m_cornerRadiusTL; }
+	double cornerRadiusTR() const { return m_cornerRadiusTR; }
+	double cornerRadiusBL() const { return m_cornerRadiusBL; }
+	double cornerRadiusBR() const { return m_cornerRadiusBR; }
+	//! \brief True when the four corners differ, so the shape has to be built corner by corner.
+	bool hasIndividualCornerRadii() const;
+	/*! \brief Sets all four corners in one undoable step. The shape is not
+	rebuilt here; call SetFrameRound() (or updateClip()) afterwards. */
+	void setCornerRadii(double tl, double tr, double bl, double br);
 	// PDF bookmark
 	bool isPDFBookmark() const { return isBookmark; }
 	void setIsPDFBookmark(bool val) { isBookmark = val; }
@@ -1494,6 +1508,12 @@ public:	// Start public variables
 	int inlineCharID {0};
 	/** Radius of rounded corners */
 	double m_roundedCornerRadius {0.0};
+	/** Per-corner radii. All four equal (the default, all zero) means the
+	shape is uniform and m_roundedCornerRadius drives it. */
+	double m_cornerRadiusTL {0.0};
+	double m_cornerRadiusTR {0.0};
+	double m_cornerRadiusBL {0.0};
+	double m_cornerRadiusBR {0.0};
 
 	//Undo Data
 	double oldXpos {0.0}; ///< Stores the old X-position for undo action. Is used to detect move actions.
@@ -1622,6 +1642,7 @@ protected: // Start protected functions
 	void restoreConnectPath(SimpleState *state, bool isUndo);
 	void restoreContourLine(SimpleState *state, bool isUndo);
 	void restoreCornerRadius(SimpleState *state, bool isUndo);
+	void restoreCornerRadii(SimpleState *state, bool isUndo);
 	void restoreCreateMeshGrad(SimpleState *state, bool isUndo);
 	void restoreCustomLineStyle(SimpleState *state, bool isUndo);
 	void restoreDefaultParagraphStyle(SimpleState *state, bool isUndo);
