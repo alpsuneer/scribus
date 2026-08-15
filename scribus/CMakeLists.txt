@@ -164,6 +164,7 @@ if(HAVE_OSG)
 		ui/dialogs/imagesizedialog.cpp
 		ui/dialogs/canvassizedialog.cpp
 		ui/dialogs/autoarrangedialog.cpp
+		ui/proofprintdialog.cpp
 		ui/marchingantsitem.cpp
 		ui/tools/imagetool.cpp
 		ui/tools/rectmarqueetool.cpp
@@ -179,8 +180,14 @@ if(HAVE_OSG)
 		scimagesam.cpp
 		autocorrectengine.cpp
 		autoarrangeengine.cpp
+	singleinstance.cpp
+	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		scupdateclient.cpp
+		scupdatekeystore.cpp
+		ui/updatesettingsdialog.cpp
+		ui/updateavailabledialog.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -208,6 +215,7 @@ else()
 		ui/dialogs/imagesizedialog.cpp
 		ui/dialogs/canvassizedialog.cpp
 		ui/dialogs/autoarrangedialog.cpp
+		ui/proofprintdialog.cpp
 		ui/marchingantsitem.cpp
 		ui/tools/imagetool.cpp
 		ui/tools/rectmarqueetool.cpp
@@ -223,8 +231,14 @@ else()
 		scimagesam.cpp
 		autocorrectengine.cpp
 		autoarrangeengine.cpp
+	singleinstance.cpp
+	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		scupdateclient.cpp
+		scupdatekeystore.cpp
+		ui/updatesettingsdialog.cpp
+		ui/updateavailabledialog.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -274,6 +288,10 @@ target_link_libraries(${EXE_NAME}
 	Qt6::PrintSupport
 	Qt6::Svg
 	)
+
+if (Qt6Keychain_FOUND)
+	target_link_libraries(${EXE_NAME} PRIVATE Qt6Keychain::Qt6Keychain)
+endif()
 
 if (HAVE_OSG)
 	target_link_libraries(${EXE_NAME}

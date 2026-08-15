@@ -275,6 +275,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_formats.h"
 #include "util_printer.h"
 #include "ui/proofprintdialog.h"
+#include "ui/updatesettingsdialog.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
 #include "third_party/Qt-Advanced-Docking-System/src/IconProvider.h"
 
@@ -6060,7 +6061,7 @@ void ScribusMainWindow::slotHelpActionSearch()
 
 void ScribusMainWindow::slotHelpCheckUpdates()
 {
-	About dia(this, About::CheckUpdates);
+	UpdateSettingsDialog dia(this);
 	dia.exec();
 }
 

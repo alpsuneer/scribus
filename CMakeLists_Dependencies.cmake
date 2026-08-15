@@ -124,6 +124,16 @@ add_definitions(${Qt6Svg_DEFINITIONS})
 message(STATUS "Qt Version Found: ${Qt6Widgets_VERSION}")
 set(QT_VERSION_MAJOR 6)
 
+#<< Qt Keychain (optional, updater API key storage)
+find_package(Qt6Keychain QUIET)
+if (Qt6Keychain_FOUND)
+	message(STATUS "Qt6Keychain found: updater will store the API key in the system keychain")
+	add_definitions(-DHAVE_QTKEYCHAIN)
+else()
+	message(STATUS "Qt6Keychain not found: updater API key falls back to obfuscated prefs storage")
+endif()
+#>> Qt Keychain (optional, updater API key storage)
+
 #<<PNG
 if (WIN32)
 	# On win32 we can use Qt's zlib and libpng, so we use some
