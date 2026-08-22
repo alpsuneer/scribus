@@ -1576,6 +1576,17 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			}
 		}
 	}
+
+	// Always-visible document action, appended after every selection-gated
+	// row above: unlike row1/row2, it is not added to m_textWidgets /
+	// m_imageWidgets / m_textWrapWidgets, so updateFromSelection()'s
+	// show/hide passes never touch it and it stays on the bar with no
+	// selection at all.
+	if (m_scmw && m_scmw->scrActions.contains("extrasImposition"))
+	{
+		addSeparator();
+		addAction(m_scmw->scrActions["extrasImposition"]);
+	}
 }
 
 void SuneerControlBar::setDocument(ScribusDoc* doc)

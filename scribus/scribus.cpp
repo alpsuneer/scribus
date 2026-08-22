@@ -164,6 +164,8 @@ for which a new license (GPL+exception) is in place.
 #include "scraction.h"
 #include "scribusXml.h"
 #include "scribusapp.h"
+#include "singleinstance.h"
+#include "documentlock.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
 #include "scribusview.h"
@@ -276,6 +278,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_printer.h"
 #include "ui/proofprintdialog.h"
 #include "ui/updatesettingsdialog.h"
+#include "ui/impositiondialog.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
 #include "third_party/Qt-Advanced-Docking-System/src/IconProvider.h"
 
@@ -320,8 +323,52 @@ ScribusMainWindow::ScribusMainWindow() :
 /*
  * retval 0 - ok, 1 - no fonts, ...
  */
+void ScribusMainWindow::queueFilesFromOtherInstance(const QStringList& files)
+{
+	if (files.isEmpty())
+		return;
+	m_pendingFilesFromOtherInstance += files;
+	// Deliberately NOT opening here. This runs from a socket callback, and
+	// loadDoc() puts up modal dialogs of its own; if the operator already has a
+	// modal open (an unsaved-changes prompt, say) opening another from a blocked
+	// event loop is at best confusing and at worst re-entrant. Defer instead.
+	QTimer::singleShot(0, this, &ScribusMainWindow::drainPendingFiles);
+}
+
+void ScribusMainWindow::drainPendingFiles()
+{
+	if (m_pendingFilesFromOtherInstance.isEmpty())
+		return;
+	// A modal is up: leave the queue alone and try again shortly. The arriving
+	// file waits politely rather than interrupting or auto-answering anything.
+	if (QApplication::activeModalWidget() != nullptr)
+	{
+		QTimer::singleShot(250, this, &ScribusMainWindow::drainPendingFiles);
+		return;
+	}
+
+	const QStringList files = m_pendingFilesFromOtherInstance;
+	m_pendingFilesFromOtherInstance.clear();
+	for (const QString& f : files)
+	{
+		if (QFileInfo::exists(f))
+			loadDoc(f, AlreadyOpenAction::AskGoToOrCancel);
+	}
+	// Show the operator what they double-clicked.
+	if (isMinimized())
+		showNormal();
+	raise();
+	activateWindow();
+}
+
 int ScribusMainWindow::initScMW(bool primaryMainWindow)
 {
+	// Receive paths from later launches (null when opted out via
+	// SCRIBUS_NO_SINGLE_INSTANCE, --no-single-instance, or a headless run).
+	if (primaryMainWindow && ScQApp && ScQApp->singleInstance())
+		connect(ScQApp->singleInstance(), &SingleInstance::filesReceived,
+		        this, &ScribusMainWindow::queueFilesFromOtherInstance);
+
 	// Documentation: https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System/blob/master/doc/user-guide.md
 	CDockManager::setConfigFlag(CDockManager::AlwaysShowTabs, false);
 	CDockManager::setConfigFlag(CDockManager::FloatingContainerHasWidgetIcon, true);
@@ -1545,6 +1592,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFramesDoc", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
+	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
+	scrMenuMgr->addMenuItemString("extrasImposition", "Extras");
 	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
 	scrMenuMgr->addMenuItemString("SRTools", "Extras");
 	scrMenuMgr->addMenuItemString("SRDuplicateContentCheck", "SRTools");
@@ -3723,6 +3772,11 @@ bool ScribusMainWindow::loadPage(const QString& fileName, int Nr, bool Mpa, cons
 
 bool ScribusMainWindow::loadDoc(const QString& fileName)
 {
+	return loadDoc(fileName, AlreadyOpenAction::InformAndSwitch);
+}
+
+bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen)
+{
 #ifdef DEBUG_LOAD_TIMES
 	QTime t;
 	struct tms tms1, tms2;
@@ -3751,24 +3805,126 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 	// PV - 5780: Scribus doesn't track what documents are already opened
 	// The goal of this part of code is to disallow user to open one
 	// doc multiple times.
-	QString filename = fi.absoluteFilePath();
-	QString platfName(QDir::toNativeSeparators(filename));
+	// Match on the CANONICAL path of the document each window actually holds,
+	// not on the window title. Titles are decorated (a trailing "*" when
+	// modified) and are not paths at all, and a plain absolute-path compare
+	// treats /home/s1/Desktop/a.sla and a symlink to it as different documents —
+	// opening the same file twice is exactly how documents get corrupted.
+	// canonicalFilePath() resolves symlinks, "..", and duplicate separators.
+	const QString filename = fi.absoluteFilePath();
+	const QString wantedCanonical = fi.canonicalFilePath();
 	int windowCount = windows.count();
 	for (int i = 0; i < windowCount; ++i)
 	{
-		QString docNameUnmodified(windows.at(i)->windowTitle());
-		ScribusWin * mx = qobject_cast<ScribusWin*>(windows.at(i)->widget());
-		if (mx && mx->doc()->isModified() && docNameUnmodified.endsWith("*"))
-			docNameUnmodified.resize(docNameUnmodified.length() - 1);
+		ScribusWin* mx = qobject_cast<ScribusWin*>(windows.at(i)->widget());
+		if (!mx || !mx->doc())
+			continue;
+		const QString openPath = mx->doc()->documentFileName();
+		if (openPath.isEmpty())
+			continue;                       // never-saved document, cannot collide
+		const QString openCanonical = QFileInfo(openPath).canonicalFilePath();
+		// canonicalFilePath() is empty if the file vanished; fall back so a
+		// deleted-but-open document still matches itself by absolute path.
+		const bool same = (!openCanonical.isEmpty() && !wantedCanonical.isEmpty())
+		                ? (openCanonical == wantedCanonical)
+		                : (QFileInfo(openPath).absoluteFilePath() == fi.absoluteFilePath());
+		if (!same)
+			continue;
 
-		if (docNameUnmodified == platfName)
+		QApplication::restoreOverrideCursor();
+		if (onAlreadyOpen == AlreadyOpenAction::AskGoToOrCancel)
 		{
-			QApplication::restoreOverrideCursor();
+			// The operator just double-clicked and is expecting something to
+			// happen, so surface the window first — otherwise the dialog can
+			// appear behind the file manager they clicked from.
+			if (isMinimized())
+				showNormal();
+			raise();
+			activateWindow();
+
+			ScMessageBox mb(QMessageBox::Information,
+			                tr("Already Open"),
+			                tr("%1 is already open.").arg(fi.fileName()),
+			                QMessageBox::NoButton, this);
+			QPushButton* goTo = mb.addButton(tr("Go to it"), QMessageBox::AcceptRole);
+			mb.addButton(QMessageBox::Cancel);
+			mb.setDefaultButton(goTo);          // Enter = Go to it
+			mb.exec();
+			if (mb.clickedButton() != goTo)
+				return true;                    // Cancel: dismiss, open nothing
+		}
+		else
+		{
 			ScMessageBox::information(this, tr("Document is already opened"), tr("This document is already open. It will be set as the active document."));
-			windowsMenuActivated(i);
-			return true;
+		}
+		windowsMenuActivated(i);
+		if (isMinimized())
+			showNormal();
+		raise();
+		activateWindow();
+		return true;
+	}
+	// ── Network lock ──────────────────────────────────────────────────────
+	// Reached only when the document is NOT already open in this instance, so a
+	// document open here can never present as "in use by someone else".
+	bool openReadOnlyDueToLock = false;
+	{
+		DocumentLock::Info holder;
+		if (!DocumentLock::acquire(filename, &holder))
+		{
+			if (DocumentLock::isMineAndDead(holder))
+			{
+				// Our own user and host, but that PID is gone: a crashed session
+				// of ours. Reclaim silently, which is the only automatic takeover.
+				DocumentLock::takeOver(filename);
+			}
+			else if (!holder.valid)
+			{
+				// The create failed for a reason other than an existing lock —
+				// a read-only share, or no permission to write beside the file.
+				// Fail safe: the operator asked never to risk two writers.
+				QApplication::restoreOverrideCursor();
+				ScMessageBox::warning(this, tr("Cannot Lock Document"),
+					tr("Scribus could not create a lock file next to this document, so it "
+					   "cannot tell whether another machine is editing it.\n\nOpening "
+					   "read-only. Use Save As to keep any changes."));
+				QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+				openReadOnlyDueToLock = true;
+			}
+			else
+			{
+				QApplication::restoreOverrideCursor();
+				const bool stale = DocumentLock::isStale(holder, DocumentLock::DefaultStaleHours);
+				ScMessageBox mb(QMessageBox::Warning, tr("Document In Use"),
+					tr("%1 is in use by %2.").arg(fi.fileName(), DocumentLock::describe(holder)),
+					QMessageBox::NoButton, this);
+				QPushButton* ro = mb.addButton(tr("Open Read-Only"), QMessageBox::AcceptRole);
+				QPushButton* take = nullptr;
+				if (stale)
+				{
+					mb.setInformativeText(tr("This lock is more than %1 hours old. If that machine "
+					                         "crashed, you can take it over — but if someone is still "
+					                         "editing, their work will be at risk.")
+					                      .arg(DocumentLock::DefaultStaleHours));
+					take = mb.addButton(tr("Take Over"), QMessageBox::DestructiveRole);
+				}
+				mb.addButton(QMessageBox::Cancel);
+				mb.setDefaultButton(ro);
+				mb.exec();
+				if (mb.clickedButton() == take && take)
+				{
+					if (!DocumentLock::takeOver(filename))
+						openReadOnlyDueToLock = true;   // lost a race: fail safe
+				}
+				else if (mb.clickedButton() == ro)
+					openReadOnlyDueToLock = true;
+				else
+					return false;                       // Cancel: open nothing
+				QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+			}
 		}
 	}
+
 	UndoBlocker undoBlocker;
 	//! Which native SLA generation wrote this file. Captured while the loader is
 	//! still alive; used after loadDoc() returns to offer the legacy fix.
@@ -4152,6 +4308,13 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 	// paint before the dialog appears.
 	if (ret && HaveDoc && doc)
 		QTimer::singleShot(0, this, [this, loadedFormatID] { suneerMaybeOfferLegacyOverflowFix(loadedFormatID); });
+	// Carry the lock decision onto the document now that it exists.
+	if (ret && doc)
+		doc->setOpenedReadOnly(openReadOnlyDueToLock);
+	// The load failed, so hold no lock: another machine must not be blocked by a
+	// document that never opened here.
+	if (!ret && !openReadOnlyDueToLock)
+		DocumentLock::release(filename);
 #ifdef DEBUG_LOAD_TIMES
 	times(&tms2);
 	double ticks = sysconf(_SC_CLK_TCK);
@@ -4490,6 +4653,16 @@ void ScribusMainWindow::slotFileRevert()
 
 bool ScribusMainWindow::slotFileSave()
 {
+	// Opened read-only because another machine holds the lock: never write over
+	// their work. Save As to a different name stays available.
+	if (doc && doc->openedReadOnly())
+	{
+		ScMessageBox::information(this, tr("Read-Only Document"),
+			tr("This document was opened read-only because it is in use on another "
+			   "machine, so it cannot be saved over.\n\nUse Save As to keep your "
+			   "changes under a different name."));
+		return false;
+	}
 	bool ret = false;
 	if ((doc->hasName) && (!doc->isConverted))
 	{
@@ -4599,6 +4772,10 @@ bool ScribusMainWindow::slotFileClose()
 
 bool ScribusMainWindow::DoFileClose()
 {
+	// Give up the network lock before anything else: if this throws or returns
+	// early, another machine would be blocked by a document nobody has open.
+	if (doc && !doc->documentFileName().isEmpty() && !doc->openedReadOnly())
+		DocumentLock::release(doc->documentFileName());
 	slotEndSpecialEdit();
 	view->deselectItems(false);
 	if (doc == storyEditor->currentDocument())
@@ -9611,6 +9788,16 @@ void ScribusMainWindow::suneerFixOverflowFrames()
 void ScribusMainWindow::suneerFixOverflowFramesDoc()
 {
 	suneerFixOverflowFramesRun(true);
+}
+
+void ScribusMainWindow::suneerOpenImposition()
+{
+	if (!HaveDoc || !doc)
+		return;
+	if (doc->DocPages.count() < 1)
+		return;
+	ImpositionDialog dia(doc, this);
+	dia.exec();
 }
 
 void ScribusMainWindow::suneerFitImageToFrame(PageItem* item)

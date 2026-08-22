@@ -44,7 +44,14 @@ class PLUGIN_API ImportPdfPlugin : public LoadSavePlugin
 		\param fileName input filename, or QString() to prompt.
 		\retval bool always true
 		 */
-		virtual bool importFile(QString fileName = QString(), int flags = lfUseCurrentPage|lfInteractive);
+		//! explicitDoc: if non-null, import targets this document instead of
+		//! ScCore->primaryMainWindow()->doc. Used by loadFile() (the FileFormat/
+		//! LoadSavePlugin generic interface) to honour a target set via
+		//! setupTargets() -- needed by callers importing into a document other
+		//! than whichever one is interactively active (e.g. a headless scratch
+		//! doc). Direct callers (the interactive Import menu action) never pass
+		//! this, so their behaviour is unchanged.
+		virtual bool importFile(QString fileName = QString(), int flags = lfUseCurrentPage|lfInteractive, ScribusDoc* explicitDoc = nullptr);
 
 	private:
 		void registerFormats();

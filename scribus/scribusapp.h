@@ -29,6 +29,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusapi.h"
 
 class ScribusCore;
+class SingleInstance;
 class ScribusMainWindow;
 class ScDLManager;
 
@@ -79,6 +80,10 @@ class SCRIBUS_API ScribusQApp : public QApplication
 		const QString& currGUILanguage() { return m_GUILang; }
 		const QString& userPrefsDir() { return m_prefsUserDir; }
 		ScDLManager* dlManager() { return m_scDLMgr; }
+		//! Server for handing files to this instance; null when opted out.
+		SingleInstance* singleInstance() const { return m_singleInstance; }
+		//! True when init() gave its files to a running instance: exit at once.
+		bool handedOff() const { return m_handedOff; }
 		QString pythonScript; // script to be run in python from CLI
 		QStringList pythonScriptArgs; // command line arguments and flags for script from CLI
 
@@ -111,6 +116,8 @@ class SCRIBUS_API ScribusQApp : public QApplication
 		QList<QString> m_filesToLoad;
 		QString m_fileName;
 		ScDLManager *m_scDLMgr {nullptr};
+		SingleInstance* m_singleInstance {nullptr};
+		bool m_handedOff {false};
 
 	protected:
 		virtual bool event(QEvent *event);

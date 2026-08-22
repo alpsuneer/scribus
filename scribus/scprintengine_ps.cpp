@@ -82,14 +82,16 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 		// broadsheet down proportionally and centred (it never crops or
 		// stretches). If the printer reports a size we do not recognise we fall
 		// back to A4, which is what the proof dialog reports too.
-		QString proofMedia;
-		if (options.isProofPrint && PrinterUtil::getDefaultPaperSize(options.printer, proofMedia))
+		QString proofMedia = options.proofMedia;
+		if (options.isProofPrint && proofMedia.isEmpty())
+			PrinterUtil::getDefaultPaperSize(options.printer, proofMedia);
+		if (options.isProofPrint)
 		{
-			cmd += " -o media=" + proofMedia.toLocal8Bit();
-		}
-		else if (options.isProofPrint)
-		{
-			cmd += " -o media=A4";
+			cmd += " -o media=" + (proofMedia.isEmpty() ? QByteArray("A4") : proofMedia.toLocal8Bit());
+			// Pull from the tray the user picked, so the sheet that comes out is
+			// the one they chose the paper size for.
+			if (!options.inputSlot.isEmpty())
+				cmd += " -o InputSlot=" + options.inputSlot.toLocal8Bit();
 		}
 		else
 		{
@@ -110,7 +112,22 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 		cmd += options.printerOptions.toLocal8Bit();
 		cmd += " ";
 		cmd += "\"" + filename.toLocal8Bit() + "\"";
-		system(cmd.data());
+		// Look at what lpr actually said. Discarding this status is how a proof
+		// to a queue that is missing, disabled or rejecting jobs used to report
+		// success and produce nothing: the only signal the operator got was the
+		// paper that never arrived. Name the queue in the failure instead.
+		//
+		// Proofs only. Production printing has always ignored this status, and
+		// changing that belongs in its own change with its own testing rather
+		// than riding along with the proof dialog.
+		int lprStatus = system(cmd.data());
+		if ((lprStatus != 0) && options.isProofPrint)
+		{
+			m_errorMessage = tr("Could not send the job to printer \"%1\". "
+			                    "The queue may be missing, disabled or not accepting jobs.")
+			                    .arg(options.printer);
+			return false;
+		}
 	}
 	// Disabled that for now, as kprinter won't work otherwise
 	// leaving that file around doesn't harm, as it will be overwritten the next time.

@@ -38,7 +38,8 @@
     <function shortcut="" name="editMasterPages" />
     <function shortcut="Ctrl+V" name="editPaste" />
     <function shortcut="" name="editPastePlainText"/>
-    <function shortcut="Ctrl+Shift+V" name="editPasteContents" />
+    <function shortcut="" name="editPasteContents" />
+    <function shortcut="Ctrl+Shift+V" name="editPasteOriginalPosition"/>
     <function shortcut="Ctrl+Alt+Shift+V" name="editPasteContentsAbs" />
     <function shortcut="" name="editPatterns" />
     <function shortcut="Ctrl+Z" name="editRedoAction" />

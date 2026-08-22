@@ -36,6 +36,8 @@ for which a new license (GPL+exception) is in place.
 #include <QTranslator>
 
 #include "scribusapp.h"
+#include "singleinstance.h"
+#include "documentlock.h"
 
 #include "downloadmanager/scdlmgr.h"
 #include "iconmanager.h"
@@ -63,6 +65,7 @@ for which a new license (GPL+exception) is in place.
 #define ARG_NOSPLASH "--no-splash"
 #define ARG_NEVERSPLASH "--never-splash"
 #define ARG_NOGUI "--no-gui"
+#define ARG_NOSINGLEINSTANCE "--no-single-instance"
 #define ARG_DISPLAY "--display"
 #define ARG_FONTINFO "--font-info"
 #define ARG_PROFILEINFO "--profile-info"
@@ -79,6 +82,7 @@ for which a new license (GPL+exception) is in place.
 #define ARG_NOSPLASH_SHORT "-ns"
 #define ARG_NEVERSPLASH_SHORT "-nns"
 #define ARG_NOGUI_SHORT "-g"
+#define ARG_NOSINGLEINSTANCE_SHORT "-nsi"
 #define ARG_DISPLAY_SHORT "-d"
 #define ARG_FONTINFO_SHORT "-fi"
 #define ARG_PROFILEINFO_SHORT "-pi"
@@ -230,6 +234,10 @@ void ScribusQApp::parseCommandLine()
 			m_showSplash = false;
 			neversplash = true;
 		}
+		else if (arg == ARG_NOSINGLEINSTANCE || arg == ARG_NOSINGLEINSTANCE_SHORT)
+		{
+			SingleInstance::setDisabled(true);
+		}
 		else if (arg == ARG_NOGUI || arg == ARG_NOGUI_SHORT)
 		{
 			useGUI = false;
@@ -343,6 +351,43 @@ void ScribusQApp::parseCommandLine()
 
 int ScribusQApp::init()
 {
+	// Release document locks on SIGTERM/SIGINT/SIGHUP. Without this only
+	// File > Quit releases, and a killed Scribus leaves its lock behind — one
+	// regression battery run leaked five. Fatal signals are untouched so
+	// scribus-debug and core dumps behave exactly as before.
+	DocumentLock::installSignalCleanup();
+
+	// Headless and scripted runs must never post their files into the
+	// operator's live GUI instance: every regression battery launches with -g
+	// or -py, and doing so would hijack the session under test.
+	if (!useGUI || !pythonScript.isEmpty())
+		SingleInstance::setDisabled(true);
+
+	// A second launch hands its files to the running instance and exits. Done
+	// before any heavy setup so the double-click feels instant.
+	if (!SingleInstance::isDisabled() && !m_filesToLoad.isEmpty())
+	{
+		QStringList absPaths;
+		for (const QString& f : std::as_const(m_filesToLoad))
+			absPaths.append(QFileInfo(f).absoluteFilePath());
+		if (SingleInstance::sendToRunningInstance(absPaths))
+		{
+			m_handedOff = true;
+			return EXIT_SUCCESS;
+		}
+	}
+	// Nobody was listening (or a crashed instance left a stale socket): become
+	// the receiver. Failure is not fatal — Scribus simply behaves as before.
+	if (!SingleInstance::isDisabled())
+	{
+		m_singleInstance = new SingleInstance(this);
+		if (!m_singleInstance->listen())
+		{
+			delete m_singleInstance;
+			m_singleInstance = nullptr;
+		}
+	}
+
 	m_ScCore = new ScribusCore();
 	Q_CHECK_PTR(m_ScCore);
 	if (!m_ScCore)
@@ -600,6 +645,7 @@ void ScribusQApp::showUsage()
 	printArgLine(ts, ARG_VERSION_SHORT, ARG_VERSION, tr("Output version information and exit") );
 	printArgLine(ts, ARG_PYTHONSCRIPT_SHORT, qPrintable(QString("%1 <%2> [%3] ").arg(ARG_PYTHONSCRIPT, tr("script"), tr("arguments ..."))), tr("Run script in Python [with optional arguments]. This option must be last option used") );
 	printArgLine(ts, ARG_NOGUI_SHORT, ARG_NOGUI, tr("Do not start GUI") );
+	printArgLine(ts, ARG_NOSINGLEINSTANCE_SHORT, ARG_NOSINGLEINSTANCE, tr("Always start a new instance, never reuse a running one") );
 	ts << (QString("     %1").arg(CMD_OPTIONS_END,-39)) << tr("Explicit end of command line options"); Qt::endl(ts);
 	
 #if defined(_WIN32) && !defined(_CONSOLE)

@@ -189,6 +189,9 @@ if(HAVE_OSG)
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp
 		ui/updateavailabledialog.cpp
+		scimpositionengine.cpp
+		ui/impositiondialog.cpp
+		ui/impositionpreviewwidget.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -241,6 +244,9 @@ else()
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp
 		ui/updateavailabledialog.cpp
+		scimpositionengine.cpp
+		ui/impositiondialog.cpp
+		ui/impositionpreviewwidget.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}

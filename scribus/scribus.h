@@ -142,7 +142,23 @@ public:
 	/*!
 	* \retval 0 - ok, 1 - no fonts, ...
 	*/
+	//! What to do when the requested document is already open. Declared here
+	//! rather than beside loadDoc(): that sits in a `public slots:` block, and
+	//! moc rejects a type declaration inside one ("Parse error at enum").
+	enum class AlreadyOpenAction
+	{
+		InformAndSwitch,   //!< stock: tell the user, then switch (File > Open)
+		AskGoToOrCancel    //!< offer "Go to it" or "Cancel" (double-click handoff)
+	};
+
 	int initScMW(bool primaryMainWindow);
+	/*! Queue paths handed over by another launch. NEVER opens them inline: a
+	    modal dialog may be up, and a document must not be opened from inside a
+	    blocked event loop. */
+	void queueFilesFromOtherInstance(const QStringList& files);
+private slots:
+	void drainPendingFiles();
+public:
 	void setupMainWindow();
 	int getScreenNumber() const;
 	QScreen* getScreen() const;
@@ -400,6 +416,7 @@ public slots:
 	void rebuildLayersList();
 	bool slotFileOpen();
 	bool loadDoc(const QString& );
+	bool loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen);
 	/**
 	 * @brief Do post loading functions
 	 */
@@ -436,7 +453,9 @@ public slots:
 	void slotEditCopy();
 	/** \brief paste the clipboard into the document*/
 	void slotEditPaste(bool forcePlainText = false);
+	void slotEditPasteOriginalPosition();
 	void slotEditPastePlainText();
+	void doEditPaste(bool forcePlainText, bool pasteInOriginalPosition);
 	void slotEditCopyContents();
 	//! \brief Suneer: autoflow an overflowing text frame onto new pages (linked frames, same master/layout)
 	void suneerAutoflowToNewPages();
@@ -445,6 +464,8 @@ public slots:
 	//! \brief Add or remove the News Browser tab in the Paragraph Styles docker.
 	void suneerSetNewsBrowserTabVisible(bool visible);
 	void suneerFixOverflowFramesDoc();
+	//! \brief Suneer: open the two-page CTP imposition dialog
+	void suneerOpenImposition();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor
@@ -694,10 +715,9 @@ private:
 	void setStyleSheet(); //set stylesheet for app
 	void initDefaultValues();
 	void initKeyboardShortcuts();
-	//! \brief Suneer: make editStyledCopy/editStyledPaste the unambiguous owners of
-	//! Ctrl+Shift+C/V by clearing those combos from any other action (self-heals on every
-	//! shortcut (re)load). Prevents Qt "Ambiguous shortcut overload".
-	void enforceStyledClipboardShortcuts();
+	//! \brief Keep Ctrl+Shift+C for styled copy and Ctrl+Shift+V for original-position
+	//! paste, clearing conflicting assignments after every shortcut (re)load.
+	void enforceClipboardShortcuts();
 	void initPalettes();
 	void initScrapbook();
 	void updateColorMenu(QProgressBar* progressBar = nullptr);
@@ -721,6 +741,8 @@ private:
 	void addNewPages(int wo, int where, int numPages, double height, double width, int orient, const QString& siz, bool mov, QStringList* basedOn = 0, bool overrideMasterPageSizing = true);
 
 	int m_DocNr { 1 };
+	//! Paths handed over by other launches, waiting for a modal-free moment.
+	QStringList m_pendingFilesFromOtherInstance;
 	bool m_PrinterUsed { false };
 	struct PDe {
 					QString Pname;

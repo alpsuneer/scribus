@@ -1100,6 +1100,8 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("scale-height", "scale-height", "", defaultKey(name), mainWindow));
 	name = "extrasFixOverflowFramesDoc";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasImposition";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
@@ -1107,6 +1109,7 @@ void ActionManager::initExtrasMenuActions()
 	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
 	connect( (*scrActions)["extrasFixOverflowFrames"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFrames()) );
 	connect( (*scrActions)["extrasFixOverflowFramesDoc"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFramesDoc()) );
+	connect( (*scrActions)["extrasImposition"], SIGNAL(triggered()), mainWindow, SLOT(suneerOpenImposition()) );
 }
 
 
@@ -1953,6 +1956,7 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
 	(*scrActions)["extrasFixOverflowFrames"]->setTexts( tr("Fix Overflowing Frames"));
 	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
+	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2624,7 +2628,8 @@ void ActionManager::createDefaultMenus()
 		<< "extrasUpdateDocument"
 		<< "extrasAutoflowToNewPages"
 		<< "extrasFixOverflowFrames"
-		<< "extrasFixOverflowFramesDoc";
+		<< "extrasFixOverflowFramesDoc"
+		<< "extrasImposition";
 	//Windows
 	++itmenu;
 	itmenu->second

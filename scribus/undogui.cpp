@@ -67,6 +67,7 @@ UndoWidget::UndoWidget(QWidget* parent, const char* name) : UndoGui(parent, name
 	parent->addAction(actions["editCut"]);
 	parent->addAction(actions["editCopy"]);
 	parent->addAction(actions["editPaste"]);
+	parent->addAction(actions["editPasteOriginalPosition"]);
 
 	connect(undoMenu, SIGNAL(triggered(QAction*)), this, SLOT(undoMenuClicked(QAction*)));
 	connect(redoMenu, SIGNAL(triggered(QAction*)), this, SLOT(redoMenuClicked(QAction*)));

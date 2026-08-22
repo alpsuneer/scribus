@@ -45,6 +45,99 @@
 #include <QTimer>
 #include <QShortcut>
 #include <QSettings>
+#include <QDirIterator>
+#include <QFileInfo>
+#include <QSet>
+#include "commonstrings.h"
+#include "resourcecollection.h"
+#include "scribusstructs.h"
+
+// ============================================================
+// Template style source
+//
+// Scribus keeps no record of where a paragraph style came from, so a style
+// pasted in from another .sla is indistinguishable from one defined in this
+// document's own style set. Rather than guess from the name (production
+// documents mix numbered styles like "02 BodyText" with plenty of
+// non-numbered ones — "channel movie", "schedule", "Notification" — so a
+// naming-pattern heuristic misclassifies real template styles), "template
+// style" is defined as: any paragraph style name that appears in the
+// canonical template file(s) on disk. Add a style to those files and it is
+// recognized everywhere with no per-document or per-style upkeep.
+static QString defaultTemplateSourcePath()
+{
+	return QDir::homePath() + "/Desktop/template";
+}
+
+static QString templateSourcePath()
+{
+	QSettings cfg("Scribus", "ParagraphStylesTemplateSource");
+	return cfg.value("path", defaultTemplateSourcePath()).toString();
+}
+
+static void setTemplateSourcePath(const QString& path)
+{
+	QSettings cfg("Scribus", "ParagraphStylesTemplateSource");
+	cfg.setValue("path", path);
+}
+
+static QStringList collectTemplateSlaFiles(const QString& path)
+{
+	QStringList result;
+	QFileInfo fi(path);
+	if (fi.isDir())
+	{
+		QDirIterator it(path, QStringList() << "*.sla", QDir::Files, QDirIterator::Subdirectories);
+		while (it.hasNext())
+			result << it.next();
+	}
+	else if (fi.isFile())
+	{
+		result << path;
+	}
+	return result;
+}
+
+// Cache keyed on the configured source path: the panel calls this on every
+// list rebuild, and re-parsing every template .sla each time would be slow
+// for a folder-based source. Reloaded on demand via reloadTemplateStyleNames().
+struct TemplateStyleCache
+{
+	QSet<QString> names;
+	QString sourcePath;
+	bool loaded = false;
+};
+static TemplateStyleCache s_templateCache;
+
+static const QSet<QString>& templateStyleNames(ScribusDoc* doc, bool forceReload = false)
+{
+	const QString path = templateSourcePath();
+	if (!forceReload && s_templateCache.loaded && s_templateCache.sourcePath == path)
+		return s_templateCache.names;
+
+	QSet<QString> names;
+	names.insert(CommonStrings::DefaultParagraphStyle);
+	if (doc)
+	{
+		const QStringList files = collectTemplateSlaFiles(path);
+		for (const QString& file : files)
+		{
+			// loadStylesFromFile() only fills the temp sets passed to it — it
+			// never touches doc's own style set, colors or fonts, so reading
+			// the template files here cannot affect the open document.
+			StyleSet<ParagraphStyle> tempStyles;
+			StyleSet<CharStyle> tempCharStyles;
+			QHash<QString, MultiLine> tempLineStyles;
+			doc->loadStylesFromFile(file, &tempStyles, &tempCharStyles, &tempLineStyles);
+			for (int i = 0; i < tempStyles.count(); ++i)
+				names.insert(tempStyles[i].name());
+		}
+	}
+	s_templateCache.names = names;
+	s_templateCache.sourcePath = path;
+	s_templateCache.loaded = true;
+	return s_templateCache.names;
+}
 
 // Per-style shortcut storage (in-memory, saved to QSettings)
 static QMap<QString, QKeySequence> s_styleShortcuts;
@@ -704,6 +797,27 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	);
 	stylesLayout->addWidget(m_searchBox);
 
+	QHBoxLayout* templateFilterLayout = new QHBoxLayout();
+	templateFilterLayout->setSpacing(6);
+	m_templateOnlyCheck = new QCheckBox("Template styles only", this);
+	{
+		QSettings cfg("Scribus", "ParagraphStylesPanel");
+		m_templateOnlyCheck->setChecked(cfg.value("templateStylesOnly", true).toBool());
+	}
+	m_templateOnlyCheck->setToolTip(
+		"Hide paragraph styles that aren't part of the template files at\n" + defaultTemplateSourcePath() +
+		" (e.g. styles imported by pasting text from another document).\n"
+		"Nothing is deleted — this only affects what's shown in this list.");
+	templateFilterLayout->addWidget(m_templateOnlyCheck);
+	templateFilterLayout->addStretch();
+	QToolButton* templateSourceBtn = new QToolButton(this);
+	templateSourceBtn->setText("\xe2\x9a\x99"); // ⚙
+	templateSourceBtn->setToolTip("Configure template style source / clean up imported styles");
+	templateFilterLayout->addWidget(templateSourceBtn);
+	stylesLayout->addLayout(templateFilterLayout);
+	connect(m_templateOnlyCheck, &QCheckBox::toggled, this, &ParagraphStylesPanel::toggleTemplateOnly);
+	connect(templateSourceBtn, &QToolButton::clicked, this, &ParagraphStylesPanel::openTemplateSourceSettings);
+
 	m_stylesList = new QListWidget(this);
 	m_stylesList->setAlternatingRowColors(false);
 	m_stylesList->setStyleSheet(
@@ -750,7 +864,19 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	m_editButton->setEnabled(false);
 	m_editButton->setStyleSheet(m_newButton->styleSheet());
 
+	QPushButton* cleanupButton = new QPushButton("Clean Up", this);
+	cleanupButton->setToolTip(
+		"Remove imported paragraph styles that aren't applied to any text in this document.\n"
+		"Template styles and styles currently in use are never removed.");
+	cleanupButton->setStyleSheet(
+		"QPushButton { padding: 8px 12px; background: #7f8c8d; color: white;"
+		"  border: none; border-radius: 4px; font-size: 10pt; }"
+		"QPushButton:hover { background: #636e72; }"
+	);
+	connect(cleanupButton, &QPushButton::clicked, this, &ParagraphStylesPanel::cleanupImportedStyles);
+
 	buttonLayout->addWidget(setNextButton);
+	buttonLayout->addWidget(cleanupButton);
 	// colConfigBtn removed — Column Style is now a tab
 	buttonLayout->addStretch();
 	buttonLayout->addWidget(m_newButton);
@@ -1066,16 +1192,149 @@ void ParagraphStylesPanel::updateStylesList()
 		}
 		m_stylesList->addItem(item);
 	}
+	applyListFilters();
 }
 
 void ParagraphStylesPanel::filterStyles(const QString& filter)
 {
+	Q_UNUSED(filter);
+	applyListFilters();
+}
+
+void ParagraphStylesPanel::applyListFilters()
+{
+	const QString filter = m_searchBox->text();
+	const bool templateOnly = m_templateOnlyCheck && m_templateOnlyCheck->isChecked();
+	const QSet<QString>& templateNames = templateOnly ? templateStyleNames(m_doc) : QSet<QString>();
 	for (int i = 0; i < m_stylesList->count(); ++i)
 	{
 		QListWidgetItem* item = m_stylesList->item(i);
 		QString name = item->data(Qt::UserRole).toString();
-		item->setHidden(!name.contains(filter, Qt::CaseInsensitive));
+		bool matchesText = name.contains(filter, Qt::CaseInsensitive);
+		bool matchesTemplate = !templateOnly || templateNames.contains(name);
+		item->setHidden(!(matchesText && matchesTemplate));
 	}
+}
+
+void ParagraphStylesPanel::toggleTemplateOnly(bool checked)
+{
+	QSettings cfg("Scribus", "ParagraphStylesPanel");
+	cfg.setValue("templateStylesOnly", checked);
+	applyListFilters();
+}
+
+void ParagraphStylesPanel::openTemplateSourceSettings()
+{
+	QDialog dlg(this);
+	dlg.setWindowTitle("Template Style Source");
+	QVBoxLayout* layout = new QVBoxLayout(&dlg);
+
+	QLabel* info = new QLabel(
+		"A paragraph style counts as a \"template style\" if its name appears in\n"
+		"one of the .sla files below (a single file, or every .sla under a folder).\n"
+		"Anything else — e.g. a style pulled in by pasting text from another\n"
+		"document — is treated as imported and hidden when \"Template styles only\" is on.",
+		&dlg);
+	info->setWordWrap(true);
+	layout->addWidget(info);
+
+	QHBoxLayout* pathLayout = new QHBoxLayout();
+	QLineEdit* pathEdit = new QLineEdit(templateSourcePath(), &dlg);
+	QPushButton* browseFileBtn = new QPushButton("File...", &dlg);
+	QPushButton* browseFolderBtn = new QPushButton("Folder...", &dlg);
+	pathLayout->addWidget(pathEdit);
+	pathLayout->addWidget(browseFileBtn);
+	pathLayout->addWidget(browseFolderBtn);
+	layout->addLayout(pathLayout);
+
+	connect(browseFileBtn, &QPushButton::clicked, &dlg, [&dlg, pathEdit]() {
+		QString path = QFileDialog::getOpenFileName(&dlg, "Choose Template File", pathEdit->text(), "Scribus Files (*.sla)");
+		if (!path.isEmpty())
+			pathEdit->setText(path);
+	});
+	connect(browseFolderBtn, &QPushButton::clicked, &dlg, [&dlg, pathEdit]() {
+		QString path = QFileDialog::getExistingDirectory(&dlg, "Choose Template Folder", pathEdit->text());
+		if (!path.isEmpty())
+			pathEdit->setText(path);
+	});
+
+	QLabel* countLabel = new QLabel(&dlg);
+	auto refreshCount = [this, countLabel, pathEdit]() {
+		setTemplateSourcePath(pathEdit->text());
+		const QSet<QString>& names = templateStyleNames(m_doc, true);
+		countLabel->setText(QString("%1 template style name(s) found.").arg(names.count()));
+	};
+	refreshCount();
+	layout->addWidget(countLabel);
+
+	QPushButton* refreshBtn = new QPushButton("Refresh", &dlg);
+	connect(refreshBtn, &QPushButton::clicked, &dlg, [refreshCount]() { refreshCount(); });
+	layout->addWidget(refreshBtn);
+
+	QDialogButtonBox* box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+	layout->addWidget(box);
+	connect(box, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	connect(box, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+	QString previousPath = templateSourcePath();
+	if (dlg.exec() == QDialog::Accepted)
+	{
+		setTemplateSourcePath(pathEdit->text());
+		templateStyleNames(m_doc, true);
+	}
+	else
+	{
+		setTemplateSourcePath(previousPath);
+	}
+	applyListFilters();
+}
+
+void ParagraphStylesPanel::cleanupImportedStyles()
+{
+	if (!m_doc)
+		return;
+
+	const QSet<QString>& templateNames = templateStyleNames(m_doc);
+	ResourceCollection usedResources;
+	m_doc->getUsedStylesFromItems(usedResources);
+
+	QStringList toRemove;
+	int styleCount = m_doc->paragraphStyles().count();
+	for (int i = 0; i < styleCount; ++i)
+	{
+		const ParagraphStyle& ps = m_doc->paragraphStyles()[i];
+		if (ps.isDefaultStyle() || !ps.hasName())
+			continue;
+		if (templateNames.contains(ps.name()))
+			continue; // template style: never auto-removed, used or not
+		if (usedResources.styles().contains(ps.name()))
+			continue; // still applied to text somewhere: never remove
+		toRemove.append(ps.name());
+	}
+
+	if (toRemove.isEmpty())
+	{
+		QMessageBox::information(this, "Clean Up Imported Styles",
+			"No unused imported styles found. Nothing to remove.");
+		return;
+	}
+
+	QMessageBox::StandardButton reply = QMessageBox::question(this, "Clean Up Imported Styles",
+		QString("Remove %1 unused imported style(s)?\n\n%2").arg(toRemove.count()).arg(toRemove.join("\n")),
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (reply != QMessageBox::Yes)
+		return;
+
+	StyleSet<ParagraphStyle> keptStyles;
+	for (int i = 0; i < styleCount; ++i)
+	{
+		const ParagraphStyle& ps = m_doc->paragraphStyles()[i];
+		if (!toRemove.contains(ps.name()))
+			keptStyles.create(ps);
+	}
+	m_doc->redefineStyles(keptStyles, true);
+	m_doc->changed();
+	updateStylesList();
 }
 
 void ParagraphStylesPanel::applyStyle()

@@ -43,6 +43,38 @@ class SCRIBUS_API PrinterUtil
 		 */
 		bool static getDefaultPaperSize(const QString& printerName, QString& mediaName, QSizeF* sizePoints = nullptr);
 
+		/**
+		 * @brief Paper sizes a queue actually offers, with the queue's default.
+		 *
+		 * Queried from cupsd rather than the PPD file: /etc/cups/ppd is
+		 * root:lp 0640 and the desktop user is not in group lp, so parsing the
+		 * PPD would fail for exactly the users who need this. The names are
+		 * PPD keywords ("A4", "A3"), which is what -o media= expects.
+		 *
+		 * @param names receives the offered sizes, default first if identifiable
+		 * @param defaultName receives the queue's default size
+		 * @return false if the queue reports no page sizes at all
+		 */
+		bool static getSupportedPaperSizes(const QString& printerName, QStringList& names, QString& defaultName);
+
+		/**
+		 * @brief Paper trays a queue offers, with the queue's default.
+		 *
+		 * Same source and the same reason as getSupportedPaperSizes(). Names
+		 * are PPD keywords ("Auto", "Tray1"), which is what -o InputSlot=
+		 * expects.
+		 *
+		 * @return false if the queue reports no input slots (single-source
+		 * printer): callers should then hide the control entirely.
+		 */
+		bool static getInputSlots(const QString& printerName, QStringList& traySlots, QString& defaultSlot);
+
+		/**
+		 * @brief Size in points of a PPD paper keyword, for scaling.
+		 * @return an invalid (empty) QSizeF if the name is not one we can size.
+		 */
+		QSizeF static paperSizePoints(const QString& mediaName);
+
 #if defined(_WIN32)
 		/**
 		 * @brief Get the defaults settings for a specified printer (Windows only)

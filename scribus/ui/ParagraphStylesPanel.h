@@ -20,6 +20,7 @@ class ScribusDoc;
 class ScribusMainWindow;
 class PageItem_TextFrame;
 class QShortcut;
+class QCheckBox;
 
 class ParagraphStylesPanel : public QDockWidget
 {
@@ -70,6 +71,9 @@ private slots:
 	void editStyle();
 	void newStyle();
 	void deleteStyle();
+	void toggleTemplateOnly(bool checked);
+	void openTemplateSourceSettings();
+	void cleanupImportedStyles();
 private:
 	void applySingleParagraph(PageItem_TextFrame* textFrame, const QString& styleName);
 	void applySequentialStyles(PageItem_TextFrame* textFrame, const QString& startStyleName);
@@ -77,13 +81,18 @@ private:
 	void applyChainFromStyle(const QString& startStyle);
 	void setupShortcuts();
 	void clearShortcuts();
-	
+	//! \brief Re-applies the search text and (if enabled) the template-styles-only
+	//! filter to the already-populated list. Call after any rebuild or after either
+	//! filter's state changes.
+	void applyListFilters();
+
 	QPointer<ScribusDoc> m_doc;
 	ScribusMainWindow* m_mainWindow;
 	
 	QListWidget* m_stylesList;
 	QTabWidget* m_tabWidget {nullptr};
 	QLineEdit* m_searchBox;
+	QCheckBox* m_templateOnlyCheck {nullptr};
 	QGridLayout* m_iconsGrid = nullptr;
 	QWidget*     m_designTab  = nullptr;
 	QListWidget* m_colList    = nullptr;

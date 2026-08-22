@@ -6,6 +6,7 @@ for which a new license (GPL+exception) is in place.
 */
 #include "util_printer.h"
 #include "scconfig.h"
+#include <QProcess>
 #include <QPrinterInfo>
 #include <QPrinter>
 #include <QPageLayout>
@@ -109,6 +110,89 @@ bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& media
 	if (sizePoints)
 		*sizePoints = pageSize.size(QPageSize::Point);
 	return true;
+}
+
+
+// Ask cupsd (not the PPD file, which the desktop user cannot read) for one of
+// the option lists lpoptions reports, e.g. "PageSize" or "InputSlot". Returns
+// the offered values; the queue's default is the one marked with '*'.
+static bool scQueryPrinterOptionList(const QString& printerName, const QString& optionKey,
+                                     QStringList& values, QString& defaultValue)
+{
+	values.clear();
+	defaultValue.clear();
+	if (printerName.isEmpty())
+		return false;
+
+	QProcess proc;
+	proc.start("lpoptions", QStringList() << "-p" << printerName << "-l");
+	if (!proc.waitForFinished(4000))
+	{
+		proc.kill();
+		proc.waitForFinished(1000);
+		return false;
+	}
+	const QString out = QString::fromLocal8Bit(proc.readAllStandardOutput());
+
+	// Each line looks like:  PageSize/Media Size: A4 *A3 A5 ...
+	const QStringList lines = out.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+	for (const QString& line : lines)
+	{
+		int slash = line.indexOf(QLatin1Char('/'));
+		int colon = line.indexOf(QLatin1Char(':'));
+		if ((slash < 0) || (colon < slash))
+			continue;
+		if (line.left(slash).trimmed() != optionKey)
+			continue;
+		const QStringList tokens = line.mid(colon + 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+		for (const QString& token : tokens)
+		{
+			QString value = token.trimmed();
+			bool isDefault = value.startsWith(QLatin1Char('*'));
+			if (isDefault)
+				value.remove(0, 1);
+			if (value.isEmpty())
+				continue;
+			values.append(value);
+			if (isDefault)
+				defaultValue = value;
+		}
+		break;
+	}
+	return !values.isEmpty();
+}
+
+bool PrinterUtil::getSupportedPaperSizes(const QString& printerName, QStringList& names, QString& defaultName)
+{
+	return scQueryPrinterOptionList(printerName, QStringLiteral("PageSize"), names, defaultName);
+}
+
+bool PrinterUtil::getInputSlots(const QString& printerName, QStringList& traySlots, QString& defaultSlot)
+{
+	return scQueryPrinterOptionList(printerName, QStringLiteral("InputSlot"), traySlots, defaultSlot);
+}
+
+QSizeF PrinterUtil::paperSizePoints(const QString& mediaName)
+{
+	// Only the sizes a proof is ever scaled onto need to be resolvable here;
+	// anything else is reported as unknown so the caller can fall back rather
+	// than invent a geometry.
+	static const QHash<QString, QPageSize::PageSizeId> sizeIds {
+		{ QStringLiteral("A3"),      QPageSize::A3 },
+		{ QStringLiteral("A4"),      QPageSize::A4 },
+		{ QStringLiteral("A5"),      QPageSize::A5 },
+		{ QStringLiteral("A6"),      QPageSize::A6 },
+		{ QStringLiteral("B4"),      QPageSize::B4 },
+		{ QStringLiteral("B5"),      QPageSize::B5 },
+		{ QStringLiteral("Letter"),  QPageSize::Letter },
+		{ QStringLiteral("Legal"),   QPageSize::Legal },
+		{ QStringLiteral("Tabloid"), QPageSize::Tabloid },
+		{ QStringLiteral("Executive"), QPageSize::Executive },
+	};
+	auto it = sizeIds.constFind(mediaName);
+	if (it == sizeIds.constEnd())
+		return QSizeF();
+	return QPageSize(it.value()).size(QPageSize::Point);
 }
 
 #if defined(_WIN32)

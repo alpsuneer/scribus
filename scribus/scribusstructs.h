@@ -454,6 +454,11 @@ struct PrintOptions
 	//! not enough, a PostScript printer receives the job unscaled and clips it.
 	double proofPaperWidth { 0.0 };
 	double proofPaperHeight { 0.0 };
+	//! Paper chosen for a proof (PPD keyword, e.g. "A4"). Empty means fall back
+	//! to whatever the queue reports as its default.
+	QString proofMedia;
+	//! Tray chosen for a proof (PPD keyword, e.g. "Tray1"), empty for none.
+	QString inputSlot;
 	PrintLanguage prnLanguage { PrintLanguage::PostScript3 };
 	double markLength { 20.0 };
 	double markOffset { 0.0 };

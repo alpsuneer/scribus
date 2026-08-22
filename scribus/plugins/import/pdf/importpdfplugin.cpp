@@ -146,11 +146,15 @@ bool ImportPdfPlugin::fileSupported(QIODevice* /* file */, const QString & fileN
 
 bool ImportPdfPlugin::loadFile(const QString & fileName, const FileFormat &, int flags, int /*index*/)
 {
-	// There's only one format to handle, so we just call importFile(...)
-	return importFile(fileName, flags);
+	// There's only one format to handle, so we just call importFile(...).
+	// m_Doc was set by setupTargets() (part of the generic FileFormat/
+	// LoadSavePlugin contract) immediately before this runs -- pass it
+	// through explicitly so importFile() targets it instead of silently
+	// falling back to whichever document is interactively active.
+	return importFile(fileName, flags, m_Doc);
 }
 
-bool ImportPdfPlugin::importFile(QString fileName, int flags)
+bool ImportPdfPlugin::importFile(QString fileName, int flags, ScribusDoc* explicitDoc)
 {
 	if (!checkFlags(flags))
 		return false;
@@ -165,7 +169,7 @@ bool ImportPdfPlugin::importFile(QString fileName, int flags)
 		fileName = diaf.selectedFile();
 		prefs->set("wdir", fileName.left(fileName.lastIndexOf("/")));
 	}
-	m_Doc = ScCore->primaryMainWindow()->doc;
+	m_Doc = explicitDoc ? explicitDoc : ScCore->primaryMainWindow()->doc;
 	bool emptyDoc = (m_Doc == nullptr);
 	bool hasCurrentPage = (m_Doc && m_Doc->currentPage());
 

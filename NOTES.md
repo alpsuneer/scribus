@@ -438,6 +438,52 @@ Traps:
 
 ---
 
+## Desh RIP — standalone CTP screening tool
+
+A **separate application, not part of this repository**: `/home/s1/desh-rip/`,
+Python 3 + PyQt6. Takes the imposed PDF that this fork's Impose Pages feature
+produces (Extras → Impose Pages → Preview PDF / Send to CTP, uncommitted work
+on `feature/ctp-output`) and converts it to 4 separated 1-bit CMYK TIFF plates
+via Ghostscript's `tiffsep1` device, with real AM (amplitude-modulated)
+halftone screening — the working recipe is Key Trap #5 above; every mechanism
+in the feature's original spec (`sethalftone`/`setpagedevice` alone) silently
+produced wrong output, discovered only by testing pixel content, not by
+whether the command exited 0.
+
+**Stack**: PyQt6, installed via `apt install python3-pyqt6` (`python3-pyqt6`
+6.9.0-2). Neither PyQt6 nor PySide6 was preinstalled on this machine, but both
+are real, clean Debian packages here — no pip/venv workaround needed
+(`python3-pyside6.qtwidgets` 6.8.2.1-4 is the PySide6 fallback, also available,
+not installed).
+
+**Structure**:
+
+| File | Role |
+|---|---|
+| `desh_rip/profiles.py` | `Profile` dataclass, JSON persistence at `~/.config/desh-rip/profiles.json` |
+| `desh_rip/ghostscript.py` | The actual `tiffsep1` invocation, implementing the Key Trap #5 recipe. Raises `ValueError` immediately for an FM profile — no silent wrong-screening output |
+| `desh_rip/settings_dialog.py` | Print Profiles UI: profile list, AM/FM editor, per-channel angles, "standard newspaper angles" checkbox |
+| `desh_rip/main_window.py` + `main.py` | App shell; "Generate Plates..." runs the real pipeline end to end |
+
+**State: AM screening complete and verified working. FM screening
+deliberately unimplemented** — blocked on Key Trap #5's still-unsolved FM
+mechanism. The FM radio button is present in the UI (matches the originally-
+specified mockup) but labelled "not yet supported"; selecting it and trying
+to generate plates fails with a clear message rather than producing incorrect
+output.
+
+**Verification**: ran `ghostscript.generate_plates()` against a real
+production imposed PDF and diffed the **raw pixel data** (`Image.tobytes()`
+MD5, not just file bytes — those differ on every run due to a TIFF timestamp
+tag) against the manually-validated reference command from the Key Trap #5
+investigation — **100% pixel-identical on all 4 channels**. GUI launched and
+screenshotted on an isolated Xvfb display (`:77`, never the operator's live
+desktop) — main window and Print Profiles dialog both confirmed rendering
+correctly; the AM/FM radio toggle confirmed switching the settings groups
+correctly.
+
+---
+
 ## Key traps
 
 ### 1. The SLA 1/10 grid
@@ -523,6 +569,90 @@ each other forever. Record in the command, not in the layout. Layout keeps an
 unrecorded fallback plus a `qWarning`.
 
 Regression battery: `~/scribus-crashlogs/repro/run_undo_bullet_test.sh [char|image]`.
+
+### 5. Ghostscript silently ignores every classic halftone operator — `sethalftone`/`setpagedevice`/`setscreen`/`setcolorscreen` all do nothing
+
+Discovered while building CTP plate generation (imposition PDF → 4 separated
+1-bit TIFFs via `gs -sDEVICE=tiffsep1`). Every "obvious" PostScript mechanism
+for controlling AM screening frequency/angle gets **accepted** (confirmed via
+`currenthalftone` immediately reflecting the request) but has **zero effect on
+the rendered output**:
+
+- `sethalftone` with a `HalftoneType 1` or `5` (multi-colorant) dict
+- `setpagedevice` with the same dict
+- `setscreen` (the classic Level 1 freq/angle/proc operator)
+- `setcolorscreen` (the RGB+gray 12-argument form)
+
+Verified via 15+ isolated tests, not just "looked the same": byte-identical
+output across wildly different requested frequencies (20lpi vs 150lpi), on
+two different devices (`tiffsep1` and `pbmraw`), on both PDF and PostScript
+input (ruling out the newer C-based `pdfi` PDF interpreter as the cause —
+plain `.ps` input was equally unaffected), with `-dPreserveHalftoneInfo=false`
+/ `-dAccurateScreens=true` / `-dUseFastColor=true` all tried in combination
+and making no difference. Confirmed on a trivial single-rectangle synthetic
+file (`0.37 setgray; 0 0 200 200 rectfill`) to rule out any real-content
+explanation (embedded pre-screened images, antialiasing artifacts, etc.).
+
+**What actually works** — found in Ghostscript's docs, not in any PostScript
+operator:
+
+```
+-dDITHERPPI=<lpi>   forces the requested frequency to actually be used. Without
+                    it, gs silently substitutes its own "minimal sized periodic
+                    screen" for colour accuracy, discarding the requested
+                    Frequency entirely — confirmed by the internal string
+                    `strings libgs.so.10` reveals: "No additional dithering,
+                    creating minimal sized periodic screen".
+-dCOLORSCREEN       required for per-channel Angle to differ AT ALL. Without
+                    it every CMYK channel renders at the same angle regardless
+                    of a HalftoneType 5 dict's per-colorant Angle — verified
+                    visually: Cyan (15°) and Magenta (75°) were pixel-identical
+                    until this flag was added, then visibly different.
+```
+
+Both are plain `-d` command-line switches, not PostScript. The halftone dict
+itself is still required for the actual per-channel Frequency/Angle/SpotFunction
+values — it just silently does nothing without these two flags present too.
+
+Working recipe (verified pixel-for-pixel reproducible, including from Python
+via `subprocess` — see Desh RIP below):
+
+```
+gs -dBATCH -dNOPAUSE -dSAFER -sDEVICE=tiffsep1 -r1200 -sCompression=g4 \
+   -dDITHERPPI=150 -dCOLORSCREEN \
+   -sOutputFile=out_%d.tif \
+   -c "<< /HalftoneType 5
+        /Default << /HalftoneType 1 /Frequency 150 /Angle 45 /SpotFunction {dup mul exch dup mul add 1 exch sub} >>
+        /Cyan    << /HalftoneType 1 /Frequency 150 /Angle 15 /SpotFunction {dup mul exch dup mul add 1 exch sub} >>
+        /Magenta << /HalftoneType 1 /Frequency 150 /Angle 75 /SpotFunction {dup mul exch dup mul add 1 exch sub} >>
+        /Yellow  << /HalftoneType 1 /Frequency 150 /Angle  0 /SpotFunction {dup mul exch dup mul add 1 exch sub} >>
+        /Black   << /HalftoneType 1 /Frequency 150 /Angle 45 /SpotFunction {dup mul exch dup mul add 1 exch sub} >>
+       >> sethalftone" \
+   -f input.pdf
+```
+
+Two more traps bundled into the same investigation:
+
+- **`/SpotFunction /SimpleDot` (a name) is invalid** — PostScript's `sethalftone`
+  requires a **procedure** (`{...}`). `SimpleDot` as a *named* spot function is
+  a PDF-halftone-dictionary-spec convention (Table 100 in the PDF spec), not a
+  PostScript one; using it throws `Error: /typecheck in --sethalftone--`.
+- **Argument order**: `-sOutputFile` must come *before* `-c`/`-f`. `-f file.pdf`
+  triggers immediate execution, so any switch after it (e.g. `-c "..." -f
+  input.pdf -sOutputFile=...`) arrives too late for the device to see —
+  `tiffsep1` then reports "requires an output file but no file was specified"
+  even though one was given.
+- `tiffsep1` names its own output
+  `<template-with-%d-substituted>(<SeparationName>).tif` (e.g.
+  `out_1(Cyan).tif`), never `<template><SeparationName>.tif` — trips up any
+  code, or command typed by hand, that assumes the latter.
+
+**FM/stochastic screening (`HalftoneType 3`, threshold array) is still
+unsolved.** Tested with and without `-dDITHERPPI`; produced the same default
+periodic pattern regardless of the threshold array's actual contents, every
+time. Needs a fresh investigation pass — possibly also needs a properly-
+constructed blue-noise matrix rather than the crude random-shuffle array used
+to test, since a bad matrix could itself explain "no visible difference".
 
 ### Other traps that cost real time
 

@@ -96,6 +96,10 @@ int mainApp(int argc, char **argv)
 	int appRetVal = app.init();
 	if (appRetVal == EXIT_FAILURE)
 		return(EXIT_FAILURE);
+	// The files went to an already-running instance, so there is no window here
+	// and nothing to pump: entering exec() would hang as an invisible process.
+	if (app.handedOff())
+		return EXIT_SUCCESS;
 	if (app.useGUI)
 		return app.exec();
 	return EXIT_SUCCESS;

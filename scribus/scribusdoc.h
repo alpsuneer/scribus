@@ -1377,6 +1377,9 @@ protected:
 	QString m_currentEditedSymbol;
 	int m_currentEditedIFrame {0};
 	QString m_documentFileName;
+	//! Opened while another machine held the lock file: Save is refused, Save As
+	//! to a different name is still allowed.
+	bool m_openedReadOnly { false };
 	QUuid m_uuid;
 
 public: // Public attributes
@@ -2011,6 +2014,8 @@ public:
 	void ImportData();
 	void ResetFormFields();
 	QString documentFileName() const;
+	bool openedReadOnly() const { return m_openedReadOnly; }
+	void setOpenedReadOnly(bool ro) { m_openedReadOnly = ro; }
 	void setDocumentFileName(const QString& documentFileName);
 };
 
