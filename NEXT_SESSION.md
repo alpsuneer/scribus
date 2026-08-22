@@ -33,6 +33,7 @@ Engineering index lives in NOTES.md; this file is just "where we left off".
 - **Five committed 16px SVGs are unregistered**: `select-{lasso,ellipse,polygon,rectangular,smart}.svg`. Harmless today — the editor loads those tools through `makePngTool`, which uses the `-24.png`/`-48.png` files, not the manifest. They only need ids if the toolbar ever moves to the SVGs.
 - **Anything added to the build must be committed with its sources.** The clean-checkout breakage came from committing `CMakeLists.txt` entries, headers and call sites while the `.cpp` files stayed untracked; local builds hide this completely. `git status` before committing a feature.
 - **GUI automation**: the "Qt menus intermittently refuse to open" symptom was self-inflicted — the editor window is not at (0,0) (seen at X=1,Y=25). Always `eval $(xdotool getwindowgeometry --shell $W)` and offset. Screenshots don't capture the pointer; use the XFixes probe (`xfixes.get_cursor_image(display, root)`) to verify cursors.
+- **`pgrep -f` / `pkill -f` match the invoking shell's own command line.** `pkill -f "Xvfb :77"` kills the shell running it (exit 144), and an `until ! pgrep -f "cmake --build"` watcher never exits because it finds itself. Collect PIDs first and `kill` those, or use a self-excluding pattern like `ps -eo args | grep '[u]ntil'`. Cost three self-killed shells and a bogus "8 builds still running" reading in this run.
 
 ## Design decisions worth remembering
 
