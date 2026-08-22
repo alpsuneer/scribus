@@ -253,6 +253,11 @@ On Dark:  #e580ff; rgb(229, 128, 255); hsl(288, 100, 75)
 		<icon id="cursor-polygon" file="32/cursor-polygon.svg" />		
 		<icon id="cursor-remove-point" file="32/cursor-remove.svg" />
 		<icon id="cursor-rotate" file="32/cursor-rotate.svg" />
+		<icon id="cursor-select-brush" file="32/cursor-select-brush.svg" /><!-- image editor -->
+		<icon id="cursor-select-ellipse" file="32/cursor-select-ellipse.svg" /><!-- image editor -->
+		<icon id="cursor-select-lasso" file="32/cursor-select-lasso.svg" /><!-- image editor -->
+		<icon id="cursor-select-rect" file="32/cursor-select-rect.svg" /><!-- image editor -->
+		<icon id="cursor-select-smart" file="32/cursor-select-smart.svg" /><!-- image editor -->
 		<icon id="cursor-select-column" file="32/cursor-select-column.svg" /><!-- table -->
 		<icon id="cursor-select-row" file="32/cursor-select-row.svg" /><!-- table -->
 		<icon id="cursor-split" file="32/cursor-split.svg" />

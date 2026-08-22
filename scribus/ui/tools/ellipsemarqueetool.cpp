@@ -8,10 +8,23 @@ for which a new license (GPL+exception) is in place.
 
 #include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
+#include <QCursor>
 #include <QPen>
 
+#include "iconmanager.h"
 #include "scimageselection.h"
 #include "ui/scimageeditor.h"
+
+//! The crosshair every selection tool used to share told the user nothing about
+//! which one was active. Each now carries the shared crosshair plus its own
+//! badge; the hotspot stays on the crosshair centre so precision is unchanged.
+QCursor EllipseMarqueeTool::cursor() const
+{
+	const QCursor c = IconManager::instance().loadCursor(QStringLiteral("cursor-select-ellipse"), 15, 15);
+	// A missing icon id yields a null pixmap, and QCursor turns that into a plain
+	// arrow — worse than the crosshair it replaced — so fall back explicitly.
+	return c.pixmap().isNull() ? QCursor(Qt::CrossCursor) : c;
+}
 
 void EllipseMarqueeTool::createRubber(const QRectF& r)
 {

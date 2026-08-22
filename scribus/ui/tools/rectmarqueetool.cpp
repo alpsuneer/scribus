@@ -9,10 +9,23 @@ for which a new license (GPL+exception) is in place.
 #include <QGraphicsRectItem>
 #include <QGraphicsScene>
 #include <QMouseEvent>
+#include <QCursor>
 #include <QPen>
 
+#include "iconmanager.h"
 #include "scimageselection.h"
 #include "ui/scimageeditor.h"
+
+//! The crosshair every selection tool used to share told the user nothing about
+//! which one was active. Each now carries the shared crosshair plus its own
+//! badge; the hotspot stays on the crosshair centre so precision is unchanged.
+QCursor RectMarqueeTool::cursor() const
+{
+	const QCursor c = IconManager::instance().loadCursor(QStringLiteral("cursor-select-rect"), 15, 15);
+	// A missing icon id yields a null pixmap, and QCursor turns that into a plain
+	// arrow — worse than the crosshair it replaced — so fall back explicitly.
+	return c.pixmap().isNull() ? QCursor(Qt::CrossCursor) : c;
+}
 
 namespace
 {
@@ -53,8 +66,13 @@ void RectMarqueeTool::mouseRelease(QMouseEvent* e, const QPointF& imagePos)
 	removeRubber();
 	if (!m_editor || !m_editor->selection())
 		return;
-	if (r.width() < 2.0 || r.height() < 2.0)
-		return;   // stray click — leave the selection unchanged
+	// Stray click — leave the selection unchanged. The threshold is how far the
+	// hand moved, so it is a screen distance: a flat 2 image pixels is a tenth
+	// of a pixel of cursor travel at 20x, and 10 pixels of travel on a big photo
+	// zoomed out to fit, where an ordinary click-jitter would wipe the selection.
+	const double slop = imageDistance(2.0);
+	if (r.width() < slop || r.height() < slop)
+		return;
 	QRect ir = r.toRect().intersected(QRect(QPoint(0, 0), m_editor->selection()->size()));
 	if (ir.width() < 1 || ir.height() < 1)
 		return;

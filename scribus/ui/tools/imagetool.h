@@ -56,6 +56,14 @@ protected:
 
 	//! Selection combination mode from Shift/Alt modifiers (Photoshop convention).
 	ScImageSelection::Mode modeFromModifiers(Qt::KeyboardModifiers mods) const;
+
+	//! \a screenPixels converted to image pixels at the view's current zoom.
+	//! Tools are handed positions in image coordinates, but anything measuring
+	//! how far the *hand* moved — a stray-click guard, a vertex-subsample gate,
+	//! a click-versus-drag threshold — is a screen distance and has to be
+	//! converted, or it silently tightens as you zoom in and loosens as you
+	//! zoom out.
+	double imageDistance(double screenPixels) const;
 };
 
 #endif // IMAGETOOL_H

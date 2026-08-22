@@ -11,10 +11,23 @@ for which a new license (GPL+exception) is in place.
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainterPath>
+#include <QCursor>
 #include <QPen>
 
+#include "iconmanager.h"
 #include "scimageselection.h"
 #include "ui/scimageeditor.h"
+
+//! The crosshair every selection tool used to share told the user nothing about
+//! which one was active. Each now carries the shared crosshair plus its own
+//! badge; the hotspot stays on the crosshair centre so precision is unchanged.
+QCursor PolygonLassoTool::cursor() const
+{
+	const QCursor c = IconManager::instance().loadCursor(QStringLiteral("cursor-polygon"), 15, 15);
+	// A missing icon id yields a null pixmap, and QCursor turns that into a plain
+	// arrow — worse than the crosshair it replaced — so fall back explicitly.
+	return c.pixmap().isNull() ? QCursor(Qt::CrossCursor) : c;
+}
 
 void PolygonLassoTool::mousePress(QMouseEvent* e, const QPointF& imagePos)
 {
@@ -79,6 +92,9 @@ void PolygonLassoTool::commit()
 	if (m_editor && m_editor->selection() && m_anchors.size() >= 3)
 	{
 		QPainterPath path(m_anchors.first());
+		// Same reason as the freehand lasso: a self-crossing outline would lose
+		// whole wedges under the default odd-even fill rule.
+		path.setFillRule(Qt::WindingFill);
 		for (int i = 1; i < m_anchors.size(); ++i)
 			path.lineTo(m_anchors.at(i));
 		path.closeSubpath();

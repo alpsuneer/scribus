@@ -28,12 +28,19 @@ for which a new license (GPL+exception) is in place.
 #include <QtConcurrent/QtConcurrentRun>
 
 #include "scimagesam.h"
+#include "iconmanager.h"
 #include "scimageselection.h"
 #include "ui/scimageeditor.h"
 
+//! The crosshair every selection tool used to share told the user nothing about
+//! which one was active. Each now carries the shared crosshair plus its own
+//! badge; the hotspot stays on the crosshair centre so precision is unchanged.
 QCursor SamSelectTool::cursor() const
 {
-	return Qt::CrossCursor;
+	const QCursor c = IconManager::instance().loadCursor(QStringLiteral("cursor-select-smart"), 15, 15);
+	// A missing icon id yields a null pixmap, and QCursor turns that into a plain
+	// arrow — worse than the crosshair it replaced — so fall back explicitly.
+	return c.pixmap().isNull() ? QCursor(Qt::CrossCursor) : c;
 }
 
 QWidget* SamSelectTool::optionsBar()
@@ -216,7 +223,12 @@ void SamSelectTool::mouseRelease(QMouseEvent* e, const QPointF& imagePos)
 	if (!m_ready || !m_editor || !m_editor->selection())
 		return;
 
-	if (QLineF(m_start, imagePos).length() < 5.0)
+	// Click-versus-box is a question about how far the hand moved, so the
+	// threshold is a screen distance. As a flat 5 image pixels it drifts with
+	// the zoom: on a big photo fitted to the window an ordinary click travels
+	// well past it and is read as a box prompt, which clears the session and
+	// throws away the point prompts accumulated on the current object.
+	if (QLineF(m_start, imagePos).length() < imageDistance(5.0))
 	{
 		// Point click: add to the running prompt and re-segment the same object.
 		// Alt-click always subtracts, regardless of the options-bar toggle.

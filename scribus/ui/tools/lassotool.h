@@ -28,6 +28,8 @@ public:
 
 	QString name() const override { return tr("Lasso"); }
 
+	QCursor cursor() const override;
+
 	void mousePress(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseMove(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseRelease(QMouseEvent* e, const QPointF& imagePos) override;
@@ -39,7 +41,10 @@ private:
 
 	QPainterPath m_path;
 	QPointF m_last;
-	QGraphicsPathItem* m_preview { nullptr };
+	// Two overlaid outlines with interleaved dashes (the marching-ants trick) so
+	// the trace stays visible over both light and dark images.
+	QGraphicsPathItem* m_previewDark { nullptr };
+	QGraphicsPathItem* m_previewLight { nullptr };
 	ScImageSelection::Mode m_mode { ScImageSelection::Replace };
 	bool m_active { false };
 };

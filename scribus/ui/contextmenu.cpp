@@ -103,6 +103,9 @@ void ContextMenu::createMenuItems_Selection()
 	QMenu *menuScrapbook = new QMenu(this);
 	QMenu *menuEdit = new QMenu(this);
 	QMenu *menuImage = new QMenu(this);
+	// QMenu hides action tooltips unless asked; the image-editor entry uses one
+	// to explain why it is disabled for vector images.
+	menuImage->setToolTipsVisible(true);
 //	QMenu *menuWeld = new QMenu(this);
 
 	//<-- Add Info
@@ -377,17 +380,16 @@ void ContextMenu::createMenuItems_Selection()
 			QAction* editInScribus = menuImage->addAction(tr("Edit in Scribus Image Editor"));
 			QPointer<PageItem_ImageFrame> imgFrame = currItem->asImageFrame();
 			QWidget* parentWin = m_ScMW;
+			// The editor is a raster tool; opening a vector placement would mean
+			// rasterising it on save, so those are offered but disabled.
+			if (ScImageEditor::isVectorImage(imgFrame->Pfile))
+			{
+				editInScribus->setEnabled(false);
+				editInScribus->setToolTip(tr("Not available for vector images"));
+			}
 			connect(editInScribus, &QAction::triggered, m_ScMW, [imgFrame, parentWin]() {
-				if (!imgFrame || imgFrame->Pfile.isEmpty())
-					return;
-				QImage img(imgFrame->Pfile);
-				if (img.isNull())
-					img = imgFrame->pixm.qImage();
-				if (img.isNull())
-					return;
-				ScImageEditor* editor = new ScImageEditor(img, imgFrame.data(), parentWin);
-				editor->setAttribute(Qt::WA_DeleteOnClose);
-				editor->show();
+				if (imgFrame)
+					ScImageEditor::openForFrame(imgFrame.data(), parentWin);
 			});
 		}
 		if (m_actionList.contains("editEditWithImageEditor"))

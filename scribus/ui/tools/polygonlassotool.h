@@ -29,6 +29,8 @@ public:
 
 	QString name() const override { return tr("Polygonal Lasso"); }
 
+	QCursor cursor() const override;
+
 	void mousePress(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseMove(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseRelease(QMouseEvent* e, const QPointF& imagePos) override { Q_UNUSED(e) Q_UNUSED(imagePos) }  // polygon lasso commits on click/Enter, not release

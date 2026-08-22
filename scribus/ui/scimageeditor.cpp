@@ -52,6 +52,9 @@ for which a new license (GPL+exception) is in place.
 #include "sccolor.h"
 #include "scimagefilterdialogs.h"
 #include "scimagefilterengine.h"
+#include "cmsettings.h"
+#include "prefsmanager.h"
+#include "scimage.h"
 #include "scimageselection.h"
 #include "ui/dialogs/autoenhancedialog.h"
 #include "ui/dialogs/imagesizedialog.h"
@@ -65,10 +68,12 @@ for which a new license (GPL+exception) is in place.
 #include "ui/tools/ellipsemarqueetool.h"
 #include "ui/tools/lassotool.h"
 #include "ui/tools/polygonlassotool.h"
+#include "ui/tools/penpathtool.h"
 #include "ui/tools/samselecttool.h"
 #include "ui/tools/refineedgesbrushtool.h"
 #include "scribusdoc.h"
 #include "util.h"
+#include "util_formats.h"
 #include "selection.h"
 #include "undomanager.h"
 
@@ -97,28 +102,32 @@ namespace
 		QList<ScImageEditor::StackEntry> m_after;
 	};
 
-	// Captures the working base image (+ cropped flag) before/after a crop, so
-	// crops are undoable on the same stack as effect-stack changes. Base and
-	// stack are independent concerns, so interleaved undo/redo composes correctly.
-	class CropCommand : public QUndoCommand
+	// Captures the whole working base state (image + the flags that decide how
+	// Save & Apply writes it) before/after a destructive baseline change, so
+	// crop, resize, canvas-size and erase are undoable on the same stack as
+	// effect-stack changes. Base and stack are independent concerns, so
+	// interleaved undo/redo composes correctly.
+	class BaseImageCommand : public QUndoCommand
 	{
 	public:
-		CropCommand(ScImageEditor* editor,
-		            const QImage& before, bool beforeCropped,
-		            const QImage& after, bool afterCropped,
-		            const QString& text)
+		BaseImageCommand(ScImageEditor* editor,
+		                 const QImage& before, bool beforeCropped, bool beforeErased,
+		                 const QImage& after, bool afterCropped, bool afterErased,
+		                 const QString& text)
 			: QUndoCommand(text), m_editor(editor),
-			  m_before(before), m_beforeCropped(beforeCropped),
-			  m_after(after), m_afterCropped(afterCropped)
+			  m_before(before), m_beforeCropped(beforeCropped), m_beforeErased(beforeErased),
+			  m_after(after), m_afterCropped(afterCropped), m_afterErased(afterErased)
 		{}
-		void undo() override { m_editor->applyBaseState(m_before, m_beforeCropped); }
-		void redo() override { m_editor->applyBaseState(m_after, m_afterCropped); }
+		void undo() override { m_editor->applyBaseState(m_before, m_beforeCropped, m_beforeErased); }
+		void redo() override { m_editor->applyBaseState(m_after, m_afterCropped, m_afterErased); }
 	private:
 		ScImageEditor* m_editor;
 		QImage m_before;
 		bool m_beforeCropped;
+		bool m_beforeErased;
 		QImage m_after;
 		bool m_afterCropped;
+		bool m_afterErased;
 	};
 
 	// Captures the selection mask before/after an edit. The change has already
@@ -160,6 +169,10 @@ ScImageEditorView::ScImageEditorView(QGraphicsScene* scene, QWidget* parent)
 	setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 	setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 	setFocusPolicy(Qt::StrongFocus);   // needed for Enter (crop) / Esc / Space
+	// setTool() early-returns when the tool is unchanged, so the initial Move
+	// never reaches updateCursor(); prime the cursor here or the editor opens
+	// showing a plain arrow.
+	updateCursor();
 }
 
 void ScImageEditorView::zoomBy(double factor)
@@ -214,16 +227,47 @@ void ScImageEditorView::clearSelection()
 	emit selectionChanged(QRectF());
 }
 
+void ScImageEditorView::setActiveImageTool(ImageTool* tool)
+{
+	m_imageTool = tool;
+	updateCursor();
+}
+
+namespace
+{
+	//! Named cursor with an explicit fallback: a missing icon id gives a null
+	//! pixmap and QCursor silently degrades that to a plain arrow.
+	QCursor namedCursor(const char* name, Qt::CursorShape fallback, int hotX = 15, int hotY = 15)
+	{
+		const QCursor c = IconManager::instance().loadCursor(QLatin1String(name), hotX, hotY);
+		return c.pixmap().isNull() ? QCursor(fallback) : c;
+	}
+}
+
 void ScImageEditorView::updateCursor()
 {
+	// Single authority for the canvas cursor, and it has to be applied to the
+	// VIEWPORT: a cursor set on the view widget is masked by whatever the
+	// viewport carries. Setting the tool cursor on the viewport while the legacy
+	// tools set theirs on the view is why the marquee crosshair used to stick to
+	// every tool for the rest of the session once a selection tool was touched.
+	if (m_imageTool)
+	{
+		viewport()->setCursor(m_imageTool->cursor());
+		return;
+	}
 	switch (m_tool)
 	{
-		case Tool::Move:
-		case Tool::Hand:       setCursor(Qt::OpenHandCursor); break;
-		case Tool::Select:
-		case Tool::Crop:       setCursor(Qt::CrossCursor); break;
-		case Tool::Eyedropper: setCursor(Qt::PointingHandCursor); break;
-		case Tool::Zoom:       setCursor(Qt::CrossCursor); break;
+		// Hotspots are per-glyph, not a shared constant: cursor-move's arrow tip is
+		// at its top-left, the eyedropper's tip is at its bottom-left, and
+		// cursor-zoom-in is a 16x16 SVG (in the 32/ folder) whose lens centres on
+		// (7,7). Using one hotspot for all of them puts clicks off target.
+		case Tool::Move:       viewport()->setCursor(namedCursor("cursor-move", Qt::SizeAllCursor, 1, 1)); break;
+		case Tool::Hand:       viewport()->setCursor(Qt::OpenHandCursor); break;
+		case Tool::Select:     viewport()->setCursor(Qt::CrossCursor); break;
+		case Tool::Crop:       viewport()->setCursor(namedCursor("cursor-frame", Qt::CrossCursor, 15, 15)); break;
+		case Tool::Eyedropper: viewport()->setCursor(namedCursor("cursor-color-picker", Qt::PointingHandCursor, 2, 29)); break;
+		case Tool::Zoom:       viewport()->setCursor(namedCursor("cursor-zoom-in", Qt::CrossCursor, 7, 7)); break;
 	}
 }
 
@@ -262,7 +306,7 @@ void ScImageEditorView::mousePressEvent(QMouseEvent* event)
 	{
 		m_panning = true;
 		m_lastPanPoint = event->pos();
-		setCursor(Qt::ClosedHandCursor);
+		viewport()->setCursor(Qt::ClosedHandCursor);
 		event->accept();
 		return;
 	}
@@ -398,7 +442,7 @@ void ScImageEditorView::keyPressEvent(QKeyEvent* event)
 	{
 		m_spaceDown = true;
 		if (!m_panning)
-			setCursor(Qt::OpenHandCursor);
+			viewport()->setCursor(Qt::OpenHandCursor);
 		event->accept();
 		return;
 	}
@@ -419,6 +463,14 @@ void ScImageEditorView::keyPressEvent(QKeyEvent* event)
 			event->accept();
 			return;
 		}
+	}
+	if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
+	{
+		// Reached only if the active tool did not consume it above — the polygon
+		// lasso takes Backspace while it has anchors down.
+		emit eraseRequested();
+		event->accept();
+		return;
 	}
 	if (event->key() == Qt::Key_Escape)
 	{
@@ -454,6 +506,12 @@ ScImageEditor::ScImageEditor(const QImage& image, PageItem_ImageFrame* frame, QW
 	resize(1200, 800);   // default on first open; overridden by saved geometry if present
 
 	m_undoStack = new QUndoStack(this);
+	// Each crop/resize/erase command holds two full-resolution QImages. Now that
+	// the base is the real image rather than a thumbnail, an unbounded stack can
+	// run to hundreds of MB, so cap the depth. The cap counts *commands*, and a
+	// selection-driven edit pushes two of them (the selection change, then the
+	// base-image change), so 30 is roughly 15 lasso-and-erase cycles.
+	m_undoStack->setUndoLimit(30);
 
 	m_scene = new QGraphicsScene(this);
 	m_pixmapItem = m_scene->addPixmap(QPixmap());
@@ -472,6 +530,7 @@ ScImageEditor::ScImageEditor(const QImage& image, PageItem_ImageFrame* frame, QW
 	connect(m_view, &ScImageEditorView::selectionChanged, this, &ScImageEditor::onSelectionChanged);
 	connect(m_view, &ScImageEditorView::cropConfirmed, this, &ScImageEditor::onCropConfirmed);
 	connect(m_view, &ScImageEditorView::colorPicked, this, &ScImageEditor::onColorPicked);
+	connect(m_view, &ScImageEditorView::eraseRequested, this, &ScImageEditor::eraseSelection);
 
 	m_originalImage = image;     // pristine source for non-destructive effects
 	// Seed the stack from any effects already on the frame so the editor is a
@@ -586,12 +645,16 @@ void ScImageEditor::createActions()
 	m_toolEllipseMarquee = makePngTool("select-ellipse",     QStyle::SP_FileDialogListView,  tr("Elliptical Marquee"));
 	m_toolLasso          = makePngTool("select-lasso",       QStyle::SP_FileDialogDetailedView, tr("Lasso"));
 	m_toolPolyLasso      = makePngTool("select-polygon",     QStyle::SP_FileDialogDetailedView, tr("Polygonal Lasso"));
+	// No dedicated pen glyph exists in the icon set; the symmetric bezier-control
+	// node is the closest and is literally what the tool draws.
+	m_toolPen            = makeTool("bezier-control-symetric", QStyle::SP_FileDialogDetailedView, tr("Pen Path"));
 	m_toolSmartSelect    = makePngTool("select-smart",       QStyle::SP_DialogYesButton,     tr("Smart Select (SAM)"));
 	m_toolRefineBrush    = makeTool("select-brush",       QStyle::SP_DialogResetButton,      tr("Refine Edges Brush"));
 	m_rectMarqueeTool    = new RectMarqueeTool(this);
 	m_ellipseMarqueeTool = new EllipseMarqueeTool(this);
 	m_lassoTool          = new LassoTool(this);
 	m_polyLassoTool      = new PolygonLassoTool(this);
+	m_penTool            = new PenPathTool(this);
 	m_samTool            = new SamSelectTool(this);
 	m_refineBrushTool    = new RefineEdgesBrushTool(this);
 
@@ -605,6 +668,9 @@ void ScImageEditor::createActions()
 	m_toolEllipseMarquee->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_M));
 	m_toolLasso->setShortcut(QKeySequence(Qt::Key_L));
 	m_toolPolyLasso->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_L));
+	// P for the pen, Photoshop-style. Shift+P is left free for a future
+	// Freeform Pen and is deliberately not wired up yet.
+	m_toolPen->setShortcut(QKeySequence(Qt::Key_P));
 	m_toolSmartSelect->setShortcut(QKeySequence(Qt::Key_W));
 	m_toolRefineBrush->setShortcut(QKeySequence(Qt::Key_R));
 	m_toolMove->setChecked(true);
@@ -814,6 +880,51 @@ void ScImageEditor::selectSmooth()
 		m_pendingSelectionLabel = tr("Smooth");
 		m_selection->smooth(r);
 	}
+}
+
+void ScImageEditor::eraseSelection()
+{
+	if (m_originalImage.isNull() || !m_selection || m_selection->isEmpty())
+		return;
+	const QImage& mask = m_selection->mask();          // Alpha8, base-sized
+	if (mask.size() != m_originalImage.size())
+		return;
+
+	// Erasing is a destructive baseline change like crop: it edits the base the
+	// effect stack runs on, so the stack stays non-destructive on top of it.
+	const QImage before = m_originalImage;
+	QImage after = m_originalImage.convertToFormat(QImage::Format_ARGB32);
+	// convertToFormat carries the DPI over, but a base that arrives without it
+	// would silently become 96 dpi in the sidecar PNG, so pin it explicitly.
+	after.setDotsPerMeterX(m_originalImage.dotsPerMeterX());
+	after.setDotsPerMeterY(m_originalImage.dotsPerMeterY());
+
+	const int w = after.width();
+	const int h = after.height();
+	for (int y = 0; y < h; ++y)
+	{
+		const uchar* m = mask.constScanLine(y);
+		QRgb* d = reinterpret_cast<QRgb*>(after.scanLine(y));
+		for (int x = 0; x < w; ++x)
+		{
+			const int cov = m[x];
+			if (cov == 0)
+				continue;
+			// Scale the existing alpha by the *un*selected fraction, so a
+			// feathered or anti-aliased selection edge erases softly and an
+			// already-transparent pixel stays transparent. Format_ARGB32 is
+			// non-premultiplied, so the colour channels are left alone.
+			const QRgb p = d[x];
+			d[x] = qRgba(qRed(p), qGreen(p), qBlue(p), qAlpha(p) * (255 - cov) / 255);
+		}
+	}
+
+	if (m_undoStack)
+		m_undoStack->push(new BaseImageCommand(this, before, m_baseIsCropped, m_baseIsErased,
+		                                       after, m_baseIsCropped, true, tr("Erase Selection")));
+	else
+		applyBaseState(after, m_baseIsCropped, true);
+	statusBar()->showMessage(tr("Erased the selected pixels"), 3000);
 }
 
 void ScImageEditor::populateFilterMenu(QMenu* menu, bool primary)
@@ -1048,6 +1159,111 @@ void ScImageEditor::invalidateStackPrefixCache()
 	m_stackPrefixCount = -1;
 }
 
+bool ScImageEditor::isVectorImage(const QString& path)
+{
+	// Sniff first, exactly like ScImage::loadPicture does, so a .tif that is
+	// really a PDF is judged on its content rather than its name.
+	QString ext = getImageType(path);
+	if (ext.isEmpty())
+		ext = QFileInfo(path).suffix().toLower();
+	return extensionIndicatesPDF(ext) || extensionIndicatesEPSorPS(ext);
+}
+
+QImage ScImageEditor::loadFrameImage(PageItem_ImageFrame* frame, QString* error)
+{
+	const auto fail = [error](const QString& msg) { if (error) *error = msg; return QImage(); };
+	if (!frame || frame->Pfile.isEmpty())
+		return fail(tr("The frame has no image file."));
+
+	const QString path = frame->Pfile;
+	if (!QFileInfo::exists(path))
+		return fail(tr("The image file no longer exists:\n\"%1\"").arg(path));
+
+	// Read through Scribus's own loaders rather than QImage, which has no plugin
+	// for TIFF, PSD, JXL and the rest — those used to fall back to the frame's
+	// low-res preview (PageItem::loadImage runs createLowRes() on pixm), so the
+	// editor silently worked on a thumbnail and wrote it back at that size.
+	ScImage img;
+	CMSettings cms(frame->doc(), frame->ImageProfile, static_cast<eRenderIntent>(frame->ImageIntent));
+	cms.setUseEmbeddedProfile(frame->UseEmbedded);
+	// Soft proofing is a *display* transform: PageItem enables it because it is
+	// painting to screen. Baking it into the editable base would write proofed
+	// pixels back to disk, so it stays off here.
+	cms.allowSoftProofing(false);
+
+	bool realCMYK = false;
+	if (!img.loadPicture(path, frame->pixm.imgInfo.actualPageNumber, cms, ScImage::RGBData,
+	                     PrefsManager::instance().gsResolution(), &realCMYK, true))
+		return fail(tr("Scribus could not read the image file:\n\"%1\"").arg(path));
+
+	QImage out = img.qImage();
+	if (out.isNull())
+		return fail(tr("The image file loaded but contained no pixels:\n\"%1\"").arg(path));
+
+	// TIFF and PSD come through RawImage::convertToQImage(), which builds a fresh
+	// ARGB32 and drops the DPI — it survives only in imgInfo. Without this the
+	// image would come back as 96 dpi and any sidecar written from it would too.
+	const ImageInfoRecord& info = img.imgInfo;
+	if (info.xres > 0 && info.yres > 0)
+	{
+		out.setDotsPerMeterX(qRound(info.xres / 0.0254));
+		out.setDotsPerMeterY(qRound(info.yres / 0.0254));
+	}
+	return out;
+}
+
+bool ScImageEditor::openForFrame(PageItem_ImageFrame* frame, QWidget* parent)
+{
+	if (!frame || frame->Pfile.isEmpty())
+		return false;
+
+	// Vector sources are excluded outright: the editor is a raster tool, and
+	// saving would replace a scalable placement with a rasterised bitmap. The
+	// menu entries are disabled for these, so this is the belt-and-braces check.
+	if (isVectorImage(frame->Pfile))
+	{
+		QMessageBox::information(parent, tr("Scribus Image Editor"),
+			tr("The image editor is not available for vector images."));
+		return false;
+	}
+
+	// A CMYK source has to become RGB to be editable at all, and Save & Apply
+	// would then write an RGB image back — a colour-space change that matters
+	// for print, so it is never made silently.
+	if (frame->pixm.imgInfo.colorspace == ColorSpaceCMYK)
+	{
+		QMessageBox box(parent);
+		box.setIcon(QMessageBox::Warning);
+		box.setWindowTitle(tr("Scribus Image Editor"));
+		box.setText(tr("\"%1\" is a CMYK image.").arg(QFileInfo(frame->Pfile).fileName()));
+		box.setInformativeText(tr("The editor works in RGB, so the image will be converted for editing. "
+		                          "If you save your changes, the frame will use an RGB version of the image "
+		                          "instead of the CMYK original."));
+		QPushButton* goOn = box.addButton(tr("Continue in RGB"), QMessageBox::AcceptRole);
+		box.addButton(QMessageBox::Cancel);
+		box.setDefaultButton(QMessageBox::Cancel);
+		box.exec();
+		if (box.clickedButton() != goOn)
+			return false;
+	}
+
+	QString error;
+	const QImage img = loadFrameImage(frame, &error);
+	if (img.isNull())
+	{
+		// Never fall back to frame->pixm.qImage(): that is the low-res preview,
+		// and editing it would quietly write a thumbnail back over the original.
+		QMessageBox::critical(parent, tr("Scribus Image Editor"),
+			tr("The image could not be opened for editing.\n\n%1").arg(error));
+		return false;
+	}
+
+	auto* editor = new ScImageEditor(img, frame, parent);
+	editor->setAttribute(Qt::WA_DeleteOnClose);
+	editor->show();
+	return true;
+}
+
 void ScImageEditor::setActiveTool(ImageTool* tool)
 {
 	if (m_activeTool == tool)
@@ -1058,11 +1274,12 @@ void ScImageEditor::setActiveTool(ImageTool* tool)
 	if (m_view)
 		m_view->setActiveImageTool(tool);
 	if (tool)
-	{
 		tool->activate(this);
-		if (m_view)
-			m_view->viewport()->setCursor(tool->cursor());
-	}
+	// Refresh after activate() so a tool whose cursor depends on its state gets
+	// the final one, and so switching BACK to a legacy tool restores that tool's
+	// cursor instead of leaving the previous selection tool's behind.
+	if (m_view)
+		m_view->updateCursor();
 	updateToolOptionsBar();
 }
 
@@ -1432,7 +1649,7 @@ void ScImageEditor::createToolBar()
 	for (QAction* a : navTools)
 		toolBar->addAction(a);
 	toolBar->addSeparator();
-	const QList<QAction*> selectTools = { m_toolRectMarquee, m_toolEllipseMarquee, m_toolLasso, m_toolPolyLasso, m_toolSmartSelect };
+	const QList<QAction*> selectTools = { m_toolRectMarquee, m_toolEllipseMarquee, m_toolLasso, m_toolPolyLasso, m_toolPen, m_toolSmartSelect };
 	for (QAction* a : selectTools)
 		toolBar->addAction(a);
 	toolBar->addSeparator();
@@ -1651,6 +1868,7 @@ void ScImageEditor::onToolChanged(QAction* action)
 	else if (action == m_toolEllipseMarquee) imageTool = m_ellipseMarqueeTool;
 	else if (action == m_toolLasso)          imageTool = m_lassoTool;
 	else if (action == m_toolPolyLasso)      imageTool = m_polyLassoTool;
+	else if (action == m_toolPen)            imageTool = m_penTool;
 	else if (action == m_toolSmartSelect)    imageTool = m_samTool;
 	else if (action == m_toolRefineBrush)    imageTool = m_refineBrushTool;
 	if (imageTool)
@@ -1690,17 +1908,21 @@ void ScImageEditor::onCropConfirmed(const QRectF& sceneRect)
 	performCrop(sceneRect);
 }
 
-void ScImageEditor::applyBaseState(const QImage& base, bool cropped)
+void ScImageEditor::applyBaseState(const QImage& base, bool cropped, bool erased)
 {
+	const bool sizeChanged = (m_originalImage.size() != base.size());
 	m_originalImage = base;
 	invalidateStackPrefixCache();
 	m_baseIsCropped = cropped;
+	m_baseIsErased = erased;
 	m_selectionRect = QRectF();
 	if (m_view)
 		m_view->clearSelection();
 	ensureSelection();      // base size may have changed (crop) — resize the selection
 	renderEffects();        // re-run the stack on this base; updates the size label
-	if (m_view)
+	// Only refit when the dimensions moved (crop/resize). An erase leaves the
+	// size alone, and refitting there would throw away the user's zoom.
+	if (m_view && sizeChanged)
 		m_view->zoomFit();
 }
 
@@ -1721,9 +1943,9 @@ void ScImageEditor::performCrop(const QRectF& sceneRect)
 	after.setDotsPerMeterX(m_originalImage.dotsPerMeterX());
 	after.setDotsPerMeterY(m_originalImage.dotsPerMeterY());
 	if (m_undoStack)
-		m_undoStack->push(new CropCommand(this, before, beforeCropped, after, true, tr("Crop"))); // push() → redo() → applyBaseState(after, true)
+		m_undoStack->push(new BaseImageCommand(this, before, beforeCropped, m_baseIsErased, after, true, m_baseIsErased, tr("Crop"))); // push() → redo() → applyBaseState(after, true, …)
 	else
-		applyBaseState(after, true);
+		applyBaseState(after, true, m_baseIsErased);
 }
 
 void ScImageEditor::applyBaseResize(const QImage& newBase, const QString& label)
@@ -1736,9 +1958,9 @@ void ScImageEditor::applyBaseResize(const QImage& newBase, const QString& label)
 	const QImage before = m_originalImage;
 	const bool beforeCropped = m_baseIsCropped;
 	if (m_undoStack)
-		m_undoStack->push(new CropCommand(this, before, beforeCropped, newBase, true, label));
+		m_undoStack->push(new BaseImageCommand(this, before, beforeCropped, m_baseIsErased, newBase, true, m_baseIsErased, label));
 	else
-		applyBaseState(newBase, true);
+		applyBaseState(newBase, true, m_baseIsErased);
 }
 
 void ScImageEditor::openImageSizeDialog()
@@ -1818,27 +2040,85 @@ void ScImageEditor::saveAndApply()
 	if (!doc)
 		return;
 
-	// Region-masked (selection) effects cannot be represented in the frame's
-	// non-destructive effectsInUse list (Scribus applies those whole-image), so
-	// they must be flattened into the file.
-	if (hasMaskedEffects())
+	// Erased pixels only exist in a format that has an alpha channel, and the
+	// source usually does not: writeImageToFile() composites alpha onto white
+	// for JPEG, and this Qt build cannot write TIFF at all. So an erase never
+	// writes back over the source — it writes a PNG sidecar beside it and
+	// repoints the frame, the same pattern the background-removal and feather
+	// tools use. Nothing is overwritten, so there is no confirmation to ask for.
+	if (m_baseIsErased)
 	{
-		const auto answer = QMessageBox::question(this, tr("Save && Apply"),
-			tr("This image uses selection-limited adjustments, which must be flattened into the source file:\n\"%1\"\n\n"
-			   "Any other frames using this file will be affected. Continue?").arg(m_frame->Pfile),
-			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-		if (answer != QMessageBox::Yes)
+		const QString outPath = derivedImagePath(m_frame->Pfile, QStringLiteral("_erased"), QStringLiteral("png"));
+		// Selection-limited effects cannot live in effectsInUse either, so when
+		// they are present the flattened image is what goes into the sidecar and
+		// the frame keeps no effects; otherwise the sidecar is the bare base and
+		// the stack stays non-destructive on top of it.
+		const bool bakeEffects = hasMaskedEffects();
+		const QImage& src = bakeEffects ? m_image : m_originalImage;
+		if (src.isNull())
+		{
+			QMessageBox::warning(this, tr("Save && Apply"), tr("There is no image to write."));
 			return;
-		const QString writeError = m_image.isNull() ? tr("there is no image to write") : writeImageToFile(m_image, m_frame->Pfile);
+		}
+		const QString writeError = writeImageToFile(src, outPath);
 		if (!writeError.isEmpty())
 		{
 			QMessageBox::warning(this, tr("Save && Apply"),
-				tr("Could not write the flattened image to \"%1\".\n\n%2").arg(m_frame->Pfile, writeError));
+				tr("Could not write the erased image to \"%1\".\n\n%2").arg(outPath, writeError));
+			return;
+		}
+		m_frame->effectsInUse = bakeEffects ? ScImageEffectList() : effectiveEffects();
+		// Route through the doc with reload=false so the swap lands in the
+		// document's undo history as a Get Image action; Ctrl+Z there puts Pfile
+		// back to the original. loadPict assigns Pfile itself *after* capturing
+		// the old path for that undo state, so do not pre-assign it here.
+		doc->loadPict(outPath, m_frame, false, true);
+		m_baseIsErased = false;
+		m_baseIsCropped = false;   // the sidecar holds the whole (cropped) base
+		m_frame->update();
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		return;
+	}
+
+	// Region-masked (selection) effects cannot be represented in the frame's
+	// non-destructive effectsInUse list (Scribus applies those whole-image), so
+	// they must be flattened into a file.
+	if (hasMaskedEffects())
+	{
+		if (m_image.isNull())
+		{
+			QMessageBox::warning(this, tr("Save && Apply"), tr("There is no image to write."));
+			return;
+		}
+		// Overwriting the source is only on the table when Qt can actually write
+		// that format; otherwise the flattened result goes to a PNG sidecar and
+		// the original is left alone (see the crop branch for the full reasoning).
+		const bool inPlace = canWriteImageFile(m_frame->Pfile);
+		const QString outPath = inPlace ? m_frame->Pfile
+		                                : derivedImagePath(m_frame->Pfile, QStringLiteral("_flattened"), QStringLiteral("png"));
+		if (inPlace)
+		{
+			const auto answer = QMessageBox::question(this, tr("Save && Apply"),
+				tr("This image uses selection-limited adjustments, which must be flattened into the source file:\n\"%1\"\n\n"
+				   "Any other frames using this file will be affected. Continue?").arg(m_frame->Pfile),
+				QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+			if (answer != QMessageBox::Yes)
+				return;
+		}
+		const QString writeError = writeImageToFile(m_image, outPath);
+		if (!writeError.isEmpty())
+		{
+			QMessageBox::warning(this, tr("Save && Apply"),
+				tr("Could not write the flattened image to \"%1\".\n\n%2").arg(outPath, writeError));
 			return;
 		}
 		m_frame->effectsInUse.clear();   // everything is baked into the file now
 		m_baseIsCropped = false;
-		m_frame->loadImage(m_frame->Pfile, true);
+		if (inPlace)
+			m_frame->loadImage(m_frame->Pfile, true);
+		else
+			doc->loadPict(outPath, m_frame, false, true);   // registers a Get Image undo
 		m_frame->update();
 		doc->changed();
 		doc->regionsChanged()->update(QRectF());
@@ -1846,24 +2126,46 @@ void ScImageEditor::saveAndApply()
 	}
 
 	// A crop changes pixel dimensions and cannot be a non-destructive effect, so
-	// write the cropped base (without effects) back to the source file; the
-	// effect stack is then re-applied on top via effectsInUse as usual.
+	// the cropped base has to be written out; the effect stack is then re-applied
+	// on top via effectsInUse as usual.
 	if (m_baseIsCropped)
 	{
-		const auto answer = QMessageBox::question(this, tr("Save && Apply"),
-			tr("The image was cropped. Applying it will overwrite the source file:\n\"%1\"\n\n"
-			   "Any other frames using this file will be affected. Continue?").arg(m_frame->Pfile),
-			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-		if (answer != QMessageBox::Yes)
-			return;
-		const QString writeError = writeImageToFile(m_originalImage, m_frame->Pfile);
+		// Only overwrite the source when Qt can write that format. For anything
+		// else (TIFF, PSD, …) writing back is not merely impossible, it is
+		// destructive — QImageWriter truncates the file before it discovers it
+		// has no plugin — so those go to a PNG sidecar beside the original and
+		// the frame is repointed, exactly as the erase path does.
+		const bool inPlace = canWriteImageFile(m_frame->Pfile);
+		const QString outPath = inPlace ? m_frame->Pfile
+		                                : derivedImagePath(m_frame->Pfile, QStringLiteral("_cropped"), QStringLiteral("png"));
+		if (inPlace)
+		{
+			const auto answer = QMessageBox::question(this, tr("Save && Apply"),
+				tr("The image was cropped. Applying it will overwrite the source file:\n\"%1\"\n\n"
+				   "Any other frames using this file will be affected. Continue?").arg(m_frame->Pfile),
+				QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+			if (answer != QMessageBox::Yes)
+				return;
+		}
+		const QString writeError = writeImageToFile(m_originalImage, outPath);
 		if (!writeError.isEmpty())
 		{
 			QMessageBox::warning(this, tr("Save && Apply"),
-				tr("Could not write the cropped image to \"%1\".\n\n%2").arg(m_frame->Pfile, writeError));
+				tr("Could not write the cropped image to \"%1\".\n\n%2").arg(outPath, writeError));
 			return;
 		}
-		m_baseIsCropped = false;   // the file now matches the cropped base
+		m_baseIsCropped = false;   // the written file now matches the cropped base
+		if (!inPlace)
+		{
+			// Sidecar: repoint the frame (registers a Get Image undo, which is why
+			// Pfile must not be pre-assigned) and re-apply the stack on top.
+			m_frame->effectsInUse = effectiveEffects();
+			doc->loadPict(outPath, m_frame, false, true);
+			m_frame->update();
+			doc->changed();
+			doc->regionsChanged()->update(QRectF());
+			return;
+		}
 	}
 
 	// Non-destructive: store the (visible) stack on the frame as effectsInUse.
@@ -1931,6 +2233,8 @@ void ScImageEditor::revertImage()
 	m_originalImage = img;
 	m_stack.clear();
 	invalidateStackPrefixCache();
+	m_baseIsCropped = false;   // the base is the file again
+	m_baseIsErased = false;
 	if (m_undoStack)
 		m_undoStack->clear();   // prior states referred to the old base image
 	ensureSelection();

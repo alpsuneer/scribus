@@ -23,6 +23,8 @@ public:
 
 	QString name() const override { return tr("Elliptical Marquee"); }
 
+	QCursor cursor() const override;
+
 protected:
 	void createRubber(const QRectF& r) override;
 	void setRubber(const QRectF& r) override;

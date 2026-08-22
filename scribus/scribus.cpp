@@ -10607,14 +10607,7 @@ void ScribusMainWindow::slotOpenScImageEditor()
 	PageItem_ImageFrame* imgFrame = currItem->asImageFrame();
 	if (!imgFrame || imgFrame->Pfile.isEmpty())
 		return;
-	QImage img(imgFrame->Pfile);
-	if (img.isNull())
-		img = imgFrame->pixm.qImage();
-	if (img.isNull())
-		return;
-	ScImageEditor* editor = new ScImageEditor(img, imgFrame, this);
-	editor->setAttribute(Qt::WA_DeleteOnClose);
-	editor->show();
+	ScImageEditor::openForFrame(imgFrame, this);
 }
 
 void ScribusMainWindow::callImageEditor()

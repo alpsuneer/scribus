@@ -61,6 +61,13 @@ human-readable failure reason. JPEG cannot store an alpha channel, so ARGB
 images are converted before a .jpg/.jpeg write. Permission problems are
 spelled out explicitly because QImageWriter's own message omits the OS reason.
 \a quality is passed to the writer when >= 0 (JPEG: 0-100). */
+/*! \brief True if Qt can write the image format implied by \a path's suffix.
+
+Pure query — it inspects QImageWriter::supportedImageFormats() and never touches
+the file. Do NOT use QImageWriter::canWrite() for this: that opens the device,
+which truncates an existing file to zero bytes before it reports anything, even
+when the format IS writable. */
+bool SCRIBUS_API canWriteImageFile(const QString& path);
 QString SCRIBUS_API writeImageToFile(const QImage& image, const QString& path, int quality = -1);
 /*! \brief Path for an image derived from \a sourcePath, written beside it:
 derivedImagePath("/p/photo.jpg", "_crop", "png") -> "/p/photo_crop.png".

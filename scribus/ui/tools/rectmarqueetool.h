@@ -28,6 +28,8 @@ public:
 
 	QString name() const override { return tr("Rectangular Marquee"); }
 
+	QCursor cursor() const override;
+
 	void mousePress(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseMove(QMouseEvent* e, const QPointF& imagePos) override;
 	void mouseRelease(QMouseEvent* e, const QPointF& imagePos) override;

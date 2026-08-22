@@ -171,6 +171,7 @@ if(HAVE_OSG)
 		ui/tools/ellipsemarqueetool.cpp
 		ui/tools/lassotool.cpp
 		ui/tools/polygonlassotool.cpp
+		ui/tools/penpathtool.cpp
 		ui/tools/samselecttool.cpp
 		ui/tools/refineedgesbrushtool.cpp
 		ui/dialogs/autoenhancedialog.cpp
@@ -222,6 +223,7 @@ else()
 		ui/tools/ellipsemarqueetool.cpp
 		ui/tools/lassotool.cpp
 		ui/tools/polygonlassotool.cpp
+		ui/tools/penpathtool.cpp
 		ui/tools/samselecttool.cpp
 		ui/tools/refineedgesbrushtool.cpp
 		ui/dialogs/autoenhancedialog.cpp

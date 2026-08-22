@@ -61,8 +61,12 @@ public:
 	Tool tool() const { return m_tool; }
 
 	//! When set, left-button mouse/key events route to this tool (see ImageTool).
-	//! Null restores the legacy built-in tool handling.
-	void setActiveImageTool(ImageTool* tool) { m_imageTool = tool; }
+	//! Null restores the legacy built-in tool handling. Also refreshes the cursor.
+	void setActiveImageTool(ImageTool* tool);
+
+	//! Apply the active tool's cursor to the canvas. Public because the editor
+	//! has to re-apply it whenever the tool changes in either direction.
+	void updateCursor();
 
 	//! Current marquee in scene (== image pixel) coordinates; null if none.
 	QRectF selectionRect() const;
@@ -79,6 +83,8 @@ signals:
 	void selectionChanged(const QRectF& sceneRect);
 	void cropConfirmed(const QRectF& sceneRect);
 	void colorPicked(const QPoint& imagePos);
+	//! Delete/Backspace pressed — erase the pixels under the current selection.
+	void eraseRequested();
 
 protected:
 	void wheelEvent(QWheelEvent* event) override;
@@ -90,7 +96,6 @@ protected:
 	void keyReleaseEvent(QKeyEvent* event) override;
 
 private:
-	void updateCursor();
 	void updateRubber(const QPointF& scenePos);
 	QRectF clampToScene(const QRectF& r) const;
 
@@ -132,6 +137,21 @@ public:
 		QImage mask;   //!< Alpha8 selection mask; null = apply to whole image
 	};
 
+	//! True when \a path is a vector format the raster editor must not open
+	//! (PDF/AI/EPS/PS). Sniffs the content like the rest of the load path, so a
+	//! mislabelled file is judged on what it actually is.
+	static bool isVectorImage(const QString& path);
+	//! Full-resolution image for \a frame, read through Scribus's own loaders so
+	//! formats Qt cannot read (TIFF, PSD, …) come in at source resolution rather
+	//! than as the frame's low-res preview. Returns a null QImage on failure and
+	//! fills \a error with a message naming the file.
+	static QImage loadFrameImage(PageItem_ImageFrame* frame, QString* error);
+	//! Open the editor on \a frame: refuses vector images, warns before
+	//! converting a CMYK source to RGB, and reports a load failure instead of
+	//! silently falling back to the frame's preview. Returns false if no editor
+	//! was opened. Both entry points (context menu, Edit menu) go through this.
+	static bool openForFrame(PageItem_ImageFrame* frame, QWidget* parent);
+
 	//! The pixel selection for this editor (never null once the image is set).
 	ScImageSelection* selection() const { return m_selection; }
 	//! The currently displayed image (base + committed effects) — SAM input.
@@ -146,7 +166,7 @@ public:
 	//! Swap in a whole stack state and re-render (used by undo/redo commands).
 	void applyStackState(const QList<StackEntry>& state);
 	//! Swap in a base image + cropped flag and re-render (used by crop undo/redo).
-	void applyBaseState(const QImage& base, bool cropped);
+	void applyBaseState(const QImage& base, bool cropped, bool erased);
 	//! Replace the selection mask (used by selection undo/redo commands).
 	void applySelectionMask(const QImage& mask);
 	//! Label the next selection edit for the undo history (call before mutating).
@@ -197,6 +217,8 @@ protected slots:
 	void selectExpand();
 	void selectContract();
 	void selectSmooth();
+	//! Clear the pixels under the selection to transparent (Delete/Backspace).
+	void eraseSelection();
 
 protected:
 	void showEvent(QShowEvent* event) override;
@@ -276,6 +298,7 @@ protected:
 	QUndoStack* m_undoStack { nullptr };
 	QRectF m_selectionRect;         //!< active marquee (image coords), or null
 	bool m_baseIsCropped { false }; //!< true once the base image has been cropped
+	bool m_baseIsErased  { false }; //!< true once pixels have been erased to transparent
 
 	ScImageSelection* m_selection { nullptr };
 	MarchingAntsItem* m_marchingAnts { nullptr };
@@ -302,12 +325,14 @@ protected:
 	QAction* m_toolEllipseMarquee { nullptr };
 	QAction* m_toolLasso { nullptr };
 	QAction* m_toolPolyLasso { nullptr };
+	QAction* m_toolPen { nullptr };
 	QAction* m_toolSmartSelect { nullptr };
 	QAction* m_toolRefineBrush { nullptr };
 	ImageTool* m_rectMarqueeTool { nullptr };
 	ImageTool* m_ellipseMarqueeTool { nullptr };
 	ImageTool* m_lassoTool { nullptr };
 	ImageTool* m_polyLassoTool { nullptr };
+	ImageTool* m_penTool { nullptr };
 	ImageTool* m_samTool { nullptr };
 	ImageTool* m_refineBrushTool { nullptr };
 	QImage m_lastSelectionMask;   //!< remembers the last selection for Reselect

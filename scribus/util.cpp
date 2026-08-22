@@ -478,10 +478,30 @@ QString derivedImagePath(const QString& sourcePath, const QString& tag, const QS
 	return path;
 }
 
+bool canWriteImageFile(const QString& path)
+{
+	const QByteArray suffix = QFileInfo(path).suffix().toLower().toUtf8();
+	if (suffix.isEmpty())
+		return false;
+	return QImageWriter::supportedImageFormats().contains(suffix);
+}
+
 QString writeImageToFile(const QImage& image, const QString& path, int quality)
 {
 	QImage out = image;
 	const QString suffix = QFileInfo(path).suffix().toLower();
+
+	// Decide BEFORE opening anything. QImageWriter truncates the destination the
+	// moment it opens the device and only then discovers it has no plugin for the
+	// format, so simply attempting the write DESTROYS an existing file — a .tif
+	// destination went from 360140 bytes to 0 and then reported failure. Bail out
+	// without ever constructing the writer.
+	if (!canWriteImageFile(path))
+	{
+		return QObject::tr("Scribus cannot write \"%1\" images on this system — "
+		                   "no image plugin for that format is installed.")
+		       .arg(suffix.isEmpty() ? QObject::tr("(no extension)") : suffix);
+	}
 	if ((suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg")) && out.hasAlphaChannel())
 	{
 		// JPEG doesn't support transparency. Create a white background and composite the image on it.
@@ -490,8 +510,20 @@ QString writeImageToFile(const QImage& image, const QString& path, int quality)
 		QPainter p(&temp);
 		p.drawImage(0, 0, out);
 		p.end();
+		// A fresh QImage carries no resolution, so carry it across by hand or the
+		// composite silently rewrites a 300 dpi photo as 96 dpi on the way out.
+		temp.setDotsPerMeterX(out.dotsPerMeterX());
+		temp.setDotsPerMeterY(out.dotsPerMeterY());
 		out = temp;
 	}
+	// KNOWN LIMITATION — TIFF cannot be written here. QImageWriter only offers the
+	// formats Qt has plugins for, and the Qt6 build we ship against has no TIFF
+	// plugin (supportedImageFormats() = bmp cur ico jfif jpeg jpg pbm pgm png ppm
+	// xbm xpm). Scribus displays TIFFs fine because it reads them through its own
+	// libtiff loader, not through Qt, so the gap only shows up on the write side.
+	// The guard above turns that into a clean refusal; callers that need to write
+	// SOMETHING (the image editor's crop and flatten) ask canWriteImageFile()
+	// first and fall back to a PNG sidecar beside the original.
 	QImageWriter writer(path);
 	if (quality >= 0)
 		writer.setQuality(quality);
