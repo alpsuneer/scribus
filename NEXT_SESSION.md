@@ -5,6 +5,8 @@ Engineering index lives in NOTES.md; this file is just "where we left off".
 
 ## Shipped
 
+- Branch now **builds from a clean checkout**: earlier commits had added CMake entries, headers and call sites without `git add`ing the implementation files. Verified by building a pristine worktree (0 errors, 0 undefined refs).
+- Registered `tool-move` and `select-brush` in the iconset manifest; both were loading Qt fallback icons and logging IconManager warnings.
 - Per-tool cursors: 12 editor tools, 12 distinct cursors (5 new `cursor-select-*.svg`, rest reused).
 - Cursor infrastructure: `updateCursor()` is now the single authority and targets the **viewport**; cursor primed in the view constructor.
 - Pen Path tool (`P`): cubic beziers, click=corner / drag=smooth, Alt=convert, Backspace, Enter or double-click commits.
@@ -28,6 +30,8 @@ Engineering index lives in NOTES.md; this file is just "where we left off".
 - **PolygonLassoTool preview is invisible on light images**: white-only pen at `ui/tools/polygonlassotool.cpp:125`. Should adopt LassoTool's black+white two-pass (measured contrast span 17/255 vs 255/255).
 - **`resources/iconsets/CMakeLists.txt` uses `file(GLOB)`** (`:115`, `:127`), evaluated at *configure* time — new artwork needs `cmake -S . -B build` before `cmake --install`, or it silently doesn't deploy.
 - **`icons/1_7_0/1_7_0.xml` is a stale duplicate.** IconManager reads the root copy, `icons/1_7_0.xml`.
+- **Five committed 16px SVGs are unregistered**: `select-{lasso,ellipse,polygon,rectangular,smart}.svg`. Harmless today — the editor loads those tools through `makePngTool`, which uses the `-24.png`/`-48.png` files, not the manifest. They only need ids if the toolbar ever moves to the SVGs.
+- **Anything added to the build must be committed with its sources.** The clean-checkout breakage came from committing `CMakeLists.txt` entries, headers and call sites while the `.cpp` files stayed untracked; local builds hide this completely. `git status` before committing a feature.
 - **GUI automation**: the "Qt menus intermittently refuse to open" symptom was self-inflicted — the editor window is not at (0,0) (seen at X=1,Y=25). Always `eval $(xdotool getwindowgeometry --shell $W)` and offset. Screenshots don't capture the pointer; use the XFixes probe (`xfixes.get_cursor_image(display, root)`) to verify cursors.
 
 ## Design decisions worth remembering
