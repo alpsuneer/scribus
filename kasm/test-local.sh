@@ -26,8 +26,26 @@ for arg in "$@"; do
     esac
 done
 
+# ---------------------------------------------------------------------------
+# BuildKit's build containers do not always inherit working DNS — on a host
+# running an IPsec/VPN daemon, `docker run` resolves fine while `docker build`
+# fails every apt step with "Temporary failure resolving 'deb.debian.org'".
+# Probe once and fall back to the host network rather than letting a 4-minute
+# apt stage time out and report it as a missing-package error.
+# ---------------------------------------------------------------------------
+NET_ARGS=()
+probe_dir="$(mktemp -d)"
+trap 'rm -rf "${probe_dir}"' EXIT
+printf 'FROM debian:trixie-slim\nRUN getent hosts deb.debian.org\n' > "${probe_dir}/Dockerfile"
+if docker build -q -f "${probe_dir}/Dockerfile" "${probe_dir}" >/dev/null 2>&1; then
+    echo "==> Build-network DNS OK"
+else
+    echo "==> Build-network DNS is broken; falling back to --network=host"
+    NET_ARGS+=(--network=host)
+fi
+
 echo "==> Building ${IMAGE} (context: ${REPO_ROOT})"
-docker build -f kasm/Dockerfile.kasm "${BUILD_ARGS[@]}" -t "${IMAGE}" .
+docker build "${NET_ARGS[@]}" -f kasm/Dockerfile.kasm "${BUILD_ARGS[@]}" -t "${IMAGE}" .
 
 echo "==> Image built:"
 docker images | grep -E "REPOSITORY|scribus-mdtp" || true

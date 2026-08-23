@@ -191,6 +191,32 @@ wrapper's name.
 | **SAM Smart Select does nothing** | Status bar shows why. Check `ls -lL ~/.config/scribus/sam/` resolves into `/opt/scribus/sam`, and `ldconfig -p \| grep onnxruntime`. |
 | **Malayalam renders as boxes** | Fonts missing. `fc-list :lang=ml \| wc -l` should be non-zero; `prefsmanager.cpp` probes U+0D15 to pick a face that actually renders. |
 | **Slow / laggy UI** | Increase `shm_size` (≥ 512m) and container CPU/memory. |
+| **Build fails: `Unable to locate package …`** | Almost always DNS, not packages. Look further up for `Temporary failure resolving 'deb.debian.org'` — apt then "succeeds" with stale lists and reports every package as missing. See below. |
+
+---
+
+## BuildKit DNS on the development laptop
+
+On this host `docker run` resolves DNS normally but **`docker build` does not** —
+every apt step dies with `Temporary failure resolving 'deb.debian.org'`. The
+host runs an active IPsec/strongSwan daemon, and BuildKit's build containers
+cannot reach the LAN resolver (192.168.29.1) the way `docker run` containers can.
+
+The trap is the error message: apt treats the failed refresh as a warning
+("Some index files failed to download … old ones used instead"), continues with
+an empty package list, and then reports **`Unable to locate package`** for
+everything — including packages that certainly exist. It reads like a wrong
+package list; it is a network fault.
+
+Build with the host network:
+
+```bash
+docker build --network=host -f kasm/Dockerfile.kasm -t scribus-mdtp:kasm .
+```
+
+`test-local.sh` probes for this and adds `--network=host` automatically. A
+cloud/CI builder with normal DNS needs none of this — the Dockerfile itself is
+unaffected.
 
 ---
 
