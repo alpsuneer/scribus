@@ -1,0 +1,33 @@
+{
+  "workspace_id": "scribus-malayalam-dtp",
+  "friendly_name": "Scribus Malayalam DTP",
+  "description": "Scribus 1.7.3 with Photoshop-style image editor and SAM AI Smart Select. Full Malayalam font suite + fcitx5 with the Deshabhimani m17n layout.",
+  "image": "scribus-mdtp:kasm",
+  "restrict_network_names": false,
+  "cores": 2.0,
+  "memory": 4096,
+  "gpu_count": 0,
+  "categories": ["Graphics", "Publishing"],
+  "docker_registry": "",
+  "run_config": {
+    "shm_size": "512m",
+    "environment": {
+      "KASM_APP": "scribus"
+    }
+  },
+  "_comment_volume_mappings": [
+    "Documents: per-user working files.",
+    "SAM models: bind-mount ONE read-only copy per agent over /opt/scribus/sam",
+    "instead of baking 43 MB into the image. kasm-launch.sh symlinks",
+    "~/.config/scribus/sam -> /opt/scribus/sam at session start, so the models",
+    "never get duplicated into each user's persistent profile.",
+    "Omit the /opt/scribus/sam entry if you built with INCLUDE_SAM_MODELS=true."
+  ],
+  "volume_mappings": {
+    "{kasm_user_home}/Documents": "/home/kasm-user/Documents",
+    "/srv/scribus-sam": {
+      "bind": "/opt/scribus/sam",
+      "mode": "ro"
+    }
+  }
+}

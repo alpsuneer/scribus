@@ -1,0 +1,24 @@
+# Keep the Docker build context small (source tree is ~5.4 GB, mostly build/).
+# Context after these excludes is ~320 MB.
+build/
+build-*/
+*/build/
+.git/
+.github/
+
+# Local backups / scratch created during development
+**/*.bak
+**/*.bak_*
+*.deb
+scribus/*.bak*
+
+# Kasm local test artifacts
+kasm/test-workspace/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.o
+*.a
+*~
+.DS_Store

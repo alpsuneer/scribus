@@ -1,0 +1,204 @@
+# syntax=docker/dockerfile:1
+# ============================================================================
+#  Scribus 1.7.3 — Malayalam DTP edition (Photoshop-style image editor + SAM)
+#  Kasm Workspaces image (browser-streamed XFCE desktop via KasmVNC)
+#
+#  Build (from the repository ROOT, not from kasm/):
+#    docker build -f kasm/Dockerfile.kasm -t scribus-mdtp:kasm .
+#
+#  With SAM models baked in:
+#    docker build -f kasm/Dockerfile.kasm \
+#        --build-arg INCLUDE_SAM_MODELS=true -t scribus-mdtp:kasm .
+# ============================================================================
+#
+#  WHY core-debian-trixie AND NOT core-ubuntu-noble
+#  ------------------------------------------------
+#  The fork is developed on Debian 13 (trixie). Verified inside the base image,
+#  every dependency resolves to the *identical* version the host builds against:
+#      qt6-base-dev        6.8.2+dfsg-9+deb13u2
+#      libonnxruntime-dev  1.21.0+dfsg-1
+#      libpoppler-cpp-dev  25.03.0-5+deb13u4
+#      libpodofo-dev       0.9.8+dfsg-3.2
+#      libjxl-dev          0.11.2-0.1~deb13u2
+#  Ubuntu 24.04 (noble) ships Qt 6.4.2 and has no libonnxruntime package at all,
+#  so it would mean compiling this fork against a Qt it has never seen and
+#  hand-installing Microsoft's ONNX tarball. QT_MIN_VERSION is 6.4.0, so noble
+#  would *configure* — it simply would not be the tested combination.
+# ============================================================================
+
+ARG KASM_BASE_TAG=1.19.0-rolling-weekly
+FROM kasmweb/core-debian-trixie:${KASM_BASE_TAG}
+
+ARG INCLUDE_SAM_MODELS=false
+# Public MobileSAM ONNX export (encoder) + SAM decoder — same source validated
+# for the desktop build.
+ARG SAM_MODELS_URL=https://github.com/vietanhdev/segment-anything-onnx-models/releases/download/1.0/mobile_sam_20230629.zip
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    STARTUPDIR=/dockerstartup \
+    INST_DIR=/usr/local \
+    SAM_SYSTEM_DIR=/opt/scribus/sam
+
+# Kasm convention: build-time customisation belongs to the DEFAULT PROFILE.
+# /dockerstartup/kasm_default_profile.sh copies /home/kasm-default-profile into
+# $HOME at session start (gated on $HOME/.bashrc not existing). Anything baked
+# straight into /home/kasm-user is destroyed the moment persistent profiles are
+# switched on, because the user's volume mounts over that path. HOME is reset to
+# /home/kasm-user at the end of this file.
+USER root
+
+ENV HOME=/home/kasm-default-profile
+WORKDIR $HOME
+
+# ---------------------------------------------------------------------------
+# 1. Build + runtime dependencies.
+#    Package set mirrors what CMake actually resolved on the development host;
+#    hyphen / graphicsmagick / librevenge are deliberately absent because the
+#    host build did not find them either, and the goal is an identical binary.
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        `# toolchain` \
+        build-essential cmake ninja-build pkg-config git wget unzip ca-certificates file \
+        python3-dev \
+        `# Qt 6` \
+        qt6-base-dev qt6-base-dev-tools qt6-base-private-dev \
+        qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools linguist-qt6 \
+        qt6-svg-dev qt6-5compat-dev qtkeychain-qt6-dev \
+        `# document / imaging libraries` \
+        libpodofo-dev libpoppler-dev libpoppler-cpp-dev \
+        libharfbuzz-dev libicu-dev libhunspell-dev liblcms2-dev \
+        libtiff-dev libjpeg62-turbo-dev libpng-dev libjxl-dev \
+        libxml2-dev libcairo2-dev libcups2-dev libfreetype-dev libfontconfig-dev \
+        libboost-dev zlib1g-dev libzstd-dev libssl-dev \
+        `# SAM Smart Select — Debian packages ONNX Runtime, unlike Ubuntu` \
+        libonnxruntime-dev \
+        `# GL / windowing (pulled by Qt, named for clarity)` \
+        libxkbcommon-dev libglu1-mesa-dev libegl-dev libgles-dev \
+        libglx-dev libopengl-dev libvulkan-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 2. Build Scribus from source and install to /usr/local.
+#    Options match the development host's CMakeCache exactly:
+#    Release, WITH_BOOST/WITH_PODOFO/WITH_SAM=ON, prefix /usr/local.
+# ---------------------------------------------------------------------------
+COPY . /tmp/scribus-source
+RUN cd /tmp/scribus-source \
+ && rm -rf build-kasm && mkdir build-kasm && cd build-kasm \
+ && cmake -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="${INST_DIR}" \
+        -DWITH_SAM=ON \
+        -DWITH_BOOST=ON \
+        -DWITH_PODOFO=ON \
+        -DWANT_HEADERINSTALL=OFF \
+        .. \
+ && ninja -j"$(nproc)" \
+ && ninja install \
+ && ldconfig \
+ && cd / && rm -rf /tmp/scribus-source
+
+# ---------------------------------------------------------------------------
+# 3. Fonts, input method engines, and the CUSTOM m17n tables.
+#
+#    ml-deshabhimani is the newsroom's production default keyboard
+#    (fcitx5 profile: DefaultIM=m17n_ml_deshabhimani) and te-praja-sr is the
+#    Telugu layout. NEITHER ships in m17n-db — both are hand-installed on the
+#    host and are not dpkg-owned, so fcitx5-m17n alone gives the stock tables
+#    and silently loses the layout the operators actually type on.
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        fonts-smc fonts-smc-anjalioldlipi fonts-smc-gayathri fonts-smc-manjari \
+        fonts-lohit-mlym fonts-samyak-mlym \
+        fonts-noto-core fonts-noto-ui-core fonts-noto-color-emoji \
+        fcitx5 fcitx5-frontend-qt6 fcitx5-m17n fcitx5-config-qt m17n-db \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY kasm/ime/ml-deshabhimani.mim /usr/share/m17n/ml-deshabhimani.mim
+COPY kasm/ime/te-praja-sr.mim     /usr/share/m17n/te-praja-sr.mim
+RUN chmod 0644 /usr/share/m17n/ml-deshabhimani.mim /usr/share/m17n/te-praja-sr.mim \
+ && fc-cache -f
+
+# ---------------------------------------------------------------------------
+# 4. SAM models — ONE system-wide copy, not one per user.
+#
+#    SamSegmenter::modelDir() is hardcoded to $HOME/.config/scribus/sam/ with no
+#    system fallback (scimagesam.cpp:26). Baking 43 MB of .onnx into the default
+#    profile would make kasm_default_profile.sh `cp -rp` it into every user's
+#    home on first launch. Instead the models live in /opt and the launch script
+#    symlinks them in, which also lets an admin bind-mount a replacement set
+#    read-only without touching profiles.
+# ---------------------------------------------------------------------------
+RUN mkdir -p "${SAM_SYSTEM_DIR}" \
+ && if [ "${INCLUDE_SAM_MODELS}" = "true" ]; then \
+        set -eux; \
+        cd /tmp; \
+        wget -q -O sam.zip "${SAM_MODELS_URL}"; \
+        unzip -o sam.zip -d sam_extract; \
+        cp "$(find sam_extract -iname '*encoder*.onnx' | head -1)" "${SAM_SYSTEM_DIR}/encoder.onnx"; \
+        cp "$(find sam_extract -iname '*decoder*.onnx' | head -1)" "${SAM_SYSTEM_DIR}/decoder.onnx"; \
+        rm -rf /tmp/sam.zip /tmp/sam_extract; \
+        echo "SAM models baked into ${SAM_SYSTEM_DIR}"; \
+    else \
+        echo "SAM models NOT bundled — mount them at ${SAM_SYSTEM_DIR} (see README)."; \
+    fi \
+ && chmod -R a+rX /opt/scribus
+
+# ---------------------------------------------------------------------------
+# 5. Desktop integration and auto-launch.
+#    /dockerstartup/custom_startup.sh does not exist in the base image; Kasm
+#    runs it if present, so we install our launcher as exactly that file.
+# ---------------------------------------------------------------------------
+COPY kasm/scribus.desktop  "${INST_DIR}/share/applications/scribus-mdtp.desktop"
+COPY kasm/kasm-launch.sh   "${STARTUPDIR}/custom_startup.sh"
+RUN chmod +x "${STARTUPDIR}/custom_startup.sh"
+
+# Default profile: autostart entry, desktop shortcut, and the fcitx5 engine list
+# with the Malayalam Deshabhimani layout as the default IM.
+RUN mkdir -p "${HOME}/.config/autostart" "${HOME}/.config/fcitx5" \
+             "${HOME}/Desktop" "${HOME}/Documents" \
+ && cp "${INST_DIR}/share/applications/scribus-mdtp.desktop" "${HOME}/.config/autostart/scribus.desktop" \
+ && cp "${INST_DIR}/share/applications/scribus-mdtp.desktop" "${HOME}/Desktop/scribus.desktop" \
+ && chmod +x "${HOME}/Desktop/scribus.desktop" \
+ && printf '%s\n' \
+        '[Groups/0]' \
+        'Name=Default' \
+        'Default Layout=us' \
+        'DefaultIM=m17n_ml_deshabhimani' \
+        '' \
+        '[Groups/0/Items/0]' \
+        'Name=keyboard-us' \
+        'Layout=' \
+        '' \
+        '[Groups/0/Items/1]' \
+        'Name=m17n_ml_deshabhimani' \
+        'Layout=' \
+        '' \
+        '[Groups/0/Items/2]' \
+        'Name=m17n_ml_mozhi' \
+        'Layout=' \
+        '' \
+        '[Groups/0/Items/3]' \
+        'Name=m17n_te_praja-sr' \
+        'Layout=' \
+        '' \
+        '[GroupOrder]' \
+        '0=Default' \
+        > "${HOME}/.config/fcitx5/profile"
+
+# Qt/GTK must be told to route input through fcitx before Scribus starts.
+RUN printf '%s\n' \
+        'export QT_IM_MODULE=fcitx' \
+        'export GTK_IM_MODULE=fcitx' \
+        'export XMODIFIERS=@im=fcitx' \
+        > /etc/profile.d/fcitx.sh
+
+# ---------------------------------------------------------------------------
+# 6. Ownership, then hand back to the Kasm runtime.
+# ---------------------------------------------------------------------------
+RUN chown -R 1000:0 "${HOME}" \
+ && chmod -R g+rwX "${HOME}"
+
+ENV HOME=/home/kasm-user
+WORKDIR $HOME
+USER 1000

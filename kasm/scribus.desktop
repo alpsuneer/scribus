@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Scribus Malayalam DTP
+GenericName=Desktop Publishing
+Comment=Scribus 1.7.3 with Photoshop-style image editor and SAM AI Smart Select
+Exec=/usr/local/bin/scribus %F
+TryExec=/usr/local/bin/scribus
+Icon=scribus
+Terminal=false
+Categories=Graphics;Publishing;Qt;
+MimeType=application/x-scribus;
+StartupNotify=true
+StartupWMClass=scribus
+Keywords=DTP;Layout;Publishing;Malayalam;PDF;
