@@ -426,6 +426,10 @@ Traps:
   the hand-made per-user units installed keeps using them, including a stale
   `ExecStart` pointing at a script that has since moved. Remove the per-user
   copies to let the packaged one take over.
+  This recurred on the dev machine on 2026-08-23: the stale per-user unit
+  failed `203/EXEC` daily while the packaged one worked, so whether
+  housekeeping ran depended on which user manager picked it up. Fixed by
+  deleting the per-user `.service`/`.timer`, not by editing them.
 - The unit uses `%h`, not a baked-in home, because one packaged unit serves
   every user. `ConditionPathExists=%h/scribus-crashlogs` keeps it a silent
   no-op for users who never run `scribus-debug`.
@@ -435,6 +439,60 @@ Traps:
 - `CPACK_DEBIAN_PACKAGE_SHLIBDEPS` was tried and **left off**: it pushes
   packaging past 10 minutes on this tree. The `.deb` therefore declares no
   library dependencies — the target machine needs the Qt6 runtime already.
+
+#### The in-process crash handler — `main_nix.cpp`
+
+`scribus-debug` only captures a crash for sessions launched through it. Every
+other session goes through `initCrashHandler()`, and until 2026-08-23 that path
+recorded **nothing at all**: `defaultCrashHandler()` wrote no log, raised a
+modal `ScMessageBox` from signal context, then called `exit(255)`.
+
+Three measured consequences, each of which hid real crashes:
+
+- **`exit(255)` is a clean exit, so the kernel writes no core.** A crash the
+  handler processed successfully left no trace anywhere — not in
+  `~/scribus-crashlogs`, not in `coredumpctl`, not in the journal. Verified by
+  dismissing the dialog on a test instance: coredump count went 35 → 35.
+- **The modal dialog blocks forever.** `ScMessageBox::critical` runs a nested Qt
+  event loop from a signal handler; with nobody to click OK the process sits in
+  `QDialog::exec()` indefinitely. The operator force-quits, SIGKILL cannot be
+  caught, and the crash is invisible. Confirmed by live backtrace:
+  `defaultCrashHandler` → `QDialog::exec` → `ppoll`, still alive after 20 s.
+- **The only crashes that ever produced evidence were the ones where the handler
+  itself crashed.** Every stored `scribus.bin` core reads
+  `SigCgt=0x00000001000040ab` — SIGILL/SIGABRT/SIGFPE caught, SIGSEGV *not* —
+  which is the kernel forcing `SIG_DFL` after a second fault inside the handler,
+  where SIGSEGV was blocked. A healthy process reads `…44ab`. That is why the
+  Aug 16–17 cores all share one `~QMdiSubWindow → QFontCache` signature: it is
+  the handler's own teardown faulting, not the original bug.
+
+The handler now writes evidence first and gets out of the way:
+`alarm(30)` → async-safe log → `notify-send` → emergency save → re-raise
+`SIG_DFL`. What matters if you touch it again:
+
+- **The order is the whole design.** The log reaches disk *before*
+  `emergencySave()` runs, because `emergencySave()` is Qt code in signal context
+  and is the call most likely to fault. Do not move it earlier.
+- **`alarm()` must be armed first.** The old code armed `alarm(300)` *after* the
+  blocking dialog, where it could never bound the hang it existed to bound.
+- **Async-safety is not optional on the logging path.** No `malloc`, no
+  `printf`, no Qt: raw `write(2)` helpers plus `backtrace_symbols_fd`, the
+  non-allocating variant. `printBacktrace()` in `util_debug.cpp` uses `new`,
+  `backtrace_symbols` and `__cxa_demangle` — never call it from a handler.
+  `backtrace()` is primed once at init because its first call may `dlopen`.
+- **`SA_ONSTACK` + `sigaltstack` is what makes a stack-overflow SIGSEGV
+  catchable at all** — without an alternate stack the kernel cannot push a
+  signal frame and kills the process outright.
+- **Re-raising instead of exiting costs a ~15 MB core per crash** via
+  systemd-coredump, and the exit status becomes signal death (139), not 255.
+- SIGBUS was missing from the installed set and is now included.
+
+Names in the log are mangled on purpose (demangling allocates); run
+`c++filt < crash-*.log`.
+
+Not exercised: the `notify-send` branch (`notify-send` is not installed on the
+dev machine, so `asNotify()` is a no-op there and has never run), the
+nested-fault path, and the stack-overflow case.
 
 ---
 
