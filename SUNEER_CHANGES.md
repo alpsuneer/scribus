@@ -313,7 +313,30 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - gdb വേണം (`apt install gdb`). ഇല്ലെങ്കിൽ scribus-debug
   ഒരു message കാണിച്ച് നിർത്തും
 
-### 20. Authors
+### 20. Kasm Workspace — Browser-ൽ Scribus
+
+- Scribus ഇനി **browser-ൽ** ഉപയോഗിക്കാം. User-ന്റെ machine-ൽ ഒന്നും
+  install ചെയ്യേണ്ട — Kasm Workspaces server-ൽ ഓടും, screen browser-ലേക്ക്
+  stream ചെയ്യും
+- Image ഉണ്ടാക്കാൻ:
+  ```bash
+  docker build -f kasm/Dockerfile.kasm -t scribus-mdtp:kasm .
+  ```
+  അല്ലെങ്കിൽ locally test ചെയ്യാൻ `./kasm/test-local.sh` — എന്നിട്ട്
+  `https://localhost:6901` (user: `kasm_user`, password: `password`)
+- Session തുറന്നാൽ **Scribus തനിയെ വരും**. വേറെ ഒന്നും ചെയ്യേണ്ട
+- **Malayalam പൂർണ്ണമായി വർക്ക് ചെയ്യും**: SMC fonts, Lohit, Samyak, Noto
+  എല്ലാം ഉണ്ട്. Keyboard-ൽ **Deshabhimani layout തന്നെയാണ് default**
+  (`m17n_ml_deshabhimani`) — Telugu Praja-യും ഉണ്ട്
+- **SAM Smart Select** പ്രവർത്തിക്കും. Model files `/opt/scribus/sam`-ൽ
+  ഇടണം, അല്ലെങ്കിൽ build ചെയ്യുമ്പോൾ
+  `--build-arg INCLUDE_SAM_MODELS=true` കൊടുക്കണം
+- ശ്രദ്ധിക്കുക: ഈ laptop-ൽ build ചെയ്യുമ്പോൾ `--network=host` വേണം
+  (VPN കാരണം docker build-ന് DNS കിട്ടില്ല). `test-local.sh` ഇത്
+  തനിയെ ശരിയാക്കും
+- വിശദമായ വിവരങ്ങൾ `kasm/README.md`-ൽ ഉണ്ട്
+
+### 21. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
