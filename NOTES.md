@@ -438,6 +438,52 @@ Traps:
 
 ---
 
+### Kasm workspace image — `kasm/`
+
+Browser-streamed Scribus for demos and (eventually) cloud-hosted production:
+`kasmweb/core-debian-trixie` + KasmVNC + XFCE, Scribus built from source into
+`/usr/local`. Built with `docker build -f kasm/Dockerfile.kasm .` from the
+repository root.
+
+**The base image is Debian trixie on purpose.** Every dependency then resolves
+to the *same version the development host builds against* — verified inside the
+image: `qt6-base-dev 6.8.2+dfsg-9+deb13u2`, `libonnxruntime-dev 1.21.0+dfsg-1`,
+`libpoppler-cpp-dev 25.03.0-5+deb13u4`. An earlier draft targeted
+`core-ubuntu-noble`, which ships **Qt 6.4.2** and packages **no ONNX Runtime at
+all**; `QT_MIN_VERSION` is 6.4.0 so it would configure, but it meant compiling
+this fork against a Qt it had never been built with plus hand-installing
+Microsoft's ONNX tarball. That draft was never once built.
+
+Traps:
+
+- **Build-time `HOME` must be `/home/kasm-default-profile`, not
+  `/home/kasm-user`.** `/dockerstartup/kasm_default_profile.sh` copies the
+  former into `$HOME` at session start (gated on `$HOME/.bashrc` not existing).
+  Anything baked straight into `/home/kasm-user` is destroyed the moment
+  persistent profiles are enabled, because the user's volume mounts over that
+  path — so it demos perfectly and fails in production. Reset `ENV HOME` back
+  to `/home/kasm-user` before the final `USER 1000`.
+- **`ml-deshabhimani.mim` and `te-praja-sr.mim` are not in any Debian package.**
+  They are hand-installed on the host and not dpkg-owned, so installing
+  `fcitx5-m17n` yields the stock m17n tables and *silently* substitutes a
+  different keyboard for the one the newsroom types on. Both now live in
+  `kasm/ime/` and are copied to `/usr/share/m17n/`. Re-copy them after any
+  host-side update; nothing syncs them.
+- **SAM models do not belong in the default profile.** `SamSegmenter::modelDir()`
+  is hardcoded to `$HOME/.config/scribus/sam/` with no system fallback
+  (`scimagesam.cpp:26`), so baking them in makes Kasm `cp -rp` 43 MB into every
+  user's home on first launch. They live once at `/opt/scribus/sam` and
+  `kasm-launch.sh` symlinks them in — which also lets an admin bind-mount a
+  replacement set read-only without touching profiles.
+- Wait for the desktop with Kasm's own `/usr/bin/desktop_ready`, not a
+  hand-rolled `until pgrep -x xfce4-session`; the base image's DE can change.
+- The `pgrep` guard must match **`scribus.bin`**, not `scribus` — the installed
+  `/usr/local/bin/scribus` is a wrapper that `exec -a scribus`es the real ELF,
+  so the running process never carries the wrapper's name. Guarding on the
+  wrong name spawns duplicate windows on every retry.
+
+---
+
 ## Desh RIP — standalone CTP screening tool
 
 A **separate application, not part of this repository**: `/home/s1/desh-rip/`,
@@ -668,6 +714,22 @@ to test, since a bad matrix could itself explain "no visible difference".
   running the build-dir binary. Change a shared struct, rebuild only the main
   binary, and you get SIGSEGV on document load. Full build **and**
   `cmake --install`.
+- **`docker build` has no DNS on this laptop, and apt reports it as missing
+  packages.** `docker run` resolves fine; BuildKit's build containers cannot
+  reach the LAN resolver while strongSwan/IPsec is active. apt treats the failed
+  refresh as a *warning* ("Some index files failed to download … old ones used
+  instead"), carries on with an empty list, and then prints `Unable to locate
+  package` for **every** dependency — including `libssl-dev` and
+  `libonnxruntime-dev`, which obviously exist. It reads exactly like a wrong
+  package list in the Dockerfile and cost a full four-minute apt stage to
+  misdiagnose. Build with `--network=host`; `kasm/test-local.sh` probes and adds
+  it automatically.
+- **A piped `docker build … | tail` reports `tail`'s exit status, not the
+  build's.** A failed build looked like a clean `exit code 0` with an empty log.
+  Redirect to a file and check `$?`, or read `PIPESTATUS[0]`.
+- **Docker's data root here is `/home/docker`** (`/etc/docker/daemon.json`), so
+  `df /` is the wrong filesystem to check before a large build — `/` had 10 GB
+  free while the builder had 60 GB.
 - **Newspaper guides come in pairs** bracketing narrow gutters, so "every gap is
   a column" produced 15 fake columns. The engine drops spans narrower than
   0.5× the widest.
