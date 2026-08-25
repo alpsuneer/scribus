@@ -219,6 +219,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/marksmanager.h"
 #include "ui/markvariabletext.h"
 #include "ui/mergedoc.h"
+#include "ui/contourdetectdialog.h"
 #include "ui/imageeraseroptions.h"
 #include "ui/modetoolbar.h"
 #include "ui/movepage.h"
@@ -1328,6 +1329,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->createMenu("ItemPathOps", tr("Shape && Paths"), "Item");
 	scrMenuMgr->addMenuItemString("ItemPathOps", "Item");
 	scrMenuMgr->addMenuItemString("itemShapeEdit", "ItemPathOps");
+	scrMenuMgr->addMenuItemString("itemDetectContour", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemCombinePolygons", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemSplitPolygons", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemAttachTextToPath", "ItemPathOps");
@@ -7082,6 +7084,76 @@ void ScribusMainWindow::setImageEraserOptionsVisible(bool visible)
 	imageEraserOptions->setVisible(visible);
 	if (visible)
 		imageEraserOptions->refreshFromMode();
+}
+
+void ScribusMainWindow::slotDetectContourFromImage()
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+		return;
+	PageItem* currItem = doc->m_Selection->itemAt(0);
+	PageItem_ImageFrame* frame = currItem ? currItem->asImageFrame() : nullptr;
+	if (!frame)
+		return;
+
+	if (!frame->canDetectContour())
+	{
+		// Nothing transparent anywhere: tracing would just return the image
+		// rectangle, which is what the frame shape already gives you.
+		statusBar()->showMessage(tr("This image has nothing transparent to trace."), 6000);
+		return;
+	}
+
+	ContourDetectDialog dialog(this, frame);
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+
+	QString message;
+	FPointArray contour = frame->detectContourFromMask(dialog.threshold(), dialog.tolerance(),
+	                                                   dialog.mode(), &message);
+	if (contour.size() < 4)
+	{
+		statusBar()->showMessage(message.isEmpty() ? tr("No visible region") : message, 6000);
+		return;
+	}
+
+	FPointArray oldContour = currItem->ContourLine.copy();
+	int oldFlow = static_cast<int>(currItem->textFlowMode());
+	int newFlow = dialog.useForTextWrap()
+		? static_cast<int>(PageItem::TextFlowUsesContourLine)
+		: oldFlow;
+
+	currItem->ContourLine = contour;
+	currItem->ClipEdited = true;
+	if (newFlow != oldFlow)
+		currItem->setTextFlowMode(static_cast<PageItem::TextFlowMode>(newFlow));
+
+	if (UndoManager::undoEnabled())
+	{
+		auto* state = new ScOldNewState<FPointArray>(Um::DetectContourLine, QString(), Um::IBorder);
+		state->set("DETECT_CONTOUR");
+		state->setStates(oldContour, contour);
+		if (newFlow != oldFlow)
+		{
+			// The wrap mode is part of the same user action, so it has to undo
+			// with it rather than as a separate step.
+			state->set("DETECT_CONTOUR_FLOW", true);
+			state->set("DETECT_CONTOUR_FLOW_OLD", oldFlow);
+			state->set("DETECT_CONTOUR_FLOW_NEW", newFlow);
+		}
+		m_undoManager->action(currItem, state);
+	}
+
+	currItem->update();
+	doc->changed();
+	doc->regionsChanged()->update(QRectF());
+	// Text on other frames only reflows once their layout is invalidated.
+	doc->invalidateAll();
+	view->DrawNew();
+
+	if (!message.isEmpty())
+		statusBar()->showMessage(message, 8000);
+	else
+		statusBar()->showMessage(tr("Contour detected: %n node(s)", "", contour.size() / 4), 5000);
 }
 
 void ScribusMainWindow::setMainWindowActive()

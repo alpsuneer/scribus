@@ -365,7 +365,38 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   കാണില്ല.** പക്ഷേ OK കൊടുത്താലും mask നഷ്ടപ്പെടില്ല — canvas-ൽ
   ശരിയായി കാണാം
 
-### 22. Authors
+### 22. Detect Contour from Image (Ctrl+Shift+K) — Text wrap ചിത്രത്തിന്റെ ശരിക്കുള്ള shape-ന് ചുറ്റും
+
+- Image eraser കൊണ്ട് photo-യുടെ ഭാഗങ്ങൾ മായ്ച്ചതിന് ശേഷം, **ബാക്കി
+  കാണുന്ന ഭാഗത്തിന്റെ outline തനിയെ കണ്ടെത്തി** contour line ആക്കാം.
+  Text അപ്പോൾ frame-ന്റെ ചതുരത്തിന് ചുറ്റുമല്ല, **ചിത്രത്തിന്റെ ശരിക്കുള്ള
+  രൂപത്തിന് ചുറ്റും** ഒഴുകും
+- Image frame select ചെയ്യുക → **Item › Shape & Paths › Detect Contour from
+  Image**, അല്ലെങ്കിൽ **Ctrl+Shift+K**. Properties palette-ലെ **Shape** tab-ൽ
+  "Contour: Detect from Image" button-ഉം ഉണ്ട്
+- മായ്ച്ചിട്ടില്ലെങ്കിലും, ചിത്രത്തിന് സ്വന്തം transparency (cut-out PNG)
+  ഉണ്ടെങ്കിൽ അതും ഉപയോഗിക്കും. രണ്ടും ഇല്ലെങ്കിൽ button enable ആകില്ല
+- Dialog-ൽ:
+  - **Preview** — mask-ഉം കണ്ടെത്തിയ outline-ഉം **ചുവപ്പ് നിറത്തിൽ**
+    (holes ഓറഞ്ച് നിറത്തിൽ). Apply ചെയ്യുന്നതിന് മുൻപ് കാണാം
+  - **Alpha threshold** (1–254, default 128) — എത്ര transparent ആയാൽ
+    "മായ്ച്ചു" എന്ന് കണക്കാക്കണം
+  - **Simplify tolerance** (0.5–20 px, default 2.0) — കൂട്ടിയാൽ nodes കുറയും.
+    Node കൂടുതലായാൽ layout മന്ദഗതിയിലാകും; 2000-ന് മുകളിൽ ആയാൽ
+    മുന്നറിയിപ്പ് വരും
+  - **Contour** — "Largest region only" (default) / "All separate regions" /
+    "Include holes"
+  - **Use the contour for text wrap** (default on) — ഇത് ഓഫ് ആക്കിയാൽ
+    contour സൂക്ഷിക്കും, പക്ഷേ text wrap മാറില്ല
+- **Include holes** ഉപയോഗിച്ചാൽ ചിത്രത്തിനുള്ളിലെ ദ്വാരത്തിലും text
+  ഒഴുകും — verify ചെയ്തിട്ടുണ്ട്
+- **Undo/Redo പ്രവർത്തിക്കും.** Contour-ഉം text wrap mode-ഉം ഒരുമിച്ച്
+  ഒറ്റ step ആയി undo ആകും
+- **⚠️ ശ്രദ്ധിക്കുക:** Scribus-ൽ text wrap പ്രവർത്തിക്കണമെങ്കിൽ **image
+  frame, text frame-ന്റെ മുകളിൽ** ആയിരിക്കണം. അല്ലെങ്കിൽ contour ശരിയായി
+  കണ്ടെത്തിയാലും text ഒഴുകില്ല. `Item › Level › Move to Front` ഉപയോഗിക്കുക
+
+### 23. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

@@ -5206,6 +5206,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreResTyp(ss, isUndo);
 		else if (ss->contains("RESET_CONTOUR"))
 			restoreContourLine(ss, isUndo);
+		else if (ss->contains("DETECT_CONTOUR"))
+			restoreDetectedContourLine(ss, isUndo);
 		else if (ss->contains("CHANGE_SHAPE_TYPE"))
 			restoreShapeType(ss, isUndo);
 		else if (ss->contains("UNITEITEM"))
@@ -8117,6 +8119,27 @@ void PageItem::restoreSplitItem(SimpleState *state, bool isUndo)
 	}
 	else
 		doc()->itemSelection_SplitItems();
+}
+
+void PageItem::restoreDetectedContourLine(SimpleState *state, bool isUndo)
+{
+	// Deliberately not restoreContourLine(): that one's redo branch rebuilds
+	// the contour from PoLine, which is right for "reset to frame shape" and
+	// wrong for anything that replaces the contour with a computed one.
+	const auto *is = dynamic_cast<ScOldNewState<FPointArray>*>(state);
+	if (!is)
+	{
+		qFatal("PageItem::restoreDetectedContourLine: dynamic cast failed");
+		return;
+	}
+	ContourLine = isUndo ? is->getOldState() : is->getNewState();
+	ClipEdited = true;
+	if (state->contains("DETECT_CONTOUR_FLOW"))
+	{
+		int oldMode = state->getInt("DETECT_CONTOUR_FLOW_OLD");
+		int newMode = state->getInt("DETECT_CONTOUR_FLOW_NEW");
+		m_textFlowMode = static_cast<TextFlowMode>(isUndo ? oldMode : newMode);
+	}
 }
 
 void PageItem::restoreContourLine(SimpleState *state, bool isUndo)

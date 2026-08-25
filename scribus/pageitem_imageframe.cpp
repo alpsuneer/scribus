@@ -26,6 +26,8 @@ for which a new license (GPL+exception) is in place.
 #include <QFontInfo>
 #include <QGridLayout>
 #include <QKeyEvent>
+#include <QPainterPath>
+#include <QPolygonF>
 
 #include <cmath>
 #include <cassert>
@@ -606,4 +608,159 @@ QImage* PageItem_ImageFrame::imageForDraw()
 		m_eraserCompositeKey = key;
 	}
 	return &m_eraserComposite;
+}
+
+QTransform PageItem_ImageFrame::imagePixelToLocal() const
+{
+	// Mirrors the transform chain applied in DrawObj_Item, minus the low-res
+	// proxy scale: callers work in the real image's pixel space, not the
+	// preview pixmap's.
+	QTransform t;
+	if (imageFlippedH())
+	{
+		t.translate(m_width, 0);
+		t.scale(-1, 1);
+	}
+	if (imageFlippedV())
+	{
+		t.translate(0, m_height);
+		t.scale(1, -1);
+	}
+	t.translate(m_imageXOffset * m_imageXScale, m_imageYOffset * m_imageYScale);
+	t.rotate(m_imageRotation);
+	t.scale(m_imageXScale, m_imageYScale);
+	return t;
+}
+
+QTransform PageItem_ImageFrame::maskPixelToLocal(const QSize& maskSize) const
+{
+	QTransform t = imagePixelToLocal();
+	if (maskSize.width() <= 0 || maskSize.height() <= 0 || OrigW <= 0 || OrigH <= 0)
+		return t;
+	// The mask is capped below the image's own resolution, so it needs its own
+	// scale step before the image-space transform.
+	t.scale(double(OrigW) / double(maskSize.width()),
+	        double(OrigH) / double(maskSize.height()));
+	return t;
+}
+
+QImage PageItem_ImageFrame::contourSourceMask() const
+{
+	QImage mask = eraserMask();
+	if (!mask.isNull())
+		return mask;
+
+	// No erasure: fall back to whatever transparency the image file itself
+	// carries, so a cut-out PNG can be traced without erasing anything first.
+	if (!imageIsAvailable || Pfile.isEmpty())
+		return QImage();
+
+	const QImage& base = pixm.qImage();
+	if (base.isNull() || !base.hasAlphaChannel())
+		return QImage();
+
+	QImage alpha(base.size(), QImage::Format_Grayscale8);
+	if (alpha.isNull())
+		return QImage();
+
+	bool sawTransparency = false;
+	for (int y = 0; y < base.height(); ++y)
+	{
+		const QRgb* src = reinterpret_cast<const QRgb*>(base.constScanLine(y));
+		uchar* dst = alpha.scanLine(y);
+		for (int x = 0; x < base.width(); ++x)
+		{
+			int a = qAlpha(src[x]);
+			dst[x] = uchar(a);
+			if (a < 255)
+				sawTransparency = true;
+		}
+	}
+	// A format that merely has an alpha channel but uses none of it is not a
+	// cut-out; treat it as "nothing to trace" so the caller can say so.
+	return sawTransparency ? alpha : QImage();
+}
+
+bool PageItem_ImageFrame::canDetectContour() const
+{
+	return !contourSourceMask().isNull();
+}
+
+FPointArray PageItem_ImageFrame::detectContourFromMask(int threshold, double tolerance,
+                                                       ScContour::Mode mode, QString* message) const
+{
+	FPointArray result;
+	if (message)
+		message->clear();
+
+	QImage mask = contourSourceMask();
+	if (mask.isNull())
+	{
+		if (message)
+			*message = tr("This image has nothing transparent to trace.");
+		return result;
+	}
+
+	QList<ScContour::Ring> rings = ScContour::detect(mask, threshold, tolerance, mode);
+	if (rings.isEmpty())
+	{
+		if (message)
+			*message = tr("No visible region");
+		return result;
+	}
+
+	QTransform toLocal = maskPixelToLocal(mask.size());
+
+	result.svgInit();
+	int nodeCount = 0;
+	for (const ScContour::Ring& ring : rings)
+	{
+		if (ring.points.size() < 3)
+			continue;
+		QPolygonF mapped = toLocal.map(ring.points);
+		result.svgMoveTo(mapped[0].x(), mapped[0].y());
+		for (int i = 1; i < mapped.size(); ++i)
+			result.svgLineTo(mapped[i].x(), mapped[i].y());
+		result.svgClosePath();
+		nodeCount += mapped.size();
+	}
+
+	if (result.size() < 4)
+	{
+		if (message)
+			*message = tr("No visible region");
+		return FPointArray();
+	}
+
+	// The image is clipped to the frame when drawn, so the visible region is
+	// really mask AND frame. Only pay for the intersection when the contour
+	// actually leaves the frame - a plain rectangular case would otherwise come
+	// back from QPainterPath with its corners perturbed and extra nodes.
+	QPainterPath framePath = PoLine.toQPainterPath(true);
+	QPainterPath contourPath = result.toQPainterPath(true);
+	if (!framePath.isEmpty() && !framePath.contains(contourPath.boundingRect()))
+	{
+		QPainterPath clipped = contourPath.intersected(framePath);
+		if (clipped.isEmpty())
+		{
+			if (message)
+				*message = tr("No visible region");
+			return FPointArray();
+		}
+		FPointArray clippedArray;
+		clippedArray.svgInit();
+		clippedArray.fromQPainterPath(clipped, true);
+		if (clippedArray.size() >= 4)
+		{
+			result = clippedArray;
+			nodeCount = result.size() / 4;
+		}
+	}
+
+	if (message && message->isEmpty() && nodeCount > 2000)
+	{
+		*message = tr("The detected contour has %1 nodes, which will slow down layout. "
+		              "Increase the simplify tolerance to reduce it.").arg(nodeCount);
+	}
+	return result;
 }

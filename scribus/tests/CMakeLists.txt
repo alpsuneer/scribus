@@ -47,3 +47,9 @@ add_executable(erasermasktests ${ERASERMASKTESTS_SOURCES})
 target_link_libraries(erasermasktests ${TESTS_LIBRARIES})
 add_test(NAME erasermasktests COMMAND erasermasktests)
 
+# Unit tests for eraser-mask contour tracing
+set(CONTOURDETECTTESTS_SOURCES contourdetecttests.cpp ../util_contour.cpp)
+add_executable(contourdetecttests ${CONTOURDETECTTESTS_SOURCES})
+target_link_libraries(contourdetecttests ${TESTS_LIBRARIES})
+add_test(NAME contourdetecttests COMMAND contourdetecttests)
+

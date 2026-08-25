@@ -26,9 +26,11 @@ for which a new license (GPL+exception) is in place.
 #include <QString>
 #include <QRectF>
 #include <QKeyEvent>
+#include <QTransform>
 
 #include "scribusapi.h"
 #include "pageitem.h"
+#include "util_contour.h"
 class ScPainter;
 class ScribusDoc;
 
@@ -72,6 +74,42 @@ public:
 	    and only the finished stroke is committed. */
 	void setLiveEraserMask(const QImage& mask);
 	void clearLiveEraserMask();
+	//@}
+
+	//! \name Image coordinate mapping
+	//! One definition of where the image sits inside the frame, shared by
+	//! everything that has to go between pixels and page geometry. It mirrors
+	//! the transform chain in DrawObj_Item, which is the authority; keep them
+	//! together if that chain ever changes.
+	//@{
+	/*! \brief Full-resolution image pixels (the OrigW x OrigH space) to
+	    item-local points. Excludes the low-res proxy scale, so it is in terms
+	    of the real image, not whatever preview pixmap is loaded. */
+	QTransform imagePixelToLocal() const;
+	//! As imagePixelToLocal(), starting from the space of a \a maskSize mask.
+	QTransform maskPixelToLocal(const QSize& maskSize) const;
+	//@}
+
+	//! \name Contour detection
+	//@{
+	/*! \brief The mask a contour should be traced from: the eraser mask if the
+	    frame has one, otherwise the image's own alpha channel. Null when
+	    neither exists, which means "nothing is transparent". */
+	QImage contourSourceMask() const;
+	//! True when there is something to trace, i.e. contourSourceMask() is set.
+	bool canDetectContour() const;
+
+	/*! \brief Trace the visible region of the image into a contour.
+
+	    \param threshold alpha at or above which a pixel counts as visible.
+	    \param tolerance simplification tolerance, in image pixels.
+	    \param mode      which traced rings to keep.
+	    \param message   set to a user-facing explanation when the result is
+	                     empty or needed clamping; may be null.
+	    \returns the contour in item-local points, ready for ContourLine.
+	             Empty when nothing is visible. */
+	FPointArray detectContourFromMask(int threshold, double tolerance,
+	                                  ScContour::Mode mode, QString* message = nullptr) const;
 	//@}
 
 protected:

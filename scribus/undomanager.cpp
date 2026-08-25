@@ -765,6 +765,7 @@ void UndoManager::languageChange()
 	UndoManager::EditShape          = tr("Edit shape");
 	UndoManager::ChangeShapeType    = tr("Change shape type");
 	UndoManager::ResetContourLine   = tr("Reset contour line");
+	UndoManager::DetectContourLine  = tr("Detect contour from image");
 	UndoManager::AddPage            = tr("Add page");
 	UndoManager::AddPages           = tr("Add pages");
 	UndoManager::ReplaceText        = tr("Replace text");
@@ -1112,6 +1113,7 @@ QString UndoManager::EditContourLine    = "";
 QString UndoManager::EditShape          = "";
 QString UndoManager::ChangeShapeType    = "";
 QString UndoManager::ResetContourLine   = "";
+QString UndoManager::DetectContourLine = "";
 QString UndoManager::GradTypeMask       = "";
 QString UndoManager::AddPage            = "";
 QString UndoManager::AddPages           = "";

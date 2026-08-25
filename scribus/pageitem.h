@@ -1641,6 +1641,7 @@ protected: // Start protected functions
 	void restoreSideBorders(SimpleState *state, bool isUndo);
 	void restoreConnectPath(SimpleState *state, bool isUndo);
 	void restoreContourLine(SimpleState *state, bool isUndo);
+	void restoreDetectedContourLine(SimpleState *state, bool isUndo);
 	void restoreCornerRadius(SimpleState *state, bool isUndo);
 	void restoreCornerRadii(SimpleState *state, bool isUndo);
 	void restoreCreateMeshGrad(SimpleState *state, bool isUndo);

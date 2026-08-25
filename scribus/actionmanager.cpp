@@ -524,6 +524,8 @@ void ActionManager::initItemMenuActions()
 
 	name = "itemShapeEdit";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemDetectContour";
+	scrActions->insert(name, new ScrAction(QString(), QString(), "", defaultKey(name), mainWindow));
 	(*scrActions)["itemShapeEdit"]->setToggleAction(true);
 	(*scrActions)["itemShapeEdit"]->setChecked(false);
 	name = "itemAttachTextToPath";
@@ -580,6 +582,7 @@ void ActionManager::initItemMenuActions()
 	connect( (*scrActions)["itemAttributes"], SIGNAL(triggered()), mainWindow, SLOT(objectAttributes()) );
 	connect( (*scrActions)["itemsAutoArrange"], SIGNAL(triggered()), mainWindow, SLOT(slotAutoArrangeFrames()) );
 	connect( (*scrActions)["itemShapeEdit"], SIGNAL(triggered()), mainWindow, SLOT(toggleNodeEdit()) );
+	connect( (*scrActions)["itemDetectContour"], SIGNAL(triggered()), mainWindow, SLOT(slotDetectContourFromImage()) );
 	connect( (*scrActions)["itemImageInfo"], SIGNAL(triggered()), mainWindow, SLOT(getImageInfo()) );
 	connect( (*scrActions)["itemToggleInlineImage"], SIGNAL(triggered()), mainWindow, SLOT(toogleInlineState()) );
 }
@@ -1792,6 +1795,7 @@ void ActionManager::languageChange()
 	(*scrActions)["itemPDFAnnotationProps"]->setTexts( tr("Annotation P&roperties..."));
 	(*scrActions)["itemPDFFieldProps"]->setTexts( tr("Field P&roperties..."));
 	(*scrActions)["itemShapeEdit"]->setTexts( tr("&Edit Shape..."));
+	(*scrActions)["itemDetectContour"]->setTexts( tr("Detect Contour from &Image"));
 	(*scrActions)["itemAttachTextToPath"]->setTexts( tr("&Attach Text to Path"));
 	(*scrActions)["itemDetachTextFromPath"]->setTexts( tr("&Detach Text from Path"));
 	(*scrActions)["itemCombinePolygons"]->setTexts( tr("&Combine Polygons"));
@@ -2168,6 +2172,8 @@ void ActionManager::createDefaultShortcuts()
 	//Item Menu
 	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
 	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
+	// Ctrl+Shift+D, the obvious mnemonic, is taken by Multiple Duplicate above.
+	defKeys.insert("itemDetectContour", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
 	// Auto Arrange has NO default shortcut. The selection-scoped engine behind it
 	// is correct on a synthetic page but wrong on a real broadsheet, so the
 	// feature is parked; see NOTES.md. The code stays compiled and the action

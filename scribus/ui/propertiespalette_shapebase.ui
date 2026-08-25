@@ -250,6 +250,53 @@
     </layout>
    </item>
    <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_contour">
+     <property name="spacing">
+      <number>16</number>
+     </property>
+     <item>
+      <widget class="FormWidget" name="labelContour">
+       <property name="label" stdset="0">
+        <string>Contour</string>
+       </property>
+       <property name="font">
+        <font>
+         <pointsize>8</pointsize>
+        </font>
+       </property>
+       <layout class="QHBoxLayout" name="horizontalLayout_contourInner">
+        <item>
+         <widget class="QToolButton" name="detectContour">
+          <property name="toolTip">
+           <string>Trace the visible part of the image into the contour line</string>
+          </property>
+          <property name="text">
+           <string>Detect from Image</string>
+          </property>
+          <property name="toolButtonStyle">
+           <enum>Qt::ToolButtonTextOnly</enum>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_contour">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>

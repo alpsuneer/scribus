@@ -546,6 +546,8 @@ public slots:
 	/** \brief Re-read the eraser brush settings into the options bar, after the
 	    canvas-side [ and ] keys have changed them. */
 	void updateImageEraserOptions();
+	/** \brief Trace the selected image's visible region into its contour line. */
+	void slotDetectContourFromImage();
 	/** \brief Show or hide the eraser options bar with the mode. */
 	void setImageEraserOptionsVisible(bool visible);
 	/** \brief Neues Dokument erzeugt */

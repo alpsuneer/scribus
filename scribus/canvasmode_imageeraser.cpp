@@ -165,42 +165,23 @@ bool CanvasMode_ImageEraser::canvasToMask(PageItem* item, const QPointF& canvasP
 		return false;
 	QPointF localPt = itemInv.map(docPt);
 
-	// Item-local points -> original image pixels. This mirrors the transform
-	// chain in PageItem_ImageFrame::DrawObj_Item exactly, minus the low-res
-	// proxy scale, so the result is in the full-resolution pixel space that
-	// OrigW/OrigH describe.
-	QTransform imgXf;
-	if (item->imageFlippedH())
-	{
-		imgXf.translate(item->width(), 0);
-		imgXf.scale(-1, 1);
-	}
-	if (item->imageFlippedV())
-	{
-		imgXf.translate(0, item->height());
-		imgXf.scale(1, -1);
-	}
-	imgXf.translate(item->imageXOffset() * item->imageXScale(),
-	                item->imageYOffset() * item->imageYScale());
-	imgXf.rotate(item->imageRotation());
+	// Item-local points -> mask pixels. The forward mapping lives on the image
+	// frame and is shared with contour detection, so both agree on where the
+	// image sits in the frame.
+	PageItem_ImageFrame* frame = item->asImageFrame();
+	if (!frame)
+		return false;
 	if (item->imageXScale() == 0.0 || item->imageYScale() == 0.0)
 		return false;
-	imgXf.scale(item->imageXScale(), item->imageYScale());
 
-	QTransform imgInv = imgXf.inverted(&ok);
+	QImage mask = m_previewMask.isNull() ? ScEraserMask::maskOf(item->effectsInUse) : m_previewMask;
+	if (mask.isNull() || mask.width() <= 0 || mask.height() <= 0)
+		return false;
+
+	QTransform maskInv = frame->maskPixelToLocal(mask.size()).inverted(&ok);
 	if (!ok)
 		return false;
-	QPointF imgPx = imgInv.map(localPt);
-
-	// Original image pixels -> mask pixels (the mask is capped at MaxEdge).
-	QImage mask = m_previewMask.isNull() ? ScEraserMask::maskOf(item->effectsInUse) : m_previewMask;
-	int maskW = mask.isNull() ? 0 : mask.width();
-	int maskH = mask.isNull() ? 0 : mask.height();
-	if (maskW <= 0 || maskH <= 0)
-		return false;
-
-	maskPos = QPointF(imgPx.x() * double(maskW) / double(item->OrigW),
-	                  imgPx.y() * double(maskH) / double(item->OrigH));
+	maskPos = maskInv.map(localPt);
 	return true;
 }
 

@@ -19,6 +19,7 @@ for which a new license (GPL+exception) is in place.
 #include <QSignalBlocker>
 
 #include "appmodehelper.h"
+#include "pageitem_imageframe.h"
 #include "appmodes.h"
 #include "canvasmode.h"
 #include "pageitem.h"
@@ -470,6 +471,14 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemPreviewLow"]->setEnabled(isImageFrame);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(isImageFrame && currItem->isRaster);
 	(*a_scrActions)["toolsImageEraser"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->isRaster);
+	// Enabled only when there is actually an alpha boundary to trace, so the
+	// action never silently returns the plain image rectangle.
+	{
+		PageItem_ImageFrame* imgFrame = currItem ? currItem->asImageFrame() : nullptr;
+		(*a_scrActions)["itemDetectContour"]->setEnabled(isImageFrame && currItem->imageIsAvailable
+		                                                 && currItem->isRaster
+		                                                 && imgFrame && imgFrame->canDetectContour());
+	}
 	(*a_scrActions)["editCopyContents"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["editPasteContents"]->setEnabled(isImageFrame);
 	(*a_scrActions)["editPasteContentsAbs"]->setEnabled(isImageFrame);
@@ -1994,6 +2003,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(false);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(false);
 	(*a_scrActions)["toolsImageEraser"]->setEnabled(false);
+	(*a_scrActions)["itemDetectContour"]->setEnabled(false);
 	(*a_scrActions)["itemExtendedImageProperties"]->setEnabled(false);
 	(*a_scrActions)["itemGroup"]->setEnabled(false);
 	(*a_scrActions)["itemUngroup"]->setEnabled(false);

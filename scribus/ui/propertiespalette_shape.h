@@ -57,6 +57,8 @@ protected:
 	
 	void enableCustomShape();
 	void enableEditShape();
+	//! The Detect button only makes sense on an image with an alpha boundary.
+	void enableDetectContour();
 
 public slots:
 	void setMainWindow(ScribusMainWindow *mw);
@@ -79,6 +81,7 @@ private slots:
 
 	void handleTextFlow();
 	void handleShapeEdit();
+	void handleDetectContour();
 	void handleShapeEditEnded();
 	void handleCornerRadius();
 	void handleNewShape(int, int, qreal *);

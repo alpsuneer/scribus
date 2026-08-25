@@ -361,6 +361,7 @@ the narrow `ScribusDoc::itemSelection_ResetParagraphShading()`. Note also that
 | Feature | Key commits | Branch |
 |---|---|---|
 | `EF_ERASERMASK` mask model, `modeImageEraser` canvas mode, options bar, all four renderers | (this change) | feature/ctp-output |
+| Contour detection from the eraser mask (`util_contour`, `ScContour`) feeding `ContourLine` | (this change) | feature/ctp-output |
 
 Paint-to-erase on a placed image, Photoshop style. Soft brush with a hardness
 slider, Alt to un-erase, `[`/`]` to resize, Shift+E / mode toolbar to enter.
@@ -401,6 +402,56 @@ CMYK case is deliberately left un-erased rather than risking the K plate.
 **PDF/X-1a cannot carry transparency** (`PDFVersion::supportsTransparency()`
 lists only 1.4/1.5/1.6/X-4). The newspaper preset is X-1a, so a feathered erase
 quantises to a hard edge there. Erasing still happens; only the feather is lost.
+
+#### Contour from the eraser mask
+
+`Item > Shape & Paths > Detect Contour from Image` (Ctrl+Shift+K, also a
+button in the Properties palette's Shape tab) traces the still-visible part of
+a photo into the item's `ContourLine`, so text wraps the actual shape.
+
+`util_contour.cpp` does the tracing. It is edge-following marching squares:
+every cell edge between a solid cell and a hole becomes a directed unit edge
+oriented with the solid side on the right, and chaining them gives closed rings.
+Two things fall out of that orientation for free - **outer rings come out with
+positive shoelace area and holes negative**, so containment never has to be
+tested, and the saddle case has one rule: take the sharpest clockwise turn,
+which keeps diagonally touching regions apart rather than tracing a figure
+eight. Simplification is Ramer-Douglas-Peucker; Scribus had none of its own
+(nothing in `util_math.cpp`, `fpointarray.cpp` or lib2geom).
+
+Traps met on the way:
+
+- **`restoreContourLine`'s redo branch hardcodes `ContourLine = PoLine.copy()`.**
+  That is right for "reset contour to frame shape" and wrong for anything that
+  computes a contour, so this uses its own `DETECT_CONTOUR` state holding an
+  old/new `FPointArray` pair. The wrap-mode change rides in the same state:
+  one user action must undo as one step.
+- **Text wrap flattens a contour to a single `QPolygon` and ignores the
+  sub-path list.** `pageitem.cpp:10038` calls `flattenPath(ContourLine, Segs)`
+  and hands the polygon to `QRegion` without looking at `Segs`. Holes still
+  work, because the concatenation makes a keyhole polygon and `QRegion`'s
+  odd-even fill reads that correctly - verified visually, text flows inside an
+  erased hole. Do not assume sub-paths are honoured anywhere else on that path.
+- **Wrap only applies to items above the text frame in z-order.** An
+  apparently-not-working contour is usually this, not the contour.
+- **A detected contour does nothing until the item's text flow is set to use
+  it**, which is why the dialog has a "Use the contour for text wrap" box on by
+  default rather than leaving the feature looking inert.
+- `svgPath()` writes coordinates through `QString::number`, i.e. six
+  significant digits, so a contour is only bit-stable *after* its first save.
+  save -> load -> save is byte-identical; in-memory doubles vs reloaded ones
+  are not necessarily.
+
+Unit tests: `scribus/tests/contourdetecttests.cpp`, 13 cases - square gives 4
+nodes, L-shape 6, holes come back with opposite winding, diagonal cells stay
+separate, plus threshold/mode/empty/opaque handling.
+
+One caution about testing simplification: a metric that measures how far the
+ring's *vertices* sit from the ideal shape cannot fail, because RDP only ever
+keeps points that were already on the traced boundary. The first version of the
+circle test did exactly that and read ~0.6 px at every tolerance from 0.5 to 8.
+What the tolerance bounds is how far the *chords* sag, so the test samples
+along each edge.
 
 Unit tests: `scribus/tests/erasermasktests.cpp`, 16 cases covering the codec,
 the brush profile, both export merge formats, and the two stroke regressions.

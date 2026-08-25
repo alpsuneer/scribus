@@ -530,6 +530,7 @@ public:
 	static QString EditShape;
 	static QString ChangeShapeType;
 	static QString ResetContourLine;
+	static QString DetectContourLine;
 	static QString AddPage;
 	static QString AddPages;
 	static QString ReplaceText;

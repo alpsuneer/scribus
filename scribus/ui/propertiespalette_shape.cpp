@@ -44,6 +44,7 @@ PropertiesPalette_Shape::PropertiesPalette_Shape( QWidget* parent)
 
 	connect(textFlowBtnGroup, SIGNAL(idClicked(int)), this, SLOT(handleTextFlow()));
 	connect(editShape, SIGNAL(clicked()) , this, SLOT(handleShapeEdit()));
+	connect(detectContour, SIGNAL(clicked()), this, SLOT(handleDetectContour()));
 	connect(roundRect, SIGNAL(valueChanged(double)) , this, SLOT(handleCornerRadius()));
 	connect(customShape, SIGNAL(FormSel(int,int,qreal*)), this, SLOT(handleNewShape(int,int,qreal*)));
 
@@ -190,6 +191,27 @@ void PropertiesPalette_Shape::enableEditShape()
 		enabled &= !m_item->isTable();
 	}
 	editShape->setEnabled(enabled);
+	enableDetectContour();
+}
+
+void PropertiesPalette_Shape::enableDetectContour()
+{
+	bool enabled = false;
+	if (m_item && !m_item->locked())
+	{
+		// Same condition as the Item menu entry: there has to be an actual
+		// alpha boundary, or tracing would just return the image rectangle.
+		PageItem_ImageFrame* frame = m_item->asImageFrame();
+		enabled = frame && m_item->imageIsAvailable && m_item->isRaster && frame->canDetectContour();
+	}
+	detectContour->setEnabled(enabled);
+}
+
+void PropertiesPalette_Shape::handleDetectContour()
+{
+	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
+		return;
+	m_ScMW->slotDetectContourFromImage();
 }
 
 void PropertiesPalette_Shape::handleSelectionChanged()
