@@ -22,6 +22,7 @@ for which a new license (GPL+exception) is in place.
 #ifndef PAGEITEM_IMAGEFRAME_H
 #define PAGEITEM_IMAGEFRAME_H
 
+#include <QImage>
 #include <QString>
 #include <QRectF>
 #include <QKeyEvent>
@@ -50,10 +51,47 @@ public:
 	bool createInfoGroup(QFrame *, QGridLayout *) override;
 	void applicableActions(QStringList& actionList) override;
 	QString infoDescription() const override;
-	
+
+	//! \name Non-destructive eraser mask
+	//! The stored mask lives in effectsInUse as an ImageEffect::EF_ERASERMASK
+	//! entry, which is what gives it .sla persistence, copy/paste and undo for
+	//! free. These accessors deal in the decoded greyscale image; see
+	//! scimageerasermask.h for the storage format.
+	//@{
+	//! Mask currently in force: the live stroke preview when one is running,
+	//! otherwise the one decoded from effectsInUse. Null when nothing is erased.
+	QImage eraserMask() const;
+	//! Replace the stored mask. An empty mask removes the effect entry.
+	void setEraserMask(const QImage& mask);
+	//! True when this frame has anything erased.
+	bool hasEraserMask() const;
+
+	/*! \brief Show \a mask on canvas without storing it.
+	    Used while a stroke is in progress: re-encoding a base64 PNG on every
+	    mouse move would be far too slow, so the preview bypasses effectsInUse
+	    and only the finished stroke is committed. */
+	void setLiveEraserMask(const QImage& mask);
+	void clearLiveEraserMask();
+	//@}
+
 protected:
 	void DrawObj_Item(ScPainter *p, const QRectF& e) override;
 
+private:
+	/*! \brief The image to draw: the eraser composite when a mask is in force,
+	    otherwise pixm itself. Rebuilds the composite only when the mask or the
+	    underlying pixmap actually changed. */
+	QImage* imageForDraw();
+
+	//! Transient stroke preview; never saved. See setLiveEraserMask().
+	QImage m_liveEraserMask;
+	bool m_liveEraserMaskSet {false};
+
+	//! pixm with the eraser mask multiplied into its alpha channel.
+	QImage m_eraserComposite;
+	//! Identity of what m_eraserComposite was built from, so a stale composite
+	//! is never drawn after the image is reloaded or the mask edited.
+	QString m_eraserCompositeKey;
 };
 
 #endif

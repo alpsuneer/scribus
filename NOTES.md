@@ -356,6 +356,70 @@ the narrow `ScribusDoc::itemSelection_ResetParagraphShading()`. Note also that
 | Resize Image (resample to what the frame needs), visible self-exiting crop mode, image write error reporting | `b082928`, `9f77571`, `6c93954` | |
 | Embed in SLA (Base64) actually embeds | `7f610b8` | |
 
+### Image eraser (non-destructive, on-canvas)
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| `EF_ERASERMASK` mask model, `modeImageEraser` canvas mode, options bar, all four renderers | (this change) | feature/ctp-output |
+
+Paint-to-erase on a placed image, Photoshop style. Soft brush with a hardness
+slider, Alt to un-erase, `[`/`]` to resize, Shift+E / mode toolbar to enter.
+
+**The mask rides in `PageItem::effectsInUse` as `ImageEffect::EF_ERASERMASK`
+(code 31), with a base64 PNG in `effectParameters`.** That choice is the whole
+design, and it is worth understanding before changing anything here:
+
+- `.sla` save/load is *generic* over effect codes
+  (`scribus171format_save.cpp` writes `Code`/`Param`, `scribus171format.cpp`
+  reads them back), so persistence needed **no file-format changes at all** —
+  and copy/paste works for free, since that path serialises to SLA XML.
+- Undo reuses `ScOldNewState<ScImageEffectList>` + `"APPLY_IMAGE_EFFECTS"`,
+  already replayed by `PageItem::restoreImageEffects`. New labels
+  `Um::EraseImageArea` / `Um::RestoreImageArea`.
+- `PageItem`'s copy constructor already copies `effectsInUse`.
+
+**The effect is a data carrier, not a transform. `ScImage::applyEffect` must
+never act on it** — it is a chain of `if (code == ...)` tests, so an unhandled
+code is skipped, and that is deliberate. On the export paths ScImage is CMYK,
+where **`qAlpha()` is the black plate, not alpha** (`scimage.cpp:2580`, and the
+interleaved writer at `:2614`). Writing the mask into alpha there would knock
+holes in the K separation of every printed page. Each renderer therefore
+composites the mask itself:
+
+| Renderer | How the mask gets in | Verified |
+|---|---|---|
+| Canvas — `PageItem_ImageFrame::DrawObj_Item` | `imageForDraw()` returns a cached ARGB composite | yes, screenshot |
+| PDF ≥1.4 / X-4 — `pdflib_core.cpp` | 8-bit `/SMask`, `mergeIntoAlphaBytes` | yes, byte-identical |
+| PDF 1.3 / X-1a / X-3 — `pdflib_core.cpp` | 1-bit `/ImageMask`, `mergeIntoPdfImageMask` | yes, erased fraction matches |
+| PostScript — `pslib.cpp` (2 sites) | ImageType 3 + InterleaveType 1, `mergeEraserMaskForPS` | yes, byte-identical |
+| `scpageoutput.cpp` | alpha, RGB modes only | **no — Windows-GDI-only path** |
+
+`ScPageOutput` is reachable only from `scprintengine_gdi.cpp`, which
+`CMakeLists_Sources.txt` builds under `if(WIN32)`. It is dead on Linux, and its
+CMYK case is deliberately left un-erased rather than risking the K plate.
+
+**PDF/X-1a cannot carry transparency** (`PDFVersion::supportsTransparency()`
+lists only 1.4/1.5/1.6/X-4). The newspaper preset is X-1a, so a feathered erase
+quantises to a hard edge there. Erasing still happens; only the feather is lost.
+
+Unit tests: `scribus/tests/erasermasktests.cpp`, 16 cases covering the codec,
+the brush profile, both export merge formats, and the two stroke regressions.
+
+```bash
+cmake -S . -B build-tests -DWITH_TESTS=ON
+cmake --build build-tests --target erasermasktests
+QT_QPA_PLATFORM=offscreen build-tests/scribus/tests/erasermasktests
+```
+
+Build the target by name, not `all`: **`scribus/tests/` is bit-rotted**. Its
+`TESTS_LIBRARIES` was built from the Qt4-era `QT_QTTEST_LIBRARY`/`QT_LIBRARIES`,
+which are empty under Qt6, so nothing in that directory linked — now pointed at
+`Qt6::Test`, which also fixed `cellareatests`. `scribus_tests_lib` still does not
+compile (`runtests.cpp` cannot find `QTest`; `testStoryText.cpp:17` has an
+ambiguous `insertChars` overload). Both are pre-existing and were left alone, so
+`WITH_TESTS=ON` still fails on `all`. The main build is configured
+`WITH_TESTS=OFF` and is unaffected.
+
 ### Printing and export
 
 | Feature | Key commits | Branch |
@@ -760,6 +824,37 @@ to test, since a bad matrix could itself explain "no visible difference".
 
 ### Other traps that cost real time
 
+- **A placed image is drawn by four renderers, and three of them reload it from
+  `Pfile` rather than using `pixm`.** `PageItem_ImageFrame::DrawObj_Item` ends
+  in one `p->drawImage()`, which makes it look like the single place to hook
+  anything image-related. It is not: `pslib.cpp` and `pdflib_core.cpp` call
+  `PS_image`/`PDF_Image` with `item->Pfile`, and `scpageoutput.cpp` calls
+  `loadPicture` again. Anything hooked only into the canvas draw path is
+  **invisible in the PDF and on paper, silently**. The one thing all four share
+  is `ScImage::applyEffect` on `item->effectsInUse` — which is why the eraser
+  mask is carried there.
+- **In a CMYK `ScImage`, `qAlpha()` is the black plate.** See
+  `writePSImageToFilter` (`scimage.cpp:2580`): `k = qAlpha(r)`. Any "just set
+  the alpha channel" idea applied on an export path punches holes in the K
+  separation instead of making pixels transparent. Transparency on those paths
+  goes through the separate mask array / `SMask`, never through the samples.
+- **`getImageEffectsModifier()` concatenates every `effectParameters` verbatim
+  into the image cache key.** Fine for `"0.5 1.0"`; ruinous for an effect whose
+  parameters are a base64 PNG rebuilt on every brush stroke. Anything bulky
+  stored in an effect must contribute a digest, not its payload.
+- **`EffectsDialog::saveValues()` clears the effect list and rebuilds it from
+  the visible widget**, so any effect code the dialog does not know about is
+  silently dropped the moment the user presses OK. An erased frame lost its mask
+  to a dialog the user only opened to look at. Unknown effects now have to be
+  carried across explicitly (`m_eraserMaskParams`).
+- **Brush dabs must be spaced along the whole stroke, not per mouse-move
+  event.** Two separate versions of this bug: compositing each event's coverage
+  into the mask cumulatively let overlapping feathers stack up and left one
+  visible scallop per event; and restarting the dab phase at each event made the
+  same gesture come out differently depending on the event rate. Fix is a
+  coverage buffer accumulated with `max()` over the whole stroke, applied
+  against the stroke-start mask each time, plus a carried dab-distance. Both are
+  pinned by the regression checks in the eraser mask test.
 - **`print $_siginfo` does not error on a clean exit under gdb 16.3.** The
   original `scribus-debug` chained crash-only `-ex` commands after it and relied
   on that error to stop batch gdb from reaching them. gdb 16.3 prints

@@ -63,6 +63,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsmanager.h"
 #include "resourcecollection.h"
 #include "sccolorengine.h"
+#include "scimageerasermask.h"
 #include "scimagecacheproxy.h"
 #include "sclimits.h"
 #include "scpage.h"
@@ -10150,7 +10151,12 @@ QString PageItem::getImageEffectsModifier() const
 			first = false;
 		else
 			ts << "/";
-		ts << i->effectCode << ":" << i->effectParameters;
+		// The eraser mask's parameters are a base64 PNG - hundreds of KB, and
+		// rewritten on every stroke. Only its digest belongs in a cache key.
+		if (i->effectCode == ImageEffect::EF_ERASERMASK)
+			ts << i->effectCode << ":" << ScEraserMask::digest(i->effectParameters);
+		else
+			ts << i->effectCode << ":" << i->effectParameters;
 		i++;
 	}
 	return buffer;

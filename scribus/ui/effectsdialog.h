@@ -168,6 +168,11 @@ public:
 
 	ScImageEffectList effectsList;
 
+	//! The eraser mask is carried in effectsInUse but is not one of the effects
+	//! this dialog lists, so saveValues() would drop it when it rebuilds the
+	//! list from the visible widget. Kept here and re-appended instead.
+	QString m_eraserMaskParams;
+
 public slots:
 	virtual void leaveOK();
 	virtual void updateSolarize(int val);

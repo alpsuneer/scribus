@@ -607,6 +607,8 @@ public:
 	static QString ResetControlPoint;
 	static QString ResetControlPoints;
 	static QString ImageEffects;
+	static QString EraseImageArea;
+	static QString RestoreImageArea;
 	static QString LevelUp;
 	static QString LevelDown;
 	static QString LevelBottom;

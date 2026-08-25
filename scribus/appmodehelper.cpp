@@ -371,6 +371,8 @@ void AppModeHelper::setApplicationMode(ScribusMainWindow* scmw, ScribusDoc* doc,
 			break;
 		case modeEyeDropper:
 			break;
+		case modeImageEraser:
+			break;
 		case modeImportImage:
 			break;
 		case modeImportObject:
@@ -467,6 +469,7 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemPreviewNormal"]->setEnabled(isImageFrame);
 	(*a_scrActions)["itemPreviewLow"]->setEnabled(isImageFrame);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(isImageFrame && currItem->isRaster);
+	(*a_scrActions)["toolsImageEraser"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->isRaster);
 	(*a_scrActions)["editCopyContents"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["editPasteContents"]->setEnabled(isImageFrame);
 	(*a_scrActions)["editPasteContentsAbs"]->setEnabled(isImageFrame);
@@ -1031,6 +1034,7 @@ void AppModeHelper::setModeActionsPerMode(int newMode)
 	(*a_scrActions)["toolsEyeDropper"]->setChecked(newMode == modeEyeDropper);
 	(*a_scrActions)["toolsMeasurements"]->setChecked(newMode == modeMeasurementTool);
 	(*a_scrActions)["toolsCopyProperties"]->setChecked(newMode == modeCopyProperties);
+	(*a_scrActions)["toolsImageEraser"]->setChecked(newMode == modeImageEraser);
 	(*a_scrActions)["toolsPDFPushButton"]->setChecked(newMode == modeInsertPDFButton);
 	(*a_scrActions)["toolsPDFRadioButton"]->setChecked(newMode == modeInsertPDFRadioButton);
 	(*a_scrActions)["toolsPDFTextField"]->setChecked(newMode == modeInsertPDFTextfield);
@@ -1989,6 +1993,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(false);
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(false);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(false);
+	(*a_scrActions)["toolsImageEraser"]->setEnabled(false);
 	(*a_scrActions)["itemExtendedImageProperties"]->setEnabled(false);
 	(*a_scrActions)["itemGroup"]->setEnabled(false);
 	(*a_scrActions)["itemUngroup"]->setEnabled(false);

@@ -820,6 +820,8 @@ void UndoManager::languageChange()
 	UndoManager::ResetControlPoint  = tr("Reset control point");
 	UndoManager::ResetControlPoints = tr("Reset control points");
 	UndoManager::ImageEffects       = tr("Apply image effects");
+	UndoManager::EraseImageArea     = tr("Erase image area");
+	UndoManager::RestoreImageArea   = tr("Restore erased image area");
 	UndoManager::InsertFrame        = tr("Insert frame");
 	UndoManager::AdjustFrameToImage = tr("Adjust frame to the image size");
 	UndoManager::RemoveAllGuides    = tr("Remove all guides");
@@ -1164,6 +1166,8 @@ QString UndoManager::ColumnsGap         = "";
 QString UndoManager::ResetControlPoint  = "";
 QString UndoManager::ResetControlPoints = "";
 QString UndoManager::ImageEffects       = "";
+QString UndoManager::EraseImageArea    = "";
+QString UndoManager::RestoreImageArea  = "";
 QString UndoManager::InsertFrame        = "";
 QString UndoManager::AdjustFrameToImage = "";
 QString UndoManager::RemoveAllGuides    = "";

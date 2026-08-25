@@ -89,6 +89,7 @@ class InlinePalette;
 class LayerPalette;
 class MarksManager;
 class Measurements;
+class ImageEraserOptions;
 class ModeToolBar;
 class NodePalette;
 class NotesStylesEditor;
@@ -263,6 +264,8 @@ public:
 	EditToolBar *editToolBar {nullptr};
 	FileToolBar *fileToolBar {nullptr};
 	ModeToolBar* modeToolBar {nullptr};
+	//! Brush controls for the image eraser; shown only while that mode is active.
+	ImageEraserOptions* imageEraserOptions {nullptr};
 	PDFToolBar* pdfToolBar {nullptr};
 	ViewToolBar* viewToolBar {nullptr};
 	QLabel* mainWindowXPosLabel {nullptr};
@@ -540,6 +543,11 @@ public slots:
 	/** \brief Switch appMode
 	\param mode TODO learn modes*/
 	void setAppModeByToggle(bool isOn, int newMode);
+	/** \brief Re-read the eraser brush settings into the options bar, after the
+	    canvas-side [ and ] keys have changed them. */
+	void updateImageEraserOptions();
+	/** \brief Show or hide the eraser options bar with the mode. */
+	void setImageEraserOptionsVisible(bool visible);
 	/** \brief Neues Dokument erzeugt */
 	void HaveNewDoc();
 	void HaveNewSel();

@@ -27,6 +27,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsmanager.h"
 #include "scfonts.h"
 #include "scimage.h"
+#include "scimageerasermask.h"
 #include "scpage.h"
 #include "scpattern.h"
 #include "text/textlayoutpainter.h"
@@ -772,6 +773,19 @@ void ScPageOutput::drawItem_ImageFrame(PageItem_ImageFrame* item, ScPainterExBas
 				imScaleY *= (PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / (double) m_imageRes);
 			}
 			scImg.applyEffect(item->effectsInUse, m_doc->PageColors, useCmyk);
+
+			// Non-destructive eraser mask. Only in the RGB modes: with CMYK
+			// images the alpha channel carries the black plate, so writing the
+			// mask into it would knock holes in the K separation. This output
+			// path is reached only from the Windows GDI print engine, so the
+			// CMYK gap here has never been exercised.
+			if (!useCmyk)
+			{
+				QImage eraserMask = ScEraserMask::maskOf(item->effectsInUse);
+				if (!eraserMask.isNull())
+					ScEraserMask::applyToAlpha(*scImg.qImagePtr(), eraserMask);
+			}
+
 			mode = imageMode;
 			pImage = &scImg;
 		}

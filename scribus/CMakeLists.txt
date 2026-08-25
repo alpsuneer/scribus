@@ -159,6 +159,7 @@ if(HAVE_OSG)
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
+		ui/imageeraseroptions.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
 		ui/dialogs/imagesizedialog.cpp
@@ -185,6 +186,8 @@ if(HAVE_OSG)
 	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		canvasmode_imageeraser.cpp
+		scimageerasermask.cpp
 		scupdateclient.cpp
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp
@@ -214,6 +217,7 @@ else()
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
+		ui/imageeraseroptions.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
 		ui/dialogs/imagesizedialog.cpp
@@ -240,6 +244,8 @@ else()
 	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		canvasmode_imageeraser.cpp
+		scimageerasermask.cpp
 		scupdateclient.cpp
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp

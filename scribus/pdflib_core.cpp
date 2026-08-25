@@ -24,6 +24,7 @@ for which a new license (GPL+exception) is in place.
 #include "pdflib_core.h"
 
 #include "scconfig.h"
+#include "scimageerasermask.h"
 
 #if defined(_MSC_VER) && !defined(_USE_MATH_DEFINES)
 #define _USE_MATH_DEFINES
@@ -11096,6 +11097,26 @@ bool PDFLibCore::PDF_Image(PageItem* item, const QString& fn, double sx, double 
 			origWidth = img.width();
 			origHeight = img.height();
 			img.applyEffect(item->effectsInUse, item->doc()->PageColors, imgE);
+
+			// Fold in the non-destructive eraser mask. It goes through the
+			// mask channel, never through the image samples: img may be CMYK
+			// here, where qAlpha() carries the black plate rather than alpha.
+			if (item->pixm.imgInfo.type != ImageType7)
+			{
+				QImage eraserMask = ScEraserMask::maskOf(item->effectsInUse);
+				if (!eraserMask.isNull())
+				{
+					// Must match what getAlpha() wrote above: 8-bit soft mask
+					// where the PDF version allows transparency, otherwise the
+					// 1-bit stencil, which loses feathering but still erases.
+					if (Options.supportsTransparency())
+						ScEraserMask::mergeIntoAlphaBytes(im2, eraserMask, origWidth, origHeight);
+					else
+						ScEraserMask::mergeIntoPdfImageMask(im2, eraserMask, origWidth, origHeight);
+					alphaM = !im2.isEmpty();
+				}
+			}
+
 			if (!((Options.RecalcPic) && (Options.PicRes < (qMax(72.0 / item->imageXScale(), 72.0 / item->imageYScale())))))
 			{
 				ImInfo.sxa = sx * (1.0 / ImInfo.reso);

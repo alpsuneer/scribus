@@ -41,6 +41,7 @@ for which a new license (GPL+exception) is in place.
 #include "scraction.h"
 #include "scpage.h"
 #include "scpaths.h"
+#include "scimageerasermask.h"
 #include "scpainter.h"
 #include "scribusstructs.h"
 #include "scribuscore.h"
@@ -206,7 +207,7 @@ void PageItem_ImageFrame::DrawObj_Item(ScPainter *p, const QRectF& /*e*/)
 		}
 		else
 			p->setMaskMode(0);
-		p->drawImage(pixm.qImagePtr());
+		p->drawImage(imageForDraw());
 	}
 	p->restore();
 }
@@ -527,4 +528,82 @@ QString PageItem_ImageFrame::infoDescription() const
 	}
 	htmlText.append(PageItem::infoDescription());
 	return htmlText;
+}
+
+QImage PageItem_ImageFrame::eraserMask() const
+{
+	if (m_liveEraserMaskSet)
+		return m_liveEraserMask;
+	return ScEraserMask::maskOf(effectsInUse);
+}
+
+bool PageItem_ImageFrame::hasEraserMask() const
+{
+	if (m_liveEraserMaskSet)
+		return !m_liveEraserMask.isNull();
+	return ScEraserMask::indexIn(effectsInUse) >= 0;
+}
+
+void PageItem_ImageFrame::setEraserMask(const QImage& mask)
+{
+	ScEraserMask::setMask(effectsInUse, mask);
+	// The composite is keyed on the stored parameters, so dropping the key is
+	// enough to force a rebuild on the next draw.
+	m_eraserCompositeKey.clear();
+}
+
+void PageItem_ImageFrame::setLiveEraserMask(const QImage& mask)
+{
+	m_liveEraserMask = mask;
+	m_liveEraserMaskSet = true;
+	m_eraserCompositeKey.clear();
+}
+
+void PageItem_ImageFrame::clearLiveEraserMask()
+{
+	m_liveEraserMask = QImage();
+	m_liveEraserMaskSet = false;
+	m_eraserCompositeKey.clear();
+}
+
+QImage* PageItem_ImageFrame::imageForDraw()
+{
+	QImage* base = pixm.qImagePtr();
+	if (!hasEraserMask() || base == nullptr || base->isNull())
+	{
+		// Release the composite as soon as the erasure is gone: for a full-page
+		// newspaper photo it is the same size as the pixmap itself.
+		if (!m_eraserComposite.isNull())
+		{
+			m_eraserComposite = QImage();
+			m_eraserCompositeKey.clear();
+		}
+		return base;
+	}
+
+	// Identity covers both halves of what the composite is made of. pixm's
+	// cacheKey changes whenever the image is reloaded or another effect is
+	// re-applied, which is what stops a stale composite surviving a reload.
+	QString maskId = m_liveEraserMaskSet
+		? QString("live:%1").arg(m_liveEraserMask.cacheKey())
+		: QString("saved:%1").arg(ScEraserMask::digest(ScEraserMask::paramsOf(effectsInUse)));
+	QString key = QString("%1/%2x%3/%4")
+		.arg(base->cacheKey())
+		.arg(base->width())
+		.arg(base->height())
+		.arg(maskId);
+
+	if (key != m_eraserCompositeKey || m_eraserComposite.isNull())
+	{
+		QImage mask = eraserMask();
+		if (mask.isNull())
+			return base;
+		m_eraserComposite = *base;
+		// Detach before the in-place alpha write: a shallow copy would erase
+		// the cached pixmap itself, and that copy is shared with the loader.
+		m_eraserComposite.detach();
+		ScEraserMask::applyToAlpha(m_eraserComposite, mask);
+		m_eraserCompositeKey = key;
+	}
+	return &m_eraserComposite;
 }

@@ -53,6 +53,7 @@ for which a new license (GPL+exception) is in place.
 
 #include "scribuscore.h"
 #include "selection.h"
+#include "scimageerasermask.h"
 #include "scpattern.h"
 #include "scstreamfilter_ascii85.h"
 #include "scstreamfilter_flate.h"
@@ -1323,6 +1324,29 @@ bool PSLib::resampleImageForOutput(const PageItem* item, const QString& ext, ScI
 	return true;
 }
 
+namespace
+{
+	/*! \brief Fold an item's non-destructive eraser mask into the PostScript
+	    image mask.
+
+	    PostScript gets the erasure through the ImageType 3 mask channel rather
+	    than through the image samples: on this path ScImage is CMYK, where
+	    qAlpha() carries the black plate, so writing alpha there would punch
+	    holes in the K separation instead of making pixels transparent.
+
+	    Must be called after resampleImageForOutput(), which resizes the image
+	    and the mask together, so that w/h here are the final emitted ones. */
+	void mergeEraserMaskForPS(PageItem* item, const ScImage& image, QByteArray& maskArray)
+	{
+		if (!item || item->pixm.imgInfo.type == ImageType7)
+			return;
+		QImage mask = ScEraserMask::maskOf(item->effectsInUse);
+		if (mask.isNull())
+			return;
+		ScEraserMask::mergeIntoAlphaBytes(maskArray, mask, image.width(), image.height());
+	}
+}
+
 bool PSLib::PS_ImageData(PageItem *item, const QString& fn, const QString& Name, const QString& Prof, bool UseEmbedded)
 {
 	bool dummy;
@@ -1383,6 +1407,7 @@ bool PSLib::PS_ImageData(PageItem *item, const QString& fn, const QString& Name,
 	// Must match PS_image() exactly: this writes the samples, PS_image() writes
 	// the /Width and /Height that describe them.
 	resampleImageForOutput(item, ext, image, maskArray);
+	mergeEraserMaskForPS(item, image, maskArray);
 	if ((maskArray.size() > 0) && (item->pixm.imgInfo.type != ImageType7))
 	{
 		PutStream("currentfile /ASCII85Decode filter /FlateDecode filter /ReusableStreamDecode filter\n");
@@ -1495,6 +1520,10 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 		}
 	}
 	resampleImageForOutput(item, ext, image, maskArray, &scalex, &scaley);
+	// Both PS image paths must agree on whether a mask is present: when a
+	// reusable stream was emitted by PS_ImageData, its interleaved sample
+	// layout is what the image operator here declares.
+	mergeEraserMaskForPS(item, image, maskArray);
 
 	int w = image.width();
 	int h = image.height();

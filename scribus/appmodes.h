@@ -48,7 +48,8 @@ enum AppMode
 	modeEditMeshPatch,
 	modeEditWeldPoint,
 	modeInsertPDFRadioButton,
-	modeSuneerImageCrop
+	modeSuneerImageCrop,
+	modeImageEraser
 };
 
 #endif // APPMODES_H

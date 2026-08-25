@@ -336,7 +336,36 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   തനിയെ ശരിയാക്കും
 - വിശദമായ വിവരങ്ങൾ `kasm/README.md`-ൽ ഉണ്ട്
 
-### 21. Authors
+### 21. Image Eraser (Shift+E) — Placed image-ൽ paint ചെയ്ത് മായ്ക്കാം
+
+- Page-ൽ ഇട്ട ഒരു photo-യുടെ വേണ്ടാത്ത ഭാഗം **brush കൊണ്ട് paint ചെയ്ത്
+  മായ്ക്കാം**. Photoshop-ലെ eraser പോലെ തന്നെ
+- **Original image file-ന് ഒരു മാറ്റവുമില്ല.** മായ്ച്ചത് ഒരു mask ആയി
+  `.sla`-ൽ മാത്രം സൂക്ഷിക്കും. അതുകൊണ്ട് എപ്പോൾ വേണമെങ്കിലും
+  തിരികെ കൊണ്ടുവരാം
+- Image frame select ചെയ്ത ശേഷം toolbar-ലെ eraser button, അല്ലെങ്കിൽ
+  **Shift+E**. Image frame select ചെയ്തിട്ടില്ലെങ്കിൽ button enable ആകില്ല
+- Tool on ആയാൽ മുകളിൽ ഒരു ചെറിയ **options bar** വരും:
+  - **Brush** — 1 മുതൽ 500 px വരെ. Canvas-ൽ `[` `]` keys കൊണ്ടും മാറ്റാം
+  - **Hardness** — 0% (നല്ല soft edge) മുതൽ 100% (hard edge) വരെ.
+    Photo-യെ page-ലേക്ക് blend ചെയ്യാൻ soft edge ഉപയോഗിക്കുക
+  - **Reset Erasure** — ആ frame-ലെ മായ്ച്ചതെല്ലാം ഒറ്റയടിക്ക് തിരികെ
+- **Alt പിടിച്ച് വരച്ചാൽ മായ്ച്ചത് തിരികെ വരും** (un-erase). Cursor-ൽ
+  ഒരു `+` അടയാളം കാണിക്കും
+- Mouse pointer-ന്റെ കൂടെ brush-ന്റെ വട്ടം കാണാം. Soft brush ആണെങ്കിൽ
+  ഉള്ളിൽ ഒരു dotted വട്ടം കൂടി — അതാണ് solid ആയ ഭാഗം
+- **Undo/Redo പ്രവർത്തിക്കും.** ഒരു stroke = ഒരു undo step
+- **PDF-ലും print-ലും ശരിയായി വരും:**
+  - PDF 1.4/1.5/1.6/X-4 — soft edge അതേപടി (8-bit soft mask)
+  - PDF/X-1a, X-3 (newspaper preset) — മായ്ച്ചത് വരും, പക്ഷേ soft edge
+    hard ആയി മാറും. ആ PDF version-കളിൽ transparency അനുവദനീയമല്ല
+  - PostScript print — soft edge അതേപടി
+- Esc അമർത്തിയാൽ tool-ൽ നിന്ന് പുറത്തുവരാം
+- ശ്രദ്ധിക്കുക: **Image Effects dialog-ന്റെ preview-യിൽ മായ്ച്ചത്
+  കാണില്ല.** പക്ഷേ OK കൊടുത്താലും mask നഷ്ടപ്പെടില്ല — canvas-ൽ
+  ശരിയായി കാണാം
+
+### 22. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

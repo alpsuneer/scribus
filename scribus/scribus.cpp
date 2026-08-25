@@ -219,6 +219,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/marksmanager.h"
 #include "ui/markvariabletext.h"
 #include "ui/mergedoc.h"
+#include "ui/imageeraseroptions.h"
 #include "ui/modetoolbar.h"
 #include "ui/movepage.h"
 #include "ui/multipleduplicate.h"
@@ -665,6 +666,12 @@ void ScribusMainWindow::initToolBars()
 	modeToolBar = new ModeToolBar(this);
 	pdfToolBar = new PDFToolBar(this);
 	viewToolBar = new ViewToolBar(this);
+
+	// Deliberately not an ScToolBar and not registered with addScToolBar():
+	// its visibility follows the canvas mode, not a saved preference.
+	imageEraserOptions = new ImageEraserOptions(this);
+	addToolBar(Qt::ToolBarArea::TopToolBarArea, imageEraserOptions);
+	imageEraserOptions->hide();
 
 	addScToolBar(fileToolBar, fileToolBar->objectName());
 	addScToolBar(editToolBar, editToolBar->objectName());
@@ -7060,6 +7067,21 @@ void ScribusMainWindow::setAppModeByToggle(bool isOn, int newMode)
 		view->requestMode(newMode);
 	else
 		slotSelect();
+}
+
+void ScribusMainWindow::updateImageEraserOptions()
+{
+	if (imageEraserOptions)
+		imageEraserOptions->refreshFromMode();
+}
+
+void ScribusMainWindow::setImageEraserOptionsVisible(bool visible)
+{
+	if (!imageEraserOptions)
+		return;
+	imageEraserOptions->setVisible(visible);
+	if (visible)
+		imageEraserOptions->refreshFromMode();
 }
 
 void ScribusMainWindow::setMainWindowActive()

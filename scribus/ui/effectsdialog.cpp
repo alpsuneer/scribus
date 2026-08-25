@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "effectsdialog.h"
+#include "scimageerasermask.h"
 
 #include <QGridLayout>
 #include <QGroupBox>
@@ -54,6 +55,7 @@ EffectsDialog::EffectsDialog( QWidget* parent, PageItem* item, ScribusDoc* docc 
 	setWindowIcon(IconManager::instance().loadIcon("app-icon"));
 
 	effectsList = m_item->effectsInUse;
+	m_eraserMaskParams = ScEraserMask::paramsOf(m_item->effectsInUse);
 
 //	CMSettings cms(docc, "", Intent_Perceptual);
 //	cms.allowColorManagement(false);
@@ -826,6 +828,17 @@ void EffectsDialog::saveValues(bool finalValues)
 			ef.effectParameters = m_effectValMap[usedEffects->item(e)];
 		}
 		effectsList.append(ef);
+	}
+
+	// Put the eraser mask back: it is not one of the effects listed above, so
+	// the rebuild would otherwise silently discard an erased frame's mask the
+	// moment the user pressed OK.
+	if (!m_eraserMaskParams.isEmpty())
+	{
+		struct ImageEffect eraser;
+		eraser.effectCode = ImageEffect::EF_ERASERMASK;
+		eraser.effectParameters = m_eraserMaskParams;
+		effectsList.append(eraser);
 	}
 }
 

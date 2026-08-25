@@ -63,7 +63,11 @@ struct ImageEffect
 		EF_AUTOCOLOR = 27,
 		EF_AUTOENHANCE = 28,
 		EF_AUTOCMYK = 29,
-		EF_SHADOWHIGHLIGHT = 30
+		EF_SHADOWHIGHLIGHT = 30,
+		//! Non-destructive eraser mask. Not a transform: effectParameters carry a
+		//! base64 PNG that each renderer composites itself. ScImage::applyEffect
+		//! must leave it alone - see scimageerasermask.h.
+		EF_ERASERMASK = 31
 	};
 
 	int effectCode;
