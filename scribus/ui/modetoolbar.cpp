@@ -105,6 +105,7 @@ ModeToolBar::ModeToolBar(ScribusMainWindow* parent) : ScToolBar( tr("Tools"), "T
 	this->addAction(m_ScMW->scrActions["toolsCopyProperties"]);
 	this->addAction(m_ScMW->scrActions["toolsEyeDropper"]);
 	this->addAction(m_ScMW->scrActions["toolsImageEraser"]);
+	this->addAction(m_ScMW->scrActions["toolsRemoveObject"]);
 
 	languageChange();
 

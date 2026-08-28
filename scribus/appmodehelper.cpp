@@ -471,6 +471,7 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemPreviewLow"]->setEnabled(isImageFrame);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(isImageFrame && currItem->isRaster);
 	(*a_scrActions)["toolsImageEraser"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->isRaster);
+	(*a_scrActions)["toolsRemoveObject"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->isRaster);
 	// Enabled only when there is actually an alpha boundary to trace, so the
 	// action never silently returns the plain image rectangle.
 	{
@@ -1044,6 +1045,7 @@ void AppModeHelper::setModeActionsPerMode(int newMode)
 	(*a_scrActions)["toolsMeasurements"]->setChecked(newMode == modeMeasurementTool);
 	(*a_scrActions)["toolsCopyProperties"]->setChecked(newMode == modeCopyProperties);
 	(*a_scrActions)["toolsImageEraser"]->setChecked(newMode == modeImageEraser);
+	(*a_scrActions)["toolsRemoveObject"]->setChecked(newMode == modeRemoveObject);
 	(*a_scrActions)["toolsPDFPushButton"]->setChecked(newMode == modeInsertPDFButton);
 	(*a_scrActions)["toolsPDFRadioButton"]->setChecked(newMode == modeInsertPDFRadioButton);
 	(*a_scrActions)["toolsPDFTextField"]->setChecked(newMode == modeInsertPDFTextfield);
@@ -2003,6 +2005,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(false);
 	(*a_scrActions)["styleImageEffects"]->setEnabled(false);
 	(*a_scrActions)["toolsImageEraser"]->setEnabled(false);
+	(*a_scrActions)["toolsRemoveObject"]->setEnabled(false);
 	(*a_scrActions)["itemDetectContour"]->setEnabled(false);
 	(*a_scrActions)["itemExtendedImageProperties"]->setEnabled(false);
 	(*a_scrActions)["itemGroup"]->setEnabled(false);

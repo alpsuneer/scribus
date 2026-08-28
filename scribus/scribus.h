@@ -90,6 +90,7 @@ class LayerPalette;
 class MarksManager;
 class Measurements;
 class ImageEraserOptions;
+class RemovalToolWidget;
 class ModeToolBar;
 class NodePalette;
 class NotesStylesEditor;
@@ -266,6 +267,9 @@ public:
 	ModeToolBar* modeToolBar {nullptr};
 	//! Brush controls for the image eraser; shown only while that mode is active.
 	ImageEraserOptions* imageEraserOptions {nullptr};
+	//! Brush and Apply controls for object removal; shown only while that mode
+	//! is active.
+	RemovalToolWidget* removalToolOptions {nullptr};
 	PDFToolBar* pdfToolBar {nullptr};
 	ViewToolBar* viewToolBar {nullptr};
 	QLabel* mainWindowXPosLabel {nullptr};
@@ -550,6 +554,12 @@ public slots:
 	void slotDetectContourFromImage();
 	/** \brief Show or hide the eraser options bar with the mode. */
 	void setImageEraserOptionsVisible(bool visible);
+	/** \brief Re-read the object removal tool's state into its options bar:
+	    the brush settings after the canvas-side [ and ] keys, and whether
+	    Apply is possible yet. */
+	void updateRemovalToolOptions();
+	/** \brief Show or hide the object removal options bar with the mode. */
+	void setRemovalToolOptionsVisible(bool visible);
 	/** \brief Neues Dokument erzeugt */
 	void HaveNewDoc();
 	void HaveNewSel();

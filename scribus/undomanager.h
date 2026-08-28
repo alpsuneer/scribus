@@ -610,6 +610,7 @@ public:
 	static QString ImageEffects;
 	static QString EraseImageArea;
 	static QString RestoreImageArea;
+	static QString RemoveObject;
 	static QString LevelUp;
 	static QString LevelDown;
 	static QString LevelBottom;

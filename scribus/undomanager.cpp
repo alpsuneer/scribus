@@ -822,6 +822,7 @@ void UndoManager::languageChange()
 	UndoManager::ResetControlPoints = tr("Reset control points");
 	UndoManager::ImageEffects       = tr("Apply image effects");
 	UndoManager::EraseImageArea     = tr("Erase image area");
+	UndoManager::RemoveObject       = tr("Remove object from image");
 	UndoManager::RestoreImageArea   = tr("Restore erased image area");
 	UndoManager::InsertFrame        = tr("Insert frame");
 	UndoManager::AdjustFrameToImage = tr("Adjust frame to the image size");
@@ -1169,6 +1170,7 @@ QString UndoManager::ResetControlPoint  = "";
 QString UndoManager::ResetControlPoints = "";
 QString UndoManager::ImageEffects       = "";
 QString UndoManager::EraseImageArea    = "";
+QString UndoManager::RemoveObject      = "";
 QString UndoManager::RestoreImageArea  = "";
 QString UndoManager::InsertFrame        = "";
 QString UndoManager::AdjustFrameToImage = "";

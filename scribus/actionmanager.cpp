@@ -984,6 +984,8 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction(ScrAction::DataInt, "tool-copy-style", "tool-copy-style", "", defaultKey(name), mainWindow, modeCopyProperties));
 	name = "toolsImageEraser";
 	scrActions->insert(name, new ScrAction(ScrAction::DataInt, "tool-image-eraser", "tool-image-eraser", "", defaultKey(name), mainWindow, modeImageEraser));
+	name = "toolsRemoveObject";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, "tool-remove-object", "tool-remove-object", "", defaultKey(name), mainWindow, modeRemoveObject));
 	name = "toolsUnlinkTextFrameAndCutText";
 	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, modeUnlinkFrames));
 
@@ -1065,7 +1067,7 @@ void ActionManager::initToolsMenuActions()
 	*modeActionNames << "toolsInsertShape" << "toolsInsertPolygon" << "toolsInsertArc" << "toolsInsertSpiral" << "toolsInsertLine" << "toolsInsertBezier";
 	*modeActionNames << "toolsInsertFreehandLine" << "toolsInsertCalligraphicLine" << "toolsInsertRenderFrame" << "toolsRotate" << "toolsZoom" << "toolsEditContents";
 	*modeActionNames << "toolsEditWithStoryEditor" << "toolsLinkTextFrame" << "toolsUnlinkTextFrame"; //<< "toolsUnlinkTextFrameAndCutText";
-	*modeActionNames << "toolsEyeDropper" << "toolsCopyProperties" << "toolsImageEraser";
+	*modeActionNames << "toolsEyeDropper" << "toolsCopyProperties" << "toolsImageEraser" << "toolsRemoveObject";
 	*modeActionNames << "toolsPDFPushButton" << "toolsPDFRadioButton" << "toolsPDFTextField" << "toolsPDFCheckBox" << "toolsPDFComboBox" << "toolsPDFListBox" << "toolsPDFAnnotText" << "toolsPDFAnnotLink";
 #ifdef HAVE_OSG
 	*modeActionNames << "toolsPDFAnnot3D";
@@ -1927,6 +1929,7 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsEyeDropper"]->setTexts( tr("&Eye Dropper"));
 	(*scrActions)["toolsCopyProperties"]->setTexts( tr("Copy Item Properties"));
 	(*scrActions)["toolsImageEraser"]->setTexts( tr("Image &Eraser"));
+	(*scrActions)["toolsRemoveObject"]->setTexts( tr("Remove &Object"));
 
 	(*scrActions)["toolsInsertTextFrame"]->setText( tr("&Text Frame"));
 	(*scrActions)["toolsInsertImageFrame"]->setText( tr("&Image Frame"));
@@ -2009,6 +2012,7 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsEditWithStoryEditor"]->setStatusTextAndShortcut( tr("Edit text in story editor"));
 	(*scrActions)["toolsEyeDropper"]->setStatusTextAndShortcut( tr("Eye Dropper"));
 	(*scrActions)["toolsImageEraser"]->setStatusTextAndShortcut( tr("Erase parts of a placed image without changing the image file"));
+	(*scrActions)["toolsRemoveObject"]->setStatusTextAndShortcut( tr("Paint over an unwanted object and rebuild the pixels underneath it"));
 	(*scrActions)["toolsInsertArc"]->setStatusTextAndShortcut( tr("Insert an arc"));
 	(*scrActions)["toolsInsertBezier"]->setStatusTextAndShortcut( tr("Insert a bezier curve"));
 	(*scrActions)["toolsInsertCalligraphicLine"]->setStatusTextAndShortcut( tr("Insert a calligraphic line"));
@@ -2246,6 +2250,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsUnlinkTextFrame", QKeySequence(Qt::Key_U));
 	defKeys.insert("toolsEyeDropper", QKeySequence(Qt::Key_Y));
 	defKeys.insert("toolsImageEraser", QKeySequence(Qt::SHIFT | Qt::Key_E));
+	defKeys.insert("toolsRemoveObject", QKeySequence(Qt::SHIFT | Qt::Key_R));
 
 	//PDF items
 	//Extras Menu
@@ -2752,6 +2757,7 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "toolsEyeDropper";
 	itnmenua->second << "toolsCopyProperties";
 	itnmenua->second << "toolsImageEraser";
+	itnmenua->second << "toolsRemoveObject";
 	itnmenua->second << "toolsPDFPushButton";
 	itnmenua->second << "toolsPDFRadioButton";
 	itnmenua->second << "toolsPDFTextField";

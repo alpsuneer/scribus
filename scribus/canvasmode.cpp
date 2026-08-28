@@ -26,6 +26,7 @@
 #include "canvasmode_drawfreehand.h"
 #include "canvasmode_suneercontour.h"
 #include "canvasmode_imageeraser.h"
+#include "canvasmode_removalmask.h"
 #include "canvasmode_suneercrop.h"
 #include "canvasmode_drawcalligraphic.h"
 #include "canvasmode_edit.h"
@@ -129,6 +130,9 @@ CanvasMode* CanvasMode::createForAppMode(ScribusView* view, int appMode)
 			break;
 		case modeImageEraser:
 			result = new CanvasMode_ImageEraser(view);
+			break;
+		case modeRemoveObject:
+			result = new CanvasMode_RemovalMask(view);
 			break;
 		case modeSuneerContourDraw:
 			result = new SuneerContourMode(view);

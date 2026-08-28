@@ -594,6 +594,7 @@ On Dark:  #e580ff; rgb(229, 128, 255); hsl(288, 100, 75)
 		<icon id="tool-link-text-frame" file="16/tool-link-text-frame.svg" />
 		<icon id="tool-measure" file="16/tool-ruler.svg" />
 		<icon id="tool-move" file="16/tool-move.svg" /><!-- image editor -->
+		<icon id="tool-remove-object" file="16/tool-remove-object.svg" />
 		<icon id="tool-rotate" file="16/tool-rotate.svg" />
 		<icon id="tool-select" file="16/tool-select.svg" />
 		<icon id="tool-story-editor" file="16/tool-story-editor.svg" />

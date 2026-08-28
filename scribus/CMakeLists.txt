@@ -160,6 +160,8 @@ if(HAVE_OSG)
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
+		ui/removaltoolwidget.cpp
+		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
@@ -188,8 +190,10 @@ if(HAVE_OSG)
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		canvasmode_imageeraser.cpp
+		canvasmode_removalmask.cpp
 		scimageerasermask.cpp
 		util_contour.cpp
+		util_inpaint.cpp
 		scupdateclient.cpp
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp
@@ -220,6 +224,8 @@ else()
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
+		ui/removaltoolwidget.cpp
+		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
@@ -248,8 +254,10 @@ else()
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		canvasmode_imageeraser.cpp
+		canvasmode_removalmask.cpp
 		scimageerasermask.cpp
 		util_contour.cpp
+		util_inpaint.cpp
 		scupdateclient.cpp
 		scupdatekeystore.cpp
 		ui/updatesettingsdialog.cpp

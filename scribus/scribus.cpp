@@ -221,6 +221,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/mergedoc.h"
 #include "ui/contourdetectdialog.h"
 #include "ui/imageeraseroptions.h"
+#include "ui/removaltoolwidget.h"
 #include "ui/modetoolbar.h"
 #include "ui/movepage.h"
 #include "ui/multipleduplicate.h"
@@ -673,6 +674,10 @@ void ScribusMainWindow::initToolBars()
 	imageEraserOptions = new ImageEraserOptions(this);
 	addToolBar(Qt::ToolBarArea::TopToolBarArea, imageEraserOptions);
 	imageEraserOptions->hide();
+
+	removalToolOptions = new RemovalToolWidget(this);
+	addToolBar(Qt::ToolBarArea::TopToolBarArea, removalToolOptions);
+	removalToolOptions->hide();
 
 	addScToolBar(fileToolBar, fileToolBar->objectName());
 	addScToolBar(editToolBar, editToolBar->objectName());
@@ -1330,6 +1335,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("ItemPathOps", "Item");
 	scrMenuMgr->addMenuItemString("itemShapeEdit", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemDetectContour", "ItemPathOps");
+	scrMenuMgr->addMenuItemString("toolsRemoveObject", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemCombinePolygons", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemSplitPolygons", "ItemPathOps");
 	scrMenuMgr->addMenuItemString("itemAttachTextToPath", "ItemPathOps");
@@ -7084,6 +7090,21 @@ void ScribusMainWindow::setImageEraserOptionsVisible(bool visible)
 	imageEraserOptions->setVisible(visible);
 	if (visible)
 		imageEraserOptions->refreshFromMode();
+}
+
+void ScribusMainWindow::updateRemovalToolOptions()
+{
+	if (removalToolOptions)
+		removalToolOptions->refreshFromMode();
+}
+
+void ScribusMainWindow::setRemovalToolOptionsVisible(bool visible)
+{
+	if (!removalToolOptions)
+		return;
+	removalToolOptions->setVisible(visible);
+	if (visible)
+		removalToolOptions->refreshFromMode();
 }
 
 void ScribusMainWindow::slotDetectContourFromImage()
