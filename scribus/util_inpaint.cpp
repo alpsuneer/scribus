@@ -9,6 +9,7 @@ for which a new license (GPL+exception) is in place.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -33,6 +34,112 @@ namespace
 	//! Heap pops between two polls of the caller's cancel flag. Small enough
 	//! that Cancel feels immediate, large enough not to show in the profile.
 	constexpr size_t CancelCheckInterval = 1024;
+
+	//! \name Method selection
+	//@{
+	/*! \brief Mask half-width, in pixels, at or below which the fast marching
+	    method is used regardless of content.
+
+	    A hole this thin has real pixels within a pixel or two of every point
+	    inside it, so the averaging has no room to flatten anything and the
+	    exemplar method would cost a great deal for no visible gain. Wires,
+	    aerials, scratches and dust all land here. */
+	constexpr double ThinMaskThickness = 4.0;
+
+	/*! \brief Median ring gradient below which the fast marching method is
+	    used whatever the size of the hole.
+
+	    Sky, a studio backdrop, a painted wall: there is no texture to
+	    reproduce, a diffusion is exactly right, and it is several times
+	    cheaper. Measured on real photographs, this statistic reads about 0.5
+	    in open sky and 4 to 6 in a crowd, so the threshold sits with a margin
+	    on both sides. It is set above a smooth ramp as well - a steep gradient
+	    with no texture in it, a studio backdrop or a clear sky at dusk, reads
+	    as a constant 2-ish here and a diffusion reproduces it exactly, which
+	    no amount of patch copying will. Erring towards the exemplar method
+	    would be the worse mistake in the other direction too: run on flat sky
+	    it *invents* texture that was never there. */
+	constexpr double FlatRingBusyness = 3.0;
+
+	//! How far out from the mask the flatness test looks.
+	constexpr int RingWidth = 12;
+	//@}
+
+	//! \name Exemplar filling
+	//@{
+	//! Confidence never reaches exactly zero, so that priorities keep ordering
+	//! the front sensibly even very deep inside a large hole.
+	constexpr float MinConfidence = 1.0e-4f;
+
+	//! Floor under Criminisi's data term. Without it a patch in a perfectly
+	//! flat part of the front has priority zero and is never chosen.
+	constexpr double MinDataTerm = 1.0e-3;
+
+	//! Criminisi's alpha: the normalising constant for the data term, the
+	//! maximum value a channel can take.
+	constexpr double DataNormalisation = 255.0;
+
+	/*! \brief How strongly a nearby source patch is preferred over a distant
+	    one of the same quality.
+
+	    Pure best-match search happily takes a patch from the far side of the
+	    picture, which is how exemplar filling ends up pasting a face into a
+	    hedge. Nearby patches are far more likely to belong to the same surface
+	    under the same light. */
+	constexpr double ProximityPenalty = 0.35;
+
+	//! Search-window span per unit of coarse step: a window this wide is swept
+	//! every other pixel, twice this wide every third, and so on up to a step
+	//! of four. The winner is then refined at full resolution.
+	constexpr int CoarseSearchThreshold = 40;
+
+	/*! \brief How much an area of the picture is penalised for having already
+	    been copied from.
+
+	    Exemplar filling has a well known way of going wrong: it copies a patch,
+	    that patch becomes the context the next match is measured against, so it
+	    matches the same place again, and a recognisable thing gets stamped
+	    across the hole several times over. Charging a source for each time it
+	    has been used breaks the loop and makes the fill reach for its second
+	    and third choices, which are usually just as good and not a copy of
+	    something the eye has already seen. */
+	constexpr double SourceUsagePenalty = 0.30;
+
+	//! Fraction of the compared window that has to be real photograph before a
+	//! candidate's score means anything. Without a floor, a candidate that
+	//! happens to overlap the fill almost entirely could win on the three
+	//! pixels it did match.
+	constexpr double MinMatchCoverage = 0.6;
+	//@}
+
+	inline double clampd(double v, double lo, double hi)
+	{
+		return v < lo ? lo : (v > hi ? hi : v);
+	}
+
+	/*! \brief Working picture: one float per channel per pixel,
+	    un-premultiplied, in R G B A order.
+
+	    Kept as floats because in the fast marching method every filled pixel is
+	    a weighted average that later pixels average again, and rounding to 8
+	    bits at every step visibly bands a long fill. */
+	struct Plane
+	{
+		int w {0};
+		int h {0};
+		std::vector<float> v;   //!< w * h * 4
+
+		inline const float* at(int x, int y) const { return &v[(size_t(y) * size_t(w) + size_t(x)) * 4]; }
+		inline float* at(int x, int y) { return &v[(size_t(y) * size_t(w) + size_t(x)) * 4]; }
+		//! Rec. 601 luma, which is what the structure terms are computed on.
+		inline double luma(int x, int y) const
+		{
+			const float* p = at(x, y);
+			return 0.299 * double(p[0]) + 0.587 * double(p[1]) + 0.114 * double(p[2]);
+		}
+	};
+
+	// ---------------------------------------------------------------- Telea
 
 	/*! \brief The marching state over the working rectangle.
 
@@ -142,20 +249,6 @@ namespace
 		else
 			gy = 0.0;
 	}
-
-	//! Working picture: one float per channel per pixel, un-premultiplied,
-	//! in R G B A order. Kept as floats because every filled pixel is a
-	//! weighted average that later pixels then average again, and rounding to
-	//! 8 bits at every step visibly bands a long fill.
-	struct Plane
-	{
-		int w {0};
-		int h {0};
-		std::vector<float> v;   //!< w * h * 4
-
-		inline const float* at(int x, int y) const { return &v[(size_t(y) * size_t(w) + size_t(x)) * 4]; }
-		inline float* at(int x, int y) { return &v[(size_t(y) * size_t(w) + size_t(x)) * 4]; }
-	};
 
 	/*! \brief Gradient of the picture at an unmasked pixel, per channel.
 
@@ -329,6 +422,777 @@ namespace
 		}
 	}
 
+	/*! \brief Telea fast marching fill over \a plane.
+
+	    \param masked one byte per pixel, non-zero where the hole is.
+	    \returns false if the caller cancelled. */
+	bool runFastMarching(Plane& plane, const std::vector<uint8_t>& masked, int radius,
+	                     const Inpaint::Options& opts, size_t total, size_t& filled, int& lastPercent)
+	{
+		const int w = plane.w;
+		const int h = plane.h;
+
+		Field field;
+		field.w = w;
+		field.h = h;
+		field.t.assign(size_t(w) * size_t(h), 0.0f);
+		field.state.assign(size_t(w) * size_t(h), StKnown);
+		field.settled.assign(size_t(w) * size_t(h), 0);
+		field.original.assign(size_t(w) * size_t(h), 1);
+
+		for (size_t i = 0; i < masked.size(); ++i)
+		{
+			if (!masked[i])
+				continue;
+			field.state[i] = StInside;
+			field.original[i] = 0;
+			field.t[i] = InfiniteT;
+		}
+
+		// Seed the march from the known pixels that touch the hole. Their
+		// arrival time is zero by definition, so the heap starts there and
+		// works inwards.
+		using Entry = std::pair<float, int>;
+		std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> heap;
+		for (int y = 0; y < h; ++y)
+		{
+			for (int x = 0; x < w; ++x)
+			{
+				const int i = field.idx(x, y);
+				if (field.state[i] != StKnown)
+					continue;
+				const bool touches =
+					(x > 0 && field.state[i - 1] == StInside) ||
+					(x < w - 1 && field.state[i + 1] == StInside) ||
+					(y > 0 && field.state[i - w] == StInside) ||
+					(y < h - 1 && field.state[i + w] == StInside);
+				if (touches)
+					heap.emplace(0.0f, i);
+			}
+		}
+
+		//! Starts at the interval so the very first pass through the loop polls,
+		//! which is what makes an already-set cancel flag return immediately.
+		size_t sinceCancelCheck = CancelCheckInterval;
+
+		const int dx[4] = { -1, 1, 0, 0 };
+		const int dy[4] = { 0, 0, -1, 1 };
+
+		while (!heap.empty())
+		{
+			if (++sinceCancelCheck >= CancelCheckInterval)
+			{
+				sinceCancelCheck = 0;
+				if (opts.cancel && opts.cancel->load())
+					return false;
+			}
+
+			const Entry top = heap.top();
+			heap.pop();
+			const int p = top.second;
+			if (field.settled[p])
+				continue;   // a stale entry left behind when this pixel's time was lowered
+			field.settled[p] = 1;
+			field.state[p] = StKnown;
+
+			const int px = p % w;
+			const int py = p / w;
+
+			for (int k = 0; k < 4; ++k)
+			{
+				const int nxp = px + dx[k];
+				const int nyp = py + dy[k];
+				if (!field.contains(nxp, nyp))
+					continue;
+				const int n = field.idx(nxp, nyp);
+				if (field.state[n] == StKnown)
+					continue;
+
+				const float nt = marchTime(field, nxp, nyp);
+				if (nt < field.t[n])
+				{
+					field.t[n] = nt;
+					heap.emplace(nt, n);
+				}
+
+				if (field.state[n] == StInside)
+				{
+					// First time the march reaches this pixel: it now has an
+					// arrival time, so it can be given a colour. Marking it
+					// BAND keeps that colour out of later averages until it
+					// settles.
+					field.state[n] = StBand;
+					fillPixel(plane, field, nxp, nyp, radius);
+					++filled;
+
+					const int percent = total ? int((filled * 100) / total) : 100;
+					if (opts.progress && percent != lastPercent)
+					{
+						lastPercent = percent;
+						opts.progress(percent);
+					}
+				}
+			}
+		}
+
+		return !(opts.cancel && opts.cancel->load());
+	}
+
+	// ------------------------------------------------------------- Exemplar
+
+	/*! \brief Criminisi exemplar filling.
+
+	    Fills the hole one patch at a time, and the whole method is in the two
+	    choices it makes each round:
+
+	    - **which patch to fill next.** Priority is confidence times data term.
+	      Confidence is how much of the patch is real photograph rather than
+	      earlier guesswork, so the fill works inwards from what it is sure of.
+	      The data term is how strongly an edge in the picture runs into the
+	      hole at that point, so edges are continued *before* flat areas are
+	      touched, and an edge arriving from one side meets the one arriving
+	      from the other instead of both being smeared away first. This
+	      ordering is the reason the method keeps structure at all.
+	    - **what to fill it with.** The best matching patch of real photograph
+	      elsewhere in the picture, copied in whole. Copied, never averaged -
+	      which is the entire difference from the fast marching method, and the
+	      reason a fill can come out with texture in it.
+
+	    Pixels this fill has already invented are never used as source patches.
+	    They take part in matching, weighted by their confidence, but the
+	    colours that get copied are always real photograph, so a guess cannot be
+	    laundered into evidence for the next guess. */
+	struct Exemplar
+	{
+		Plane* plane {nullptr};
+		int w {0};
+		int h {0};
+		//! Half-width of the block that gets copied.
+		int patchR {4};
+		/*! \brief Half-width of the block that gets *compared*, which is
+		    deliberately larger.
+
+		    Matching over exactly the piece being copied leaves a patch with no
+		    distinguishing feature in it - a plain stretch of a repeating
+		    pattern, say - free to match anywhere in that pattern, including
+		    somewhere a whole half-period out of step, and the fill comes back
+		    subtly but visibly misaligned. Comparing a wider ring of the
+		    surroundings settles which alignment is actually meant, while
+		    still copying a small block so that detail stays local. */
+		int matchR {8};
+
+		//! Has a colour: originally known, or filled by this run.
+		std::vector<uint8_t> filled;
+		//! Never masked. Only these may be *copied from*.
+		std::vector<uint8_t> original;
+		//! Criminisi's C(p): 1 for photograph, less for reconstruction.
+		std::vector<float> conf;
+		//! Which copied patch each pixel came from; -1 for real photograph.
+		//! Only used afterwards, to find where two patches meet.
+		std::vector<int32_t> source;
+		//! Summed-area table over `original`, so "is this whole candidate
+		//! window real photograph?" is one subtraction rather than a scan.
+		std::vector<int32_t> integral;
+
+		//! How often each coarse cell of the picture has been copied from; see
+		//! SourceUsagePenalty. One cell per patch radius is fine - the point is
+		//! to notice an area being mined repeatedly, not an exact position.
+		std::vector<uint16_t> usage;
+		int usageW {0};
+		int usageH {0};
+
+		//! The fill front, kept incrementally: rebuilding it from scratch each
+		//! round is what makes naive implementations quadratic.
+		std::vector<uint8_t> onFront;
+		std::vector<float> prio;
+		std::vector<int> frontList;
+		size_t staleFront {0};
+
+		inline int idx(int x, int y) const { return y * w + x; }
+		inline bool contains(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
+		inline bool isFilled(int x, int y) const { return contains(x, y) && filled[idx(x, y)] != 0; }
+
+		inline int usageCell(int x, int y) const
+		{
+			const int cx = std::min(usageW - 1, std::max(0, x / patchR));
+			const int cy = std::min(usageH - 1, std::max(0, y / patchR));
+			return cy * usageW + cx;
+		}
+
+		void buildIntegral()
+		{
+			const int stride = w + 1;
+			integral.assign(size_t(stride) * size_t(h + 1), 0);
+			for (int y = 0; y < h; ++y)
+			{
+				int32_t rowSum = 0;
+				for (int x = 0; x < w; ++x)
+				{
+					rowSum += original[idx(x, y)] ? 1 : 0;
+					integral[size_t(y + 1) * stride + (x + 1)] =
+						integral[size_t(y) * stride + (x + 1)] + rowSum;
+				}
+			}
+		}
+
+		//! True when every pixel of the closed rectangle is real photograph.
+		bool windowAllOriginal(int x0, int y0, int x1, int y1) const
+		{
+			if (x0 < 0 || y0 < 0 || x1 >= w || y1 >= h)
+				return false;
+			const int stride = w + 1;
+			const int32_t s =
+				  integral[size_t(y1 + 1) * stride + (x1 + 1)]
+				- integral[size_t(y0) * stride + (x1 + 1)]
+				- integral[size_t(y1 + 1) * stride + x0]
+				+ integral[size_t(y0) * stride + x0];
+			return s == int32_t(x1 - x0 + 1) * int32_t(y1 - y0 + 1);
+		}
+
+		//! Criminisi's C(p): the mean confidence over the patch, counting the
+		//! part still missing as zero.
+		double confidenceAt(int x, int y) const
+		{
+			const int x0 = std::max(0, x - patchR);
+			const int y0 = std::max(0, y - patchR);
+			const int x1 = std::min(w - 1, x + patchR);
+			const int y1 = std::min(h - 1, y + patchR);
+			double sum = 0.0;
+			int n = 0;
+			for (int yy = y0; yy <= y1; ++yy)
+			{
+				for (int xx = x0; xx <= x1; ++xx)
+				{
+					const int i = idx(xx, yy);
+					if (filled[i])
+						sum += double(conf[i]);
+					++n;
+				}
+			}
+			return n ? sum / double(n) : 0.0;
+		}
+
+		/*! \brief Criminisi's D(p): how strongly an edge runs into the hole.
+
+		    The isophote - the direction a line of constant brightness travels,
+		    i.e. the image gradient turned through a right angle - dotted with
+		    the normal of the fill front. Large where an edge meets the hole
+		    head on, near zero where the front runs along an edge or where
+		    there is no edge at all.
+
+		    The gradient is taken over the patch and the strongest one kept,
+		    rather than read at p itself: p is by definition an empty pixel on
+		    the boundary, so a difference centred there usually has a hole on
+		    one side and no gradient to report. Only filled pixels are ever
+		    read - the hole still contains the object being removed, and
+		    differentiating that would let it steer its own removal. */
+		double dataTermAt(int x, int y) const
+		{
+			// Normal of the fill front: the gradient of "which pixels have a
+			// colour". Outside the rectangle counts as filled, because beyond
+			// it the picture really does continue.
+			auto indicator = [this](int xx, int yy) -> double {
+				if (!contains(xx, yy))
+					return 1.0;
+				return filled[idx(xx, yy)] ? 1.0 : 0.0;
+			};
+			double nx = (indicator(x + 1, y) - indicator(x - 1, y)) * 0.5;
+			double ny = (indicator(x, y + 1) - indicator(x, y - 1)) * 0.5;
+			const double nlen = std::sqrt(nx * nx + ny * ny);
+			if (nlen < 1.0e-9)
+				return 0.0;
+			nx /= nlen;
+			ny /= nlen;
+
+			const int x0 = std::max(1, x - patchR);
+			const int y0 = std::max(1, y - patchR);
+			const int x1 = std::min(w - 2, x + patchR);
+			const int y1 = std::min(h - 2, y + patchR);
+
+			double bestMag = -1.0;
+			double bestGx = 0.0;
+			double bestGy = 0.0;
+			for (int yy = y0; yy <= y1; ++yy)
+			{
+				for (int xx = x0; xx <= x1; ++xx)
+				{
+					if (!filled[idx(xx, yy)])
+						continue;
+					if (!isFilled(xx - 1, yy) || !isFilled(xx + 1, yy))
+						continue;
+					if (!isFilled(xx, yy - 1) || !isFilled(xx, yy + 1))
+						continue;
+					const double gx = (plane->luma(xx + 1, yy) - plane->luma(xx - 1, yy)) * 0.5;
+					const double gy = (plane->luma(xx, yy + 1) - plane->luma(xx, yy - 1)) * 0.5;
+					const double mag = gx * gx + gy * gy;
+					if (mag > bestMag)
+					{
+						bestMag = mag;
+						bestGx = gx;
+						bestGy = gy;
+					}
+				}
+			}
+			if (bestMag <= 0.0)
+				return 0.0;
+
+			// Isophote: the gradient turned a right angle.
+			const double isoX = -bestGy;
+			const double isoY = bestGx;
+			return std::fabs(isoX * nx + isoY * ny) / DataNormalisation;
+		}
+
+		//! Recompute front membership and priority over a rectangle. Called
+		//! only on what a patch copy can have changed.
+		void refresh(int x0, int y0, int x1, int y1)
+		{
+			x0 = std::max(0, x0);
+			y0 = std::max(0, y0);
+			x1 = std::min(w - 1, x1);
+			y1 = std::min(h - 1, y1);
+			for (int y = y0; y <= y1; ++y)
+			{
+				for (int x = x0; x <= x1; ++x)
+				{
+					const int i = idx(x, y);
+					const bool wanted = !filled[i] &&
+						(isFilled(x - 1, y) || isFilled(x + 1, y) ||
+						 isFilled(x, y - 1) || isFilled(x, y + 1));
+					if (wanted)
+					{
+						const double c = std::max(confidenceAt(x, y), double(MinConfidence));
+						const double d = std::max(dataTermAt(x, y), MinDataTerm);
+						prio[i] = float(c * d);
+						if (!onFront[i])
+						{
+							onFront[i] = 1;
+							frontList.push_back(i);
+						}
+					}
+					else if (onFront[i])
+					{
+						onFront[i] = 0;
+						++staleFront;
+					}
+				}
+			}
+		}
+
+		/*! \brief The best matching patch of real photograph near \a px, \a py.
+
+		    Sum of squared differences over the part of the target patch that
+		    already has a colour, each pixel weighted by its confidence so that
+		    this fill's own earlier guesses steer the match less than real
+		    photograph does. Candidates must be *entirely* photograph, which the
+		    summed-area table settles in constant time and which throws out most
+		    of the window near a large hole immediately. */
+		bool bestSource(int px, int py, int searchR, int& outX, int& outY,
+		                std::vector<float>& scratch) const
+		{
+			// Target samples: dx, dy, weight, r, g, b - packed flat because
+			// this is the innermost loop of the whole method.
+			scratch.clear();
+			double weightSum = 0.0;
+			for (int dy = -matchR; dy <= matchR; ++dy)
+			{
+				for (int dx = -matchR; dx <= matchR; ++dx)
+				{
+					const int tx = px + dx;
+					const int ty = py + dy;
+					if (!contains(tx, ty))
+						continue;
+					const int i = idx(tx, ty);
+					if (!filled[i])
+						continue;
+					const float* c = plane->at(tx, ty);
+					const float wgt = std::max(conf[i], MinConfidence);
+					scratch.push_back(float(dx));
+					scratch.push_back(float(dy));
+					scratch.push_back(wgt);
+					scratch.push_back(c[0]);
+					scratch.push_back(c[1]);
+					scratch.push_back(c[2]);
+					weightSum += double(wgt);
+				}
+			}
+			if (weightSum <= 0.0 || scratch.empty())
+				return false;
+
+			const size_t sampleCount = scratch.size() / 6;
+			const float* samples = scratch.data();
+
+			double best = std::numeric_limits<double>::max();
+			int bestX = -1;
+			int bestY = -1;
+
+			// A candidate must be able to supply the whole block that will be
+			// copied, and the wider window it is compared over must at least
+			// lie inside the picture.
+			const double minCoverage = MinMatchCoverage * weightSum;
+			auto consider = [&](int qx, int qy) {
+				if (!windowAllOriginal(qx - patchR, qy - patchR, qx + patchR, qy + patchR))
+					return;
+				if (qx - matchR < 0 || qy - matchR < 0 || qx + matchR >= w || qy + matchR >= h)
+					return;
+				const double ddx = double(qx - px);
+				const double ddy = double(qy - py);
+				const double prox = (1.0 + ProximityPenalty *
+					std::sqrt(ddx * ddx + ddy * ddy) / double(searchR)) *
+					(1.0 + SourceUsagePenalty * double(usage[usageCell(qx, qy)]));
+				// Everything still to be added is non-negative and the divisor
+				// can only shrink, so a running sum past this bound can never
+				// come back under the best score. Safe to give up on.
+				const double cutoff = (best >= std::numeric_limits<double>::max() / 2.0)
+					? std::numeric_limits<double>::max()
+					: best * weightSum / prox;
+				double ssd = 0.0;
+				double used = 0.0;
+				for (size_t s = 0; s < sampleCount; ++s)
+				{
+					const float* smp = samples + s * 6;
+					const int cx = qx + int(smp[0]);
+					const int cy = qy + int(smp[1]);
+					// Outside the copied block the candidate may overlap
+					// ground this fill has already touched. Those pixels are
+					// simply not evidence, so they are skipped rather than
+					// disqualifying an otherwise good near neighbour - which
+					// is what excluding them wholesale did, pushing the fill
+					// out to distant patches of the wrong material.
+					if (!original[idx(cx, cy)])
+						continue;
+					const float* c = plane->at(cx, cy);
+					const double dr = double(smp[3]) - double(c[0]);
+					const double dg = double(smp[4]) - double(c[1]);
+					const double db = double(smp[5]) - double(c[2]);
+					ssd += double(smp[2]) * (dr * dr + dg * dg + db * db);
+					used += double(smp[2]);
+					if (ssd >= cutoff)
+						return;
+				}
+				// Judged on too little to be worth trusting.
+				if (used < minCoverage)
+					return;
+				const double score = (ssd / used) * prox;
+				if (score < best)
+				{
+					best = score;
+					bestX = qx;
+					bestY = qy;
+				}
+			};
+
+			/* A wide window is swept coarsely and the winner then refined at
+			   full resolution.
+
+			   The step grows with the window, because the window grows with the
+			   hole and the cost of sweeping it grows as the square. A big
+			   removal from a newspaper-sized photograph is the case that
+			   matters: at a fixed step of two it took half a minute, and almost
+			   all of that was spent distinguishing between candidates one pixel
+			   apart, which the refinement pass settles anyway. */
+			const int span = 2 * searchR + 1;
+			const int step = (span > CoarseSearchThreshold)
+				? int(clampd(double(span) / double(CoarseSearchThreshold), 2.0, 4.0))
+				: 1;
+			for (int qy = py - searchR; qy <= py + searchR; qy += step)
+				for (int qx = px - searchR; qx <= px + searchR; qx += step)
+					consider(qx, qy);
+
+			if (step > 1 && bestX >= 0)
+			{
+				// Everything the coarse sweep stepped over, around its winner.
+				const int cx = bestX;
+				const int cy = bestY;
+				const int fine = step - 1;
+				for (int qy = cy - fine; qy <= cy + fine; ++qy)
+					for (int qx = cx - fine; qx <= cx + fine; ++qx)
+						consider(qx, qy);
+			}
+
+			if (bestX < 0)
+				return false;
+			outX = bestX;
+			outY = bestY;
+			return true;
+		}
+
+		//! Copy the missing part of the patch at \a px,\a py out of the patch
+		//! at \a qx,\a qy. Returns how many pixels were filled.
+		int copyPatch(int px, int py, int qx, int qy, float newConf, int32_t patchId)
+		{
+			int n = 0;
+			for (int dy = -patchR; dy <= patchR; ++dy)
+			{
+				for (int dx = -patchR; dx <= patchR; ++dx)
+				{
+					const int tx = px + dx;
+					const int ty = py + dy;
+					if (!contains(tx, ty))
+						continue;
+					const int i = idx(tx, ty);
+					if (filled[i])
+						continue;
+					const float* s = plane->at(qx + dx, qy + dy);
+					float* d = plane->at(tx, ty);
+					d[0] = s[0];
+					d[1] = s[1];
+					d[2] = s[2];
+					d[3] = s[3];
+					filled[i] = 1;
+					conf[i] = newConf;
+					source[i] = patchId;
+					++n;
+				}
+			}
+			if (n > 0)
+				++usage[usageCell(qx, qy)];
+			return n;
+		}
+
+		/*! \brief Soften the joins between patches, and nothing else.
+
+		    Patches are copied whole and butt up against each other, so where
+		    two of them meet there is a step that belongs to neither piece of
+		    photograph - the blockiness that gives an exemplar fill away. Only
+		    pixels that actually sit on such a join are touched, and only once,
+		    so the texture inside each patch is left exactly as it was copied.
+		    Blurring the whole fill instead would undo the entire point of
+		    copying patches. */
+		void softenSeams()
+		{
+			std::vector<int> seam;
+			for (int y = 0; y < h; ++y)
+			{
+				for (int x = 0; x < w; ++x)
+				{
+					const int i = idx(x, y);
+					if (source[i] < 0)
+						continue;
+					bool join = false;
+					if (x > 0 && source[i - 1] != source[i]) join = true;
+					if (!join && x < w - 1 && source[i + 1] != source[i]) join = true;
+					if (!join && y > 0 && source[i - w] != source[i]) join = true;
+					if (!join && y < h - 1 && source[i + w] != source[i]) join = true;
+					if (join)
+						seam.push_back(i);
+				}
+			}
+
+			// Gathered first, applied second, so a softened pixel does not
+			// become the input to its neighbour and spread the softening.
+			std::vector<float> updated(seam.size() * 4);
+			for (size_t k = 0; k < seam.size(); ++k)
+			{
+				const int i = seam[k];
+				const int x = i % w;
+				const int y = i / w;
+				double acc[4] = { 0.0, 0.0, 0.0, 0.0 };
+				int n = 0;
+				const int dx[4] = { -1, 1, 0, 0 };
+				const int dy[4] = { 0, 0, -1, 1 };
+				for (int q = 0; q < 4; ++q)
+				{
+					const int nx = x + dx[q];
+					const int ny = y + dy[q];
+					if (!contains(nx, ny) || !filled[idx(nx, ny)])
+						continue;
+					const float* c = plane->at(nx, ny);
+					for (int ch = 0; ch < 4; ++ch)
+						acc[ch] += double(c[ch]);
+					++n;
+				}
+				const float* self = plane->at(x, y);
+				for (int ch = 0; ch < 4; ++ch)
+				{
+					updated[k * 4 + ch] = n
+						? float(0.6 * double(self[ch]) + 0.4 * (acc[ch] / double(n)))
+						: self[ch];
+				}
+			}
+			for (size_t k = 0; k < seam.size(); ++k)
+			{
+				float* d = plane->at(seam[k] % w, seam[k] / w);
+				for (int ch = 0; ch < 4; ++ch)
+					d[ch] = updated[k * 4 + ch];
+			}
+		}
+
+		/*! \brief Last resort when the window holds no complete patch of
+		    photograph at all, which happens deep inside a very large hole.
+
+		    A plain distance-weighted average of what is around it. This is the
+		    fast marching method's behaviour and it will look like it, but a
+		    soft patch is better than a hole, and by this depth there is no
+		    real information left to preserve anyway. */
+		int averagePatch(int px, int py, float newConf)
+		{
+			int n = 0;
+			for (int dy = -patchR; dy <= patchR; ++dy)
+			{
+				for (int dx = -patchR; dx <= patchR; ++dx)
+				{
+					const int tx = px + dx;
+					const int ty = py + dy;
+					if (!contains(tx, ty))
+						continue;
+					const int i = idx(tx, ty);
+					if (filled[i])
+						continue;
+
+					double acc[4] = { 0.0, 0.0, 0.0, 0.0 };
+					double sw = 0.0;
+					for (int yy = std::max(0, ty - patchR); yy <= std::min(h - 1, ty + patchR); ++yy)
+					{
+						for (int xx = std::max(0, tx - patchR); xx <= std::min(w - 1, tx + patchR); ++xx)
+						{
+							const int j = idx(xx, yy);
+							if (!filled[j])
+								continue;
+							const double rx = double(tx - xx);
+							const double ry = double(ty - yy);
+							const double d2 = rx * rx + ry * ry;
+							if (d2 <= 0.0)
+								continue;
+							const double wgt = double(std::max(conf[j], MinConfidence)) / d2;
+							const float* c = plane->at(xx, yy);
+							for (int k = 0; k < 4; ++k)
+								acc[k] += wgt * double(c[k]);
+							sw += wgt;
+						}
+					}
+					if (sw <= 0.0)
+						continue;
+					float* d = plane->at(tx, ty);
+					for (int k = 0; k < 4; ++k)
+						d[k] = float(clampd(acc[k] / sw, 0.0, 255.0));
+					filled[i] = 1;
+					conf[i] = newConf;
+					++n;
+				}
+			}
+			return n;
+		}
+	};
+
+	/*! \brief Criminisi exemplar fill over \a plane.
+	    \returns false if the caller cancelled. */
+	bool runExemplar(Plane& plane, const std::vector<uint8_t>& masked, int patchR, int searchR,
+	                 const Inpaint::Options& opts, size_t total, size_t& filledCount, int& lastPercent)
+	{
+		const int w = plane.w;
+		const int h = plane.h;
+		const size_t n = size_t(w) * size_t(h);
+
+		Exemplar ex;
+		ex.plane = &plane;
+		ex.w = w;
+		ex.h = h;
+		ex.patchR = patchR;
+		// Three pixels of extra context all round. Measured on a regular grid
+		// and a crowd photograph together: matching over exactly the copied
+		// block loses the phase of a repeating pattern completely (56% of the
+		// grid came back in step, worse than guessing), while widening it
+		// further than this starts costing time without buying anything.
+		ex.matchR = patchR + 3;
+		ex.filled.assign(n, 1);
+		ex.original.assign(n, 1);
+		ex.conf.assign(n, 1.0f);
+		ex.source.assign(n, -1);
+		ex.onFront.assign(n, 0);
+		ex.prio.assign(n, 0.0f);
+		ex.usageW = (w + patchR - 1) / patchR;
+		ex.usageH = (h + patchR - 1) / patchR;
+		ex.usage.assign(size_t(ex.usageW) * size_t(ex.usageH), 0);
+
+		for (size_t i = 0; i < masked.size(); ++i)
+		{
+			if (!masked[i])
+				continue;
+			ex.filled[i] = 0;
+			ex.original[i] = 0;
+			ex.conf[i] = 0.0f;
+		}
+
+		ex.buildIntegral();
+		ex.refresh(0, 0, w - 1, h - 1);
+
+		std::vector<float> scratch;
+		scratch.reserve(size_t((2 * ex.matchR + 1) * (2 * ex.matchR + 1)) * 6);
+		int32_t patchId = 0;
+
+		while (filledCount < total)
+		{
+			if (opts.cancel && opts.cancel->load())
+				return false;
+
+			// Stale entries pile up as the front moves; sweeping them out when
+			// they are the majority keeps this scan proportional to the real
+			// front rather than to everything the front has ever been.
+			if (ex.staleFront > ex.frontList.size() / 2 && ex.staleFront > 64)
+			{
+				std::vector<int> live;
+				live.reserve(ex.frontList.size() - ex.staleFront + 16);
+				for (int i : ex.frontList)
+					if (ex.onFront[i])
+						live.push_back(i);
+				ex.frontList.swap(live);
+				ex.staleFront = 0;
+			}
+
+			int best = -1;
+			float bestPrio = -1.0f;
+			for (int i : ex.frontList)
+			{
+				if (!ex.onFront[i])
+					continue;
+				if (ex.prio[i] > bestPrio)
+				{
+					bestPrio = ex.prio[i];
+					best = i;
+				}
+			}
+			if (best < 0)
+				break;   // nothing reachable is still empty
+
+			const int px = best % w;
+			const int py = best / w;
+			const float newConf = float(std::max(ex.confidenceAt(px, py), double(MinConfidence)));
+
+			int filledHere = 0;
+			int qx = 0;
+			int qy = 0;
+			if (ex.bestSource(px, py, searchR, qx, qy, scratch))
+				filledHere = ex.copyPatch(px, py, qx, qy, newConf, patchId++);
+			if (filledHere == 0)
+				filledHere = ex.averagePatch(px, py, MinConfidence);
+			if (filledHere == 0)
+			{
+				// Nothing worked for this pixel at all. Drop it off the front
+				// so the loop cannot spin on it.
+				ex.onFront[best] = 0;
+				++ex.staleFront;
+				continue;
+			}
+
+			filledCount += size_t(filledHere);
+
+			const int reach = 2 * patchR + 2;
+			ex.refresh(px - reach, py - reach, px + reach, py + reach);
+
+			const int percent = total ? int((filledCount * 100) / total) : 100;
+			if (opts.progress && percent != lastPercent)
+			{
+				lastPercent = percent;
+				opts.progress(percent);
+			}
+		}
+
+		ex.softenSeams();
+		return true;
+	}
+
+	// ------------------------------------------------------- Mask analysis
+
 	//! Mask as one byte per pixel, sized to \a size. Null when unusable.
 	QImage normaliseMask(const QImage& mask, const QSize& size)
 	{
@@ -352,9 +1216,168 @@ namespace
 		}
 		return m;
 	}
+
+	/*! \brief Chamfer distance from every pixel of \a region to the nearest
+	    seed, in pixels.
+
+	    Two passes with 1 / sqrt(2) steps. Approximate, and much cheaper than an
+	    exact transform - both things it feeds only need to be roughly right.
+	    \param seed one byte per pixel over the region, non-zero where distance
+	           is zero. */
+	std::vector<float> chamfer(const std::vector<uint8_t>& seed, int w, int h)
+	{
+		constexpr float Big = 1.0e9f;
+		constexpr float Diag = 1.41421356f;
+		std::vector<float> d(size_t(w) * size_t(h));
+		for (size_t i = 0; i < d.size(); ++i)
+			d[i] = seed[i] ? 0.0f : Big;
+
+		auto relax = [](float& v, float other, float cost) {
+			if (other + cost < v)
+				v = other + cost;
+		};
+
+		for (int y = 0; y < h; ++y)
+		{
+			for (int x = 0; x < w; ++x)
+			{
+				float& v = d[size_t(y) * w + x];
+				if (v == 0.0f)
+					continue;
+				if (y > 0)
+				{
+					relax(v, d[size_t(y - 1) * w + x], 1.0f);
+					if (x > 0)
+						relax(v, d[size_t(y - 1) * w + (x - 1)], Diag);
+					if (x < w - 1)
+						relax(v, d[size_t(y - 1) * w + (x + 1)], Diag);
+				}
+				if (x > 0)
+					relax(v, d[size_t(y) * w + (x - 1)], 1.0f);
+			}
+		}
+		for (int y = h - 1; y >= 0; --y)
+		{
+			for (int x = w - 1; x >= 0; --x)
+			{
+				float& v = d[size_t(y) * w + x];
+				if (v == 0.0f)
+					continue;
+				if (y < h - 1)
+				{
+					relax(v, d[size_t(y + 1) * w + x], 1.0f);
+					if (x > 0)
+						relax(v, d[size_t(y + 1) * w + (x - 1)], Diag);
+					if (x < w - 1)
+						relax(v, d[size_t(y + 1) * w + (x + 1)], Diag);
+				}
+				if (x < w - 1)
+					relax(v, d[size_t(y) * w + (x + 1)], 1.0f);
+			}
+		}
+		return d;
+	}
+
+	//! What the two analyses below need to know about a mask.
+	struct MaskShape
+	{
+		//! How far the deepest point of the hole is from real pixels. This,
+		//! rather than the area, is what says whether a diffusion can cope: a
+		//! long scratch has a large area and a thickness of one, and the fast
+		//! marching method handles it perfectly.
+		double thickness {0.0};
+
+		/*! \brief Median gradient magnitude of the real picture in a narrow
+		    ring around the hole - how busy its actual surroundings are.
+
+		    The median rather than the mean, and a ring rather than the padded
+		    bounding box, because both of the obvious versions get the answer
+		    wrong in the same direction. A tall mask's bounding box is mostly
+		    far-away picture, and a mean is dragged upwards by a handful of
+		    strong edges, so a hole sitting in open sky next to one bright kite
+		    reads as "busy" and gets an expensive treatment that makes it worse.
+		    Measured on real photographs: open sky sits at about 0.5, a crowd at
+		    4 to 6. */
+		double busyness {0.0};
+	};
+
+	MaskShape analyseMask(const QImage& image, const QImage& maskGrey, const QRect& bbox)
+	{
+		MaskShape shape;
+
+		// Work over the bounding box grown by the ring width, so both the
+		// distance into the hole and the ring outside it fit.
+		const QRect r = bbox.adjusted(-RingWidth - 1, -RingWidth - 1, RingWidth + 1, RingWidth + 1)
+		                    .intersected(QRect(QPoint(0, 0), image.size()));
+		const int w = r.width();
+		const int h = r.height();
+		if (w <= 2 || h <= 2)
+			return shape;
+
+		std::vector<uint8_t> maskedSeed(size_t(w) * size_t(h), 0);
+		std::vector<uint8_t> clearSeed(size_t(w) * size_t(h), 0);
+		for (int y = 0; y < h; ++y)
+		{
+			const uchar* line = maskGrey.constScanLine(r.top() + y) + r.left();
+			for (int x = 0; x < w; ++x)
+			{
+				const bool m = line[x] != 0;
+				maskedSeed[size_t(y) * w + x] = m ? 1 : 0;
+				clearSeed[size_t(y) * w + x] = m ? 0 : 1;
+			}
+		}
+
+		// Distance from inside the hole out to real pixels.
+		const std::vector<float> toClear = chamfer(clearSeed, w, h);
+		for (size_t i = 0; i < toClear.size(); ++i)
+		{
+			if (maskedSeed[i] && toClear[i] < 1.0e9f && double(toClear[i]) > shape.thickness)
+				shape.thickness = double(toClear[i]);
+		}
+
+		// Distance from real pixels in to the hole, which picks out the ring.
+		const std::vector<float> toMask = chamfer(maskedSeed, w, h);
+
+		auto luma = [&](int x, int y) {
+			const QRgb p = image.pixel(r.left() + x, r.top() + y);
+			return 0.299 * qRed(p) + 0.587 * qGreen(p) + 0.114 * qBlue(p);
+		};
+
+		std::vector<float> ring;
+		ring.reserve(size_t(w) * 8);
+		for (int y = 1; y < h - 1; ++y)
+		{
+			for (int x = 1; x < w - 1; ++x)
+			{
+				const size_t i = size_t(y) * w + x;
+				if (maskedSeed[i])
+					continue;
+				const double dist = double(toMask[i]);
+				// Skip the pixel right against the mask: its difference
+				// stencil would reach into the hole and measure the edge of
+				// the object being removed rather than the surroundings.
+				if (dist < 2.0 || dist > double(RingWidth))
+					continue;
+				if (maskedSeed[i - 1] || maskedSeed[i + 1] ||
+				    maskedSeed[i - w] || maskedSeed[i + w])
+					continue;
+				const double gx = (luma(x + 1, y) - luma(x - 1, y)) * 0.5;
+				const double gy = (luma(x, y + 1) - luma(x, y - 1)) * 0.5;
+				ring.push_back(float(std::sqrt(gx * gx + gy * gy)));
+			}
+		}
+
+		if (!ring.empty())
+		{
+			const size_t mid = ring.size() / 2;
+			std::nth_element(ring.begin(), ring.begin() + mid, ring.end());
+			shape.busyness = double(ring[mid]);
+		}
+		return shape;
+	}
 }
 
-QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Options& opts)
+QImage Inpaint::inpaint(const QImage& image, const QImage& mask, const Options& opts)
 {
 	if (image.isNull())
 		return QImage();
@@ -396,11 +1419,48 @@ QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Opti
 		return image;
 	}
 
+	const QRect bbox(QPoint(bx0, by0), QPoint(bx1, by1));
 	const int radius = std::max(1, opts.radius);
 
-	// Grown by twice the radius so that every pixel a fill reads from is inside
-	// the rectangle, with room to spare for the gradient stencils at its rim.
-	const int pad = 2 * radius + 2;
+	// Which method, and how much real picture the chosen one needs around the
+	// hole to work with.
+	Method method = opts.method;
+	int patchR = 4;
+	int searchR = 64;
+	if (method == Method::Auto || method == Method::Exemplar)
+	{
+		const MaskShape shape = analyseMask(image, maskGrey, bbox);
+		if (method == Method::Auto)
+		{
+			// Thin enough that a diffusion cannot flatten anything, or sitting
+			// in flat colour where there is no texture to reproduce: the fast
+			// marching method is both right and far cheaper. Otherwise the
+			// hole is wide and its surroundings have detail in them, which is
+			// the case a diffusion turns to mud.
+			method = (shape.thickness <= ThinMaskThickness || shape.busyness < FlatRingBusyness)
+				? Method::FastMarching
+				: Method::Exemplar;
+		}
+		if (method == Method::Exemplar)
+		{
+			// A patch wants to be a little larger than the texture it is
+			// reproducing, and larger again for a thick hole because structure
+			// has further to travel across it. Searching further than that
+			// buys nothing and costs a great deal.
+			patchR = int(clampd(3.0 + shape.thickness / 20.0, 3.0, 7.0));
+			searchR = int(clampd(8.0 * patchR + shape.thickness, 48.0, 200.0));
+		}
+	}
+	if (opts.chosenMethod)
+		*opts.chosenMethod = method;
+
+	// The fast marching method only ever reads within its radius of the hole.
+	// The exemplar method has to have somewhere to copy from, so it needs a
+	// whole search window of real picture around it.
+	const int pad = (method == Method::Exemplar)
+		? (searchR + patchR + 6)   // + 4 for the wider match window, + 2 slack
+		: (2 * radius + 2);
+
 	const int rx0 = std::max(0, bx0 - pad);
 	const int ry0 = std::max(0, by0 - pad);
 	const int rx1 = std::min(imgW - 1, bx1 + pad);
@@ -419,38 +1479,14 @@ QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Opti
 	if (out.isNull())
 		return QImage();
 
-	// Load the working rectangle into floats.
 	Plane plane;
 	plane.w = w;
 	plane.h = h;
+	std::vector<uint8_t> masked;
 	try
 	{
 		plane.v.assign(size_t(w) * size_t(h) * 4, 0.0f);
-	}
-	catch (const std::bad_alloc&)
-	{
-		return QImage();
-	}
-
-	Field field;
-	field.w = w;
-	field.h = h;
-	try
-	{
-		field.t.assign(size_t(w) * size_t(h), 0.0f);
-		field.state.assign(size_t(w) * size_t(h), StKnown);
-		field.settled.assign(size_t(w) * size_t(h), 0);
-		field.original.assign(size_t(w) * size_t(h), 1);
-	}
-	catch (const std::bad_alloc&)
-	{
-		return QImage();
-	}
-
-	std::vector<uint8_t> wasMasked;
-	try
-	{
-		wasMasked.assign(size_t(w) * size_t(h), 0);
+		masked.assign(size_t(w) * size_t(h), 0);
 	}
 	catch (const std::bad_alloc&)
 	{
@@ -473,11 +1509,7 @@ QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Opti
 
 			if (mline[x] != 0)
 			{
-				const int i = field.idx(x, y);
-				field.state[i] = StInside;
-				field.original[i] = 0;
-				field.t[i] = InfiniteT;
-				wasMasked[i] = 1;
+				masked[size_t(y) * w + x] = 1;
 				++total;
 			}
 		}
@@ -490,93 +1522,20 @@ QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Opti
 		return image;
 	}
 
-	// Seed the march from the known pixels that touch the hole. Their arrival
-	// time is zero by definition, so the heap starts there and works inwards.
-	using Entry = std::pair<float, int>;
-	std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> heap;
-	for (int y = 0; y < h; ++y)
-	{
-		for (int x = 0; x < w; ++x)
-		{
-			const int i = field.idx(x, y);
-			if (field.state[i] != StKnown)
-				continue;
-			const bool touches =
-				(x > 0 && field.state[i - 1] == StInside) ||
-				(x < w - 1 && field.state[i + 1] == StInside) ||
-				(y > 0 && field.state[i - w] == StInside) ||
-				(y < h - 1 && field.state[i + w] == StInside);
-			if (touches)
-				heap.emplace(0.0f, i);
-		}
-	}
-
-	size_t filled = 0;
+	size_t filledCount = 0;
 	int lastPercent = -1;
-	//! Starts at the interval so the very first pass through the loop polls,
-	//! which is what makes an already-set cancel flag return immediately.
-	size_t sinceCancelCheck = CancelCheckInterval;
-
-	const int dx[4] = { -1, 1, 0, 0 };
-	const int dy[4] = { 0, 0, -1, 1 };
-
-	while (!heap.empty())
+	bool ok = false;
+	try
 	{
-		if (++sinceCancelCheck >= CancelCheckInterval)
-		{
-			sinceCancelCheck = 0;
-			if (opts.cancel && opts.cancel->load())
-				return QImage();
-		}
-
-		const Entry top = heap.top();
-		heap.pop();
-		const int p = top.second;
-		if (field.settled[p])
-			continue;   // a stale entry left behind when this pixel's time was lowered
-		field.settled[p] = 1;
-		field.state[p] = StKnown;
-
-		const int px = p % w;
-		const int py = p / w;
-
-		for (int k = 0; k < 4; ++k)
-		{
-			const int nxp = px + dx[k];
-			const int nyp = py + dy[k];
-			if (!field.contains(nxp, nyp))
-				continue;
-			const int n = field.idx(nxp, nyp);
-			if (field.state[n] == StKnown)
-				continue;
-
-			const float nt = marchTime(field, nxp, nyp);
-			if (nt < field.t[n])
-			{
-				field.t[n] = nt;
-				heap.emplace(nt, n);
-			}
-
-			if (field.state[n] == StInside)
-			{
-				// First time the march reaches this pixel: it now has an
-				// arrival time, so it can be given a colour. Marking it BAND
-				// keeps that colour out of later averages until it settles.
-				field.state[n] = StBand;
-				fillPixel(plane, field, nxp, nyp, radius);
-				++filled;
-
-				const int percent = int((filled * 100) / total);
-				if (opts.progress && percent != lastPercent)
-				{
-					lastPercent = percent;
-					opts.progress(percent);
-				}
-			}
-		}
+		ok = (method == Method::Exemplar)
+			? runExemplar(plane, masked, patchR, searchR, opts, total, filledCount, lastPercent)
+			: runFastMarching(plane, masked, radius, opts, total, filledCount, lastPercent);
 	}
-
-	if (opts.cancel && opts.cancel->load())
+	catch (const std::bad_alloc&)
+	{
+		return QImage();
+	}
+	if (!ok)
 		return QImage();
 
 	// Only the pixels that were masked are written back, so nothing else in the
@@ -586,7 +1545,7 @@ QImage InpaintTelea::inpaint(const QImage& image, const QImage& mask, const Opti
 		QRgb* dstLine = reinterpret_cast<QRgb*>(out.scanLine(ry0 + y)) + rx0;
 		for (int x = 0; x < w; ++x)
 		{
-			if (!wasMasked[field.idx(x, y)])
+			if (!masked[size_t(y) * w + x])
 				continue;
 			const float* v = plane.at(x, y);
 			const int r = int(v[0] + 0.5f);

@@ -13,30 +13,44 @@ for which a new license (GPL+exception) is in place.
 #include <QImage>
 
 /*!
- \brief Telea Fast Marching Method image inpainting.
+ \brief Regenerate the pixels a mask covers from the rest of the picture.
 
- Regenerates the pixels a mask covers from the pixels around them, following
- Alexandru Telea, "An Image Inpainting Technique Based on the Fast Marching
- Method", Journal of Graphics Tools 9(1), 2004. Implemented from the paper;
- nothing is taken from another implementation.
+ Two methods, because one method cannot do both jobs:
 
- The method walks the masked region inwards from its boundary in order of
- distance to that boundary (the fast marching order), and gives each pixel a
- weighted average of the already-known pixels within a small radius, weighted
- by how well each one lies along the direction the boundary is travelling. It
- is a *smooth continuation* method: it reconstructs colour and gradient well,
- and texture not at all, so it suits removing a small object from a photo and
- does not suit filling a large hole in a patterned background.
+ - **Fast marching** (Alexandru Telea, "An Image Inpainting Technique Based on
+   the Fast Marching Method", Journal of Graphics Tools 9(1), 2004). Walks
+   inwards from the mask boundary in order of distance and gives each pixel a
+   weighted average of the known pixels near it. It is a diffusion: it
+   reconstructs colour and gradient, and it cannot reconstruct texture, because
+   an average of pixels has less detail than the pixels it averaged. Ideal for
+   something thin - a wire, an aerial, a scratch, a speck of dust - where every
+   filled pixel is a pixel or two from real data and there is no room for the
+   averaging to flatten anything. Cheap.
 
- This header deliberately pulls in nothing from Scribus: the algorithm is
- standalone so it can be unit-tested without a document, a painter or a
- running application.
+ - **Exemplar** (Antonio Criminisi, Patrick Perez, Kentaro Toyama, "Region
+   Filling and Object Removal by Exemplar-Based Image Inpainting", IEEE Trans.
+   Image Processing 13(9), 2004). Fills the hole a patch at a time by *copying*
+   the best-matching patch from elsewhere in the same picture, choosing which
+   patch to fill next so that edges arriving at the hole are continued before
+   flat areas are touched. Because it copies real pixels it produces real
+   texture, and because it never averages two things together it cannot make
+   the muddy brown that a diffusion makes of a person standing against grass.
+   What a wide hole needs; slower.
+
+ Both are implemented here from the papers, with no external dependencies and
+ no Scribus headers, so the algorithms can be tested without a document, a
+ painter or a running application.
+
+ Method::Auto picks between them from the shape of the mask and the busyness of
+ what surrounds it. See inpaint().
  */
-namespace InpaintTelea
+namespace Inpaint
 {
-	//! Default radius of the neighbourhood each unknown pixel is averaged
-	//! from, in pixels. Telea's own suggestion; large enough to bridge the
-	//! usual retouching mask, small enough to stay local.
+	//! Default neighbourhood radius, in pixels. Telea's own suggestion, and
+	//! used only by the fast marching method: the exemplar method sizes its
+	//! patches and its search from the mask itself, because the right patch
+	//! size is a property of the hole and of the texture around it rather
+	//! than something a caller is in a position to know.
 	constexpr int DefaultRadius = 5;
 
 	//! Coverage above which a painted overlay counts as "remove this". The
@@ -45,10 +59,27 @@ namespace InpaintTelea
 	//! mask, kept here so everything agrees on one value.
 	constexpr int MaskThreshold = 32;
 
+	enum class Method
+	{
+		//! Choose per mask. Anything thin, or anything surrounded by flat
+		//! colour, goes to the fast marching method because it is much cheaper
+		//! and loses nothing there; everything else goes to the exemplar
+		//! method. This is what callers should use.
+		Auto,
+		//! Force Telea fast marching. Cheap, smooth, no texture.
+		FastMarching,
+		//! Force Criminisi exemplar filling. Slower, keeps texture and edges.
+		Exemplar
+	};
+
 	struct Options
 	{
-		//! Neighbourhood radius in pixels. Clamped to at least 1.
+		//! Neighbourhood radius in pixels, for the fast marching method.
+		//! Clamped to at least 1. See DefaultRadius.
 		int radius = DefaultRadius;
+
+		//! Which method to use; see Method.
+		Method method = Method::Auto;
 
 		/*! \brief Called with 0..100 as the masked pixels are filled.
 
@@ -57,9 +88,13 @@ namespace InpaintTelea
 		    be empty. */
 		std::function<void(int percent)> progress;
 
-		/*! \brief Polled during the march; when it becomes true the run is
+		/*! \brief Polled during the fill; when it becomes true the run is
 		    abandoned and inpaint() returns a null QImage. May be null. */
 		std::atomic<bool>* cancel = nullptr;
+
+		//! Set to the method that actually ran. Useful to tests and to anyone
+		//! wondering why a particular removal was slow.
+		Method* chosenMethod = nullptr;
 	};
 
 	/*! \brief Inpaint the masked part of \a image.

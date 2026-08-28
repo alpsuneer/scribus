@@ -206,7 +206,7 @@ bool CanvasMode_RemovalMask::hasSelection() const
 		return false;
 	// Anything the threshold would keep counts, so the Apply button agrees
 	// exactly with what applyRemoval() would actually act on.
-	const int keepLimit = 255 - InpaintTelea::MaskThreshold;
+	const int keepLimit = 255 - Inpaint::MaskThreshold;
 	for (int y = 0; y < m_mask.height(); ++y)
 	{
 		const uchar* line = m_mask.constScanLine(y);
@@ -608,7 +608,7 @@ QImage CanvasMode_RemovalMask::thresholdedMask() const
 	if (binary.isNull())
 		return QImage();
 
-	const int keepLimit = 255 - InpaintTelea::MaskThreshold;
+	const int keepLimit = 255 - Inpaint::MaskThreshold;
 	for (int y = 0; y < m_mask.height(); ++y)
 	{
 		const uchar* src = m_mask.constScanLine(y);
@@ -759,7 +759,7 @@ void CanvasMode_RemovalMask::applyRemoval()
 
 	auto cancel = m_cancel;
 	auto percent = m_percent;
-	const int radius = InpaintTelea::DefaultRadius;
+	const int radius = Inpaint::DefaultRadius;
 
 	m_watcher = new QFutureWatcher<Outcome>(this);
 	connect(m_watcher, &QFutureWatcherBase::finished, this, &CanvasMode_RemovalMask::inpaintFinished);
@@ -767,11 +767,11 @@ void CanvasMode_RemovalMask::applyRemoval()
 		Outcome out;
 		try
 		{
-			InpaintTelea::Options opts;
+			Inpaint::Options opts;
 			opts.radius = radius;
 			opts.cancel = cancel.get();
 			opts.progress = [percent](int p) { percent->store(p); };
-			out.image = InpaintTelea::inpaint(source, binary, opts);
+			out.image = Inpaint::inpaint(source, binary, opts);
 			if (out.image.isNull() && !cancel->load())
 				out.error = tr("The inpainter could not produce a result for this mask.");
 		}

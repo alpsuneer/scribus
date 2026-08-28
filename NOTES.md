@@ -471,15 +471,16 @@ ambiguous `insertChars` overload). Both are pre-existing and were left alone, so
 `WITH_TESTS=ON` still fails on `all`. The main build is configured
 `WITH_TESTS=OFF` and is unaffected.
 
-### Object removal (Telea inpainting)
+### Object removal (inpainting)
 
 | Feature | Key commits | Branch |
 |---|---|---|
-| `util_inpaint` — Telea fast marching inpainting kernel, standalone + unit tested | `16ea33e` | feature/ctp-output |
-| `modeRemoveObject` canvas mode, red mask overlay, options bar, progress dialog, apply/undo flow | (this change) | feature/ctp-output |
+| `util_inpaint` — Telea fast marching kernel, standalone + unit tested | `16ea33e` | feature/ctp-output |
+| `modeRemoveObject` canvas mode, red mask overlay, options bar, progress dialog, apply/undo flow | `4af4715` | feature/ctp-output |
+| Criminisi exemplar filling, and choosing between the two per mask | (this change) | feature/ctp-output |
 
 Paint a red mask over something unwanted in a placed photo, press Apply, and the
-covered pixels are rebuilt from the pixels around them. Shift+R, the mode
+covered pixels are rebuilt from the rest of the picture. Shift+R, the mode
 toolbar, or `Item > Shape & Paths > Remove Object`.
 
 **This is not the eraser, and confusing the two will lead you to the wrong
@@ -488,60 +489,116 @@ be taken back pixel by pixel; nothing about the picture changes. This invents
 new pixels, writes them to a new PNG in `.scribus_edits/` beside the document,
 and points the frame at that file. Its mask is scratch state, never saved.
 
-#### The algorithm, and where it deviates from the paper
+#### Two methods, because one method cannot do both jobs
 
-`util_inpaint.cpp` implements Telea, *An Image Inpainting Technique Based on the
-Fast Marching Method*, JGT 9(1) 2004: solve |grad T| = 1 outward from the mask
-boundary with an upwind scheme and a min-heap, fill each pixel in ascending T
-with a weighted average of the known pixels within a radius, weights being
-direction along grad T, 1/d^2, and 1/(1+|T(p)-T(q)|). Nothing is taken from
-another implementation; it includes no Scribus headers so it can be tested
-without a document.
+| | fast marching (Telea 2004) | exemplar (Criminisi 2004) |
+|---|---|---|
+| what it does | weighted average of nearby known pixels, worked inwards | copies the best-matching patch of real picture, worked inwards |
+| reconstructs | colour, gradient | colour, gradient, **texture, edges** |
+| good for | wires, aerials, scratches, dust, anything against flat colour | people, clothing, crowds, foliage, any busy background |
+| cost, 400x1000 mask on a 4000x3000 photo | 0.2 s | 4 s |
 
-**Equation 2's gradient extrapolation term, applied literally, is wrong on
-photographs.** It carries each contributing pixel to p along that pixel's own
-gradient, which is what lets a smooth ramp continue across a hole. But the
-gradient is taken at pixels the algorithm has already filled, so a fill's error
-is fed back in amplified by the distance it is carried, and at a high-contrast
-mask edge it runs away into coloured spokes radiating from the hole - the
-Telea starburst you can see in any naive implementation.
+`Method::Auto` chooses, and callers should leave it alone. The rule is in
+`Inpaint::inpaint()`:
 
-Two bounds fixed it, both measured against ground truth (mask a region of a real
-photo, inpaint, PSNR over the masked pixels only):
+- **mask thickness <= 4 px → fast marching.** Thickness, not area: a scratch a
+  hundred pixels long and two wide has every one of its pixels within a pixel or
+  two of real data, so the averaging has no room to flatten anything.
+- **median ring gradient < 3 → fast marching.** Sky, a backdrop, a wall. No
+  texture to reproduce, a diffusion is exactly right, and it is much cheaper.
+- **otherwise → exemplar.**
 
-| variant | kites photo | sky photo | linear ramp, worst column |
-|---|---|---|---|
-| paper as written | 15.58 dB | 14.69 dB | 0.00 |
-| term dropped entirely | 20.47 dB | 20.92 dB | 6.55 |
-| range-clamped only | 19.30 dB | 20.37 dB | 3.05 |
-| **differentiate only unmasked pixels, and clamp** | **20.36 dB** | **21.10 dB** | 5.20 |
+Both statistics come from `analyseMask()`, off one shared chamfer distance
+transform. The ring statistic is a **median** over a **narrow ring**, and both
+of those were mistakes first: the mean over the padded bounding box read 6.5 on
+a crowd and classified it as flat, because a tall mask's bounding box is mostly
+far-away picture and a mean is dragged about by a handful of strong edges. The
+median of a true ring reads about 0.5 in open sky and 4 to 6 in a crowd.
 
-(radius 5; the last row wins at every radius tried, 3 / 5 / 8 / 12, on both
-photographs. A flat fill scores 20.00 on the ramp, so the term is still earning
-its keep there.) So: `gradientOfColour()` differentiates only pixels that were
-never masked, and `fillPixel()` holds each extrapolated value inside the range
-of colours actually present in the neighbourhood. Both are bounds on the term,
-not a change to it.
+#### Why the diffusion had to be replaced for wide masks
 
-**ROI is inside the kernel, not the caller.** Work is confined to the mask's
-bounding box grown by `2*radius+2`. For a 50x50 mask on 4000x3000 that is 14 ms
-instead of 141 ms, and - the part that actually matters - about 120 KB of
-marching state instead of ~192 MB, since the working plane is four floats per
-pixel.
+Reported as "the removed region is visibly detectable, blurred and smeared".
+Measured on a crowd photograph, 141x191 mask, before any of this change:
 
-#### The canvas mode
+```
+telea radius  3   texture ratio 0.50    PSNR 13.29 dB
+telea radius  5   texture ratio 0.41    PSNR 13.68 dB
+telea radius  9   texture ratio 0.33    PSNR 14.11 dB
+telea radius 15   texture ratio 0.26    PSNR 14.65 dB
+```
 
-- **The brush is the eraser's, not a copy of it.** `ScEraserMask::stamp()`,
-  `stampLine()` and `applyStroke()` were already standalone, so no
-  `MaskBrushPainter` extraction was needed and none was done - which is also
-  why the eraser cannot have regressed. **That is why the removal mask is stored
-  in the eraser's inverted sense** (255 = leave alone, 0 = remove): it lets
-  `applyStroke()` be called verbatim, including the dab spacing and overlap
-  handling that two real scalloping bugs were fixed in. `Alt` maps onto the
-  eraser's `restore` flag.
-- The overlay is a separate premultiplied ARGB buffer rebuilt only over the
-  touched rectangle, so a photo-sized mask does not get re-converted on every
-  repaint.
+("Texture ratio" is mean gradient magnitude inside the fill over the same in a
+ring of untouched picture around it. 1.0 means the fill carries as much detail
+as its surroundings; the ground truth scores 0.95.)
+
+Three things are visible in that table and all three matter:
+
+- **The fill carried 41% of the detail of its surroundings.** That is the
+  smooth blob a reader spots.
+- **Gradient energy collapses with depth**: 16.5 at the mask edge, then 12.2,
+  11.1, 10.7, 10.7 going inwards, against a ground truth that stays between 26
+  and 35 throughout. Each filled pixel is an average of pixels that were
+  themselves averages, and an average has less detail than its inputs. That is
+  a property of *any* diffusion, not a tuning problem - which is why the fix
+  had to be a different method rather than better weights.
+- **PSNR rises as the picture gets worse.** More blur, better PSNR. Anyone
+  tuning this kernel against PSNR will reintroduce the smear, so
+  `testBlurringScoresBetterOnPsnr()` states that trap out loud and fails if
+  someone quietly removes the texture measure.
+
+After the change, the same mask: **texture ratio 0.85, PSNR 14.58, 0.2 s**.
+
+#### The exemplar implementation, and four measured deviations
+
+Criminisi's method is in `struct Exemplar`. Each round it picks the front pixel
+with the highest confidence x data term - confidence being how much of the patch
+is real photograph rather than earlier guesswork, the data term how strongly an
+edge runs into the hole there, so edges are continued before flat areas are
+touched - then copies in the best matching patch of real picture. Copied, never
+averaged, which is the whole difference.
+
+Everything below was added on measurement, not taste:
+
+- **Reconstructions are never sources.** Only never-masked pixels may be copied
+  *from*. They take part in *matching*, weighted by confidence, but a guess can
+  never be laundered into evidence for the next guess.
+- **Source usage penalty** (`SourceUsagePenalty`). Exemplar filling repeats
+  itself: it copies a patch, that patch becomes the context the next match is
+  judged against, so it matches the same place again, and a recognisable object
+  gets stamped across the hole several times. Charging a source area for each
+  use broke the loop: PSNR 13.74 → 14.31, texture ratio 1.18 → 1.12.
+- **The compared window is wider than the copied one** (`matchR = patchR + 3`).
+  Matching over exactly the block being copied loses the *phase* of a repeating
+  pattern completely - on a regular grid only 56% of the fill came back in step,
+  which is worse than always guessing dark. Widening it fixed that (95%).
+  **But only the copied block has to be untouched picture**; requiring the whole
+  compared window to be untouched pushes the search out to distant patches of
+  the wrong material and cost 1.7 dB on the crowd photograph. Non-original
+  pixels in the compared window are skipped instead, with a coverage floor
+  (`MinMatchCoverage`) so nothing wins on a sliver of evidence.
+- **Seam softening** (`softenSeams()`). Patches are copied whole and butt
+  against each other; the step where two meet belongs to neither piece of
+  photograph. Only pixels actually on such a join are touched, once, so the
+  texture inside each patch survives - blurring the whole fill would undo the
+  entire point. PSNR 14.31 → 14.38, texture ratio 1.12 → 1.06.
+
+Speed comes from three places: a summed-area table over the untouched region so
+"is this whole candidate real picture?" is one subtraction; early exit on the
+running SSD; and a coarse sweep whose step grows with the search window,
+refined at full resolution around the winner. That last one was worth 3 to 4
+times on its own - a large removal from a newspaper photograph went from 30 s
+to 10 s, a person-sized one from 14 s to 4 s, with the crowd measurements
+unchanged to within 0.3 dB.
+
+#### What it still cannot do
+
+It does not know what was behind the object, and nothing here can invent a face
+or a limb that was never photographed. What it produces is *plausible picture
+from elsewhere in the same photograph*, which reads as a photograph rather than
+as a hole. On a complex subject it will still duplicate recognisable things and
+leave patchy joins - visible if you look for them, which is a different and much
+weaker failure than the smear it replaced. Small and medium removals against
+texture are where it is genuinely good.
 
 #### Traps met on the way
 
@@ -566,6 +623,10 @@ pixel.
 - `QDialog::reject()` (Escape) does not go through `closeEvent()`, so it needed
   overriding separately or Escape would hide the dialog and leave the job going
   with nothing on screen to stop it.
+- **Do not read the hole.** Under the mask the picture still contains the object
+  being removed. Every gradient, every match sample and every average in both
+  methods is guarded on "has this pixel got a colour yet", or the thing being
+  removed steers its own removal.
 
 #### Harness trap: `import -window <id>` can wedge the whole X server
 
@@ -576,10 +637,19 @@ application having hung. It cost a confused detour here. On the Xvfb harness use
 `import -window root`, or better `xwd -root -silent`, and never a specific
 window id.
 
-Unit tests: `scribus/tests/inpainttests.cpp`, 11 cases - flat field, ramp
-continuation, stripe banding, empty mask returns the input bit-identically,
-fully-masked degenerate case, mask on every border and corner, cancel, progress
-monotonic and ending at 100, alpha preserved, and the ROI timing on 4000x3000.
+Unit tests: `scribus/tests/inpainttests.cpp`, 28 cases. Contract (empty mask
+bit-identical, fully masked, masks on every border and corner, cancel and
+progress on both paths, alpha, ROI timing); which method Auto picks for thin,
+flat and textured masks; and quality - texture energy survives, sharp vertical
+and diagonal edges are not blurred away, coloured objects do not bleed, a
+repeated pattern comes back in phase, text-like structure does not go grey,
+discs on texture leave the background clean, and the crowd-like scene keeps its
+ground texture and its horizon line.
+
+Set `SCRIBUS_INPAINT_TEST_OUT=<dir>` to have the crowd-scene test write its
+before, after and truth images there to look at; the automated run does not
+depend on it.
+
 
 ### Printing and export
 
