@@ -53,3 +53,9 @@ add_executable(contourdetecttests ${CONTOURDETECTTESTS_SOURCES})
 target_link_libraries(contourdetecttests ${TESTS_LIBRARIES})
 add_test(NAME contourdetecttests COMMAND contourdetecttests)
 
+
+# Unit tests for Telea fast-marching inpainting
+set(INPAINTTESTS_SOURCES inpainttests.cpp ../util_inpaint.cpp)
+add_executable(inpainttests ${INPAINTTESTS_SOURCES})
+target_link_libraries(inpainttests ${TESTS_LIBRARIES})
+add_test(NAME inpainttests COMMAND inpainttests)
