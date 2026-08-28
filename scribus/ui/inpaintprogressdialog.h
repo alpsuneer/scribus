@@ -50,6 +50,10 @@ protected:
 	//! Closing the window is the same request as pressing Cancel; there must
 	//! be no way to dismiss the dialog and leave the run going unattended.
 	void closeEvent(QCloseEvent* e) override;
+	//! Escape reaches QDialog::reject() without going through closeEvent(),
+	//! so it needs the same treatment or the job would carry on with nothing
+	//! on screen to stop it.
+	void reject() override;
 
 private slots:
 	void tick();

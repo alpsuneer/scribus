@@ -471,6 +471,116 @@ ambiguous `insertChars` overload). Both are pre-existing and were left alone, so
 `WITH_TESTS=ON` still fails on `all`. The main build is configured
 `WITH_TESTS=OFF` and is unaffected.
 
+### Object removal (Telea inpainting)
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| `util_inpaint` — Telea fast marching inpainting kernel, standalone + unit tested | `16ea33e` | feature/ctp-output |
+| `modeRemoveObject` canvas mode, red mask overlay, options bar, progress dialog, apply/undo flow | (this change) | feature/ctp-output |
+
+Paint a red mask over something unwanted in a placed photo, press Apply, and the
+covered pixels are rebuilt from the pixels around them. Shift+R, the mode
+toolbar, or `Item > Shape & Paths > Remove Object`.
+
+**This is not the eraser, and confusing the two will lead you to the wrong
+layer.** The eraser hides pixels behind a mask that lives in the `.sla` and can
+be taken back pixel by pixel; nothing about the picture changes. This invents
+new pixels, writes them to a new PNG in `.scribus_edits/` beside the document,
+and points the frame at that file. Its mask is scratch state, never saved.
+
+#### The algorithm, and where it deviates from the paper
+
+`util_inpaint.cpp` implements Telea, *An Image Inpainting Technique Based on the
+Fast Marching Method*, JGT 9(1) 2004: solve |grad T| = 1 outward from the mask
+boundary with an upwind scheme and a min-heap, fill each pixel in ascending T
+with a weighted average of the known pixels within a radius, weights being
+direction along grad T, 1/d^2, and 1/(1+|T(p)-T(q)|). Nothing is taken from
+another implementation; it includes no Scribus headers so it can be tested
+without a document.
+
+**Equation 2's gradient extrapolation term, applied literally, is wrong on
+photographs.** It carries each contributing pixel to p along that pixel's own
+gradient, which is what lets a smooth ramp continue across a hole. But the
+gradient is taken at pixels the algorithm has already filled, so a fill's error
+is fed back in amplified by the distance it is carried, and at a high-contrast
+mask edge it runs away into coloured spokes radiating from the hole - the
+Telea starburst you can see in any naive implementation.
+
+Two bounds fixed it, both measured against ground truth (mask a region of a real
+photo, inpaint, PSNR over the masked pixels only):
+
+| variant | kites photo | sky photo | linear ramp, worst column |
+|---|---|---|---|
+| paper as written | 15.58 dB | 14.69 dB | 0.00 |
+| term dropped entirely | 20.47 dB | 20.92 dB | 6.55 |
+| range-clamped only | 19.30 dB | 20.37 dB | 3.05 |
+| **differentiate only unmasked pixels, and clamp** | **20.36 dB** | **21.10 dB** | 5.20 |
+
+(radius 5; the last row wins at every radius tried, 3 / 5 / 8 / 12, on both
+photographs. A flat fill scores 20.00 on the ramp, so the term is still earning
+its keep there.) So: `gradientOfColour()` differentiates only pixels that were
+never masked, and `fillPixel()` holds each extrapolated value inside the range
+of colours actually present in the neighbourhood. Both are bounds on the term,
+not a change to it.
+
+**ROI is inside the kernel, not the caller.** Work is confined to the mask's
+bounding box grown by `2*radius+2`. For a 50x50 mask on 4000x3000 that is 14 ms
+instead of 141 ms, and - the part that actually matters - about 120 KB of
+marching state instead of ~192 MB, since the working plane is four floats per
+pixel.
+
+#### The canvas mode
+
+- **The brush is the eraser's, not a copy of it.** `ScEraserMask::stamp()`,
+  `stampLine()` and `applyStroke()` were already standalone, so no
+  `MaskBrushPainter` extraction was needed and none was done - which is also
+  why the eraser cannot have regressed. **That is why the removal mask is stored
+  in the eraser's inverted sense** (255 = leave alone, 0 = remove): it lets
+  `applyStroke()` be called verbatim, including the dab spacing and overlap
+  handling that two real scalloping bugs were fixed in. `Alt` maps onto the
+  eraser's `restore` flag.
+- The overlay is a separate premultiplied ARGB buffer rebuilt only over the
+  touched rectangle, so a photo-sized mask does not get re-converted on every
+  repaint.
+
+#### Traps met on the way
+
+- **`PageItem::loadImage()` resets image scale and offset whenever the file name
+  changes** (`pageitem.cpp:10249`), so a hand-placed picture jumps in its frame
+  when the frame is repointed. Fixed on both halves: the output PNG is written
+  carrying the *source's* DPI, so `72.0/xres` lands on the identical scale, and
+  the offsets are restored through the setters afterwards. Going through the
+  setters matters - they record their own undo states inside the transaction, so
+  **redo** puts the placement back too, which stuffing the values into the
+  members would not.
+- **The progress dialog is modeless, so the finish handler may not trust
+  anything.** It re-finds the frame by name through `getItemFromName()` and
+  refuses to apply a result if the document, the frame, or the frame's `Pfile`
+  changed while the worker was running.
+- **The worker can outlive the mode.** It talks through
+  `shared_ptr<atomic<bool>>` / `<atomic<int>>` rather than cross-thread signals,
+  and captures its images by value, so closing the document mid-run cannot leave
+  it writing into freed memory. The mode's destructor sets the cancel flag and
+  takes the dialog down, which is otherwise parented to the main window and
+  would be stranded on screen.
+- `QDialog::reject()` (Escape) does not go through `closeEvent()`, so it needed
+  overriding separately or Escape would hide the dialog and leave the job going
+  with nothing on screen to stop it.
+
+#### Harness trap: `import -window <id>` can wedge the whole X server
+
+`import -window <someid>` on a window that has since been destroyed falls back
+to *interactive* window selection, which grabs the X server and never returns.
+Every other X client on that display then blocks, which looks exactly like the
+application having hung. It cost a confused detour here. On the Xvfb harness use
+`import -window root`, or better `xwd -root -silent`, and never a specific
+window id.
+
+Unit tests: `scribus/tests/inpainttests.cpp`, 11 cases - flat field, ramp
+continuation, stripe banding, empty mask returns the input bit-identically,
+fully-masked degenerate case, mask on every border and corner, cancel, progress
+monotonic and ending at 100, alpha preserved, and the ROI timing on 4000x3000.
+
 ### Printing and export
 
 | Feature | Key commits | Branch |

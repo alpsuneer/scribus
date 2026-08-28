@@ -77,6 +77,14 @@ CanvasMode_RemovalMask::~CanvasMode_RemovalMask()
 	// stays alive to be read even though this object will not.
 	if (m_cancel)
 		m_cancel->store(true);
+	// The dialog is parented to the main window, not to this mode, so it would
+	// otherwise be left on screen reporting a job nobody is watching any more.
+	if (m_progress)
+	{
+		m_progress->hide();
+		m_progress->deleteLater();
+		m_progress = nullptr;
+	}
 	if (s_active == this)
 		s_active = nullptr;
 }

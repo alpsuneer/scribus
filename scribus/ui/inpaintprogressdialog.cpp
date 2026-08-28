@@ -101,6 +101,13 @@ void InpaintProgressDialog::markCancelling()
 		m_message->setText(tr("Stopping..."));
 }
 
+void InpaintProgressDialog::reject()
+{
+	cancelPressed();
+	// Deliberately not calling QDialog::reject(): the dialog stays up until
+	// the run it is reporting on has actually stopped.
+}
+
 void InpaintProgressDialog::closeEvent(QCloseEvent* e)
 {
 	if (!m_cancelling)
