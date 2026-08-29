@@ -38,6 +38,20 @@ public:
 public slots:
 	//! Move the bar. Values outside 0..100 are ignored.
 	void setPercent(int percent);
+	//! Replace the line above the bar.
+	void setMessage(const QString& message);
+	/*! \brief Switch the bar to a moving barber's pole with no position.
+
+	    For work that cannot say how far along it is. A bar sitting at zero for
+	    a minute looks like something that has hung; one that is visibly moving
+	    does not, and that is the whole of the difference. */
+	void setIndeterminate(bool indeterminate);
+	/*! \brief Show \a hint once the run has been going \a seconds.
+
+	    So that a long wait explains itself instead of looking like a fault,
+	    without putting a warning in front of someone whose run takes two
+	    seconds. */
+	void setHint(int afterSeconds, const QString& hint);
 	//! Cancel pressed: the button goes dead and says so, but the dialog stays
 	//! up until the run really stops, so it is clear something is still
 	//! happening rather than looking like nothing was done.
@@ -63,9 +77,12 @@ private:
 	QLabel* m_message {nullptr};
 	QProgressBar* m_bar {nullptr};
 	QLabel* m_elapsed {nullptr};
+	QLabel* m_hint {nullptr};
 	QPushButton* m_cancelButton {nullptr};
 	QTimer* m_timer {nullptr};
 	QElapsedTimer m_clock;
+	QString m_hintText;
+	int m_hintAfterSeconds {0};
 	bool m_cancelling {false};
 };
 

@@ -37,6 +37,11 @@ InpaintProgressDialog::InpaintProgressDialog(QWidget* parent)
 	m_elapsed = new QLabel(this);
 	layout->addWidget(m_elapsed);
 
+	m_hint = new QLabel(this);
+	m_hint->setWordWrap(true);
+	m_hint->hide();
+	layout->addWidget(m_hint);
+
 	m_cancelButton = new QPushButton(this);
 	auto* buttons = new QHBoxLayout();
 	buttons->addStretch(1);
@@ -79,6 +84,36 @@ void InpaintProgressDialog::tick()
 		return;
 	const double seconds = double(m_clock.elapsed()) / 1000.0;
 	m_elapsed->setText(tr("Elapsed: %1 s").arg(seconds, 0, 'f', 1));
+
+	if (m_hint && !m_hintText.isEmpty() && !m_hint->isVisible() &&
+	    seconds >= double(m_hintAfterSeconds))
+	{
+		m_hint->setText(QStringLiteral("<qt><i>%1</i></qt>").arg(m_hintText.toHtmlEscaped()));
+		m_hint->show();
+		adjustSize();
+	}
+}
+
+void InpaintProgressDialog::setMessage(const QString& message)
+{
+	if (m_message)
+		m_message->setText(message);
+}
+
+void InpaintProgressDialog::setIndeterminate(bool indeterminate)
+{
+	if (!m_bar)
+		return;
+	if (indeterminate)
+		m_bar->setRange(0, 0);
+	else
+		m_bar->setRange(0, 100);
+}
+
+void InpaintProgressDialog::setHint(int afterSeconds, const QString& hint)
+{
+	m_hintAfterSeconds = afterSeconds;
+	m_hintText = hint;
 }
 
 void InpaintProgressDialog::cancelPressed()

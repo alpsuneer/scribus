@@ -64,6 +64,15 @@ RemovalToolWidget::RemovalToolWidget(ScribusMainWindow* mw)
 	m_applyButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 	addWidget(m_applyButton);
 
+	m_applyBestButton = new QToolButton(this);
+	m_applyBestButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+	addWidget(m_applyBestButton);
+
+	m_recommendLabel = new QLabel(this);
+	m_recommendLabel->setContentsMargins(6, 0, 2, 0);
+	m_recommendLabel->hide();
+	addWidget(m_recommendLabel);
+
 	m_hintLabel = new QLabel(this);
 	m_hintLabel->setContentsMargins(8, 0, 4, 0);
 	addWidget(m_hintLabel);
@@ -74,6 +83,7 @@ RemovalToolWidget::RemovalToolWidget(ScribusMainWindow* mw)
 	connect(m_hardnessSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &RemovalToolWidget::hardnessChanged);
 	connect(m_clearButton, &QToolButton::clicked, this, &RemovalToolWidget::clearClicked);
 	connect(m_applyButton, &QToolButton::clicked, this, &RemovalToolWidget::applyClicked);
+	connect(m_applyBestButton, &QToolButton::clicked, this, &RemovalToolWidget::applyBestQualityClicked);
 
 	languageChange();
 	refreshFromMode();
@@ -101,10 +111,13 @@ void RemovalToolWidget::languageChange()
 	}
 	if (m_applyButton)
 	{
-		m_applyButton->setText(tr("Apply"));
-		m_applyButton->setToolTip(tr("Rebuild the painted pixels from the ones around them. "
+		m_applyButton->setText(tr("Apply (Fast)"));
+		m_applyButton->setToolTip(tr("Rebuild the painted pixels from the ones around them, here on this machine. "
+		                             "Instant, and the right choice for most removals. "
 		                             "The result is saved as a new file; your original image is not changed."));
 	}
+	if (m_applyBestButton)
+		m_applyBestButton->setText(tr("Apply (Best Quality)"));
 	if (m_hintLabel)
 		m_hintLabel->setText(tr("Alt: unpaint   Shift: straight line"));
 }
@@ -119,6 +132,34 @@ void RemovalToolWidget::refreshFromMode()
 		m_applyButton->setEnabled(ready);
 	if (m_clearButton)
 		m_clearButton->setEnabled(mode && !running && mode->hasSelection());
+
+	if (m_applyBestButton)
+	{
+		// The tooltip is the whole feature when the button is off: it is the
+		// only place the user finds out whether to go to Preferences, start a
+		// server, or simply paint something first.
+		const QString blocked = mode ? mode->aiBlockedReason()
+		                             : tr("Enable AI features in Preferences > AI Services");
+		m_applyBestButton->setEnabled(blocked.isEmpty());
+		if (blocked.isEmpty())
+			m_applyBestButton->setToolTip(tr("Send the area around the mask to your local IOPaint server and "
+			                                 "let the model fill it. Slower, and much better on people, "
+			                                 "crowds and textured backgrounds. "
+			                                 "The result is saved as a new file; your original image is not changed."));
+		else
+			m_applyBestButton->setToolTip(blocked);
+	}
+
+	if (m_recommendLabel)
+	{
+		// Advice for the case the built-in fill is known to be weak at, put
+		// where the decision is made and nowhere near a dialog box.
+		const bool large = mode && !running && mode->hasSelection() && mode->maskCoverage() > 0.05;
+		m_recommendLabel->setVisible(large);
+		if (large)
+			m_recommendLabel->setText(QStringLiteral("<i>%1</i>")
+			                          .arg(tr("Large area - Best Quality recommended")));
+	}
 
 	if (m_updating)
 		return;
@@ -176,6 +217,13 @@ void RemovalToolWidget::applyClicked()
 	CanvasMode_RemovalMask* mode = CanvasMode_RemovalMask::active();
 	if (mode)
 		mode->applyRemoval();
+}
+
+void RemovalToolWidget::applyBestQualityClicked()
+{
+	CanvasMode_RemovalMask* mode = CanvasMode_RemovalMask::active();
+	if (mode)
+		mode->applyRemovalAI();
 }
 
 void RemovalToolWidget::clearClicked()

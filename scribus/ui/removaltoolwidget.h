@@ -44,6 +44,7 @@ private slots:
 	void sizeChanged(int value);
 	void hardnessChanged(int value);
 	void applyClicked();
+	void applyBestQualityClicked();
 	void clearClicked();
 
 private:
@@ -57,6 +58,10 @@ private:
 	QSpinBox* m_hardnessSpin {nullptr};
 	QToolButton* m_clearButton {nullptr};
 	QToolButton* m_applyButton {nullptr};
+	QToolButton* m_applyBestButton {nullptr};
+	//! Shown only when the mask is large enough that the built-in fill will
+	//! struggle with it. Advice, not a warning, and never a dialog.
+	QLabel* m_recommendLabel {nullptr};
 	QLabel* m_hintLabel {nullptr};
 
 	//! Guards the two-way binding between each slider and its spin box.

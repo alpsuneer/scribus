@@ -33,6 +33,9 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "ai/lamainpaintservice.h"
+#include "prefsmanager.h"
+#include "prefsstructs.h"
 #include "ui/inpaintprogressdialog.h"
 #include "undomanager.h"
 #include "undotransaction.h"
@@ -53,6 +56,37 @@ namespace
 
 	//! Where the rebuilt files go, relative to the document or the picture.
 	const QLatin1String EditsDirName(".scribus_edits");
+
+	/*! \name Whether the AI service answered, remembered for the session
+
+	    Testing costs a round trip and the answer almost never changes inside
+	    one sitting, so it is settled once per address rather than every time
+	    the options bar is redrawn - which happens on every brush stroke. The
+	    address is remembered alongside the answer so that changing it in
+	    Preferences asks again rather than reporting the old server's health. */
+	//@{
+	bool s_aiTested = false;
+	bool s_aiOk = false;
+	QString s_aiDetail;
+	QString s_aiTestedUrl;
+	//@}
+
+	//! Longest side sent to the AI service. LaMa's quality stops improving
+	//! above about this, and inference on a processor rather than a graphics
+	//! card gets punishing well before it.
+	constexpr int AiMaxSentEdge = 2048;
+
+	/*! \brief Real picture kept around the mask when sending it off.
+
+	    A model fills a hole from what surrounds it, so sending a tight crop
+	    starves it of exactly what it needs. Generous compared with the
+	    built-in kernel's few pixels, and bounded so that a small removal from
+	    a large photograph is still a small upload. */
+	int aiPadFor(const QRect& maskBounds)
+	{
+		const int longest = qMax(maskBounds.width(), maskBounds.height());
+		return qBound(64, longest / 2, 512);
+	}
 
 	//! Overlay colour. Deliberately nothing like the eraser, which shows the
 	//! erasure itself rather than a coloured wash: at a glance the two tools
@@ -77,6 +111,8 @@ CanvasMode_RemovalMask::~CanvasMode_RemovalMask()
 	// stays alive to be read even though this object will not.
 	if (m_cancel)
 		m_cancel->store(true);
+	if (m_aiService)
+		m_aiService->cancel();
 	// The dialog is parented to the main window, not to this mode, so it would
 	// otherwise be left on screen reporting a job nobody is watching any more.
 	if (m_progress)
@@ -141,6 +177,10 @@ void CanvasMode_RemovalMask::activate(bool fromGesture)
 	if (!m_ScMW)
 		return;
 	m_ScMW->setRemovalToolOptionsVisible(true);
+	// Settle whether the AI service is there, once per address per session, so
+	// that the Best Quality button is right the first time it is looked at
+	// rather than after the first disappointed press.
+	refreshAiAvailability();
 	notifyOptionsBar();
 	if (targetItem())
 		m_ScMW->statusBar()->showMessage(tr("Remove object: paint over what should go, then press Apply. Alt+drag unpaints, Shift+click continues in a straight line, [ and ] resize the brush, Esc to finish"));
@@ -157,6 +197,9 @@ void CanvasMode_RemovalMask::deactivate(bool forGesture)
 	if (m_painting)
 		commitStroke();
 	cancelStroke();
+
+	if (m_runIsAI && m_aiService)
+		m_aiService->cancel();
 
 	// The mask is scratch state and does not outlive the mode. Leaving it
 	// behind would mean a stray red wash reappearing over a frame the user has
@@ -619,7 +662,7 @@ QImage CanvasMode_RemovalMask::thresholdedMask() const
 	return binary;
 }
 
-QString CanvasMode_RemovalMask::outputPathFor(PageItem* item, QString& error) const
+QString CanvasMode_RemovalMask::outputPathFor(PageItem* item, const QString& tag, QString& error) const
 {
 	error.clear();
 	if (!item || item->Pfile.isEmpty())
@@ -663,8 +706,8 @@ QString CanvasMode_RemovalMask::outputPathFor(PageItem* item, QString& error) co
 		for (int n = 0; n < 1000; ++n)
 		{
 			QString name = (n == 0)
-				? QStringLiteral("%1_inpaint_%2.png").arg(stem, stamp)
-				: QStringLiteral("%1_inpaint_%2_%3.png").arg(stem, stamp).arg(n);
+				? QStringLiteral("%1_%2_%3.png").arg(stem, tag, stamp)
+				: QStringLiteral("%1_%2_%3_%4.png").arg(stem, tag, stamp).arg(n);
 			const QString full = editsDir.absoluteFilePath(name);
 			if (QFileInfo::exists(full))
 				continue;
@@ -675,6 +718,93 @@ QString CanvasMode_RemovalMask::outputPathFor(PageItem* item, QString& error) co
 	}
 
 	error = tr("Could not find a writable place to save the result. Save the document somewhere writable and try again.");
+	return QString();
+}
+
+double CanvasMode_RemovalMask::maskCoverage() const
+{
+	if (m_mask.isNull())
+		return 0.0;
+	const int keepLimit = 255 - Inpaint::MaskThreshold;
+	qint64 selected = 0;
+	for (int y = 0; y < m_mask.height(); ++y)
+	{
+		const uchar* line = m_mask.constScanLine(y);
+		for (int x = 0; x < m_mask.width(); ++x)
+		{
+			if (line[x] < keepLimit)
+				++selected;
+		}
+	}
+	const qint64 total = qint64(m_mask.width()) * qint64(m_mask.height());
+	return total > 0 ? double(selected) / double(total) : 0.0;
+}
+
+void CanvasMode_RemovalMask::ensureAiService()
+{
+	const AIServicePrefs& prefs = PrefsManager::instance().appPrefs.aiServicePrefs;
+	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
+	if (!m_aiService)
+	{
+		m_aiService = new LamaInpaintService(url, prefs.requestTimeoutSeconds, this);
+		connect(m_aiService, &AIInpaintService::connectionTested,
+		        this, &CanvasMode_RemovalMask::aiConnectionTested);
+		connect(m_aiService, &AIInpaintService::inpaintFinished,
+		        this, &CanvasMode_RemovalMask::aiInpaintFinished);
+		connect(m_aiService, &AIInpaintService::inpaintFailed,
+		        this, &CanvasMode_RemovalMask::aiInpaintFailed);
+	}
+	else
+	{
+		m_aiService->setEndpoint(url, prefs.requestTimeoutSeconds);
+	}
+}
+
+void CanvasMode_RemovalMask::refreshAiAvailability(bool force)
+{
+	const AIServicePrefs& prefs = PrefsManager::instance().appPrefs.aiServicePrefs;
+	if (!prefs.enabled)
+		return;
+
+	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
+	if (!force && s_aiTested && s_aiTestedUrl == url)
+		return;
+
+	s_aiTestedUrl = url;
+	ensureAiService();
+	m_aiService->testConnection();
+}
+
+void CanvasMode_RemovalMask::aiConnectionTested(bool ok, const QString& detail)
+{
+	s_aiTested = true;
+	s_aiOk = ok;
+	s_aiDetail = detail;
+	notifyOptionsBar();
+}
+
+bool CanvasMode_RemovalMask::aiReady() const
+{
+	return aiBlockedReason().isEmpty();
+}
+
+QString CanvasMode_RemovalMask::aiBlockedReason() const
+{
+	const AIServicePrefs& prefs = PrefsManager::instance().appPrefs.aiServicePrefs;
+	if (!prefs.enabled)
+		return tr("Enable AI features in Preferences > AI Services");
+
+	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
+	if (url.isEmpty())
+		return tr("Set the IOPaint address in Preferences > AI Services");
+	if (m_running)
+		return tr("A removal is already running");
+	if (!hasSelection())
+		return tr("Paint a mask area first");
+	if (!s_aiTested || s_aiTestedUrl != url)
+		return tr("Checking whether IOPaint is running at %1 ...").arg(url);
+	if (!s_aiOk)
+		return tr("IOPaint not reachable at %1. Is it running?\n%2").arg(url, s_aiDetail);
 	return QString();
 }
 
@@ -717,7 +847,7 @@ void CanvasMode_RemovalMask::applyRemoval()
 	}
 
 	QString pathError;
-	const QString outputPath = outputPathFor(item, pathError);
+	const QString outputPath = outputPathFor(item, QStringLiteral("inpaint"), pathError);
 	if (outputPath.isEmpty())
 	{
 		QMessageBox::critical(m_ScMW, tr("Remove Object"), pathError);
@@ -791,10 +921,234 @@ void CanvasMode_RemovalMask::applyRemoval()
 	}));
 }
 
+void CanvasMode_RemovalMask::applyRemovalAI()
+{
+	if (m_running)
+		return;
+
+	const QString blocked = aiBlockedReason();
+	if (!blocked.isEmpty())
+	{
+		if (m_ScMW)
+			m_ScMW->statusBar()->showMessage(blocked, 6000);
+		return;
+	}
+
+	PageItem* item = targetItem();
+	if (!item || item->itemName() != m_maskItemName)
+	{
+		if (m_ScMW)
+			m_ScMW->statusBar()->showMessage(tr("Select the frame the mask was painted on."), 4000);
+		return;
+	}
+
+	const QString sourcePath = item->Pfile;
+	QImage source(sourcePath);
+	if (source.isNull())
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"),
+		                      tr("Could not read the image file:\n%1").arg(sourcePath));
+		return;
+	}
+	if (source.format() != QImage::Format_RGB32 && source.format() != QImage::Format_ARGB32)
+		source = source.convertToFormat(source.hasAlphaChannel() ? QImage::Format_ARGB32 : QImage::Format_RGB32);
+
+	// The mask is painted at its own resolution; the region has to be worked
+	// out in the picture's, or the rectangle sent would not line up with it.
+	QImage binary = thresholdedMask();
+	if (binary.isNull())
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"), tr("Ran out of memory preparing the mask."));
+		return;
+	}
+	if (binary.size() != source.size())
+		binary = binary.scaled(source.size(), Qt::IgnoreAspectRatio, Qt::FastTransformation);
+
+	// Bounding box of what is to go, grown so the model has something to work
+	// from, then clipped to the picture.
+	int bx0 = source.width();
+	int by0 = source.height();
+	int bx1 = -1;
+	int by1 = -1;
+	for (int y = 0; y < binary.height(); ++y)
+	{
+		const uchar* line = binary.constScanLine(y);
+		for (int x = 0; x < binary.width(); ++x)
+		{
+			if (!line[x])
+				continue;
+			if (x < bx0) bx0 = x;
+			if (x > bx1) bx1 = x;
+			if (y < by0) by0 = y;
+			if (y > by1) by1 = y;
+		}
+	}
+	if (bx1 < bx0 || by1 < by0)
+		return;   // nothing selected after thresholding
+
+	const QRect bounds(QPoint(bx0, by0), QPoint(bx1, by1));
+	const int pad = aiPadFor(bounds);
+	QRect roi = bounds.adjusted(-pad, -pad, pad, pad)
+	                  .intersected(QRect(QPoint(0, 0), source.size()));
+	if (roi.isEmpty())
+		return;
+
+	QImage roiImage = source.copy(roi);
+	QImage roiMask = binary.copy(roi);
+
+	// Sending more than this buys nothing and costs a great deal on a
+	// processor. The mask is re-thresholded after scaling, because a smooth
+	// resample of a yes/no selection produces neither.
+	const int longest = qMax(roiImage.width(), roiImage.height());
+	if (longest > AiMaxSentEdge)
+	{
+		const QSize sent = roiImage.size().scaled(AiMaxSentEdge, AiMaxSentEdge, Qt::KeepAspectRatio);
+		roiImage = roiImage.scaled(sent, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		roiMask = roiMask.scaled(sent, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+	}
+	if (roiImage.isNull() || roiMask.isNull())
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"), tr("Ran out of memory preparing the region."));
+		return;
+	}
+
+	QString pathError;
+	const QString outputPath = outputPathFor(item, QStringLiteral("lama"), pathError);
+	if (outputPath.isEmpty())
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"), pathError);
+		return;
+	}
+
+	// Same hard rule as the built-in path, checked before the work starts and
+	// again before anything is written.
+	Q_ASSERT(outputPath != sourcePath);
+	if (outputPath == sourcePath || QFileInfo(outputPath) == QFileInfo(sourcePath))
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"),
+		                      tr("Refusing to overwrite the original image file."));
+		return;
+	}
+
+	if (m_painting)
+		commitStroke();
+
+	m_runDoc = m_doc;
+	m_runItemName = item->itemName();
+	m_runSourcePath = sourcePath;
+	m_runOutputPath = outputPath;
+	m_runIsAI = true;
+	m_runRoi = roi;
+	m_runFullImage = source;
+	m_runFullMask = binary;
+	m_running = true;
+	notifyOptionsBar();
+
+	m_progress = new InpaintProgressDialog(m_ScMW);
+	m_progress->setMessage(tr("Inpainting (Best Quality)..."));
+	// The server reports no progress, so an honest bar is one that says only
+	// that something is happening.
+	m_progress->setIndeterminate(true);
+	m_progress->setHint(10, tr("CPU inpainting can take 30-60 seconds."));
+	connect(m_progress, &InpaintProgressDialog::cancelled, this, &CanvasMode_RemovalMask::inpaintCancelled);
+	m_progress->show();
+
+	ensureAiService();
+	m_aiService->inpaint(roiImage, roiMask);
+}
+
+void CanvasMode_RemovalMask::aiInpaintFinished(const QImage& result)
+{
+	if (!m_running || !m_runIsAI)
+		return;
+
+	m_runIsAI = false;
+	finishRun();
+
+	if (result.isNull())
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"), tr("The inpainting server returned no image."));
+		return;
+	}
+
+	QImage roiResult = result;
+	if (roiResult.size() != m_runRoi.size())
+	{
+		// It was scaled down on the way out; put it back where it came from.
+		roiResult = roiResult.scaled(m_runRoi.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		if (roiResult.isNull())
+		{
+			QMessageBox::critical(m_ScMW, tr("Remove Object"), tr("Ran out of memory scaling the result."));
+			return;
+		}
+	}
+	if (roiResult.format() != QImage::Format_RGB32 && roiResult.format() != QImage::Format_ARGB32)
+		roiResult = roiResult.convertToFormat(QImage::Format_RGB32);
+
+	// Only the masked pixels are taken. Everything else in the picture stays
+	// exactly as it was, rather than coming back softened by the trip out to
+	// 2048 pixels and home again.
+	QImage composed = m_runFullImage;
+	const bool wantsAlpha = composed.hasAlphaChannel();
+	for (int y = 0; y < m_runRoi.height(); ++y)
+	{
+		const int fy = m_runRoi.top() + y;
+		QRgb* dst = reinterpret_cast<QRgb*>(composed.scanLine(fy));
+		const QRgb* src = reinterpret_cast<const QRgb*>(roiResult.constScanLine(y));
+		const uchar* mask = m_runFullMask.constScanLine(fy);
+		for (int x = 0; x < m_runRoi.width(); ++x)
+		{
+			const int fx = m_runRoi.left() + x;
+			if (!mask[fx])
+				continue;
+			const QRgb px = src[x];
+			dst[fx] = wantsAlpha ? qRgba(qRed(px), qGreen(px), qBlue(px), qAlpha(dst[fx]))
+			                     : qRgb(qRed(px), qGreen(px), qBlue(px));
+		}
+	}
+
+	m_runFullImage = QImage();
+	m_runFullMask = QImage();
+	deliverResult(composed, Um::RemoveObjectAI);
+}
+
+void CanvasMode_RemovalMask::aiInpaintFailed(const QString& error)
+{
+	if (!m_running || !m_runIsAI)
+		return;
+
+	m_runIsAI = false;
+	m_runFullImage = QImage();
+	m_runFullMask = QImage();
+	const bool cancelled = AIInpaintService::isCancelled(error);
+	finishRun();
+
+	if (cancelled)
+	{
+		// The mask is kept on purpose: cancelling usually means "not like
+		// that", and having to repaint the selection to try again, or to try
+		// the fast path instead, would be gratuitous.
+		if (m_ScMW)
+			m_ScMW->statusBar()->showMessage(tr("Object removal cancelled. The mask is still there if you want to adjust it."), 6000);
+		return;
+	}
+
+	// Whatever the server or the network actually said, not a summary of it.
+	// The mask survives so the user can retry, or fall back to Apply (Fast).
+	QMessageBox::critical(m_ScMW, tr("Remove Object (Best Quality)"), error);
+	if (m_ScMW)
+		m_ScMW->statusBar()->showMessage(tr("The mask is still there. You can try again, or use Apply (Fast)."), 8000);
+}
+
 void CanvasMode_RemovalMask::inpaintCancelled()
 {
 	if (m_cancel)
 		m_cancel->store(true);
+	// The AI path has no shared flag to raise: the request itself has to be
+	// aborted, or the server carries on working for a minute after the user
+	// has stopped waiting.
+	if (m_runIsAI && m_aiService)
+		m_aiService->cancel();
 }
 
 void CanvasMode_RemovalMask::finishRun()
@@ -828,10 +1182,6 @@ void CanvasMode_RemovalMask::inpaintFinished()
 
 	const Outcome outcome = m_watcher->result();
 	const bool wasCancelled = m_cancel && m_cancel->load();
-	const QString outputPath = m_runOutputPath;
-	const QString sourcePath = m_runSourcePath;
-	const QString itemName = m_runItemName;
-	QPointer<ScribusDoc> runDoc = m_runDoc;
 
 	m_cancel.reset();
 	finishRun();
@@ -856,6 +1206,19 @@ void CanvasMode_RemovalMask::inpaintFinished()
 		QMessageBox::critical(m_ScMW, tr("Remove Object"), tr("The removal produced no image."));
 		return;
 	}
+
+	deliverResult(outcome.image, Um::RemoveObject);
+}
+
+/*! The careful half of both paths. Everything between here and the end of the
+    function is the same whether the pixels came from the built-in kernel or
+    from a model on the other end of a socket. */
+void CanvasMode_RemovalMask::deliverResult(const QImage& image, const QString& undoName)
+{
+	const QString outputPath = m_runOutputPath;
+	const QString sourcePath = m_runSourcePath;
+	const QString itemName = m_runItemName;
+	QPointer<ScribusDoc> runDoc = m_runDoc;
 
 	// The dialog was modeless, so nothing stopped the user from closing the
 	// document or replacing the picture while it ran. Put the result somewhere
@@ -888,7 +1251,7 @@ void CanvasMode_RemovalMask::inpaintFinished()
 		return;
 	}
 
-	QImage toSave = outcome.image;
+	QImage toSave = image;
 	// Carry the source's resolution across. Scribus derives the image scale
 	// from the file's DPI, so a PNG saved at Qt's default would re-enter the
 	// frame at a different size and the picture would jump.
@@ -919,7 +1282,7 @@ void CanvasMode_RemovalMask::inpaintFinished()
 	if (UndoManager::undoEnabled())
 	{
 		transaction = UndoManager::instance()->beginTransaction(
-			item->getUName(), item->getUPixmap(), Um::RemoveObject,
+			item->getUName(), item->getUPixmap(), undoName,
 			QFileInfo(outputPath).fileName(), Um::IImageFrame);
 	}
 

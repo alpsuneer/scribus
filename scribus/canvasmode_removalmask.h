@@ -19,7 +19,9 @@ for which a new license (GPL+exception) is in place.
 
 #include "canvasmode.h"
 
+class AIInpaintService;
 class InpaintProgressDialog;
+class LamaInpaintService;
 class QTimer;
 class PageItem;
 class ScribusDoc;
@@ -87,16 +89,46 @@ public:
 	//! Throw the mask away and repaint. Does not touch the document.
 	void clearMask();
 
-	/*! \brief Start the removal: threshold the mask, hand it to the inpainter
-	    on a worker thread, and put a progress dialog up. Returns immediately;
-	    the document is only touched when the run finishes. */
+	/*! \brief Start the removal with the built-in inpainter: threshold the
+	    mask, hand it to the kernel on a worker thread, and put a progress
+	    dialog up. Returns immediately; the document is only touched when the
+	    run finishes. */
 	void applyRemoval();
+
+	/*! \brief The same, through the configured AI service instead.
+
+	    Only the area around the mask is sent, and only if the user has turned
+	    the feature on and given an address to send it to. See aiBlocked(). */
+	void applyRemovalAI();
+
+	//! \name AI availability, for the options bar
+	//@{
+	//! True when Best Quality can be pressed right now.
+	bool aiReady() const;
+	/*! \brief Why Best Quality cannot be pressed, for its tooltip, or empty
+	    when it can. Says the actual reason rather than a general one: the
+	    difference between "switch it on in Preferences" and "it is switched on
+	    but nothing answered at that address" is the whole of what the user
+	    needs to know. */
+	QString aiBlockedReason() const;
+	//! Fraction of the frame's image the mask covers, 0..1.
+	double maskCoverage() const;
+	//! Ask the service whether it is there, if that has not been settled for
+	//! this address already. Answers by refreshing the options bar.
+	void refreshAiAvailability(bool force = false);
+	//@}
 
 private slots:
 	//! The worker finished, was cancelled, or threw. Runs on the GUI thread.
 	void inpaintFinished();
 	//! Cancel pressed on the progress dialog.
 	void inpaintCancelled();
+	//! \name AI service replies
+	//@{
+	void aiConnectionTested(bool ok, const QString& detail);
+	void aiInpaintFinished(const QImage& result);
+	void aiInpaintFailed(const QString& error);
+	//@}
 
 private:
 	//! What the worker hands back, so the GUI thread can report properly
@@ -144,8 +176,23 @@ private:
 	    subdirectory, stamped with the time, and given a counter if a file of
 	    that name somehow already exists. Never the source file itself: that is
 	    checked here and asserted again at the point of writing.
-	    \param error set to a user-facing explanation when this returns empty.*/
-	QString outputPathFor(PageItem* item, QString& error) const;
+	    \param error set to a user-facing explanation when this returns empty.
+	    \param tag goes in the middle of the name, so that a file the built-in
+	           inpainter made and one a model made are told apart at a glance
+	           in a folder six months later. */
+	QString outputPathFor(PageItem* item, const QString& tag, QString& error) const;
+
+	/*! \brief Put a finished picture into the document.
+
+	    Shared by both paths, and everything careful about this operation lives
+	    here: that the frame is still the one that was asked about, that the
+	    destination is not the user's original, that the file is written before
+	    anything in the document moves, and that the whole thing is one undo
+	    step. \param undoName which action name the step carries. */
+	void deliverResult(const QImage& image, const QString& undoName);
+
+	//! Make sure m_aiService exists and points at the configured address.
+	void ensureAiService();
 
 	//! Tear down the dialog, watcher and poll timer after a run ends.
 	void finishRun();
@@ -205,6 +252,20 @@ private:
 	QString m_runItemName;
 	QString m_runSourcePath;
 	QString m_runOutputPath;
+	//@}
+
+	//! \name The AI path
+	//@{
+	LamaInpaintService* m_aiService {nullptr};
+	//! True while the run in flight is the AI one, which decides which name
+	//! the undo step gets and which finish handler is expecting a result.
+	bool m_runIsAI {false};
+	//! Only the neighbourhood of the mask is sent, and only the masked pixels
+	//! of what comes back are kept, so everything else stays bit-identical
+	//! even though the region made a round trip through a scaler.
+	QRect m_runRoi;
+	QImage m_runFullImage;
+	QImage m_runFullMask;
 	//@}
 };
 
