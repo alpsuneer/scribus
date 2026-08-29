@@ -33,7 +33,9 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "ai/aiinpaintservicefactory.h"
 #include "ai/lamainpaintservice.h"
+#include "ai/openrouterinpaintservice.h"
 #include "prefsmanager.h"
 #include "prefsstructs.h"
 #include "ui/inpaintprogressdialog.h"
@@ -68,7 +70,31 @@ namespace
 	bool s_aiTested = false;
 	bool s_aiOk = false;
 	QString s_aiDetail;
-	QString s_aiTestedUrl;
+	//! What s_aiOk was decided about. See aiConfigKey().
+	QString s_aiTestedKey;
+
+	/*! \brief Identifies the provider configuration a reachability answer
+	    belongs to, so that changing anything in Preferences retests rather
+	    than carrying the old verdict over to a service that is not the one it
+	    was about.
+
+	    The OpenRouter key is folded in as a hash rather than as itself: this
+	    string lives in a static for the life of the process and the key does
+	    not belong in one. A hash is enough - all it has to do is change when
+	    the key changes. */
+	QString aiConfigKey(const AIServicePrefs& prefs)
+	{
+		switch (AIInpaintServiceFactory::providerOf(prefs))
+		{
+		case AIProvider::OpenRouter:
+			return QStringLiteral("openrouter|%1|%2")
+			       .arg(prefs.openRouterModel)
+			       .arg(qHash(prefs.openRouterApiKey), 0, 16);
+		case AIProvider::LaMa:
+			break;
+		}
+		return QStringLiteral("lama|") + LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
+	}
 	//@}
 
 	//! Longest side sent to the AI service. LaMa's quality stops improving
@@ -743,21 +769,27 @@ double CanvasMode_RemovalMask::maskCoverage() const
 void CanvasMode_RemovalMask::ensureAiService()
 {
 	const AIServicePrefs& prefs = PrefsManager::instance().appPrefs.aiServicePrefs;
-	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
-	if (!m_aiService)
-	{
-		m_aiService = new LamaInpaintService(url, prefs.requestTimeoutSeconds, this);
-		connect(m_aiService, &AIInpaintService::connectionTested,
-		        this, &CanvasMode_RemovalMask::aiConnectionTested);
-		connect(m_aiService, &AIInpaintService::inpaintFinished,
-		        this, &CanvasMode_RemovalMask::aiInpaintFinished);
-		connect(m_aiService, &AIInpaintService::inpaintFailed,
-		        this, &CanvasMode_RemovalMask::aiInpaintFailed);
-	}
-	else
-	{
-		m_aiService->setEndpoint(url, prefs.requestTimeoutSeconds);
-	}
+	const QString key = aiConfigKey(prefs);
+	if (m_aiService && m_aiServiceKey == key)
+		return;
+
+	// Anything changed in Preferences - the provider, the address, the model,
+	// the key - and the old client is simply replaced. It is a socket and a
+	// thread, not something worth reconfiguring in place, and rebuilding is
+	// the only way the provider itself can change.
+	QString reason;
+	std::unique_ptr<AIInpaintService> service = AIInpaintServiceFactory::create(prefs, reason);
+	if (!service)
+		return;   // aiBlockedReason() reports the same thing, in the options bar
+
+	m_aiService = std::move(service);
+	m_aiServiceKey = key;
+	connect(m_aiService.get(), &AIInpaintService::connectionTested,
+	        this, &CanvasMode_RemovalMask::aiConnectionTested);
+	connect(m_aiService.get(), &AIInpaintService::inpaintFinished,
+	        this, &CanvasMode_RemovalMask::aiInpaintFinished);
+	connect(m_aiService.get(), &AIInpaintService::inpaintFailed,
+	        this, &CanvasMode_RemovalMask::aiInpaintFailed);
 }
 
 void CanvasMode_RemovalMask::refreshAiAvailability(bool force)
@@ -766,13 +798,14 @@ void CanvasMode_RemovalMask::refreshAiAvailability(bool force)
 	if (!prefs.enabled)
 		return;
 
-	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
-	if (!force && s_aiTested && s_aiTestedUrl == url)
+	const QString key = aiConfigKey(prefs);
+	if (!force && s_aiTested && s_aiTestedKey == key)
 		return;
 
-	s_aiTestedUrl = url;
+	s_aiTestedKey = key;
 	ensureAiService();
-	m_aiService->testConnection();
+	if (m_aiService)
+		m_aiService->testConnection();
 }
 
 void CanvasMode_RemovalMask::aiConnectionTested(bool ok, const QString& detail)
@@ -791,20 +824,31 @@ bool CanvasMode_RemovalMask::aiReady() const
 QString CanvasMode_RemovalMask::aiBlockedReason() const
 {
 	const AIServicePrefs& prefs = PrefsManager::instance().appPrefs.aiServicePrefs;
-	if (!prefs.enabled)
-		return tr("Enable AI features in Preferences > AI Services");
 
-	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
-	if (url.isEmpty())
-		return tr("Set the IOPaint address in Preferences > AI Services");
+	// Whatever is missing from the configuration, in the provider's own terms:
+	// a missing API key and a missing server address are different problems
+	// and the factory is the one place that knows which applies.
+	const QString unconfigured = AIInpaintServiceFactory::blockedReason(prefs);
+	if (!unconfigured.isEmpty())
+		return unconfigured;
+
 	if (m_running)
 		return tr("A removal is already running");
 	if (!hasSelection())
 		return tr("Paint a mask area first");
-	if (!s_aiTested || s_aiTestedUrl != url)
-		return tr("Checking whether IOPaint is running at %1 ...").arg(url);
+
+	const bool openRouter = (AIInpaintServiceFactory::providerOf(prefs) == AIProvider::OpenRouter);
+	const QString url = LamaInpaintService::normaliseBaseUrl(prefs.iopaintUrl);
+	if (!s_aiTested || s_aiTestedKey != aiConfigKey(prefs))
+	{
+		return openRouter ? tr("Checking your OpenRouter key ...")
+		                  : tr("Checking whether IOPaint is running at %1 ...").arg(url);
+	}
 	if (!s_aiOk)
-		return tr("IOPaint not reachable at %1. Is it running?\n%2").arg(url, s_aiDetail);
+	{
+		return openRouter ? tr("OpenRouter is not usable yet.\n%1").arg(s_aiDetail)
+		                  : tr("IOPaint not reachable at %1. Is it running?\n%2").arg(url, s_aiDetail);
+	}
 	return QString();
 }
 
@@ -1012,8 +1056,14 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 		return;
 	}
 
+	const AIServicePrefs& aiPrefs = PrefsManager::instance().appPrefs.aiServicePrefs;
+	// e.g. "lama", or "openrouter_gemini_3.1_flash_image_preview". Two
+	// removals done with different models must not land on the same filename:
+	// comparing them afterwards is most of the point of being able to switch.
+	const QString providerTag = AIInpaintServiceFactory::providerTag(aiPrefs);
+
 	QString pathError;
-	const QString outputPath = outputPathFor(item, QStringLiteral("lama"), pathError);
+	const QString outputPath = outputPathFor(item, providerTag, pathError);
 	if (outputPath.isEmpty())
 	{
 		QMessageBox::critical(m_ScMW, tr("Remove Object"), pathError);
@@ -1030,6 +1080,17 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 		return;
 	}
 
+	// Built before anything is committed to, so that a provider that cannot
+	// be built at all fails here rather than after the dialog is up and the
+	// mode believes a run is in flight.
+	ensureAiService();
+	if (!m_aiService)
+	{
+		QMessageBox::critical(m_ScMW, tr("Remove Object"),
+		                      AIInpaintServiceFactory::blockedReason(aiPrefs));
+		return;
+	}
+
 	if (m_painting)
 		commitStroke();
 
@@ -1038,6 +1099,11 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 	m_runSourcePath = sourcePath;
 	m_runOutputPath = outputPath;
 	m_runIsAI = true;
+	// Held for the whole run rather than read again at the end: Preferences
+	// can be changed while this is in flight, and the undo entry has to name
+	// what actually did the work.
+	m_runAiDescription = AIInpaintServiceFactory::providerDescription(aiPrefs);
+	m_runAiIsOpenRouter = (AIInpaintServiceFactory::providerOf(aiPrefs) == AIProvider::OpenRouter);
 	m_runRoi = roi;
 	m_runFullImage = source;
 	m_runFullMask = binary;
@@ -1045,15 +1111,19 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 	notifyOptionsBar();
 
 	m_progress = new InpaintProgressDialog(m_ScMW);
-	m_progress->setMessage(tr("Inpainting (Best Quality)..."));
-	// The server reports no progress, so an honest bar is one that says only
-	// that something is happening.
+	// Naming the model is worth the words here: on the OpenRouter path this is
+	// the moment money starts being spent, and which model is spending it is
+	// exactly what the user wants confirmed.
+	m_progress->setMessage(tr("Inpainting with %1 ...").arg(m_runAiDescription));
+	// Neither provider reports progress, so an honest bar is one that says
+	// only that something is happening.
 	m_progress->setIndeterminate(true);
-	m_progress->setHint(10, tr("CPU inpainting can take 30-60 seconds."));
+	m_progress->setHint(10, m_runAiIsOpenRouter
+	                        ? tr("Cloud models usually take 5-20 seconds.")
+	                        : tr("CPU inpainting can take 30-60 seconds."));
 	connect(m_progress, &InpaintProgressDialog::cancelled, this, &CanvasMode_RemovalMask::inpaintCancelled);
 	m_progress->show();
 
-	ensureAiService();
 	m_aiService->inpaint(roiImage, roiMask);
 }
 
@@ -1109,7 +1179,13 @@ void CanvasMode_RemovalMask::aiInpaintFinished(const QImage& result)
 
 	m_runFullImage = QImage();
 	m_runFullMask = QImage();
-	deliverResult(composed, Um::RemoveObjectAI);
+	// e.g. "Remove Object (OpenRouter: Nano Banana 2)". A document worked on
+	// over an afternoon can carry removals done by several different models,
+	// and the undo history is the only place that record survives.
+	const QString undoName = m_runAiIsOpenRouter
+		? tr("Remove Object (OpenRouter: %1)").arg(m_runAiDescription)
+		: Um::RemoveObjectAI;
+	deliverResult(composed, undoName);
 }
 
 void CanvasMode_RemovalMask::aiInpaintFailed(const QString& error)
@@ -1130,6 +1206,25 @@ void CanvasMode_RemovalMask::aiInpaintFailed(const QString& error)
 		// the fast path instead, would be gratuitous.
 		if (m_ScMW)
 			m_ScMW->statusBar()->showMessage(tr("Object removal cancelled. The mask is still there if you want to adjust it."), 6000);
+		return;
+	}
+
+	// A model declining the edit is not a failure of Scribus and not
+	// something to try again unchanged: the same request to the same model
+	// gets the same answer. It is shown as what it is, with the one thing
+	// that actually helps - a different model, or the local one, which has no
+	// content rules at all. Nothing is retried and nothing is silently
+	// switched; which model runs stays the user's choice.
+	if (OpenRouterInpaintService::isRefusal(error))
+	{
+		QMessageBox::warning(m_ScMW, tr("Remove Object (Best Quality)"),
+		                     OpenRouterInpaintService::strippedRefusal(error)
+		                     + QStringLiteral("\n\n")
+		                     + tr("This model refused. Try FLUX 2 Flex or Seedream 4.5 in "
+		                          "Preferences > AI Services for less restrictive editing, "
+		                          "or use LaMa (local, no restrictions)."));
+		if (m_ScMW)
+			m_ScMW->statusBar()->showMessage(tr("The mask is still there. Pick another model and try again."), 8000);
 		return;
 	}
 

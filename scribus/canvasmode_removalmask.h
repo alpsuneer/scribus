@@ -21,7 +21,6 @@ for which a new license (GPL+exception) is in place.
 
 class AIInpaintService;
 class InpaintProgressDialog;
-class LamaInpaintService;
 class QTimer;
 class PageItem;
 class ScribusDoc;
@@ -256,10 +255,23 @@ private:
 
 	//! \name The AI path
 	//@{
-	LamaInpaintService* m_aiService {nullptr};
+	/*! \brief The configured provider's client, built by
+	    AIInpaintServiceFactory and held only as the interface.
+
+	    Which implementation it is is the factory's business and the
+	    preferences'; nothing below this line names one. */
+	std::unique_ptr<AIInpaintService> m_aiService;
+	//! What the service in m_aiService was built for, so that a change in
+	//! Preferences is noticed and the old one is thrown away.
+	QString m_aiServiceKey;
 	//! True while the run in flight is the AI one, which decides which name
 	//! the undo step gets and which finish handler is expecting a result.
 	bool m_runIsAI {false};
+	//! What is doing the work for the run in flight, e.g. "Nano Banana 2".
+	//! Captured when the run starts, because Preferences can be changed while
+	//! it is in the air and the undo entry must name what actually ran.
+	QString m_runAiDescription;
+	bool m_runAiIsOpenRouter {false};
 	//! Only the neighbourhood of the mask is sent, and only the masked pixels
 	//! of what comes back are kept, so everything else stays bit-identical
 	//! even though the region made a round trip through a scaler.

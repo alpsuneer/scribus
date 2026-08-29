@@ -45,6 +45,36 @@
     </widget>
    </item>
    <item>
+    <layout class="QHBoxLayout" name="providerLayout">
+     <item>
+      <widget class="QLabel" name="providerLabel">
+       <property name="text">
+        <string>&amp;Provider:</string>
+       </property>
+       <property name="buddy">
+        <cstring>providerComboBox</cstring>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="providerComboBox"/>
+     </item>
+     <item>
+      <spacer name="providerSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
     <widget class="QGroupBox" name="iopaintGroupBox">
      <property name="title">
       <string>IOPaint (local inpainting server)</string>
@@ -126,6 +156,124 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="openRouterGroupBox">
+     <property name="title">
+      <string>OpenRouter (cloud image models)</string>
+     </property>
+     <layout class="QGridLayout" name="openRouterLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="apiKeyLabel">
+        <property name="text">
+         <string>API &amp;key:</string>
+        </property>
+        <property name="buddy">
+         <cstring>apiKeyLineEdit</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="apiKeyLineEdit">
+        <property name="echoMode">
+         <enum>QLineEdit::Password</enum>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QCheckBox" name="showKeyCheckBox">
+        <property name="text">
+         <string>&amp;Show</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="modelLabel">
+        <property name="text">
+         <string>&amp;Model:</string>
+        </property>
+        <property name="buddy">
+         <cstring>modelComboBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1" colspan="2">
+       <widget class="QComboBox" name="modelComboBox"/>
+      </item>
+      <item row="2" column="1" colspan="2">
+       <widget class="QLabel" name="modelHintLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="openRouterTimeoutLabel">
+        <property name="text">
+         <string>Request t&amp;imeout:</string>
+        </property>
+        <property name="buddy">
+         <cstring>openRouterTimeoutSpinBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1" colspan="2">
+       <widget class="QSpinBox" name="openRouterTimeoutSpinBox">
+        <property name="minimum">
+         <number>10</number>
+        </property>
+        <property name="maximum">
+         <number>300</number>
+        </property>
+        <property name="value">
+         <number>60</number>
+        </property>
+        <property name="suffix">
+         <string> s</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QPushButton" name="openRouterTestButton">
+        <property name="text">
+         <string>Test &amp;Connection</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1" colspan="2">
+       <widget class="QLabel" name="openRouterTestResultLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextSelectableByMouse</set>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="3">
+       <widget class="QLabel" name="openRouterInfoLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="openExternalLinks">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextBrowserInteraction</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="infoLabel">
      <property name="text">
       <string/>
@@ -155,9 +303,15 @@
  </widget>
  <tabstops>
   <tabstop>enableAICheckBox</tabstop>
+  <tabstop>providerComboBox</tabstop>
   <tabstop>iopaintUrlLineEdit</tabstop>
   <tabstop>timeoutSpinBox</tabstop>
   <tabstop>testConnectionButton</tabstop>
+  <tabstop>apiKeyLineEdit</tabstop>
+  <tabstop>showKeyCheckBox</tabstop>
+  <tabstop>modelComboBox</tabstop>
+  <tabstop>openRouterTimeoutSpinBox</tabstop>
+  <tabstop>openRouterTestButton</tabstop>
  </tabstops>
  <resources/>
  <connections/>
