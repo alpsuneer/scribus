@@ -207,7 +207,10 @@ private:
 	{
 		const QNetworkReply::NetworkError netError = reply->error();
 		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-		const QByteArray body = reply->readAll();
+		// An aborted reply has nothing to read and complains if asked, so do
+		// not ask: there is no body to report in either of those cases.
+		const bool aborted = m_cancelled || m_timedOut;
+		const QByteArray body = aborted ? QByteArray() : reply->readAll();
 		const QString transportError = reply->errorString();
 
 		finishRequest();

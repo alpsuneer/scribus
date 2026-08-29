@@ -59,3 +59,15 @@ set(INPAINTTESTS_SOURCES inpainttests.cpp ../util_inpaint.cpp)
 add_executable(inpainttests ${INPAINTTESTS_SOURCES})
 target_link_libraries(inpainttests ${TESTS_LIBRARIES})
 add_test(NAME inpainttests COMMAND inpainttests)
+
+# Unit tests for the IOPaint/LaMa inpainting client.
+# Runs against a mock server in-process; never touches a real IOPaint.
+find_package(Qt6 COMPONENTS Network REQUIRED)
+set(LAMAINPAINTSERVICETESTS_SOURCES
+	lamainpaintservicetests.cpp
+	../ai/aiinpaintservice.cpp
+	../ai/lamainpaintservice.cpp
+)
+add_executable(lamainpaintservicetests ${LAMAINPAINTSERVICETESTS_SOURCES})
+target_link_libraries(lamainpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME lamainpaintservicetests COMMAND lamainpaintservicetests)
