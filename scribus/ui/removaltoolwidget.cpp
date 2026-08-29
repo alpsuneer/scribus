@@ -6,6 +6,7 @@ for which a new license (GPL+exception) is in place.
 */
 #include "ui/removaltoolwidget.h"
 
+#include <QAction>
 #include <QLabel>
 #include <QSlider>
 #include <QSpinBox>
@@ -70,8 +71,8 @@ RemovalToolWidget::RemovalToolWidget(ScribusMainWindow* mw)
 
 	m_recommendLabel = new QLabel(this);
 	m_recommendLabel->setContentsMargins(6, 0, 2, 0);
-	m_recommendLabel->hide();
-	addWidget(m_recommendLabel);
+	m_recommendAction = addWidget(m_recommendLabel);
+	m_recommendAction->setVisible(false);
 
 	m_hintLabel = new QLabel(this);
 	m_hintLabel->setContentsMargins(8, 0, 4, 0);
@@ -155,10 +156,11 @@ void RemovalToolWidget::refreshFromMode()
 		// Advice for the case the built-in fill is known to be weak at, put
 		// where the decision is made and nowhere near a dialog box.
 		const bool large = mode && !running && mode->hasSelection() && mode->maskCoverage() > 0.05;
-		m_recommendLabel->setVisible(large);
 		if (large)
 			m_recommendLabel->setText(QStringLiteral("<i>%1</i>")
 			                          .arg(tr("Large area - Best Quality recommended")));
+		if (m_recommendAction)
+			m_recommendAction->setVisible(large);
 	}
 
 	if (m_updating)

@@ -9,6 +9,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QToolBar>
 
+class QAction;
 class QLabel;
 class QSlider;
 class QSpinBox;
@@ -62,6 +63,12 @@ private:
 	//! Shown only when the mask is large enough that the built-in fill will
 	//! struggle with it. Advice, not a warning, and never a dialog.
 	QLabel* m_recommendLabel {nullptr};
+	/*! \brief The action QToolBar wrapped m_recommendLabel in.
+
+	    A widget put into a toolbar is owned by a QWidgetAction, and it is the
+	    action's visibility the toolbar lays out from. Hiding the label itself
+	    appears to work and then never comes back. */
+	QAction* m_recommendAction {nullptr};
 	QLabel* m_hintLabel {nullptr};
 
 	//! Guards the two-way binding between each slider and its spin box.
