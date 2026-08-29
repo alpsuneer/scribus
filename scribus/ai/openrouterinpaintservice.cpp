@@ -1,0 +1,724 @@
+/*
+For general Scribus (>=1.3.2) copyright and licensing information please refer
+to the COPYING file provided with the program. Following this notice may exist
+a copyright and/or license notice that predates the release of Scribus 1.3.2
+for which a new license (GPL+exception) is in place.
+*/
+#include "ai/openrouterinpaintservice.h"
+
+#include <QBuffer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QPointer>
+#include <QTimer>
+#include <QUrl>
+
+namespace
+{
+	//! Paths under the API root. See the wire-format note in the header.
+	const QLatin1String ImagesPath("/images");
+	//! Key check. It is /key - *not* /auth/key, which does not exist.
+	const QLatin1String KeyPath("/key");
+
+	//! Sent as HTTP-Referer and X-Title. OpenRouter uses these to attribute
+	//! traffic on its public model rankings; they identify Scribus, not the
+	//! user, and carry nothing from the document.
+	const QLatin1String RefererHeader("https://scribus.net");
+	const QLatin1String TitleHeader("Scribus");
+
+	//! Alpha-blended over the area to be removed. Bright, saturated and quite
+	//! opaque on purpose: the model has to see it as a deliberate marking and
+	//! not as something that was in the photograph.
+	const int MaskR = 255, MaskG = 30, MaskB = 30, MaskA = 220;
+
+	//! Quality 92 is where JPEG stops adding visible artefacts around a hard
+	//! edge like the mask boundary, without the size of a lossless encode.
+	const int JpegQuality = 92;
+
+	/*! \brief The instruction that goes with the picture.
+
+	    It has to do the job a mask channel does elsewhere: say what the red is,
+	    say that everything else must come back untouched, and shut the door on
+	    the things these models like to add unasked. */
+	const char* const RemovalPrompt =
+		"You are an expert photo editor. The reference image has an area highlighted "
+		"with a bright red mask overlay. Return the exact same image with the "
+		"red-highlighted area completely removed and the background naturally "
+		"reconstructed. Match the surrounding lighting, texture, perspective, colors, "
+		"and content. The result must look photorealistic, as if the object was never "
+		"there. Do not modify any other parts of the image. Do not add watermarks, "
+		"borders, or text. Return only the edited image.";
+
+	/*! \brief Paint the mask onto the picture in red.
+
+	    \param image the region being repaired.
+	    \param mask 8-bit, non-zero where pixels are to be regenerated - the
+	           same sense the built-in kernel and the LaMa client use. */
+	QImage compositeMaskOverlay(const QImage& image, const QImage& mask)
+	{
+		QImage out = image.convertToFormat(QImage::Format_RGB32);
+		if (out.isNull() || mask.isNull())
+			return QImage();
+
+		QImage grey = mask;
+		if (grey.format() != QImage::Format_Grayscale8)
+			grey = grey.convertToFormat(QImage::Format_Grayscale8);
+		if (grey.isNull() || grey.size() != out.size())
+			return QImage();
+
+		for (int y = 0; y < out.height(); ++y)
+		{
+			QRgb* line = reinterpret_cast<QRgb*>(out.scanLine(y));
+			const uchar* m = grey.constScanLine(y);
+			for (int x = 0; x < out.width(); ++x)
+			{
+				if (!m[x])
+					continue;
+				const QRgb px = line[x];
+				// Straight source-over with a constant alpha. Integer maths
+				// with a rounding term, because this runs over every masked
+				// pixel of a picture up to 2048 on its long edge.
+				const int r = (qRed(px)   * (255 - MaskA) + MaskR * MaskA + 127) / 255;
+				const int g = (qGreen(px) * (255 - MaskA) + MaskG * MaskA + 127) / 255;
+				const int b = (qBlue(px)  * (255 - MaskA) + MaskB * MaskA + 127) / 255;
+				line[x] = qRgb(r, g, b);
+			}
+		}
+		return out;
+	}
+
+	//! JPEG-encode for the wire, as a complete data: URL ready to go in the
+	//! request. Empty on failure.
+	QString toDataUrl(const QImage& image)
+	{
+		if (image.isNull())
+			return QString();
+		QByteArray jpeg;
+		QBuffer buffer(&jpeg);
+		if (!buffer.open(QIODevice::WriteOnly))
+			return QString();
+		if (!image.save(&buffer, "JPEG", JpegQuality))
+			return QString();
+		buffer.close();
+		if (jpeg.isEmpty())
+			return QString();
+		return QLatin1String("data:image/jpeg;base64,") + QString::fromLatin1(jpeg.toBase64());
+	}
+
+	//! The "error" object out of a response body, or an empty object.
+	QJsonObject errorObjectOf(const QByteArray& body)
+	{
+		if (body.isEmpty())
+			return QJsonObject();
+		QJsonParseError parseError {};
+		const QJsonDocument doc = QJsonDocument::fromJson(body, &parseError);
+		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+			return QJsonObject();
+		return doc.object().value(QLatin1String("error")).toObject();
+	}
+
+	//! Whatever the far end actually said, or an empty string if it said
+	//! nothing usable. Never contains anything the caller sent.
+	QString messageOf(const QByteArray& body)
+	{
+		const QJsonObject error = errorObjectOf(body);
+		const QString message = error.value(QLatin1String("message")).toString().trimmed();
+		if (!message.isEmpty())
+			return message;
+		// Not the documented envelope: show a little of it rather than
+		// swallowing the only evidence there is.
+		return QString::fromUtf8(body.left(300)).trimmed();
+	}
+
+	//! Which vendor was behind a failure, when the metadata names one.
+	QString providerOf(const QByteArray& body)
+	{
+		const QJsonObject metadata = errorObjectOf(body).value(QLatin1String("metadata")).toObject();
+		return metadata.value(QLatin1String("provider_name")).toString().trimmed();
+	}
+
+	/*! \brief Why a moderation system rejected the job, if that is what
+	    happened.
+
+	    An error whose metadata carries "reasons" is content moderation rather
+	    than a fault, and is worth telling apart: the answer to it is another
+	    model, not another attempt. */
+	QString moderationReasonOf(const QByteArray& body)
+	{
+		const QJsonObject metadata = errorObjectOf(body).value(QLatin1String("metadata")).toObject();
+		const QJsonValue reasons = metadata.value(QLatin1String("reasons"));
+		if (!reasons.isArray())
+			return QString();
+		QStringList out;
+		const QJsonArray array = reasons.toArray();
+		for (const QJsonValue& value : array)
+		{
+			const QString text = value.toString().trimmed();
+			if (!text.isEmpty())
+				out << text;
+		}
+		return out.join(QLatin1String(", "));
+	}
+
+	/*! \brief Any text the model produced instead of a picture.
+
+	    A model that declines usually still says something, and that sentence
+	    is the most useful thing there is to show - far better than reporting
+	    that zero images came back. */
+	QString textInAnswer(const QJsonObject& root)
+	{
+		const QJsonArray data = root.value(QLatin1String("data")).toArray();
+		for (const QJsonValue& value : data)
+		{
+			const QJsonObject entry = value.toObject();
+			for (const QLatin1String key : { QLatin1String("text"),
+			                                 QLatin1String("revised_prompt"),
+			                                 QLatin1String("finish_reason") })
+			{
+				const QString text = entry.value(key).toString().trimmed();
+				if (!text.isEmpty())
+					return text;
+			}
+		}
+		for (const QLatin1String key : { QLatin1String("text"), QLatin1String("message") })
+		{
+			const QString text = root.value(key).toString().trimmed();
+			if (!text.isEmpty())
+				return text;
+		}
+		return root.value(QLatin1String("error")).toObject()
+		           .value(QLatin1String("message")).toString().trimmed();
+	}
+}
+
+/*!
+ \brief The half of OpenRouterInpaintService that lives on the private thread.
+
+ Compositing the overlay, the JPEG encode and the base64 both ways are all
+ proportional to the size of the picture and none of them belong between two
+ paint events.
+ */
+class OpenRouterInpaintWorker : public QObject
+{
+	Q_OBJECT
+
+public:
+	OpenRouterInpaintWorker() = default;
+
+public slots:
+	void configure(const QString& apiKey, const QString& model, int timeoutSeconds, const QString& apiBase)
+	{
+		m_apiKey = apiKey;
+		m_model = model;
+		m_timeoutSeconds = timeoutSeconds;
+		m_apiBase = apiBase;
+	}
+
+	void testConnection()
+	{
+		if (!beginRequest(true))
+			return;
+		QNetworkRequest request { QUrl(m_apiBase + KeyPath) };
+		applyHeaders(request);
+		trackReply(m_nam->get(request), /*isTest*/ true);
+	}
+
+	void inpaint(const QImage& image, const QImage& mask)
+	{
+		if (!beginRequest(false))
+			return;
+
+		const QImage marked = compositeMaskOverlay(image, mask);
+		const QString dataUrl = toDataUrl(marked);
+		if (dataUrl.isEmpty())
+		{
+			finishRequest();
+			emit failed(tr("Could not encode the image to send to OpenRouter."));
+			return;
+		}
+
+		// One reference image: the picture with the area to remove painted
+		// red. See the note on masking in the header for why there is no
+		// separate mask.
+		QJsonObject imageUrl;
+		imageUrl.insert(QStringLiteral("url"), dataUrl);
+		QJsonObject reference;
+		reference.insert(QStringLiteral("type"), QStringLiteral("image_url"));
+		reference.insert(QStringLiteral("image_url"), imageUrl);
+		QJsonArray references;
+		references.append(reference);
+
+		QJsonObject body;
+		body.insert(QStringLiteral("model"), m_model);
+		body.insert(QStringLiteral("prompt"), QString::fromLatin1(RemovalPrompt));
+		body.insert(QStringLiteral("input_references"), references);
+
+		QNetworkRequest request { QUrl(m_apiBase + ImagesPath) };
+		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+		applyHeaders(request);
+		trackReply(m_nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)),
+		           /*isTest*/ false);
+	}
+
+	void cancel()
+	{
+		if (!m_reply)
+			return;
+		m_cancelled = true;
+		// abort() rather than merely disconnecting: this one is being paid for
+		// by the second, so stopping the far end matters more here than it
+		// does against a local server.
+		m_reply->abort();
+	}
+
+signals:
+	void finished(const QImage& result);
+	void failed(const QString& error);
+	void tested(bool ok, const QString& detail);
+
+private:
+	//! The key goes here and nowhere else. Not in the URL, not in the body,
+	//! not in a log - there is no logging in this file.
+	void applyHeaders(QNetworkRequest& request) const
+	{
+		request.setRawHeader("Authorization", "Bearer " + m_apiKey.toUtf8());
+		request.setRawHeader("HTTP-Referer", QByteArray(RefererHeader.data(), RefererHeader.size()));
+		request.setRawHeader("X-Title", QByteArray(TitleHeader.data(), TitleHeader.size()));
+	}
+
+	bool beginRequest(bool isTest)
+	{
+		if (!m_nam)
+			m_nam = new QNetworkAccessManager(this);
+		if (m_reply)
+		{
+			const QString busy = tr("A request is already running.");
+			if (isTest)
+				emit tested(false, busy);
+			else
+				emit failed(busy);
+			return false;
+		}
+		if (m_apiKey.isEmpty())
+		{
+			const QString noKey = tr("No OpenRouter API key is set. Enter one in Preferences > AI Services.");
+			if (isTest)
+				emit tested(false, noKey);
+			else
+				emit failed(noKey);
+			return false;
+		}
+		m_cancelled = false;
+		m_timedOut = false;
+		return true;
+	}
+
+	void trackReply(QNetworkReply* reply, bool isTest)
+	{
+		m_reply = reply;
+
+		// An explicit timer rather than setTransferTimeout(), because a
+		// timeout and a user cancel both arrive as OperationCanceledError and
+		// the two have to be told apart to report either of them honestly.
+		if (!m_timer)
+		{
+			m_timer = new QTimer(this);
+			m_timer->setSingleShot(true);
+			connect(m_timer, &QTimer::timeout, this, [this]() {
+				if (!m_reply)
+					return;
+				m_timedOut = true;
+				m_reply->abort();
+			});
+		}
+		m_timer->start(qMax(1, m_timeoutSeconds) * 1000);
+
+		connect(reply, &QNetworkReply::finished, this, [this, reply, isTest]() {
+			handleReply(reply, isTest);
+		});
+	}
+
+	void finishRequest()
+	{
+		if (m_timer)
+			m_timer->stop();
+		m_reply = nullptr;
+	}
+
+	//! The user-facing sentence for an HTTP status. These are the four that
+	//! mean something a user can act on; everything else falls through to
+	//! whatever OpenRouter said.
+	QString describeStatus(int status, const QByteArray& body) const
+	{
+		const QString detail = messageOf(body);
+		switch (status)
+		{
+		case 401:
+			return tr("OpenRouter rejected the API key. Check your OpenRouter API key in Preferences > AI Services.");
+		case 402:
+			return tr("Your OpenRouter account is out of credits. Add credits to your OpenRouter account and try again.");
+		case 429:
+			return tr("OpenRouter is rate limiting this key - try again in a moment.");
+		default:
+			break;
+		}
+		if (status >= 500)
+		{
+			const QString provider = providerOf(body);
+			if (!provider.isEmpty())
+				return tr("%1 is not answering through OpenRouter right now (%2). Try again, or pick another model in Preferences.")
+				       .arg(provider).arg(status);
+			return tr("OpenRouter returned a server error (%1). Try again in a moment.").arg(status);
+		}
+		if (!detail.isEmpty())
+			return tr("OpenRouter answered %1: %2").arg(status).arg(detail);
+		return tr("OpenRouter answered %1.").arg(status);
+	}
+
+	void handleReply(QNetworkReply* reply, bool isTest)
+	{
+		const QNetworkReply::NetworkError netError = reply->error();
+		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		// An aborted reply has nothing to read and complains if asked.
+		const bool aborted = m_cancelled || m_timedOut;
+		const QByteArray body = aborted ? QByteArray() : reply->readAll();
+		const QString transportError = reply->errorString();
+
+		finishRequest();
+		reply->deleteLater();
+
+		const bool cancelled = m_cancelled;
+		const bool timedOut = m_timedOut;
+		m_cancelled = false;
+		m_timedOut = false;
+
+		if (timedOut)
+		{
+			const QString message = tr("OpenRouter did not answer within %1 seconds.").arg(m_timeoutSeconds);
+			if (isTest)
+				emit tested(false, message);
+			else
+				emit failed(message);
+			return;
+		}
+		if (cancelled)
+		{
+			if (isTest)
+				emit tested(false, tr("Cancelled."));
+			else
+				emit failed(AIInpaintService::cancelledMarker());
+			return;
+		}
+
+		if (netError != QNetworkReply::NoError && status == 0)
+		{
+			// Never reached OpenRouter at all: no HTTP status was ever set.
+			// transportError describes the socket, and cannot contain the key.
+			const QString message = tr("Could not reach OpenRouter: %1").arg(transportError);
+			if (isTest)
+				emit tested(false, message);
+			else
+				emit failed(message);
+			return;
+		}
+
+		if (status < 200 || status > 299)
+		{
+			// Moderation is not a fault, and the answer to it is a different
+			// model rather than another go, so it is marked as a refusal.
+			const QString moderation = moderationReasonOf(body);
+			if (!isTest && !moderation.isEmpty())
+			{
+				emit failed(OpenRouterInpaintService::refusalMarker()
+				            + tr("%1 declined this edit: %2")
+				              .arg(OpenRouterInpaintService::displayNameFor(m_model), moderation));
+				return;
+			}
+			const QString message = describeStatus(status, body);
+			if (isTest)
+				emit tested(false, message);
+			else
+				emit failed(message);
+			return;
+		}
+
+		QJsonParseError parseError {};
+		const QJsonDocument doc = QJsonDocument::fromJson(body, &parseError);
+		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+		{
+			const QString message = tr("OpenRouter answered with something that is not JSON (%1 bytes).")
+			                        .arg(body.size());
+			if (isTest)
+				emit tested(false, message);
+			else
+				emit failed(message);
+			return;
+		}
+		const QJsonObject root = doc.object();
+
+		if (isTest)
+		{
+			// The key endpoint answers with the key's limits. Saying what is
+			// left is what makes the test worth pressing: it is the difference
+			// between "the key is valid" and "the key is valid and can pay".
+			const QJsonObject data = root.value(QStringLiteral("data")).isObject()
+			                       ? root.value(QStringLiteral("data")).toObject()
+			                       : root;
+			const QJsonValue remaining = data.value(QStringLiteral("limit_remaining"));
+			if (remaining.isDouble())
+			{
+				emit tested(true, tr("Key accepted. About $%1 of credit left.")
+				                  .arg(remaining.toDouble(), 0, 'f', 2));
+				return;
+			}
+			if (data.value(QStringLiteral("is_free_tier")).toBool(false))
+			{
+				emit tested(true, tr("Key accepted, but the account has no credits yet. "
+				                     "Image models need paid credit."));
+				return;
+			}
+			emit tested(true, tr("Key accepted."));
+			return;
+		}
+
+		// --- the picture, if there is one ---
+		const QJsonArray data = root.value(QStringLiteral("data")).toArray();
+		QByteArray imageBytes;
+		QString unusableUrl;
+		for (const QJsonValue& value : data)
+		{
+			const QJsonObject entry = value.toObject();
+			const QString b64 = entry.value(QStringLiteral("b64_json")).toString();
+			if (!b64.isEmpty())
+			{
+				imageBytes = QByteArray::fromBase64(b64.toLatin1());
+				if (!imageBytes.isEmpty())
+					break;
+			}
+			const QString url = entry.value(QStringLiteral("url")).toString();
+			if (url.startsWith(QLatin1String("data:")))
+			{
+				const int comma = url.indexOf(QLatin1Char(','));
+				if (comma > 0)
+				{
+					imageBytes = QByteArray::fromBase64(url.mid(comma + 1).toLatin1());
+					if (!imageBytes.isEmpty())
+						break;
+				}
+			}
+			else if (!url.isEmpty())
+			{
+				unusableUrl = url;
+			}
+		}
+
+		if (imageBytes.isEmpty())
+		{
+			if (!unusableUrl.isEmpty())
+			{
+				// Deliberately not fetched. This service contacts openrouter.ai
+				// and nothing else, and a link handed back in a response is not
+				// a good enough reason to go and talk to another host.
+				emit failed(tr("This model returned a link to the result rather than the image itself, "
+				               "which Scribus does not follow. Pick another model in Preferences."));
+				return;
+			}
+			// No picture came back. Whatever the model said instead is the
+			// most useful thing to show, and it is nearly always a refusal.
+			const QString said = textInAnswer(root);
+			if (!said.isEmpty())
+			{
+				emit failed(OpenRouterInpaintService::refusalMarker()
+				            + tr("%1 returned no image. It said: %2")
+				              .arg(OpenRouterInpaintService::displayNameFor(m_model), said));
+				return;
+			}
+			emit failed(tr("OpenRouter returned no image."));
+			return;
+		}
+
+		QImage result;
+		if (!result.loadFromData(imageBytes))
+		{
+			emit failed(tr("OpenRouter returned %1 bytes that are not a readable image.")
+			            .arg(imageBytes.size()));
+			return;
+		}
+		emit finished(result);
+	}
+
+	QNetworkAccessManager* m_nam {nullptr};
+	QPointer<QNetworkReply> m_reply;
+	QTimer* m_timer {nullptr};
+	QString m_apiKey;
+	QString m_model;
+	QString m_apiBase;
+	int m_timeoutSeconds {60};
+	bool m_cancelled {false};
+	bool m_timedOut {false};
+};
+
+QString OpenRouterInpaintService::defaultApiBase()
+{
+	return QStringLiteral("https://openrouter.ai/api/v1");
+}
+
+const QList<OpenRouterInpaintService::ModelChoice>& OpenRouterInpaintService::models()
+{
+	// Curated list of Aug 2026, checked against the live
+	// https://openrouter.ai/api/v1/images/models on 29 Aug 2026: every id here
+	// exists and every one of them lists "image" among its input modalities
+	// and "input_references" among its supported parameters, which is what an
+	// edit needs. Verify against
+	// https://openrouter.ai/models?output_modalities=image and update as
+	// needed.
+	//
+	// Note for anyone updating: the chat-completions list at /api/v1/models is
+	// *not* the same set and does not contain most of these. The images API
+	// has its own catalogue at /api/v1/images/models, and that is the one to
+	// check against.
+	static const QList<ModelChoice> list = {
+		{ QStringLiteral("google/gemini-3.1-flash-image-preview"),
+		  QObject::tr("Nano Banana 2"),
+		  QObject::tr("Recommended. Balanced quality and cost.") },
+		{ QStringLiteral("google/gemini-3.1-flash-lite-image"),
+		  QObject::tr("Nano Banana 2 Lite"),
+		  QObject::tr("Cheapest. For working through a lot of removals.") },
+		{ QStringLiteral("google/gemini-3-pro-image-preview"),
+		  QObject::tr("Nano Banana Pro"),
+		  QObject::tr("Premium quality, around twice the cost.") },
+		{ QStringLiteral("openai/gpt-image-2"),
+		  QObject::tr("GPT Image 2"),
+		  QObject::tr("Best at following the mask, and at leaving text alone.") },
+		{ QStringLiteral("black-forest-labs/flux.2-flex"),
+		  QObject::tr("FLUX 2 Flex"),
+		  QObject::tr("Different look, and usually the least restrictive.") },
+		{ QStringLiteral("bytedance-seed/seedream-4.5"),
+		  QObject::tr("Seedream 4.5"),
+		  QObject::tr("Good on portraits and on keeping faces consistent.") },
+	};
+	return list;
+}
+
+QString OpenRouterInpaintService::displayNameFor(const QString& modelId)
+{
+	const QList<ModelChoice>& list = models();
+	for (const ModelChoice& choice : list)
+	{
+		if (choice.id == modelId)
+			return choice.displayName;
+	}
+	return modelId;
+}
+
+QString OpenRouterInpaintService::shortNameFor(const QString& modelId)
+{
+	const int slash = modelId.lastIndexOf(QLatin1Char('/'));
+	return slash >= 0 ? modelId.mid(slash + 1) : modelId;
+}
+
+QString OpenRouterInpaintService::fileTagFor(const QString& modelId)
+{
+	QString tag = shortNameFor(modelId);
+	tag.replace(QLatin1Char('-'), QLatin1Char('_'));
+	// Anything else that is not a plain filename character goes too, so that a
+	// future model id cannot produce a path that is not what it looks like.
+	for (int i = 0; i < tag.size(); ++i)
+	{
+		const QChar c = tag.at(i);
+		if (!c.isLetterOrNumber() && c != QLatin1Char('_') && c != QLatin1Char('.'))
+			tag[i] = QLatin1Char('_');
+	}
+	return tag;
+}
+
+QString OpenRouterInpaintService::refusalMarker()
+{
+	// Not translated and not printable: a token compared against, never
+	// something for a user to read. Stripped before the text is shown.
+	return QStringLiteral("__scribus_ai_refused__");
+}
+
+bool OpenRouterInpaintService::isRefusal(const QString& error)
+{
+	return error.startsWith(refusalMarker());
+}
+
+QString OpenRouterInpaintService::strippedRefusal(const QString& error)
+{
+	return isRefusal(error) ? error.mid(refusalMarker().size()) : error;
+}
+
+OpenRouterInpaintService::OpenRouterInpaintService(const QString& apiKey,
+                                                   const QString& model,
+                                                   int timeoutSeconds,
+                                                   QObject* parent,
+                                                   const QString& apiBase)
+	: AIInpaintService(parent),
+	  m_apiKey(apiKey),
+	  m_model(model),
+	  m_apiBase(apiBase),
+	  m_timeoutSeconds(timeoutSeconds)
+{
+	m_worker = new OpenRouterInpaintWorker;
+	m_worker->moveToThread(&m_thread);
+	connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
+
+	connect(m_worker, &OpenRouterInpaintWorker::finished, this, &AIInpaintService::inpaintFinished);
+	connect(m_worker, &OpenRouterInpaintWorker::failed, this, &AIInpaintService::inpaintFailed);
+	connect(m_worker, &OpenRouterInpaintWorker::tested, this, &AIInpaintService::connectionTested);
+
+	m_thread.start();
+	setCredentials(m_apiKey, m_model, m_timeoutSeconds);
+}
+
+OpenRouterInpaintService::~OpenRouterInpaintService()
+{
+	// Stop anything in flight before the thread goes, or the reply outlives
+	// the manager that owns it.
+	cancel();
+	m_thread.quit();
+	m_thread.wait();
+}
+
+QString OpenRouterInpaintService::name() const
+{
+	return tr("OpenRouter (%1)").arg(displayNameFor(m_model));
+}
+
+void OpenRouterInpaintService::setCredentials(const QString& apiKey, const QString& model, int timeoutSeconds)
+{
+	m_apiKey = apiKey;
+	m_model = model;
+	m_timeoutSeconds = timeoutSeconds;
+	QMetaObject::invokeMethod(m_worker, "configure", Qt::QueuedConnection,
+	                          Q_ARG(QString, m_apiKey), Q_ARG(QString, m_model),
+	                          Q_ARG(int, m_timeoutSeconds), Q_ARG(QString, m_apiBase));
+}
+
+void OpenRouterInpaintService::testConnection()
+{
+	QMetaObject::invokeMethod(m_worker, "testConnection", Qt::QueuedConnection);
+}
+
+void OpenRouterInpaintService::inpaint(const QImage& image, const QImage& mask)
+{
+	if (m_model.isEmpty())
+	{
+		emit inpaintFailed(tr("No OpenRouter model is selected. Pick one in Preferences > AI Services."));
+		return;
+	}
+	QMetaObject::invokeMethod(m_worker, "inpaint", Qt::QueuedConnection,
+	                          Q_ARG(QImage, image), Q_ARG(QImage, mask));
+}
+
+void OpenRouterInpaintService::cancel()
+{
+	QMetaObject::invokeMethod(m_worker, "cancel", Qt::QueuedConnection);
+}
+
+#include "openrouterinpaintservice.moc"

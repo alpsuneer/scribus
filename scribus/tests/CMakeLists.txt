@@ -71,3 +71,16 @@ set(LAMAINPAINTSERVICETESTS_SOURCES
 add_executable(lamainpaintservicetests ${LAMAINPAINTSERVICETESTS_SOURCES})
 target_link_libraries(lamainpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
 add_test(NAME lamainpaintservicetests COMMAND lamainpaintservicetests)
+
+# Unit tests for the OpenRouter inpainting client.
+# Runs against a mock server in-process. Nothing here contacts openrouter.ai:
+# these must pass on a machine with no account, no key and no network, and a
+# suite that spends money per run is not one anybody keeps running.
+set(OPENROUTERINPAINTSERVICETESTS_SOURCES
+	openrouterinpaintservicetests.cpp
+	../ai/aiinpaintservice.cpp
+	../ai/openrouterinpaintservice.cpp
+)
+add_executable(openrouterinpaintservicetests ${OPENROUTERINPAINTSERVICETESTS_SOURCES})
+target_link_libraries(openrouterinpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME openrouterinpaintservicetests COMMAND openrouterinpaintservicetests)
