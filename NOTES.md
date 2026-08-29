@@ -712,6 +712,91 @@ Unit tests: `scribus/tests/lamainpaintservicetests.cpp`, 14 cases, all against
 an in-process `QTcpServer` mock. Qt's `QHttpServer` module is not present in
 this build.
 
+#### The third fill: OpenRouter, a paid cloud API
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| `OpenRouterInpaintService`, `AIInpaintServiceFactory`, provider dropdown | `7339087`, `2f0adf4`, `903b940` | feature/ctp-output |
+
+One API key reaches 48 image models across Google, OpenAI, Black Forest Labs,
+ByteDance, Recraft and others, so a model that refuses a particular edit is
+answered by picking another one in Preferences rather than by integrating
+another vendor. `Preferences > AI Services > Provider` chooses; the removal
+mode asks `AIInpaintServiceFactory` and never names an implementation.
+
+**The wire format was read off the live API on 29 Aug 2026, and three things
+a reasonable person would guess are wrong.** The task this was built from
+guessed all three, which is why they are written down:
+
+| Guess | Actually |
+|---|---|
+| `reference_images: ["<base64>"]` | `input_references: [{"type": "image_url", "image_url": {"url": "..."}}]` |
+| `"modalities": ["image"]` | no such field on this endpoint |
+| `GET /api/v1/auth/key` | `GET /api/v1/key` - `/auth/key` does not exist |
+
+- `POST https://openrouter.ai/api/v1/images`, body `{model, prompt,
+  input_references}`. The reference URL may be `http(s)` or a `data:` URL, so
+  the picture goes inline and is never uploaded anywhere first.
+- Success: `200` with `{"created", "data": [{"b64_json", "media_type"}],
+  "usage": {..., "cost": 0.04}}`. `usage.cost` is the real charge in USD for
+  that one call.
+- Failure: `{"error": {"code", "message", "metadata"}}`. A moderation refusal
+  carries `reasons`, `provider_name` and `model_slug` in the metadata.
+
+**Sources**: <https://openrouter.ai/docs/guides/overview/multimodal/image-generation>,
+<https://openrouter.ai/docs/api-reference/errors>, and the machine-readable
+<https://openrouter.ai/api/v1/images/models>, whose `supported_parameters` is
+what settled the field names.
+
+Things worth knowing before changing any of it:
+
+- **None of these models takes a mask channel.** LaMa gets an image and a
+  separate mask; these get a picture and an instruction. So the mask is said in
+  the only language they all read: painted onto the picture as a bright red
+  overlay (`255,30,30` at alpha `220`), JPEG q92, with a prompt that explains
+  what the red means. That is why one reference image is sent, not two.
+- **The images API has its own catalogue.** `/api/v1/images/models` lists 48;
+  the chat-completions list at `/api/v1/models` is a different and much smaller
+  set that does not contain most of them. Checking a model id against the wrong
+  one will tell you it does not exist. `black-forest-labs/flux-dev` genuinely
+  does not - the FLUX models here are the `flux.2-*` family.
+- **The API root is pinned at compile time.** It is a constructor argument only
+  so the unit tests can point at an in-process mock; `AIInpaintServiceFactory`
+  never passes it, which is what makes "a picture only ever goes to
+  openrouter.ai" a property of the program rather than of a setting. For the
+  same reason a result handed back as a remote `url` is refused rather than
+  fetched.
+- **The key travels in the `Authorization` header and nowhere else.** There is
+  no logging in `openrouterinpaintservice.cpp` at all.
+  `testApiKeyNeverLeavesTheAuthorizationHeader()` sweeps the path, the query,
+  the body, every other header and the user-facing error text.
+- **A refusal is not a failure and is not retried.** It arrives as
+  `inpaintFailed()` prefixed with `OpenRouterInpaintService::refusalMarker()`,
+  carrying the model's own words. Nothing retries and nothing silently
+  substitutes another model - which model runs stays the user's choice. The
+  mask survives so another model can be tried against the same selection.
+- **The key is base64 in `scribus172.rc`. That is obfuscation, not
+  encryption** - it keeps the key off the screen and out of a grep and does
+  nothing against anyone who can read the file. TODO: OS keyring.
+- The undo step is `Remove Object (OpenRouter: <display name>)` and the file is
+  tagged `_openrouter_<model>_`, so two models run over the same area can be
+  told apart afterwards in both the undo history and the folder.
+- `AIServicePrefs::provider` is an int on the preferences file format. **Do not
+  reorder `AIProvider`**, and note that anything unrecognised falls back to
+  LaMa - the local one, not the one that spends money.
+
+Unit tests: `scribus/tests/openrouterinpaintservicetests.cpp`, 24 cases, all
+against an in-process mock. Nothing in the suite contacts openrouter.ai, needs
+an account or spends money.
+
+**Not exercised**: no removal has been run against the real API with a valid
+key, so no picture has actually made the round trip and no charge has been
+observed. What *has* been checked against the live service is the key endpoint:
+a deliberately invalid key returned `401` and surfaced as "OpenRouter rejected
+the API key...", which is also what confirms `/key` is the right path. Content
+refusals have never been seen from any model, because no real request has been
+made.
+
 #### Harness trap: `import -window <id>` can wedge the whole X server
 
 `import -window <someid>` on a window that has since been destroyed falls back
