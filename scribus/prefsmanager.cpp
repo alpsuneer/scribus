@@ -631,8 +631,12 @@ void PrefsManager::initDefaults()
 	// AI services. Off, so that nothing here can contact anything until the
 	// user has been to Preferences and said so.
 	appPrefs.aiServicePrefs.enabled = false;
+	appPrefs.aiServicePrefs.provider = 0;   // LaMa: local and free, so not a surprise
 	appPrefs.aiServicePrefs.iopaintUrl = "http://localhost:8080";
 	appPrefs.aiServicePrefs.requestTimeoutSeconds = 120;
+	appPrefs.aiServicePrefs.openRouterApiKey.clear();
+	appPrefs.aiServicePrefs.openRouterModel = "google/gemini-3.1-flash-image-preview";
+	appPrefs.aiServicePrefs.openRouterTimeoutSeconds = 60;
 
 	appPrefs.imageCachePrefs.cacheEnabled = false;
 	appPrefs.imageCachePrefs.maxCacheSizeMiB = 1000;
@@ -2030,6 +2034,14 @@ bool PrefsManager::writePref(const QString& filePath)
 	aiElem.setAttribute("Enabled", appPrefs.aiServicePrefs.enabled ? 1 : 0);
 	aiElem.setAttribute("IOPaintURL", appPrefs.aiServicePrefs.iopaintUrl);
 	aiElem.setAttribute("RequestTimeoutSeconds", appPrefs.aiServicePrefs.requestTimeoutSeconds);
+	aiElem.setAttribute("Provider", appPrefs.aiServicePrefs.provider);
+	// Base64, which is obfuscation and not protection - see the note on the
+	// field. Anyone who can read this file can read the key; the encoding only
+	// stops it being legible at a glance or turning up in a grep.
+	aiElem.setAttribute("OpenRouterApiKey",
+	                    QString::fromLatin1(appPrefs.aiServicePrefs.openRouterApiKey.toUtf8().toBase64()));
+	aiElem.setAttribute("OpenRouterModel", appPrefs.aiServicePrefs.openRouterModel);
+	aiElem.setAttribute("OpenRouterTimeoutSeconds", appPrefs.aiServicePrefs.openRouterTimeoutSeconds);
 	elem.appendChild(aiElem);
 	// image cache
 	QDomElement icElem = docu.createElement("ImageCache");
@@ -2920,6 +2932,13 @@ bool PrefsManager::readPref(const QString& filePath)
 			appPrefs.aiServicePrefs.enabled = static_cast<bool>(dc.attribute("Enabled", "0").toInt());
 			appPrefs.aiServicePrefs.iopaintUrl = dc.attribute("IOPaintURL", "http://localhost:8080");
 			appPrefs.aiServicePrefs.requestTimeoutSeconds = dc.attribute("RequestTimeoutSeconds", "120").toInt();
+			appPrefs.aiServicePrefs.provider = dc.attribute("Provider", "0").toInt();
+			appPrefs.aiServicePrefs.openRouterApiKey = QString::fromUtf8(
+				QByteArray::fromBase64(dc.attribute("OpenRouterApiKey", "").toLatin1()));
+			appPrefs.aiServicePrefs.openRouterModel =
+				dc.attribute("OpenRouterModel", "google/gemini-3.1-flash-image-preview");
+			appPrefs.aiServicePrefs.openRouterTimeoutSeconds =
+				dc.attribute("OpenRouterTimeoutSeconds", "60").toInt();
 		}
 		// cache manager
 		if (dc.tagName() == "ImageCache")

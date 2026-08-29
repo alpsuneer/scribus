@@ -496,8 +496,30 @@ struct ImageCachePrefs
 struct AIServicePrefs
 {
 	bool enabled {false};                 //!< Master switch, off by default
+
+	/*! \brief Which implementation the "Best Quality" removal goes to.
+
+	    Held as an int rather than the enum so that this header stays free of
+	    the ai/ headers; AIInpaintServiceFactory owns the enum and the mapping.
+	    0 is LaMa, which is what an existing profile with no such setting gets
+	    - the local one, not the one that spends money. */
+	int provider {0};
+
+	// --- LaMa / IOPaint, a server on this machine ---
 	QString iopaintUrl;                   //!< Base URL of the local IOPaint server
 	int requestTimeoutSeconds {120};      //!< How long to wait for a reply
+
+	// --- OpenRouter, a paid service on the internet ---
+	/*! \brief OpenRouter API key, held as typed.
+
+	    Written to the preferences file base64-encoded. That is obfuscation and
+	    not encryption: it keeps the key from being read over a shoulder or
+	    caught by a grep, and does nothing at all against anyone who can read
+	    the file. TODO: move this to the OS keyring (QtKeychain / libsecret)
+	    and keep only a handle here. */
+	QString openRouterApiKey;
+	QString openRouterModel;              //!< Model id, e.g. google/gemini-3.1-flash-image-preview
+	int openRouterTimeoutSeconds {60};    //!< How long to wait for a reply
 };
 
 struct ExperimentalFeaturePrefs
