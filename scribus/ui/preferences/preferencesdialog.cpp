@@ -62,6 +62,7 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, ApplicationPrefs& prefsDat
 	}
 	if (!m_Doc)
 	{
+		prefs_AIServices = new Prefs_AIServices(prefsStackWidget, m_Doc);
 		prefs_Experimental = new Prefs_Experimental(prefsStackWidget, m_Doc);
 		prefs_ExternalTools = new Prefs_ExternalTools(prefsStackWidget, m_Doc);
 		prefs_ImageCache = new Prefs_ImageCache(prefsStackWidget, m_Doc);
@@ -228,6 +229,11 @@ void PreferencesDialog::createStackWidgetList()
 	ptd.forPrefs = true;
 	ptd.forDoc = false;
 	ptd.prefsPane = dynamic_cast<Prefs_Pane*>(prefs_ImageCache);
+	stackDataList.append(ptd);
+
+	ptd.forPrefs = true;
+	ptd.forDoc = false;
+	ptd.prefsPane = dynamic_cast<Prefs_Pane*>(prefs_AIServices);
 	stackDataList.append(ptd);
 
 	ptd.forPrefs = true;

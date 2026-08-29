@@ -628,6 +628,12 @@ void PrefsManager::initDefaults()
 	appPrefs.pdfPrefs.openAfterExport = false;
 	appPrefs.pdfPrefs.PageLayout = PDFOptions::SinglePage;
 	appPrefs.pdfPrefs.openAction = "";
+	// AI services. Off, so that nothing here can contact anything until the
+	// user has been to Preferences and said so.
+	appPrefs.aiServicePrefs.enabled = false;
+	appPrefs.aiServicePrefs.iopaintUrl = "http://localhost:8080";
+	appPrefs.aiServicePrefs.requestTimeoutSeconds = 120;
+
 	appPrefs.imageCachePrefs.cacheEnabled = false;
 	appPrefs.imageCachePrefs.maxCacheSizeMiB = 1000;
 	appPrefs.imageCachePrefs.maxCacheEntries = 1000;
@@ -2019,6 +2025,12 @@ bool PrefsManager::writePref(const QString& filePath)
 	}
 	elem.appendChild(tocElem);
 
+	// AI services
+	QDomElement aiElem = docu.createElement("AIServices");
+	aiElem.setAttribute("Enabled", appPrefs.aiServicePrefs.enabled ? 1 : 0);
+	aiElem.setAttribute("IOPaintURL", appPrefs.aiServicePrefs.iopaintUrl);
+	aiElem.setAttribute("RequestTimeoutSeconds", appPrefs.aiServicePrefs.requestTimeoutSeconds);
+	elem.appendChild(aiElem);
 	// image cache
 	QDomElement icElem = docu.createElement("ImageCache");
 	icElem.setAttribute("Enabled", appPrefs.imageCachePrefs.cacheEnabled);
@@ -2901,6 +2913,13 @@ bool PrefsManager::readPref(const QString& filePath)
 				}
 				tocNode = tocNode.nextSibling();
 			}
+		}
+		// AI services
+		if (dc.tagName() == "AIServices")
+		{
+			appPrefs.aiServicePrefs.enabled = static_cast<bool>(dc.attribute("Enabled", "0").toInt());
+			appPrefs.aiServicePrefs.iopaintUrl = dc.attribute("IOPaintURL", "http://localhost:8080");
+			appPrefs.aiServicePrefs.requestTimeoutSeconds = dc.attribute("RequestTimeoutSeconds", "120").toInt();
 		}
 		// cache manager
 		if (dc.tagName() == "ImageCache")

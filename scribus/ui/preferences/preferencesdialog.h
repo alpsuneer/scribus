@@ -24,6 +24,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/preferences/prefs_documentitemattributes.h"
 #include "ui/preferences/prefs_documentsections.h"
 #include "ui/preferences/prefs_documentsetup.h"
+#include "ui/preferences/prefs_aiservices.h"
 #include "ui/preferences/prefs_experimental.h"
 #include "ui/preferences/prefs_externaltools.h"
 #include "ui/preferences/prefs_fonts.h"
@@ -96,6 +97,7 @@ class SCRIBUS_API PreferencesDialog : public ScDialog, Ui::PreferencesDialog
 		Prefs_DocumentItemAttributes *prefs_DocumentItemAttributes {nullptr};
 		Prefs_DocumentSections *prefs_DocumentSections {nullptr};
 		Prefs_DocumentSetup *prefs_DocumentSetup {nullptr};
+		Prefs_AIServices *prefs_AIServices {nullptr};
 		Prefs_Experimental *prefs_Experimental {nullptr};
 		Prefs_ExternalTools *prefs_ExternalTools {nullptr};
 		Prefs_Fonts *prefs_Fonts {nullptr};

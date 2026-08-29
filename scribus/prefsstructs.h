@@ -487,6 +487,19 @@ struct ImageCachePrefs
 	int compressionLevel; //!< Cache image compression level (see QImage)
 };
 
+/*! \brief Settings for optional AI services.
+
+    Everything here is off and empty until the user turns it on: no part of
+    Scribus contacts a network service unless this says so, and the address it
+    contacts is the one in this struct and no other. There is no fallback URL
+    and no telemetry. */
+struct AIServicePrefs
+{
+	bool enabled {false};                 //!< Master switch, off by default
+	QString iopaintUrl;                   //!< Base URL of the local IOPaint server
+	int requestTimeoutSeconds {120};      //!< How long to wait for a reply
+};
+
 struct ExperimentalFeaturePrefs
 {
 	bool notesEnabled; //!< Enable Notes
@@ -504,6 +517,7 @@ struct ApplicationPrefs
 	GuidesPrefs guidesPrefs;
 	HyphenatorPrefs hyphPrefs;
 	SpellCheckPrefs spellCheckPrefs;
+	AIServicePrefs aiServicePrefs;
 	ImageCachePrefs imageCachePrefs;
 	IndexPrefs indexPrefs;
 	ItemAttrPrefs itemAttrPrefs;

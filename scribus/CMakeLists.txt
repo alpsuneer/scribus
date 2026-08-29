@@ -191,6 +191,8 @@ if(HAVE_OSG)
 		canvasmode_suneercrop.cpp
 		canvasmode_imageeraser.cpp
 		canvasmode_removalmask.cpp
+		ai/aiinpaintservice.cpp
+		ai/lamainpaintservice.cpp
 		scimageerasermask.cpp
 		util_contour.cpp
 		util_inpaint.cpp
@@ -255,6 +257,8 @@ else()
 		canvasmode_suneercrop.cpp
 		canvasmode_imageeraser.cpp
 		canvasmode_removalmask.cpp
+		ai/aiinpaintservice.cpp
+		ai/lamainpaintservice.cpp
 		scimageerasermask.cpp
 		util_contour.cpp
 		util_inpaint.cpp

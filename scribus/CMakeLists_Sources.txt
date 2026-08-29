@@ -424,6 +424,7 @@ set(SCRIBUS_SOURCES
 	ui/preferences/prefs_guides.cpp
 	ui/preferences/prefs_hyphenator.cpp
 	ui/preferences/prefs_indexes.cpp
+	ui/preferences/prefs_aiservices.cpp
 	ui/preferences/prefs_imagecache.cpp
 	ui/preferences/prefs_keyboardshortcuts.cpp
 	ui/preferences/prefs_miscellaneous.cpp
