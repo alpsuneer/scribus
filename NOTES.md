@@ -628,6 +628,90 @@ texture are where it is genuinely good.
   methods is guarded on "has this pixel got a colour yet", or the thing being
   removed steers its own removal.
 
+#### The second fill: a model on the other end of a socket
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| AI Services preference page, `AIInpaintService` / `LamaInpaintService` | `764fceb` | feature/ctp-output |
+| Mock-server tests for the client | `4a3e7c3` | feature/ctp-output |
+| Apply (Fast) / Apply (Best Quality) in the options bar | `e49ec90`, `8ffffae` | feature/ctp-output |
+
+Apply (Fast) is the built-in kernel above, unchanged. Apply (Best Quality)
+sends the neighbourhood of the mask to a local **IOPaint** server running LaMa,
+which the user installs and runs themselves:
+
+```bash
+pip install iopaint
+iopaint start --model=lama --port=8080
+```
+
+Nothing in Scribus installs, downloads or starts it, and the feature is
+invisible until `Preferences > AI Services > Enable AI features` is ticked. It
+contacts the address in that preference and no other: no fallback host, no
+discovery, no telemetry.
+
+**The wire format was established by asking a running instance, not by reading
+anything**, and it is not what the shape of the task suggested - it is not
+multipart:
+
+- `POST {url}/api/v1/inpaint`, `Content-Type: application/json`, body
+  `{"image": "<base64 PNG>", "mask": "<base64 PNG>"}`. A `data:image/png;base64,`
+  prefix is tolerated but pointless.
+- **White in the mask means "regenerate this"** - the same sense the built-in
+  kernel uses, so nothing anywhere has to invert it.
+- Success: `200`, `Content-Type: image/png`, the whole repaired picture as raw
+  PNG bytes, same size as sent, unmasked pixels bit-identical.
+- Failure: `500` with JSON carrying the real reason in `errors` (with `detail`
+  and `error` alongside). That text is what the user is shown, rather than a
+  status code.
+
+`testRequestWireFormat()` in `lamainpaintservicetests.cpp` pins all of it. If
+IOPaint changes the contract, that test says so rather than a user wondering
+why nothing happens.
+
+Things worth knowing before changing any of it:
+
+- **The socket, the PNG encoding and the base64 both ways run on a private
+  thread.** Encoding a 2048-pixel picture is a few hundred milliseconds on its
+  own. `QNetworkAccessManager` belongs to the thread that created it, so the
+  worker owns it and the public methods are queued invocations.
+- **Cancelling is answered.** It arrives as `inpaintFailed()` carrying
+  `AIInpaintService::cancelledMarker()`, so no caller waits for a signal that
+  never comes, and no caller shows it to a user as an error. The request is
+  genuinely aborted - the mock test counts connections dropped before it
+  answered, so it fails if the reply were merely ignored.
+- **A timeout and a user cancel both surface as an aborted request** and have to
+  be told apart deliberately, which is why there is an explicit `QTimer` rather
+  than `setTransferTimeout()`.
+- **Only the neighbourhood of the mask is sent**, padded generously - a model
+  fills a hole from what surrounds it, so a tight crop starves it - and capped
+  at 2048 pixels on the longest side. **Only the masked pixels of what comes
+  back are kept**, so the rest of the picture stays bit-identical instead of
+  returning softened by a round trip through a scaler.
+- The undo step is `Um::RemoveObjectAI` and the file is tagged `_lama_` rather
+  than `_inpaint_`, so which engine produced a given result is visible both in
+  the undo history and in the folder.
+- Everything careful about applying a result - is this still the frame that was
+  asked about, is the destination still not the user's original, write before
+  moving anything, one undo step - lives in `deliverResult()` and both paths go
+  through it.
+
+**Trap: a widget in a QToolBar is owned by the QWidgetAction that
+`addWidget()` returns**, and it is the *action's* visibility the toolbar lays
+out from. Hiding the "Large area" label itself looked right, because the label
+was correctly absent, and then it never appeared for a mask that should have
+had it (`8ffffae`).
+
+Measured on a real IOPaint running LaMa on CPU: connection test 6 ms, a
+100x100 fill 525 ms, a person removed from a 756x248 crowd photograph in a few
+seconds end to end. That last one is genuinely clean - the railing, the sea,
+the hedge and the grass all continue - which is the case the built-in method
+is weakest at.
+
+Unit tests: `scribus/tests/lamainpaintservicetests.cpp`, 14 cases, all against
+an in-process `QTcpServer` mock. Qt's `QHttpServer` module is not present in
+this build.
+
 #### Harness trap: `import -window <id>` can wedge the whole X server
 
 `import -window <someid>` on a window that has since been destroyed falls back
