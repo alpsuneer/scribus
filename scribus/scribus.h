@@ -552,6 +552,11 @@ public slots:
 	void updateImageEraserOptions();
 	/** \brief Trace the selected image's visible region into its contour line. */
 	void slotDetectContourFromImage();
+	/*! \brief Run one AI Text Tools task on the selection.
+
+	    \param task the index carried as the action's data; the mapping lives
+	           in the slot, next to the menu order it mirrors. */
+	void slotAITextTask(int task);
 	/** \brief Show or hide the eraser options bar with the mode. */
 	void setImageEraserOptionsVisible(bool visible);
 	/** \brief Re-read the object removal tool's state into its options bar:

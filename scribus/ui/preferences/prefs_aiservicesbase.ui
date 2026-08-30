@@ -392,6 +392,144 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="textAiGroupBox">
+     <property name="title">
+      <string>Text AI (captions, headlines, translation)</string>
+     </property>
+     <layout class="QGridLayout" name="textAiLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="textProviderLabel">
+        <property name="text">
+         <string>Pro&amp;vider:</string>
+        </property>
+        <property name="buddy">
+         <cstring>textProviderComboBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1" colspan="2">
+       <widget class="QComboBox" name="textProviderComboBox"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="textApiKeyLabel">
+        <property name="text">
+         <string>API ke&amp;y:</string>
+        </property>
+        <property name="buddy">
+         <cstring>textApiKeyLineEdit</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="textApiKeyLineEdit">
+        <property name="echoMode">
+         <enum>QLineEdit::Password</enum>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2">
+       <widget class="QCheckBox" name="textShowKeyCheckBox">
+        <property name="text">
+         <string>S&amp;how</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1" colspan="2">
+       <widget class="QCheckBox" name="textSameKeyCheckBox">
+        <property name="text">
+         <string>Use the same key as the Gemini image service</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="textModelLabel">
+        <property name="text">
+         <string>Mo&amp;del:</string>
+        </property>
+        <property name="buddy">
+         <cstring>textModelComboBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1" colspan="2">
+       <widget class="QComboBox" name="textModelComboBox"/>
+      </item>
+      <item row="4" column="1" colspan="2">
+       <widget class="QLabel" name="textModelHintLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="textTimeoutLabel">
+        <property name="text">
+         <string>Request time&amp;out:</string>
+        </property>
+        <property name="buddy">
+         <cstring>textTimeoutSpinBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1" colspan="2">
+       <widget class="QSpinBox" name="textTimeoutSpinBox">
+        <property name="minimum">
+         <number>10</number>
+        </property>
+        <property name="maximum">
+         <number>300</number>
+        </property>
+        <property name="value">
+         <number>60</number>
+        </property>
+        <property name="suffix">
+         <string> s</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QPushButton" name="textTestButton">
+        <property name="text">
+         <string>Test Co&amp;nnection</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1" colspan="2">
+       <widget class="QLabel" name="textTestResultLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextSelectableByMouse</set>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="0" colspan="3">
+       <widget class="QLabel" name="textInfoLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="openExternalLinks">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextBrowserInteraction</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="infoLabel">
      <property name="text">
       <string/>

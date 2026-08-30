@@ -161,6 +161,8 @@ if(HAVE_OSG)
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
 		ui/removaltoolwidget.cpp
+		ui/aitextresultdialog.cpp
+		ui/aitranslatedialog.cpp
 		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
 		ui/tooloptions/moveoptionswidget.cpp
@@ -193,8 +195,15 @@ if(HAVE_OSG)
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp
 		ai/aiinpaintservicefactory.cpp
+		ai/aitextservice.cpp
+		ai/aitextprompts.cpp
+		ai/aitexthttpservice.cpp
+		ai/aitextservicefactory.cpp
+		ai/claudetextservice.cpp
 		ai/geminiinpaintservice.cpp
+		ai/geminitextservice.cpp
 		ai/lamainpaintservice.cpp
+		ai/openaitextservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp
 		util_contour.cpp
@@ -230,6 +239,8 @@ else()
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
 		ui/removaltoolwidget.cpp
+		ui/aitextresultdialog.cpp
+		ui/aitranslatedialog.cpp
 		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
 		ui/tooloptions/moveoptionswidget.cpp
@@ -262,8 +273,15 @@ else()
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp
 		ai/aiinpaintservicefactory.cpp
+		ai/aitextservice.cpp
+		ai/aitextprompts.cpp
+		ai/aitexthttpservice.cpp
+		ai/aitextservicefactory.cpp
+		ai/claudetextservice.cpp
 		ai/geminiinpaintservice.cpp
+		ai/geminitextservice.cpp
 		ai/lamainpaintservice.cpp
+		ai/openaitextservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp
 		util_contour.cpp

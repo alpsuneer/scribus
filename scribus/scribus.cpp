@@ -23,6 +23,10 @@ for which a new license (GPL+exception) is in place.
 
 
 #include "DockWidget.h"
+#include "ai/aitextservice.h"
+#include "ai/aitextservicefactory.h"
+#include "ui/aitextresultdialog.h"
+#include "ui/aitranslatedialog.h"
 #include "ui/ParagraphStylesPanel.h"
 #include "ui/suneercontrolbar.h"
 #include "ui/suneer_news_panel.h"
@@ -70,6 +74,7 @@ for which a new license (GPL+exception) is in place.
 #include <QMouseEvent>
 #include <QMultiMap>
 #include <QPixmap>
+#include <QProgressDialog>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScopedPointer>
@@ -1326,6 +1331,19 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("itemConvertToBezierCurve", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToOutlines", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToSymbolFrame", "ItemConvertTo");
+	/* AI Text Tools. Its own submenu rather than loose entries in Item: six
+	   actions that all cost money and all send something out of the building
+	   are worth grouping under a name that says so. */
+	scrMenuMgr->createMenu("ItemAIText", tr("AI Te&xt Tools"), "Item");
+	scrMenuMgr->addMenuItemString("ItemAIText", "Item");
+	scrMenuMgr->addMenuItemString("itemAITextCaption", "ItemAIText");
+	scrMenuMgr->addMenuItemString("itemAITextAltText", "ItemAIText");
+	scrMenuMgr->addMenuItemString("SEPARATOR", "ItemAIText");
+	scrMenuMgr->addMenuItemString("itemAITextHeadline", "ItemAIText");
+	scrMenuMgr->addMenuItemString("itemAITextSummarize", "ItemAIText");
+	scrMenuMgr->addMenuItemString("itemAITextTranslate", "ItemAIText");
+	scrMenuMgr->addMenuItemString("itemAITextImprove", "ItemAIText");
+
 	scrMenuMgr->createMenu("Adjust", tr("Adjust"), "Item");
 	scrMenuMgr->addMenuItemString("Adjust", "Item");
 	scrMenuMgr->addMenuItemString("itemAdjustFrameHeightToText", "Adjust");
@@ -7105,6 +7123,236 @@ void ScribusMainWindow::setRemovalToolOptionsVisible(bool visible)
 	removalToolOptions->setVisible(visible);
 	if (visible)
 		removalToolOptions->refreshFromMode();
+}
+
+/*!
+ \brief Run one AI Text Tools task on the selection.
+
+ The whole feature funnels through here: one selection check, one service, one
+ result dialog, one undo step. Nothing an AI produces reaches the document
+ without a person choosing it in that dialog first, which is why this ends in
+ exec() rather than in an insert.
+
+ The service is created per invocation and destroyed with the dialog. That
+ costs a thread each time and is worth it: Preferences can be changed between
+ two uses, and a service built once at start-up would quietly keep using the
+ key that was there then.
+ */
+void ScribusMainWindow::slotAITextTask(int task)
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+		return;
+
+	// Same order as the menu, and as the data set in ActionManager.
+	static const char* const taskNames[] = {
+		AITextService::TaskCaption,   AITextService::TaskAltText,
+		AITextService::TaskHeadline,  AITextService::TaskSummarize,
+		AITextService::TaskTranslate, AITextService::TaskImprove
+	};
+	if (task < 0 || task >= 6)
+		return;
+	const QString taskName = QLatin1String(taskNames[task]);
+
+	PageItem* item = doc->m_Selection->itemAt(0);
+	if (!item)
+		return;
+
+	AITextService::Request request;
+	request.task = taskName;
+	if (AITextService::taskNeedsImage(taskName))
+	{
+		if (!item->isImageFrame() || !item->imageIsAvailable)
+		{
+			QMessageBox::information(this, tr("AI Text Tools"),
+			                         tr("Select an image frame with a picture in it first."));
+			return;
+		}
+		// The picture as it sits on disk, not as it is cropped on the page: the
+		// model is being asked what the photograph shows.
+		QImage source(item->Pfile);
+		if (source.isNull())
+		{
+			QMessageBox::information(this, tr("AI Text Tools"),
+			                         tr("Scribus could not read that picture."));
+			return;
+		}
+		request.inputImage = source;
+	}
+	else
+	{
+		if (!item->isTextFrame())
+		{
+			QMessageBox::information(this, tr("AI Text Tools"),
+			                         tr("Select a text frame with some text in it first."));
+			return;
+		}
+		request.inputText = item->itemText.text(0, item->itemText.length());
+		if (request.inputText.trimmed().isEmpty())
+		{
+			QMessageBox::information(this, tr("AI Text Tools"),
+			                         tr("That frame has no text in it."));
+			return;
+		}
+	}
+
+	// Task-specific questions, asked before anything is spent.
+	if (taskName == QLatin1String(AITextService::TaskTranslate))
+	{
+		AITranslateDialog picker(this);
+		if (picker.exec() != QDialog::Accepted)
+			return;
+		request.parameters.insert(QStringLiteral("targetLang"), picker.targetLanguage());
+	}
+
+	QString reason;
+	std::unique_ptr<AITextService> service =
+		AITextServiceFactory::create(doc->prefsData().aiServicePrefs, reason);
+	if (!service)
+	{
+		QMessageBox::information(this, tr("AI Text Tools"), reason);
+		return;
+	}
+
+	// A modeless wait rather than a modal one: these take seconds, and the user
+	// should be able to look at the rest of the page while it happens.
+	QProgressDialog waiting(tr("Asking %1 ...")
+	                        .arg(AITextServiceFactory::providerDescription(doc->prefsData().aiServicePrefs)),
+	                        tr("Cancel"), 0, 0, this);
+	waiting.setWindowTitle(tr("AI Text Tools"));
+	waiting.setWindowModality(Qt::WindowModal);
+	waiting.setMinimumDuration(0);
+
+	AITextService::Response answer;
+	QString failure;
+	bool finished = false;
+	AITextService* raw = service.get();
+	connect(raw, &AITextService::completed, this, [&](const AITextService::Response& r) {
+		answer = r;
+		finished = true;
+	});
+	connect(raw, &AITextService::failed, this, [&](const QString& e) {
+		failure = e;
+		finished = true;
+	});
+	connect(raw, &AITextService::progressUpdate, this, [&](const QString& status) {
+		waiting.setLabelText(status);
+	});
+	connect(&waiting, &QProgressDialog::canceled, this, [raw]() { raw->cancel(); });
+
+	raw->execute(request);
+	while (!finished)
+	{
+		qApp->processEvents(QEventLoop::AllEvents, 50);
+		if (waiting.wasCanceled() && failure.isEmpty() && !finished)
+			continue;
+	}
+	waiting.close();
+
+	if (!failure.isEmpty())
+	{
+		// A cancel is something the user already knows about.
+		if (AITextService::isCancelled(failure))
+			return;
+		if (AITextService::isRefusal(failure))
+		{
+			QMessageBox::warning(this, tr("AI Text Tools"),
+			                     AITextService::strippedRefusal(failure)
+			                     + QLatin1String("\n\n")
+			                     + tr("Try another model in Preferences > AI Services."));
+			return;
+		}
+		QMessageBox::critical(this, tr("AI Text Tools"), failure);
+		return;
+	}
+
+	AITextResultDialog dialog(this, taskName, answer);
+	// Regenerate runs the same request again and replaces what is shown; the
+	// earlier answer is kept if the second attempt fails.
+	connect(&dialog, &AITextResultDialog::regenerateRequested, this, [&]() {
+		dialog.setBusy(true);
+		failure.clear();
+		finished = false;
+		raw->execute(request);
+		while (!finished)
+			qApp->processEvents(QEventLoop::AllEvents, 50);
+		if (!failure.isEmpty())
+			dialog.showError(AITextService::strippedRefusal(failure));
+		else
+			dialog.setResponse(answer);
+	});
+
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+	const QString chosen = dialog.chosenText();
+	if (chosen.isEmpty())
+		return;
+
+	if (dialog.chosenAction() == AITextResultDialog::Replace)
+	{
+		if (!item->isTextFrame())
+		{
+			QMessageBox::information(this, tr("AI Text Tools"),
+			                         tr("That can only replace the text of a text frame. "
+			                            "Use Insert as New Frame instead."));
+			return;
+		}
+		// Replacing what someone wrote is worth asking about once, even though
+		// it is undoable: the frame may hold an hour's work.
+		if (item->itemText.length() > 0
+		    && QMessageBox::question(this, tr("AI Text Tools"),
+		                             tr("Replace everything in this frame with the "
+		                                "AI-generated text?"),
+		                             QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+		       != QMessageBox::Yes)
+		{
+			return;
+		}
+
+		UndoTransaction transaction;
+		if (UndoManager::undoEnabled())
+		{
+			transaction = m_undoManager->beginTransaction(
+				doc->currentPage()->getUName(), Um::ITextFrame,
+				AITextResultDialog::titleForTask(taskName), chosen.left(60), Um::ITextFrame);
+		}
+		item->itemText.clear();
+		item->itemText.insertChars(0, chosen);
+		item->invalid = true;
+		if (transaction)
+			transaction.commit();
+		doc->regionsChanged()->update(QRectF());
+		slotDocCh();
+	}
+	else if (dialog.chosenAction() == AITextResultDialog::InsertNewFrame)
+	{
+		// Below the frame it came from, the same width, so a caption lands
+		// where a caption goes.
+		const double x = item->xPos();
+		const double y = item->yPos() + item->height() + 4.0;
+		const double w = item->width();
+		const double h = qMax(20.0, item->height() / 4.0);
+
+		UndoTransaction transaction;
+		if (UndoManager::undoEnabled())
+		{
+			transaction = m_undoManager->beginTransaction(
+				doc->currentPage()->getUName(), Um::ITextFrame,
+				AITextResultDialog::titleForTask(taskName), chosen.left(60), Um::ICreate);
+		}
+		const int index = doc->itemAdd(PageItem::TextFrame, PageItem::Unspecified,
+		                               x, y, w, h, doc->itemToolPrefs().shapeLineWidth,
+		                               CommonStrings::None, doc->itemToolPrefs().textColor);
+		if (index >= 0)
+		{
+			PageItem* created = doc->Items->at(index);
+			created->itemText.insertChars(0, chosen);
+			created->invalid = true;
+		}
+		if (transaction)
+			transaction.commit();
+		doc->regionsChanged()->update(QRectF());
+		slotDocCh();
+	}
 }
 
 void ScribusMainWindow::slotDetectContourFromImage()

@@ -12,6 +12,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefs_pane.h"
 #include "scribusapi.h"
 
+class AITextService;
 class GeminiInpaintService;
 class LamaInpaintService;
 class OpenRouterInpaintService;
@@ -77,7 +78,25 @@ class SCRIBUS_API Prefs_AIServices : public Prefs_Pane, Ui::Prefs_AIServices
 		void testGeminiClicked();
 		void geminiTested(bool ok, const QString& detail);
 
+		//! Swap the whole text section over to another provider's settings.
+		void textProviderChanged(int index);
+		void textModelChanged(int index);
+		void textShowKeyToggled(bool on);
+		void textSameKeyToggled(bool on);
+		void testTextClicked();
+		void textTested(bool ok, const QString& detail);
+
 	private:
+		/*! \brief Move what is in the text boxes into the pending values for
+		    \a provider.
+
+		    The section shows one provider at a time and reuses the same
+		    widgets, so switching away has to bank what was typed or the user
+		    loses a key by looking at another entry in the dropdown. */
+		void stashTextFields(int provider);
+		//! Put \a provider's stored values back into the widgets.
+		void loadTextFields(int provider);
+
 		void showTestResult(const QString& text, const QString& colour);
 		void showOpenRouterResult(const QString& text, const QString& colour);
 		void showGeminiResult(const QString& text, const QString& colour);
@@ -87,6 +106,18 @@ class SCRIBUS_API Prefs_AIServices : public Prefs_Pane, Ui::Prefs_AIServices
 		LamaInpaintService* m_service {nullptr};
 		OpenRouterInpaintService* m_openRouterService {nullptr};
 		GeminiInpaintService* m_geminiService {nullptr};
+		AITextService* m_textService {nullptr};
+
+		/*! \brief Per-provider text settings, held while the page is open.
+
+		    Indexed by AITextProvider. The page edits one at a time; these are
+		    what the other two are, so that saveGuiToPrefs() can write all
+		    three whatever is on screen. */
+		QString m_textKeys[3];
+		QString m_textModels[3];
+		int m_textTimeouts[3] { 60, 60, 60 };
+		bool m_geminiTextUsesImageKey {true};
+		int m_currentTextProvider {0};
 };
 
 #endif // PREFS_AISERVICES_H

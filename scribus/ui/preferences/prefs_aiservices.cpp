@@ -10,6 +10,11 @@ for which a new license (GPL+exception) is in place.
 #include "prefs_aiservices.h"
 
 #include "ai/aiinpaintservicefactory.h"
+#include "ai/aitextservice.h"
+#include "ai/aitextservicefactory.h"
+#include "ai/claudetextservice.h"
+#include "ai/geminitextservice.h"
+#include "ai/openaitextservice.h"
 #include "ai/geminiinpaintservice.h"
 #include "ai/lamainpaintservice.h"
 #include "ai/openrouterinpaintservice.h"
@@ -57,6 +62,24 @@ Prefs_AIServices::Prefs_AIServices(QWidget* parent, ScribusDoc* /*doc*/)
 	        this, &Prefs_AIServices::geminiModelChanged);
 	connect(geminiShowKeyCheckBox, &QCheckBox::toggled, this, &Prefs_AIServices::geminiShowKeyToggled);
 	connect(geminiTestButton, &QPushButton::clicked, this, &Prefs_AIServices::testGeminiClicked);
+
+	// Gemini first, and labelled: it is the only one of the three that UPI can
+	// pay for, which for this office is the difference between a feature that
+	// can be switched on and one that cannot.
+	textProviderComboBox->addItem(tr("Google Gemini text (UPI works)"),
+	                              static_cast<int>(AITextProvider::Gemini));
+	textProviderComboBox->addItem(tr("Anthropic Claude (international card needed)"),
+	                              static_cast<int>(AITextProvider::Claude));
+	textProviderComboBox->addItem(tr("OpenAI GPT (international card needed)"),
+	                              static_cast<int>(AITextProvider::OpenAI));
+
+	connect(textProviderComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &Prefs_AIServices::textProviderChanged);
+	connect(textModelComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &Prefs_AIServices::textModelChanged);
+	connect(textShowKeyCheckBox, &QCheckBox::toggled, this, &Prefs_AIServices::textShowKeyToggled);
+	connect(textSameKeyCheckBox, &QCheckBox::toggled, this, &Prefs_AIServices::textSameKeyToggled);
+	connect(textTestButton, &QPushButton::clicked, this, &Prefs_AIServices::testTextClicked);
 
 	enabledToggled(enableAICheckBox->isChecked());
 	providerChanged(providerComboBox->currentIndex());
@@ -123,8 +146,29 @@ void Prefs_AIServices::languageChange()
 		     "Your picture is sent to Google's servers.")
 		+ "</i></qt>");
 
+	textProviderComboBox->setToolTip("<qt>" + tr("Which service answers the AI Text Tools menu. "
+		"This is a separate choice from the image provider above - you can use a local image model "
+		"and a cloud text one at the same time.") + "</qt>");
+	textApiKeyLineEdit->setToolTip("<qt>" + tr("Your API key for the selected text provider. "
+		"It is stored in your preferences file only lightly obfuscated, so treat that file as you "
+		"would the key itself.") + "</qt>");
+	textSameKeyCheckBox->setToolTip("<qt>" + tr("One Google account bills both the image and the "
+		"text service, so the same key works for both.") + "</qt>");
+	textTestButton->setToolTip("<qt>" + tr("Check that the key above is valid. This lists the "
+		"models the key can reach, which runs no model and so costs nothing.") + "</qt>");
+
+	textInfoLabel->setText("<qt><i>"
+		+ tr("Text AI enables caption generation, headline suggestions, translation, "
+		     "summaries and alt text from the Item &gt; AI Text Tools menu.") + "<br/>"
+		+ tr("Payment: Gemini accepts UPI in India. Claude and OpenAI require an "
+		     "international card at this time.") + "<br/>"
+		+ tr("Your text - and, for captions and alt text, your picture - is sent to the "
+		     "provider you choose here.")
+		+ "</i></qt>");
+
 	modelChanged(modelComboBox->currentIndex());
 	geminiModelChanged(geminiModelComboBox->currentIndex());
+	textModelChanged(textModelComboBox->currentIndex());
 }
 
 void Prefs_AIServices::enabledToggled(bool on)
@@ -134,6 +178,7 @@ void Prefs_AIServices::enabledToggled(bool on)
 	iopaintGroupBox->setEnabled(on);
 	openRouterGroupBox->setEnabled(on);
 	geminiGroupBox->setEnabled(on);
+	textAiGroupBox->setEnabled(on);
 }
 
 void Prefs_AIServices::providerChanged(int index)
@@ -226,11 +271,31 @@ void Prefs_AIServices::restoreDefaults(struct ApplicationPrefs *prefsData)
 	}
 	geminiModelComboBox->setCurrentIndex(qMax(0, geminiIndex));
 
+	m_textKeys[static_cast<int>(AITextProvider::Gemini)] = ai.geminiTextApiKey;
+	m_textKeys[static_cast<int>(AITextProvider::Claude)] = ai.claudeApiKey;
+	m_textKeys[static_cast<int>(AITextProvider::OpenAI)] = ai.openAITextApiKey;
+	m_textModels[static_cast<int>(AITextProvider::Gemini)] = ai.geminiTextModel;
+	m_textModels[static_cast<int>(AITextProvider::Claude)] = ai.claudeModel;
+	m_textModels[static_cast<int>(AITextProvider::OpenAI)] = ai.openAITextModel;
+	m_textTimeouts[static_cast<int>(AITextProvider::Gemini)] = ai.geminiTextTimeoutSeconds;
+	m_textTimeouts[static_cast<int>(AITextProvider::Claude)] = ai.claudeTimeoutSeconds;
+	m_textTimeouts[static_cast<int>(AITextProvider::OpenAI)] = ai.openAITextTimeoutSeconds;
+	m_geminiTextUsesImageKey = ai.geminiTextUsesImageKey;
+
+	m_currentTextProvider = static_cast<int>(AITextServiceFactory::providerOf(ai));
+	{
+		const QSignalBlocker blockProvider(textProviderComboBox);
+		const int textIndex = textProviderComboBox->findData(m_currentTextProvider);
+		textProviderComboBox->setCurrentIndex(qMax(0, textIndex));
+	}
+	loadTextFields(m_currentTextProvider);
+
 	enabledToggled(ai.enabled);
 	providerChanged(providerComboBox->currentIndex());
 	testResultLabel->clear();
 	openRouterTestResultLabel->clear();
 	geminiTestResultLabel->clear();
+	textTestResultLabel->clear();
 }
 
 void Prefs_AIServices::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
@@ -247,6 +312,36 @@ void Prefs_AIServices::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	ai.geminiApiKey = geminiApiKeyLineEdit->text().trimmed();
 	ai.geminiModel = geminiModelComboBox->currentData().toString();
 	ai.geminiTimeoutSeconds = geminiTimeoutSpinBox->value();
+
+	/* The text section edits one provider at a time through one set of
+	   widgets, so what is on screen is banked first and then all three are
+	   written. Writing only the visible one would wipe the other two every
+	   time the page was opened. saveGuiToPrefs() is const, so the stash is
+	   done on local copies rather than on the members. */
+	QString keys[3] = { m_textKeys[0], m_textKeys[1], m_textKeys[2] };
+	QString textModels[3] = { m_textModels[0], m_textModels[1], m_textModels[2] };
+	int timeouts[3] = { m_textTimeouts[0], m_textTimeouts[1], m_textTimeouts[2] };
+	bool sameKey = m_geminiTextUsesImageKey;
+	if (m_currentTextProvider >= 0 && m_currentTextProvider <= 2)
+	{
+		keys[m_currentTextProvider] = textApiKeyLineEdit->text().trimmed();
+		textModels[m_currentTextProvider] = textModelComboBox->currentData().toString();
+		timeouts[m_currentTextProvider] = textTimeoutSpinBox->value();
+		if (m_currentTextProvider == static_cast<int>(AITextProvider::Gemini))
+			sameKey = textSameKeyCheckBox->isChecked();
+	}
+
+	ai.textProvider = textProviderComboBox->currentData().toInt();
+	ai.geminiTextApiKey = keys[static_cast<int>(AITextProvider::Gemini)];
+	ai.claudeApiKey = keys[static_cast<int>(AITextProvider::Claude)];
+	ai.openAITextApiKey = keys[static_cast<int>(AITextProvider::OpenAI)];
+	ai.geminiTextModel = textModels[static_cast<int>(AITextProvider::Gemini)];
+	ai.claudeModel = textModels[static_cast<int>(AITextProvider::Claude)];
+	ai.openAITextModel = textModels[static_cast<int>(AITextProvider::OpenAI)];
+	ai.geminiTextTimeoutSeconds = timeouts[static_cast<int>(AITextProvider::Gemini)];
+	ai.claudeTimeoutSeconds = timeouts[static_cast<int>(AITextProvider::Claude)];
+	ai.openAITextTimeoutSeconds = timeouts[static_cast<int>(AITextProvider::OpenAI)];
+	ai.geminiTextUsesImageKey = sameKey;
 }
 
 void Prefs_AIServices::showTestResult(const QString& text, const QString& colour)
@@ -378,4 +473,175 @@ void Prefs_AIServices::geminiTested(bool ok, const QString& detail)
 		showGeminiResult(QStringLiteral("\u2713 ") + detail, QStringLiteral("#1b7f2a"));
 	else
 		showGeminiResult(QStringLiteral("\u2717 ") + detail, QStringLiteral("#b00020"));
+}
+
+// --- the text section -------------------------------------------------------
+
+void Prefs_AIServices::stashTextFields(int provider)
+{
+	if (provider < 0 || provider > 2)
+		return;
+	m_textKeys[provider] = textApiKeyLineEdit->text().trimmed();
+	m_textModels[provider] = textModelComboBox->currentData().toString();
+	m_textTimeouts[provider] = textTimeoutSpinBox->value();
+	if (provider == static_cast<int>(AITextProvider::Gemini))
+		m_geminiTextUsesImageKey = textSameKeyCheckBox->isChecked();
+}
+
+void Prefs_AIServices::loadTextFields(int provider)
+{
+	if (provider < 0 || provider > 2)
+		return;
+
+	// The model list belongs to the provider, so it is rebuilt rather than
+	// filtered: an id from one provider is meaningless to another.
+	const QList<AITextProtocol::ModelChoice>* models = nullptr;
+	switch (static_cast<AITextProvider>(provider))
+	{
+	case AITextProvider::Claude:
+		models = &ClaudeTextService::models();
+		break;
+	case AITextProvider::OpenAI:
+		models = &OpenAITextService::models();
+		break;
+	case AITextProvider::Gemini:
+		models = &GeminiTextService::models();
+		break;
+	}
+
+	const QSignalBlocker blockModel(textModelComboBox);
+	textModelComboBox->clear();
+	for (const AITextProtocol::ModelChoice& choice : *models)
+		textModelComboBox->addItem(choice.displayName, choice.id);
+
+	// A model the list no longer offers - an old profile, or one edited by
+	// hand - is added rather than silently swapped, so that saving the page
+	// does not quietly change which model gets used.
+	int index = textModelComboBox->findData(m_textModels[provider]);
+	if (index < 0 && !m_textModels[provider].isEmpty())
+	{
+		textModelComboBox->addItem(m_textModels[provider], m_textModels[provider]);
+		index = textModelComboBox->count() - 1;
+	}
+	textModelComboBox->setCurrentIndex(qMax(0, index));
+
+	textApiKeyLineEdit->setText(m_textKeys[provider]);
+	textTimeoutSpinBox->setValue(m_textTimeouts[provider]);
+
+	// The shared-key checkbox only means anything for Gemini, which is the one
+	// provider that also exists on the image side.
+	const bool isGemini = (provider == static_cast<int>(AITextProvider::Gemini));
+	textSameKeyCheckBox->setVisible(isGemini);
+	{
+		const QSignalBlocker blockSame(textSameKeyCheckBox);
+		textSameKeyCheckBox->setChecked(isGemini && m_geminiTextUsesImageKey);
+	}
+	textShowKeyCheckBox->setChecked(false);
+	textShowKeyToggled(false);
+	textSameKeyToggled(textSameKeyCheckBox->isChecked() && isGemini);
+	textModelChanged(textModelComboBox->currentIndex());
+	textTestResultLabel->clear();
+}
+
+void Prefs_AIServices::textProviderChanged(int index)
+{
+	const int provider = textProviderComboBox->itemData(index).toInt();
+	if (provider == m_currentTextProvider)
+		return;
+	// Bank what is on screen before replacing it, or switching the dropdown to
+	// read a hint would silently discard a freshly pasted key.
+	stashTextFields(m_currentTextProvider);
+	m_currentTextProvider = provider;
+	loadTextFields(provider);
+}
+
+void Prefs_AIServices::textModelChanged(int index)
+{
+	const QList<AITextProtocol::ModelChoice>* models = nullptr;
+	switch (static_cast<AITextProvider>(m_currentTextProvider))
+	{
+	case AITextProvider::Claude:
+		models = &ClaudeTextService::models();
+		break;
+	case AITextProvider::OpenAI:
+		models = &OpenAITextService::models();
+		break;
+	case AITextProvider::Gemini:
+		models = &GeminiTextService::models();
+		break;
+	}
+	if (!models || index < 0 || index >= models->size())
+	{
+		textModelHintLabel->clear();
+		return;
+	}
+	textModelHintLabel->setText(QStringLiteral("<qt><i>%1</i></qt>")
+	                            .arg(models->at(index).hint.toHtmlEscaped()));
+}
+
+void Prefs_AIServices::textShowKeyToggled(bool on)
+{
+	textApiKeyLineEdit->setEchoMode(on ? QLineEdit::Normal : QLineEdit::Password);
+}
+
+void Prefs_AIServices::textSameKeyToggled(bool on)
+{
+	// Greyed rather than hidden: the user should be able to see that a key is
+	// in use and where it is coming from, without being able to edit a copy of
+	// it that would then be ignored.
+	textApiKeyLineEdit->setEnabled(!on);
+	textShowKeyCheckBox->setEnabled(!on);
+	if (on)
+		textApiKeyLineEdit->setText(apiKeyLineEdit->text().isEmpty()
+		                            ? QString() : geminiApiKeyLineEdit->text());
+}
+
+void Prefs_AIServices::testTextClicked()
+{
+	// What is in the boxes, not what was saved: the reason to press this is to
+	// find out whether the key that was just pasted works.
+	const bool sameKey = textSameKeyCheckBox->isVisible() && textSameKeyCheckBox->isChecked();
+	const QString key = sameKey ? geminiApiKeyLineEdit->text().trimmed()
+	                            : textApiKeyLineEdit->text().trimmed();
+	if (key.isEmpty())
+	{
+		textTestResultLabel->setText(QStringLiteral("<qt><b style=\"color:#b00020;\">%1</b></qt>")
+		                             .arg(tr("\u2717 Enter an API key first.")));
+		return;
+	}
+
+	const QString model = textModelComboBox->currentData().toString();
+	const int timeout = textTimeoutSpinBox->value();
+
+	// Rebuilt rather than reconfigured: switching provider changes the class,
+	// not just the credentials.
+	delete m_textService;
+	switch (static_cast<AITextProvider>(m_currentTextProvider))
+	{
+	case AITextProvider::Claude:
+		m_textService = new ClaudeTextService(key, model, timeout, this);
+		break;
+	case AITextProvider::OpenAI:
+		m_textService = new OpenAITextService(key, model, timeout, this);
+		break;
+	case AITextProvider::Gemini:
+		m_textService = new GeminiTextService(key, model, timeout, this);
+		break;
+	}
+	connect(m_textService, &AITextService::connectionTested, this, &Prefs_AIServices::textTested);
+
+	textTestButton->setEnabled(false);
+	// Not "Testing <key> ...". The key does not go on the screen.
+	textTestResultLabel->setText(QStringLiteral("<qt><b style=\"color:#666666;\">%1</b></qt>")
+	                             .arg(tr("Checking the key ...")));
+	m_textService->testConnection();
+}
+
+void Prefs_AIServices::textTested(bool ok, const QString& detail)
+{
+	textTestButton->setEnabled(true);
+	textTestResultLabel->setText(QStringLiteral("<qt><b style=\"color:%1;\">%2 %3</b></qt>")
+	                             .arg(ok ? QStringLiteral("#1b7f2a") : QStringLiteral("#b00020"),
+	                                  ok ? QStringLiteral("\u2713") : QStringLiteral("\u2717"),
+	                                  detail.toHtmlEscaped()));
 }

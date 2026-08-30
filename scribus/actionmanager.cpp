@@ -526,6 +526,22 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemDetectContour";
 	scrActions->insert(name, new ScrAction(QString(), QString(), "", defaultKey(name), mainWindow));
+	/* AI Text Tools. One action per task, each carrying its task name as
+	   integer data so that a single slot can dispatch on it rather than there
+	   being six near-identical slots. The order here is the order in the menu:
+	   the two that work on a picture first, then the four that work on words. */
+	name = "itemAITextCaption";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 0));
+	name = "itemAITextAltText";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 1));
+	name = "itemAITextHeadline";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 2));
+	name = "itemAITextSummarize";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 3));
+	name = "itemAITextTranslate";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 4));
+	name = "itemAITextImprove";
+	scrActions->insert(name, new ScrAction(ScrAction::DataInt, QString(), QString(), "", defaultKey(name), mainWindow, 5));
 	(*scrActions)["itemShapeEdit"]->setToggleAction(true);
 	(*scrActions)["itemShapeEdit"]->setChecked(false);
 	name = "itemAttachTextToPath";
@@ -583,6 +599,13 @@ void ActionManager::initItemMenuActions()
 	connect( (*scrActions)["itemsAutoArrange"], SIGNAL(triggered()), mainWindow, SLOT(slotAutoArrangeFrames()) );
 	connect( (*scrActions)["itemShapeEdit"], SIGNAL(triggered()), mainWindow, SLOT(toggleNodeEdit()) );
 	connect( (*scrActions)["itemDetectContour"], SIGNAL(triggered()), mainWindow, SLOT(slotDetectContourFromImage()) );
+	// All six go to one slot, which reads the action's data to learn the task.
+	connect( (*scrActions)["itemAITextCaption"],   SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
+	connect( (*scrActions)["itemAITextAltText"],   SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
+	connect( (*scrActions)["itemAITextHeadline"],  SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
+	connect( (*scrActions)["itemAITextSummarize"], SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
+	connect( (*scrActions)["itemAITextTranslate"], SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
+	connect( (*scrActions)["itemAITextImprove"],   SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
 	connect( (*scrActions)["itemImageInfo"], SIGNAL(triggered()), mainWindow, SLOT(getImageInfo()) );
 	connect( (*scrActions)["itemToggleInlineImage"], SIGNAL(triggered()), mainWindow, SLOT(toogleInlineState()) );
 }
@@ -1798,6 +1821,12 @@ void ActionManager::languageChange()
 	(*scrActions)["itemPDFFieldProps"]->setTexts( tr("Field P&roperties..."));
 	(*scrActions)["itemShapeEdit"]->setTexts( tr("&Edit Shape..."));
 	(*scrActions)["itemDetectContour"]->setTexts( tr("Detect Contour from &Image"));
+	(*scrActions)["itemAITextCaption"]->setTexts( tr("Generate &Caption"));
+	(*scrActions)["itemAITextAltText"]->setTexts( tr("Generate &Alt Text"));
+	(*scrActions)["itemAITextHeadline"]->setTexts( tr("Suggest &Headlines"));
+	(*scrActions)["itemAITextSummarize"]->setTexts( tr("&Summarize Article"));
+	(*scrActions)["itemAITextTranslate"]->setTexts( tr("&Translate..."));
+	(*scrActions)["itemAITextImprove"]->setTexts( tr("&Improve Text"));
 	(*scrActions)["itemAttachTextToPath"]->setTexts( tr("&Attach Text to Path"));
 	(*scrActions)["itemDetachTextFromPath"]->setTexts( tr("&Detach Text from Path"));
 	(*scrActions)["itemCombinePolygons"]->setTexts( tr("&Combine Polygons"));

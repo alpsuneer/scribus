@@ -641,6 +641,20 @@ void PrefsManager::initDefaults()
 	// Google's id, not OpenRouter's: no vendor prefix and no "-preview".
 	appPrefs.aiServicePrefs.geminiModel = "gemini-3.1-flash-image";
 	appPrefs.aiServicePrefs.geminiTimeoutSeconds = 60;
+	// Text AI. Gemini by default because it is the only one of the three that
+	// UPI can pay for, so it is the only one usable here without an
+	// international card.
+	appPrefs.aiServicePrefs.textProvider = 0;
+	appPrefs.aiServicePrefs.claudeApiKey.clear();
+	appPrefs.aiServicePrefs.claudeModel = "claude-sonnet-5";
+	appPrefs.aiServicePrefs.claudeTimeoutSeconds = 60;
+	appPrefs.aiServicePrefs.openAITextApiKey.clear();
+	appPrefs.aiServicePrefs.openAITextModel = "gpt-5.6-terra";
+	appPrefs.aiServicePrefs.openAITextTimeoutSeconds = 60;
+	appPrefs.aiServicePrefs.geminiTextApiKey.clear();
+	appPrefs.aiServicePrefs.geminiTextModel = "gemini-3.7-flash";
+	appPrefs.aiServicePrefs.geminiTextTimeoutSeconds = 60;
+	appPrefs.aiServicePrefs.geminiTextUsesImageKey = true;
 
 	appPrefs.imageCachePrefs.cacheEnabled = false;
 	appPrefs.imageCachePrefs.maxCacheSizeMiB = 1000;
@@ -2051,6 +2065,22 @@ bool PrefsManager::writePref(const QString& filePath)
 	                    QString::fromLatin1(appPrefs.aiServicePrefs.geminiApiKey.toUtf8().toBase64()));
 	aiElem.setAttribute("GeminiModel", appPrefs.aiServicePrefs.geminiModel);
 	aiElem.setAttribute("GeminiTimeoutSeconds", appPrefs.aiServicePrefs.geminiTimeoutSeconds);
+	// Text AI. The three keys use the same base64 obfuscation, and carry the
+	// same caveat, as the image keys above.
+	aiElem.setAttribute("TextProvider", appPrefs.aiServicePrefs.textProvider);
+	aiElem.setAttribute("ClaudeApiKey",
+	                    QString::fromLatin1(appPrefs.aiServicePrefs.claudeApiKey.toUtf8().toBase64()));
+	aiElem.setAttribute("ClaudeModel", appPrefs.aiServicePrefs.claudeModel);
+	aiElem.setAttribute("ClaudeTimeoutSeconds", appPrefs.aiServicePrefs.claudeTimeoutSeconds);
+	aiElem.setAttribute("OpenAITextApiKey",
+	                    QString::fromLatin1(appPrefs.aiServicePrefs.openAITextApiKey.toUtf8().toBase64()));
+	aiElem.setAttribute("OpenAITextModel", appPrefs.aiServicePrefs.openAITextModel);
+	aiElem.setAttribute("OpenAITextTimeoutSeconds", appPrefs.aiServicePrefs.openAITextTimeoutSeconds);
+	aiElem.setAttribute("GeminiTextApiKey",
+	                    QString::fromLatin1(appPrefs.aiServicePrefs.geminiTextApiKey.toUtf8().toBase64()));
+	aiElem.setAttribute("GeminiTextModel", appPrefs.aiServicePrefs.geminiTextModel);
+	aiElem.setAttribute("GeminiTextTimeoutSeconds", appPrefs.aiServicePrefs.geminiTextTimeoutSeconds);
+	aiElem.setAttribute("GeminiTextUsesImageKey", appPrefs.aiServicePrefs.geminiTextUsesImageKey ? 1 : 0);
 	elem.appendChild(aiElem);
 	// image cache
 	QDomElement icElem = docu.createElement("ImageCache");
@@ -2956,6 +2986,30 @@ bool PrefsManager::readPref(const QString& filePath)
 				dc.attribute("GeminiModel", "gemini-3.1-flash-image");
 			appPrefs.aiServicePrefs.geminiTimeoutSeconds =
 				dc.attribute("GeminiTimeoutSeconds", "60").toInt();
+			// A profile written before text AI existed has none of these
+			// attributes and gets the defaults, not empty models that would
+			// select nothing in the dropdowns.
+			appPrefs.aiServicePrefs.textProvider = dc.attribute("TextProvider", "0").toInt();
+			appPrefs.aiServicePrefs.claudeApiKey = QString::fromUtf8(
+				QByteArray::fromBase64(dc.attribute("ClaudeApiKey", "").toLatin1()));
+			appPrefs.aiServicePrefs.claudeModel =
+				dc.attribute("ClaudeModel", "claude-sonnet-5");
+			appPrefs.aiServicePrefs.claudeTimeoutSeconds =
+				dc.attribute("ClaudeTimeoutSeconds", "60").toInt();
+			appPrefs.aiServicePrefs.openAITextApiKey = QString::fromUtf8(
+				QByteArray::fromBase64(dc.attribute("OpenAITextApiKey", "").toLatin1()));
+			appPrefs.aiServicePrefs.openAITextModel =
+				dc.attribute("OpenAITextModel", "gpt-5.6-terra");
+			appPrefs.aiServicePrefs.openAITextTimeoutSeconds =
+				dc.attribute("OpenAITextTimeoutSeconds", "60").toInt();
+			appPrefs.aiServicePrefs.geminiTextApiKey = QString::fromUtf8(
+				QByteArray::fromBase64(dc.attribute("GeminiTextApiKey", "").toLatin1()));
+			appPrefs.aiServicePrefs.geminiTextModel =
+				dc.attribute("GeminiTextModel", "gemini-3.7-flash");
+			appPrefs.aiServicePrefs.geminiTextTimeoutSeconds =
+				dc.attribute("GeminiTextTimeoutSeconds", "60").toInt();
+			appPrefs.aiServicePrefs.geminiTextUsesImageKey =
+				static_cast<bool>(dc.attribute("GeminiTextUsesImageKey", "1").toInt());
 		}
 		// cache manager
 		if (dc.tagName() == "ImageCache")
