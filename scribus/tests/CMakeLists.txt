@@ -84,3 +84,15 @@ set(OPENROUTERINPAINTSERVICETESTS_SOURCES
 add_executable(openrouterinpaintservicetests ${OPENROUTERINPAINTSERVICETESTS_SOURCES})
 target_link_libraries(openrouterinpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
 add_test(NAME openrouterinpaintservicetests COMMAND openrouterinpaintservicetests)
+
+# Unit tests for the Google Gemini inpainting client.
+# Runs against a mock server in-process. Nothing here contacts
+# generativelanguage.googleapis.com, for the same reasons as above.
+set(GEMINIINPAINTSERVICETESTS_SOURCES
+	geminiinpaintservicetests.cpp
+	../ai/aiinpaintservice.cpp
+	../ai/geminiinpaintservice.cpp
+)
+add_executable(geminiinpaintservicetests ${GEMINIINPAINTSERVICETESTS_SOURCES})
+target_link_libraries(geminiinpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME geminiinpaintservicetests COMMAND geminiinpaintservicetests)

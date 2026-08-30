@@ -26,3 +26,20 @@ bool AIInpaintService::isCancelled(const QString& error)
 {
 	return error == cancelledMarker();
 }
+
+QString AIInpaintService::refusalMarker()
+{
+	// Not translated and not printable: a token compared against, never
+	// something for a user to read. Stripped before the text is shown.
+	return QStringLiteral("__scribus_ai_refused__");
+}
+
+bool AIInpaintService::isRefusal(const QString& error)
+{
+	return error.startsWith(refusalMarker());
+}
+
+QString AIInpaintService::strippedRefusal(const QString& error)
+{
+	return isRefusal(error) ? error.mid(refusalMarker().size()) : error;
+}

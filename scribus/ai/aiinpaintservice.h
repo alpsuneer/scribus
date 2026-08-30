@@ -72,6 +72,23 @@ public:
 	//! True when \a error is the cancel marker rather than a real failure.
 	static bool isCancelled(const QString& error);
 
+	/*! \brief Marker prefix on an inpaintFailed() message that was the model
+	    declining the job rather than anything breaking.
+
+	    The caller shows a refusal differently from a failure - it is worth
+	    suggesting another model, and worth not implying Scribus went wrong -
+	    so the two have to be distinguishable without matching on prose.
+
+	    Common to every service that asks a model rather than an algorithm: a
+	    refusal from Gemini is the same kind of answer as a refusal through
+	    OpenRouter, and a caller should not have to ask which one it was
+	    talking to before it can tell. */
+	static QString refusalMarker();
+	//! True when \a error carries refusalMarker(). \a error keeps its text.
+	static bool isRefusal(const QString& error);
+	//! \a error with the marker taken off, ready to show someone.
+	static QString strippedRefusal(const QString& error);
+
 signals:
 	void inpaintFinished(const QImage& result);
 	void inpaintFailed(const QString& error);

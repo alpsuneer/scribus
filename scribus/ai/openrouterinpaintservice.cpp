@@ -6,6 +6,7 @@ for which a new license (GPL+exception) is in place.
 */
 #include "ai/openrouterinpaintservice.h"
 
+#include "ai/aiinpaintcomposite.h"
 #include "ai/aiinpaintprompts.h"
 
 #include <QBuffer>
@@ -32,15 +33,6 @@ namespace
 	const QLatin1String RefererHeader("https://scribus.net");
 	const QLatin1String TitleHeader("Scribus");
 
-	//! Alpha-blended over the area to be removed. Bright, saturated and quite
-	//! opaque on purpose: the model has to see it as a deliberate marking and
-	//! not as something that was in the photograph.
-	const int MaskR = 255, MaskG = 30, MaskB = 30, MaskA = 220;
-
-	//! Quality 92 is where JPEG stops adding visible artefacts around a hard
-	//! edge like the mask boundary, without the size of a lossless encode.
-	const int JpegQuality = 92;
-
 	/*! \brief How long to keep collecting an error body once the response head
 	    has already shown an error status.
 
@@ -51,57 +43,11 @@ namespace
 	    not going to arrive. */
 	const int ErrorBodyGraceMs = 1200;
 
-	/*! \brief Paint the mask onto the picture in red.
-
-	    \param image the region being repaired.
-	    \param mask 8-bit, non-zero where pixels are to be regenerated - the
-	           same sense the built-in kernel and the LaMa client use. */
-	QImage compositeMaskOverlay(const QImage& image, const QImage& mask)
-	{
-		QImage out = image.convertToFormat(QImage::Format_RGB32);
-		if (out.isNull() || mask.isNull())
-			return QImage();
-
-		QImage grey = mask;
-		if (grey.format() != QImage::Format_Grayscale8)
-			grey = grey.convertToFormat(QImage::Format_Grayscale8);
-		if (grey.isNull() || grey.size() != out.size())
-			return QImage();
-
-		for (int y = 0; y < out.height(); ++y)
-		{
-			QRgb* line = reinterpret_cast<QRgb*>(out.scanLine(y));
-			const uchar* m = grey.constScanLine(y);
-			for (int x = 0; x < out.width(); ++x)
-			{
-				if (!m[x])
-					continue;
-				const QRgb px = line[x];
-				// Straight source-over with a constant alpha. Integer maths
-				// with a rounding term, because this runs over every masked
-				// pixel of a picture up to 2048 on its long edge.
-				const int r = (qRed(px)   * (255 - MaskA) + MaskR * MaskA + 127) / 255;
-				const int g = (qGreen(px) * (255 - MaskA) + MaskG * MaskA + 127) / 255;
-				const int b = (qBlue(px)  * (255 - MaskA) + MaskB * MaskA + 127) / 255;
-				line[x] = qRgb(r, g, b);
-			}
-		}
-		return out;
-	}
-
-	//! JPEG-encode for the wire, as a complete data: URL ready to go in the
-	//! request. Empty on failure.
+	//! JPEG-encode the composited picture as a complete data: URL, ready to go
+	//! straight into the request. Empty on failure.
 	QString toDataUrl(const QImage& image)
 	{
-		if (image.isNull())
-			return QString();
-		QByteArray jpeg;
-		QBuffer buffer(&jpeg);
-		if (!buffer.open(QIODevice::WriteOnly))
-			return QString();
-		if (!image.save(&buffer, "JPEG", JpegQuality))
-			return QString();
-		buffer.close();
+		const QByteArray jpeg = AIInpaintComposite::toJpeg(image);
 		if (jpeg.isEmpty())
 			return QString();
 		return QLatin1String("data:image/jpeg;base64,") + QString::fromLatin1(jpeg.toBase64());
@@ -230,7 +176,7 @@ public slots:
 		if (!beginRequest(false))
 			return;
 
-		const QImage marked = compositeMaskOverlay(image, mask);
+		const QImage marked = AIInpaintComposite::maskOverlay(image, mask);
 		const QString dataUrl = toDataUrl(marked);
 		if (dataUrl.isEmpty())
 		{
@@ -755,21 +701,22 @@ QString OpenRouterInpaintService::fileTagFor(const QString& modelId)
 	return tag;
 }
 
+// The three below now live on AIInpaintService, a refusal being the same kind
+// of answer whichever model gave it. They stay here as forwards so that every
+// existing caller keeps compiling.
 QString OpenRouterInpaintService::refusalMarker()
 {
-	// Not translated and not printable: a token compared against, never
-	// something for a user to read. Stripped before the text is shown.
-	return QStringLiteral("__scribus_ai_refused__");
+	return AIInpaintService::refusalMarker();
 }
 
 bool OpenRouterInpaintService::isRefusal(const QString& error)
 {
-	return error.startsWith(refusalMarker());
+	return AIInpaintService::isRefusal(error);
 }
 
 QString OpenRouterInpaintService::strippedRefusal(const QString& error)
 {
-	return isRefusal(error) ? error.mid(refusalMarker().size()) : error;
+	return AIInpaintService::strippedRefusal(error);
 }
 
 OpenRouterInpaintService::OpenRouterInpaintService(const QString& apiKey,
