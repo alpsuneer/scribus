@@ -637,6 +637,10 @@ void PrefsManager::initDefaults()
 	appPrefs.aiServicePrefs.openRouterApiKey.clear();
 	appPrefs.aiServicePrefs.openRouterModel = "google/gemini-3.1-flash-image-preview";
 	appPrefs.aiServicePrefs.openRouterTimeoutSeconds = 60;
+	appPrefs.aiServicePrefs.geminiApiKey.clear();
+	// Google's id, not OpenRouter's: no vendor prefix and no "-preview".
+	appPrefs.aiServicePrefs.geminiModel = "gemini-3.1-flash-image";
+	appPrefs.aiServicePrefs.geminiTimeoutSeconds = 60;
 
 	appPrefs.imageCachePrefs.cacheEnabled = false;
 	appPrefs.imageCachePrefs.maxCacheSizeMiB = 1000;
@@ -2042,6 +2046,11 @@ bool PrefsManager::writePref(const QString& filePath)
 	                    QString::fromLatin1(appPrefs.aiServicePrefs.openRouterApiKey.toUtf8().toBase64()));
 	aiElem.setAttribute("OpenRouterModel", appPrefs.aiServicePrefs.openRouterModel);
 	aiElem.setAttribute("OpenRouterTimeoutSeconds", appPrefs.aiServicePrefs.openRouterTimeoutSeconds);
+	// Same encoding and the same caveat as the OpenRouter key above.
+	aiElem.setAttribute("GeminiApiKey",
+	                    QString::fromLatin1(appPrefs.aiServicePrefs.geminiApiKey.toUtf8().toBase64()));
+	aiElem.setAttribute("GeminiModel", appPrefs.aiServicePrefs.geminiModel);
+	aiElem.setAttribute("GeminiTimeoutSeconds", appPrefs.aiServicePrefs.geminiTimeoutSeconds);
 	elem.appendChild(aiElem);
 	// image cache
 	QDomElement icElem = docu.createElement("ImageCache");
@@ -2939,6 +2948,14 @@ bool PrefsManager::readPref(const QString& filePath)
 				dc.attribute("OpenRouterModel", "google/gemini-3.1-flash-image-preview");
 			appPrefs.aiServicePrefs.openRouterTimeoutSeconds =
 				dc.attribute("OpenRouterTimeoutSeconds", "60").toInt();
+			appPrefs.aiServicePrefs.geminiApiKey = QString::fromUtf8(
+				QByteArray::fromBase64(dc.attribute("GeminiApiKey", "").toLatin1()));
+			// A profile written before Gemini existed has no attribute here and
+			// gets the default model, not an empty one that selects nothing.
+			appPrefs.aiServicePrefs.geminiModel =
+				dc.attribute("GeminiModel", "gemini-3.1-flash-image");
+			appPrefs.aiServicePrefs.geminiTimeoutSeconds =
+				dc.attribute("GeminiTimeoutSeconds", "60").toInt();
 		}
 		// cache manager
 		if (dc.tagName() == "ImageCache")

@@ -271,7 +271,13 @@ private:
 	//! Captured when the run starts, because Preferences can be changed while
 	//! it is in the air and the undo entry must name what actually ran.
 	QString m_runAiDescription;
-	bool m_runAiIsOpenRouter {false};
+	//! What the service itself is called for the run in flight, e.g. "Gemini".
+	//! Empty for the local provider. Captured at the same moment and for the
+	//! same reason as the description above.
+	QString m_runAiLabel;
+	//! Whether that provider sends the picture off this machine, which is what
+	//! changes both how long to expect to wait and whether it costs anything.
+	bool m_runAiIsCloud {false};
 	//! Only the neighbourhood of the mask is sent, and only the masked pixels
 	//! of what comes back are kept, so everything else stays bit-identical
 	//! even though the region made a round trip through a scaler.

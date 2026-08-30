@@ -193,6 +193,7 @@ if(HAVE_OSG)
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp
 		ai/aiinpaintservicefactory.cpp
+		ai/geminiinpaintservice.cpp
 		ai/lamainpaintservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp
@@ -261,6 +262,7 @@ else()
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp
 		ai/aiinpaintservicefactory.cpp
+		ai/geminiinpaintservice.cpp
 		ai/lamainpaintservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp

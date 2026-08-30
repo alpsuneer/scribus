@@ -1103,7 +1103,8 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 	// can be changed while this is in flight, and the undo entry has to name
 	// what actually did the work.
 	m_runAiDescription = AIInpaintServiceFactory::providerDescription(aiPrefs);
-	m_runAiIsOpenRouter = (AIInpaintServiceFactory::providerOf(aiPrefs) == AIProvider::OpenRouter);
+	m_runAiLabel = AIInpaintServiceFactory::providerLabel(aiPrefs);
+	m_runAiIsCloud = AIInpaintServiceFactory::providerIsCloud(aiPrefs);
 	m_runRoi = roi;
 	m_runFullImage = source;
 	m_runFullMask = binary;
@@ -1111,14 +1112,18 @@ void CanvasMode_RemovalMask::applyRemovalAI()
 	notifyOptionsBar();
 
 	m_progress = new InpaintProgressDialog(m_ScMW);
-	// Naming the model is worth the words here: on the OpenRouter path this is
+	// Naming the model is worth the words here: on either cloud path this is
 	// the moment money starts being spent, and which model is spending it is
-	// exactly what the user wants confirmed.
-	m_progress->setMessage(tr("Inpainting with %1 ...").arg(m_runAiDescription));
+	// exactly what the user wants confirmed. The service is named too, because
+	// the same model can be reached through both of them at different prices.
+	m_progress->setMessage(m_runAiLabel.isEmpty()
+	                       ? tr("Inpainting with %1 ...").arg(m_runAiDescription)
+	                       : tr("Inpainting with %1 (%2) ...")
+	                         .arg(m_runAiDescription, m_runAiLabel));
 	// Neither provider reports progress, so an honest bar is one that says
 	// only that something is happening.
 	m_progress->setIndeterminate(true);
-	m_progress->setHint(10, m_runAiIsOpenRouter
+	m_progress->setHint(10, m_runAiIsCloud
 	                        ? tr("Cloud models usually take 5-20 seconds.")
 	                        : tr("CPU inpainting can take 30-60 seconds."));
 	connect(m_progress, &InpaintProgressDialog::cancelled, this, &CanvasMode_RemovalMask::inpaintCancelled);
@@ -1179,12 +1184,13 @@ void CanvasMode_RemovalMask::aiInpaintFinished(const QImage& result)
 
 	m_runFullImage = QImage();
 	m_runFullMask = QImage();
-	// e.g. "Remove Object (OpenRouter: Nano Banana 2)". A document worked on
-	// over an afternoon can carry removals done by several different models,
-	// and the undo history is the only place that record survives.
-	const QString undoName = m_runAiIsOpenRouter
-		? tr("Remove Object (OpenRouter: %1)").arg(m_runAiDescription)
-		: Um::RemoveObjectAI;
+	// e.g. "Remove Object (Gemini: Nano Banana 2)". A document worked on over
+	// an afternoon can carry removals done by several different models through
+	// more than one service, and the undo history is the only place that
+	// record survives.
+	const QString undoName = m_runAiLabel.isEmpty()
+		? Um::RemoveObjectAI
+		: tr("Remove Object (%1: %2)").arg(m_runAiLabel, m_runAiDescription);
 	deliverResult(composed, undoName);
 }
 

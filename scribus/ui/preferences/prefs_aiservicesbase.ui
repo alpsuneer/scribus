@@ -274,6 +274,124 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="geminiGroupBox">
+     <property name="title">
+      <string>Google Gemini (direct)</string>
+     </property>
+     <layout class="QGridLayout" name="geminiLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="geminiApiKeyLabel">
+        <property name="text">
+         <string>API &amp;key:</string>
+        </property>
+        <property name="buddy">
+         <cstring>geminiApiKeyLineEdit</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="geminiApiKeyLineEdit">
+        <property name="echoMode">
+         <enum>QLineEdit::Password</enum>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QCheckBox" name="geminiShowKeyCheckBox">
+        <property name="text">
+         <string>&amp;Show</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="geminiModelLabel">
+        <property name="text">
+         <string>&amp;Model:</string>
+        </property>
+        <property name="buddy">
+         <cstring>geminiModelComboBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1" colspan="2">
+       <widget class="QComboBox" name="geminiModelComboBox"/>
+      </item>
+      <item row="2" column="1" colspan="2">
+       <widget class="QLabel" name="geminiModelHintLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="geminiTimeoutLabel">
+        <property name="text">
+         <string>Request t&amp;imeout:</string>
+        </property>
+        <property name="buddy">
+         <cstring>geminiTimeoutSpinBox</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1" colspan="2">
+       <widget class="QSpinBox" name="geminiTimeoutSpinBox">
+        <property name="minimum">
+         <number>10</number>
+        </property>
+        <property name="maximum">
+         <number>300</number>
+        </property>
+        <property name="value">
+         <number>60</number>
+        </property>
+        <property name="suffix">
+         <string> s</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QPushButton" name="geminiTestButton">
+        <property name="text">
+         <string>Test &amp;Connection</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1" colspan="2">
+       <widget class="QLabel" name="geminiTestResultLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextSelectableByMouse</set>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="3">
+       <widget class="QLabel" name="geminiInfoLabel">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="openExternalLinks">
+         <bool>true</bool>
+        </property>
+        <property name="textInteractionFlags">
+         <set>Qt::TextBrowserInteraction</set>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="infoLabel">
      <property name="text">
       <string/>

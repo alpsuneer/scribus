@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QCoreApplication>
 
+#include "ai/geminiinpaintservice.h"
 #include "ai/lamainpaintservice.h"
 #include "ai/openrouterinpaintservice.h"
 #include "prefsstructs.h"
@@ -24,10 +25,17 @@ namespace
 AIProvider AIInpaintServiceFactory::providerOf(const AIServicePrefs& prefs)
 {
 	// Anything unrecognised - a profile written by a later version, say -
-	// falls back to the local one rather than to the one that costs money.
-	return prefs.provider == static_cast<int>(AIProvider::OpenRouter)
-	     ? AIProvider::OpenRouter
-	     : AIProvider::LaMa;
+	// falls back to the local one rather than to one that costs money.
+	switch (prefs.provider)
+	{
+	case static_cast<int>(AIProvider::OpenRouter):
+		return AIProvider::OpenRouter;
+	case static_cast<int>(AIProvider::Gemini):
+		return AIProvider::Gemini;
+	default:
+		break;
+	}
+	return AIProvider::LaMa;
 }
 
 QString AIInpaintServiceFactory::blockedReason(const AIServicePrefs& prefs)
@@ -42,6 +50,12 @@ QString AIInpaintServiceFactory::blockedReason(const AIServicePrefs& prefs)
 			return translate("Enter an OpenRouter API key in Preferences > AI Services");
 		if (prefs.openRouterModel.trimmed().isEmpty())
 			return translate("Pick an OpenRouter model in Preferences > AI Services");
+		return QString();
+	case AIProvider::Gemini:
+		if (prefs.geminiApiKey.trimmed().isEmpty())
+			return translate("Enter a Gemini API key in Preferences > AI Services");
+		if (prefs.geminiModel.trimmed().isEmpty())
+			return translate("Pick a Gemini model in Preferences > AI Services");
 		return QString();
 	case AIProvider::LaMa:
 		break;
@@ -65,6 +79,11 @@ std::unique_ptr<AIInpaintService> AIInpaintServiceFactory::create(const AIServic
 		return std::make_unique<OpenRouterInpaintService>(prefs.openRouterApiKey.trimmed(),
 		                                                  prefs.openRouterModel.trimmed(),
 		                                                  prefs.openRouterTimeoutSeconds);
+	case AIProvider::Gemini:
+		// No apiBase argument here either, and for the same reason.
+		return std::make_unique<GeminiInpaintService>(prefs.geminiApiKey.trimmed(),
+		                                              prefs.geminiModel.trimmed(),
+		                                              prefs.geminiTimeoutSeconds);
 	case AIProvider::LaMa:
 		break;
 	}
@@ -82,6 +101,10 @@ QString AIInpaintServiceFactory::providerTag(const AIServicePrefs& prefs)
 		// filenames alone.
 		return QStringLiteral("openrouter_")
 		     + OpenRouterInpaintService::fileTagFor(prefs.openRouterModel.trimmed());
+	case AIProvider::Gemini:
+		// e.g. "gemini_gemini_3.1_flash_image".
+		return QStringLiteral("gemini_")
+		     + GeminiInpaintService::fileTagFor(prefs.geminiModel.trimmed());
 	case AIProvider::LaMa:
 		break;
 	}
@@ -94,8 +117,37 @@ QString AIInpaintServiceFactory::providerDescription(const AIServicePrefs& prefs
 	{
 	case AIProvider::OpenRouter:
 		return OpenRouterInpaintService::displayNameFor(prefs.openRouterModel.trimmed());
+	case AIProvider::Gemini:
+		return GeminiInpaintService::displayNameFor(prefs.geminiModel.trimmed());
 	case AIProvider::LaMa:
 		break;
 	}
 	return translate("LaMa");
+}
+
+QString AIInpaintServiceFactory::providerLabel(const AIServicePrefs& prefs)
+{
+	switch (providerOf(prefs))
+	{
+	case AIProvider::OpenRouter:
+		return translate("OpenRouter");
+	case AIProvider::Gemini:
+		return translate("Gemini");
+	case AIProvider::LaMa:
+		break;
+	}
+	return QString();
+}
+
+bool AIInpaintServiceFactory::providerIsCloud(const AIServicePrefs& prefs)
+{
+	switch (providerOf(prefs))
+	{
+	case AIProvider::OpenRouter:
+	case AIProvider::Gemini:
+		return true;
+	case AIProvider::LaMa:
+		break;
+	}
+	return false;
 }

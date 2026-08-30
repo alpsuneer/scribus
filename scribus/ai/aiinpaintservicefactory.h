@@ -22,7 +22,8 @@ struct AIServicePrefs;
 enum class AIProvider
 {
 	LaMa = 0,        //!< A local IOPaint server. Free, private, no account.
-	OpenRouter = 1   //!< A paid cloud API. Costs money, sends the picture out.
+	OpenRouter = 1,  //!< A paid cloud API. Costs money, sends the picture out.
+	Gemini = 2       //!< Google directly. Costs money, and can be paid by UPI.
 };
 
 /*!
@@ -58,6 +59,19 @@ namespace AIInpaintServiceFactory
 
 	//! What the user should be told is doing the work, e.g. "Nano Banana 2".
 	SCRIBUS_API QString providerDescription(const AIServicePrefs& prefs);
+
+	/*! \brief What to call the service itself, e.g. "OpenRouter" or "Gemini".
+
+	    Separate from providerDescription(), which names the model. Both appear
+	    together - "Remove Object (Gemini: Nano Banana 2)" - because the same
+	    model can be reached through either service and the undo history is the
+	    only place that record survives. Empty for the local provider, which
+	    has nothing worth naming twice. */
+	SCRIBUS_API QString providerLabel(const AIServicePrefs& prefs);
+
+	/*! \brief Whether the configured provider sends the picture off this
+	    machine, which is what changes both the wait and the bill. */
+	SCRIBUS_API bool providerIsCloud(const AIServicePrefs& prefs);
 }
 
 #endif

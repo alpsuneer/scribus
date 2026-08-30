@@ -12,6 +12,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefs_pane.h"
 #include "scribusapi.h"
 
+class GeminiInpaintService;
 class LamaInpaintService;
 class OpenRouterInpaintService;
 class ScribusDoc;
@@ -24,11 +25,17 @@ class ScribusDoc;
  turned on, because this is the only part of Scribus that sends a picture
  anywhere and it should be the user who decides that rather than a default.
 
- The two providers are not equivalent and the page does not pretend they are.
+ The three providers are not equivalent and the page does not pretend they are.
  LaMa is a server on this machine: free, private, and nothing leaves. OpenRouter
- is a paid account on the internet, and the picture goes to it and on to a model
- vendor. Only one provider's settings are shown at a time, and the OpenRouter
- side says plainly what it costs and where the picture goes.
+ and Gemini are paid accounts on the internet, and the picture goes to them and
+ on to a model vendor. Only one provider's settings are shown at a time, and
+ both cloud sides say plainly what they cost and where the picture goes.
+
+ Gemini exists on this page for a reason that is not technical: OpenRouter
+ takes cards, Google AI Studio takes UPI and bills in rupees, and that is the
+ difference between a feature this office can pay for and one it cannot. The
+ note under it says so, because a user choosing between two services that run
+ the same models deserves to know that is the actual distinction.
 
  Test Connection deliberately tests what is *typed in the boxes*, not what is
  saved: the reason to press it is to find out whether what was just entered is
@@ -64,14 +71,22 @@ class SCRIBUS_API Prefs_AIServices : public Prefs_Pane, Ui::Prefs_AIServices
 		void testOpenRouterClicked();
 		void openRouterTested(bool ok, const QString& detail);
 
+		//! Update the one-line note under the Gemini model dropdown.
+		void geminiModelChanged(int index);
+		void geminiShowKeyToggled(bool on);
+		void testGeminiClicked();
+		void geminiTested(bool ok, const QString& detail);
+
 	private:
 		void showTestResult(const QString& text, const QString& colour);
 		void showOpenRouterResult(const QString& text, const QString& colour);
+		void showGeminiResult(const QString& text, const QString& colour);
 
 		//! Built on demand for a test and kept for the life of the page, so
 		//! that repeated presses do not each start a thread.
 		LamaInpaintService* m_service {nullptr};
 		OpenRouterInpaintService* m_openRouterService {nullptr};
+		GeminiInpaintService* m_geminiService {nullptr};
 };
 
 #endif // PREFS_AISERVICES_H

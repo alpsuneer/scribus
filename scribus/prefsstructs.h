@@ -520,6 +520,21 @@ struct AIServicePrefs
 	QString openRouterApiKey;
 	QString openRouterModel;              //!< Model id, e.g. google/gemini-3.1-flash-image-preview
 	int openRouterTimeoutSeconds {60};    //!< How long to wait for a reply
+
+	// --- Google Gemini, paid directly rather than through a reseller ---
+	/*! \brief Google AI Studio API key, held as typed.
+
+	    Written to the preferences file base64-encoded, on the same terms as
+	    the OpenRouter key above: obfuscation, not encryption. TODO: move both
+	    to the OS keyring (QtKeychain / libsecret) and keep only a handle here. */
+	QString geminiApiKey;
+	/*! \brief Model id, e.g. gemini-3.1-flash-image.
+
+	    Google's own id, with no vendor prefix. OpenRouter's id for some of the
+	    same models looks like "google/gemini-3.1-flash-image" and is not
+	    interchangeable with this one. */
+	QString geminiModel;
+	int geminiTimeoutSeconds {60};        //!< How long to wait for a reply
 };
 
 struct ExperimentalFeaturePrefs
