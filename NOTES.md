@@ -785,7 +785,7 @@ Things worth knowing before changing any of it:
   reorder `AIProvider`**, and note that anything unrecognised falls back to
   LaMa - the local one, not the one that spends money.
 
-Unit tests: `scribus/tests/openrouterinpaintservicetests.cpp`, 24 cases, all
+Unit tests: `scribus/tests/openrouterinpaintservicetests.cpp`, 32 cases, all
 against an in-process mock. Nothing in the suite contacts openrouter.ai, needs
 an account or spends money.
 
@@ -796,6 +796,104 @@ a deliberately invalid key returned `401` and surfaced as "OpenRouter rejected
 the API key...", which is also what confirms `/key` is the right path. Content
 refusals have never been seen from any model, because no real request has been
 made.
+
+#### The 402 that was reported as a 60-second timeout
+
+`28c716c`. OpenRouter answered `402` in well under a second and Scribus said
+"OpenRouter did not answer within 60 seconds".
+
+Root cause: **nothing read the response until `finished()`, and that reply
+never finished.** The head - carrying the status and the reason - had been in
+the socket the whole time. The same hole swallowed a rejection that arrives
+while the picture is still uploading: the connection breaks, the status
+attribute goes with it, and a good 402 came out as "could not reach
+OpenRouter".
+
+The fix reads the response as it arrives: `metaDataChanged` for the status the
+moment the head lands, `readyRead` to accumulate the body, and a 1.2 s window
+to pick up an error message before reporting. A status learned from the head
+survives a connection that breaks afterwards, and the timeout no longer claims
+silence when a status has already been seen.
+
+**The existing tests could not have caught this**, and neither can any test
+whose mock sends a complete response and closes - every reply then reaches
+`finished()` and every path is the happy one. `MockOpenRouter::stallAfterHead`
+sends a head plus a truncated body and keeps the connection open, which is the
+shape that reproduces it.
+
+- **401 and 407 are a Qt limitation, not ours.** They are the HTTP
+  authentication statuses and Qt withholds the *entire* response for them - no
+  `metaDataChanged`, no `readyRead`, not even `authenticationRequired` - until
+  the body is complete, in case it has to resend with credentials. A 401 whose
+  body never completes gives the client nothing to act on and can only end at
+  the timeout. Measured on Qt 6.8.2: every other status fired
+  `metaDataChanged` within 3 ms, 401 and 407 fired nothing at all.
+- **`lamainpaintservice.cpp` has the same shape** (`finished()` only, one
+  `readAll()` at the end, status from the attribute) and was deliberately left
+  alone - it talks to localhost, where a stalled body is far less likely.
+  Worth fixing if it ever misbehaves.
+
+### Google Gemini, the third provider
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| `GeminiInpaintService`, shared prompt + compositor, prefs, factory | `ce78d2c` `6fc0270` `29f9651` `63374f5` | feature/ctp-output |
+
+Exists for a payment reason, not a technical one: OpenRouter needs a card that
+works internationally, Google AI Studio takes UPI and bills in INR with GST.
+The models are largely the same Nano Banana family.
+
+- **The wire format is not the one most Gemini examples show.** Verified
+  30 Aug 2026: Google moved image generation to the **Interactions API** and
+  now labels `models/{id}:generateContent` the *Generate Content API
+  (Legacy)*. It is `POST /v1beta/interactions` with the model as a *field*,
+  and a flat `input[]` of typed parts
+  (`{"type":"image","mime_type":...,"data":...}`) rather than nested
+  `contents[].parts[].inline_data`. There is no
+  `generationConfig.responseModalities`.
+- **Model ids are the stable ones** - `gemini-3.1-flash-image`,
+  `-flash-lite-image`, `gemini-3-pro-image`. The `-preview` suffixes they
+  carried earlier in the year now 404. **OpenRouter's ids for the same models
+  are different** (`google/…`, still `-preview`); the two catalogues are not
+  interchangeable, and a test pins ours to Google's.
+- **Two things only the live API could teach us** (`63374f5`), both found with
+  curl and a deliberately invalid key:
+  - **A bad key is `400`, not `401`** - `status: INVALID_ARGUMENT`, detail
+    `reason: API_KEY_INVALID`. Keying off the number reported the commonest
+    mistake there is as an unexplained bad request. Google's `status`/`reason`
+    are now read first, the HTTP code only as a fallback.
+  - **`POST /v1beta/interactions` wraps its error envelope in a one-element
+    array**, while `GET /v1beta/models` sends it bare. The object-only parser
+    dropped every message on the endpoint that does the work.
+- Test Connection is `GET /v1beta/models`: a plain GET that runs no model, so
+  it cannot be billed, and it still distinguishes a bad key from a project
+  with no billing. The key goes in `x-goog-api-key` and never in the URL,
+  though Google's own docs show `?key=` - a URL ends up in error strings and
+  proxy logs.
+- The reply handling was built with `28c716c`'s lesson already applied rather
+  than repeating the bug.
+- Shared with OpenRouter: the prompt (`ai/aiinpaintprompts.h`) and the red
+  overlay plus JPEG encode (`ai/aiinpaintcomposite.h`). A user who switches
+  provider over a payment method must not get different removals. The refusal
+  marker moved up to `AIInpaintService`; OpenRouter's three statics remain as
+  forwards.
+- `AIProvider::Gemini = 2`. **Do not reorder `AIProvider`** - it is on the
+  preferences file format.
+
+Unit tests: `scribus/tests/geminiinpaintservicetests.cpp`, 31 cases, all
+against an in-process mock.
+
+**Verified by me**: the Preferences page on Xvfb - all three providers in the
+dropdown, the Gemini box appearing and the other two hiding, the model hint
+following the dropdown, and a full save/load round trip through
+`scribus172.rc` (`Provider="2"`, `GeminiModel="gemini-3-pro-image"`, key
+base64). The endpoint paths, the `x-goog-api-key` header and the error
+envelope, against the live API with an invalid key.
+
+**Not exercised**: no removal has been run against Gemini with a valid key, so
+no picture has made the round trip, no charge has been observed, and **the
+success-response parser has never seen a real success**. Content refusals and
+`promptFeedback.blockReason` have never been seen from the real service.
 
 #### Harness trap: `import -window <id>` can wedge the whole X server
 

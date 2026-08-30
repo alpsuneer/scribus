@@ -542,7 +542,45 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   - **ഇതുവരെ ശരിക്കുള്ള ഒരു key വെച്ച് ഒരു ചിത്രവും ചെയ്തുനോക്കിയിട്ടില്ല.**
     Key ശരിയാണോ എന്ന പരിശോധന മാത്രമേ ശരിക്കുള്ള server-ൽ നടത്തിയിട്ടുള്ളൂ
 
-### 26. Authors
+### 26. Google Gemini — UPI വഴി പണം അടയ്ക്കാവുന്ന AI (പുതിയത്)
+
+- `File › Preferences › AI Services`-ലെ **Provider** dropdown-ൽ ഇപ്പോൾ
+  **മൂന്നാമതൊരു വഴി** കൂടിയുണ്ട്:
+  **Google Gemini (direct, UPI)**
+- **എന്തിനാണ് ഇത്:** OpenRouter-ന് **വിദേശത്ത് പ്രവർത്തിക്കുന്ന card**
+  വേണം. Google AI Studio-ൽ **UPI വഴി രൂപയിൽ (GST ഉൾപ്പെടെ)** പണം
+  അടയ്ക്കാം. **Model-കൾ ഏതാണ്ട് അതേ Nano Banana തന്നെ** — മാറുന്നത്
+  ഫലമല്ല, **പണം അടയ്ക്കുന്ന വഴി മാത്രമാണ്**
+- ഉപയോഗിക്കാൻ:
+  1. <https://aistudio.google.com> -ൽ ഒരു API key ഉണ്ടാക്കുക
+     (**billing on ആക്കണം**)
+  2. Provider → **Google Gemini (direct, UPI)** തിരഞ്ഞെടുക്കുക
+  3. **API key** ഒട്ടിക്കുക. **Show** ടിക്ക് ചെയ്താൽ ശരിയായോ എന്ന്
+     നോക്കാം
+  4. **Model** തിരഞ്ഞെടുക്കുക (default: **Nano Banana 2**)
+  5. **Test Connection** അമർത്തുക. **ഇത് ഒരു പൈസയും ചെലവാക്കില്ല** —
+     key ശരിയാണോ എന്നു മാത്രം നോക്കും
+- **മൂന്ന് model:** Nano Banana 2 (സാധാരണ), 2 Lite (ഏറ്റവും വില
+  കുറഞ്ഞത്), Pro (ഏറ്റവും നല്ലത്, ഏകദേശം ഇരട്ടി വില)
+- **വില:** ഒരു തവണയ്ക്ക് ഏകദേശം **$0.05–0.15 (₹4–13)**
+- **ഏത് ചെയ്തു എന്ന് മൂന്നിടത്ത് കാണാം** (OpenRouter പോലെ തന്നെ):
+  - dialog-ൽ — *"Inpainting with Nano Banana 2 (Gemini) ..."*
+  - Undo-യിൽ — *"Remove Object (Gemini: Nano Banana 2)"*
+  - File-ന്റെ പേരിൽ — `_gemini_gemini_3.1_flash_image_...png`
+- **Key തെറ്റാണെങ്കിൽ** *"Invalid Gemini API key..."* എന്ന് കൃത്യമായി
+  പറയും. **Billing on അല്ലെങ്കിൽ** aistudio.google.com-ൽ അത് ശരിയാക്കാൻ
+  പറയും
+- **⚠️ ശ്രദ്ധിക്കുക:**
+  - **ചിത്രം Google-ന്റെ server-ലേക്ക് പോകും.** രഹസ്യമായി വെക്കേണ്ട
+    ചിത്രമാണെങ്കിൽ **LaMa ഉപയോഗിക്കുക**
+  - Key `scribus172.rc`-ൽ **base64** ആയി സൂക്ഷിക്കും — OpenRouter
+    key പോലെ തന്നെ. **ആ ഫയലിനെ key പോലെ കരുതുക**
+  - **ഒരു provider തകരാറിലായാൽ Scribus താനെ വേറൊന്നിലേക്ക് മാറില്ല.**
+    ഏത് service എന്നത് നിങ്ങളുടെ തീരുമാനം തന്നെ
+  - **ഇതുവരെ ശരിക്കുള്ള ഒരു key വെച്ച് ഒരു ചിത്രവും ചെയ്തുനോക്കിയിട്ടില്ല.**
+    Google-ന്റെ server-ൽ പരിശോധിച്ചത് **തെറ്റായ ഒരു key വെച്ച് മാത്രമാണ്**
+
+### 27. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
