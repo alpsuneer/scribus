@@ -464,6 +464,28 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["itemExtendedImageProperties"]->setEnabled(isImageFrame && currItem->imageIsAvailable && currItem->pixm.imgInfo.valid);
+	/* AI Text Tools. The two picture tasks need a frame with a picture
+	   actually loaded; the four text tasks need a text frame.
+
+	   Deliberately *not* "a text frame with text in it", which is what the
+	   feature was specified as. This runs on selection change, and typing into
+	   an already-selected frame is not one: draw a frame, type into it, and the
+	   four entries would sit greyed out until you clicked away and back. A menu
+	   that is wrong about what it can do is worse than one that is broad, so
+	   the emptiness check lives in slotAITextTask() instead, where it answers
+	   with "that frame has no text in it" and costs nothing.
+
+	   The picture and frame-type conditions have no such problem: neither can
+	   change without the selection changing too. */
+	const bool oneItem = (docSelectionCount == 1);
+	const bool aiHasPicture = oneItem && isImageFrame && currItem->imageIsAvailable;
+	const bool aiHasTextFrame = oneItem && currItem && currItem->isTextFrame();
+	(*a_scrActions)["itemAITextCaption"]->setEnabled(aiHasPicture);
+	(*a_scrActions)["itemAITextAltText"]->setEnabled(aiHasPicture);
+	(*a_scrActions)["itemAITextHeadline"]->setEnabled(aiHasTextFrame);
+	(*a_scrActions)["itemAITextSummarize"]->setEnabled(aiHasTextFrame);
+	(*a_scrActions)["itemAITextTranslate"]->setEnabled(aiHasTextFrame);
+	(*a_scrActions)["itemAITextImprove"]->setEnabled(aiHasTextFrame);
 	(*a_scrActions)["itemToggleInlineImage"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["itemImageIsVisible"]->setEnabled(isImageFrame);
 	(*a_scrActions)["itemPreviewFull"]->setEnabled(isImageFrame);
