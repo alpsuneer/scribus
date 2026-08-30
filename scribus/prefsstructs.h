@@ -535,6 +535,40 @@ struct AIServicePrefs
 	    interchangeable with this one. */
 	QString geminiModel;
 	int geminiTimeoutSeconds {60};        //!< How long to wait for a reply
+
+	// --- Text AI: a separate feature area, configured independently ---
+	/*! \brief Which service answers the AI Text Tools menu.
+
+	    Held as an int for the same reason as \a provider above; the enum and
+	    the mapping live in AITextServiceFactory. 0 is Gemini, which is what an
+	    existing profile with no such setting gets - the only one of the three
+	    that UPI can pay for, and so the only one usable here without an
+	    international card. */
+	int textProvider {0};
+
+	QString claudeApiKey;                 //!< Anthropic key, base64 in the file
+	QString claudeModel;                  //!< e.g. claude-sonnet-5
+	int claudeTimeoutSeconds {60};
+
+	/*! \brief OpenAI key for *text*.
+
+	    Deliberately its own field rather than a shared "OpenAI key": if an
+	    image feature ever reaches OpenAI it will want its own entry, and one
+	    field quietly serving two features is how a user ends up unable to
+	    revoke one without breaking the other. */
+	QString openAITextApiKey;
+	QString openAITextModel;              //!< e.g. gpt-5.6-terra
+	int openAITextTimeoutSeconds {60};
+
+	QString geminiTextApiKey;             //!< Google key for text
+	QString geminiTextModel;              //!< e.g. gemini-3.7-flash
+	int geminiTextTimeoutSeconds {60};
+	/*! \brief Use the image service's Gemini key for text as well.
+
+	    One Google account bills both, so making the user paste the same key
+	    twice would be a small cruelty. On by default; clearing it lets the two
+	    use separate keys if the user ever wants that. */
+	bool geminiTextUsesImageKey {true};
 };
 
 struct ExperimentalFeaturePrefs

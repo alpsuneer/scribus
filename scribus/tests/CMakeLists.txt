@@ -96,3 +96,28 @@ set(GEMINIINPAINTSERVICETESTS_SOURCES
 add_executable(geminiinpaintservicetests ${GEMINIINPAINTSERVICETESTS_SOURCES})
 target_link_libraries(geminiinpaintservicetests ${TESTS_LIBRARIES} Qt6::Network)
 add_test(NAME geminiinpaintservicetests COMMAND geminiinpaintservicetests)
+
+# Unit tests for the three AI *text* clients. Each runs against the shared
+# in-process mock in aitextmockserver.h and contacts nothing: these must pass on
+# a machine with no account, no key and no network, and this fork's user has
+# billing for one provider only.
+set(AITEXT_SHARED_SOURCES
+	../ai/aitextservice.cpp
+	../ai/aitextprompts.cpp
+	../ai/aitexthttpservice.cpp
+)
+
+add_executable(claudetextservicetests
+	claudetextservicetests.cpp ${AITEXT_SHARED_SOURCES} ../ai/claudetextservice.cpp)
+target_link_libraries(claudetextservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME claudetextservicetests COMMAND claudetextservicetests)
+
+add_executable(geminitextservicetests
+	geminitextservicetests.cpp ${AITEXT_SHARED_SOURCES} ../ai/geminitextservice.cpp)
+target_link_libraries(geminitextservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME geminitextservicetests COMMAND geminitextservicetests)
+
+add_executable(openaitextservicetests
+	openaitextservicetests.cpp ${AITEXT_SHARED_SOURCES} ../ai/openaitextservice.cpp)
+target_link_libraries(openaitextservicetests ${TESTS_LIBRARIES} Qt6::Network)
+add_test(NAME openaitextservicetests COMMAND openaitextservicetests)
