@@ -895,6 +895,77 @@ no picture has made the round trip, no charge has been observed, and **the
 success-response parser has never seen a real success**. Content refusals and
 `promptFeedback.blockReason` have never been seen from the real service.
 
+### AI Text Tools — a second feature area
+
+| Feature | Key commits | Branch |
+|---|---|---|
+| `AITextService` + shared HTTP base + prompt table | `9ca7c09` | feature/ctp-output |
+| Claude / Gemini text / OpenAI clients, three mock suites | `9ca7c09` | feature/ctp-output |
+| Prefs section, Item ▸ AI Text Tools menu, result + translate dialogs | `5d07502` | feature/ctp-output |
+| Selection-driven menu enablement | `c85d7af` | feature/ctp-output |
+
+**Deliberately not merged with `AIInpaintService`.** An image service takes a
+picture and a mask and returns a picture that replaces pixels. This takes a
+task name, some text, sometimes a picture, and returns writing a person then
+judges. A model that writes a bad headline has still succeeded as far as HTTP
+is concerned — the failure modes do not line up, and one interface serving both
+would serve neither.
+
+- **All three provider APIs had moved** since the feature was specified.
+  Verified 30 Aug 2026:
+  - **Claude** — `POST /v1/messages`, `x-api-key` **and**
+    `anthropic-version: 2023-06-01` (not optional). Image is a content block
+    with a **nested `source`**, and goes *before* the text (Anthropic's own
+    guidance). `claude-sonnet-4-5` / `claude-opus-4-5` are superseded → Sonnet 5
+    (default), Opus 5, Haiku 4.5.
+  - **Gemini text** — **not** `models/{id}:generateContent`. Google moved text
+    generation to the same **Interactions API** the image models use and now
+    labels generateContent *legacy*. `POST /v1beta/interactions`, model as a
+    field, flat `input[]` of typed parts. `gemini-2.0-flash*` are gone → 3.7
+    Flash (default), 2.5 Pro, 3.1 Flash Lite. **Not the Nano Banana ids** — a
+    test pins that no `-image` id appears in this list.
+  - **OpenAI** — `POST /v1/chat/completions`, Bearer token, image as a complete
+    **`data:` URL** inside `image_url`, and **`max_completion_tokens`** not
+    `max_tokens`. The old spelling is *silently ignored* on current models, so
+    only a test would notice it coming back. `gpt-5`/`-mini`/`gpt-4o` are gone →
+    the 5.6 family (Terra default).
+- **One HTTP base, three protocols.** The thread, the timeout-vs-cancel
+  distinction, reading the response head as it arrives, and keeping the key out
+  of URLs and messages live once in `AITextHttpService`. That set was learned
+  from the OpenRouter 402 bug above; three copies would be three chances to
+  reintroduce it. Each provider supplies ~40 lines: URL, auth header, body
+  shape, answer path.
+- **Every exit from `execute()` is asynchronous**, including the local checks
+  that refuse before anything leaves. A caller that connects a slot and then
+  calls `execute()` must not have that slot run inside its own call.
+- **Costs are only quoted where a price was verified.** Claude's per-MTok rates
+  are in the table and the estimate is real arithmetic (tested); Gemini's and
+  OpenAI's text rates were not verified, so those report zero and the dialog
+  omits the line. A made-up number on a line a user believes is worse than none.
+- **Menu enablement is "a text frame", not "a text frame with text".** It is
+  computed on selection change, and typing into an already-selected frame is not
+  one — the stricter rule left the entries greyed until you clicked away and
+  back. The emptiness check lives in `slotAITextTask()` instead. It also has to
+  go in `AppModeHelper::enableActionsForSelection`, which runs *after*
+  `HaveNewSel()` and re-enables the set it knows about; setting the actions
+  before it silently undid them.
+
+Unit tests: `claudetextservicetests` 26, `geminitextservicetests` 23,
+`openaitextservicetests` 19 — all against the shared in-process mock in
+`tests/aitextmockserver.h`. Nothing contacts a real provider. The test input is
+Malayalam, because every document this exists for is, and each suite asserts it
+arrives as Malayalam.
+
+**Verified by me**: the Preferences section and its defaults on Xvfb; the
+Item ▸ AI Text Tools submenu, its six entries and both enablement states; and
+the handler reaching the factory and reporting "Enable AI features in
+Preferences > AI Services" on a profile with AI switched off.
+
+**Not exercised**: no real API call to any of the three. Claude and OpenAI have
+no account here at all; Gemini has billing but shares the rate-limit trouble the
+image client has. **No response from a real text model has ever been parsed** —
+success parsing, refusals and token counts are mock-only for all three.
+
 #### Harness trap: `import -window <id>` can wedge the whole X server
 
 `import -window <someid>` on a window that has since been destroyed falls back
