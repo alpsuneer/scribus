@@ -39,6 +39,16 @@ namespace
 	//! edge like the mask boundary, without the size of a lossless encode.
 	const int JpegQuality = 92;
 
+	/*! \brief How long to keep collecting an error body once the response head
+	    has already shown an error status.
+
+	    The status alone is enough to report every case a user can act on, so
+	    this is only a short window to pick up the message that usually comes
+	    with it. It is deliberately well under the two seconds a rejection is
+	    expected to surface in: an error body that has not arrived by then is
+	    not going to arrive. */
+	const int ErrorBodyGraceMs = 1200;
+
 	/*! \brief The instruction that goes with the picture.
 
 	    It has to do the job a mask channel does elsewhere: say what the red is,
@@ -314,12 +324,18 @@ private:
 		}
 		m_cancelled = false;
 		m_timedOut = false;
+		m_reported = false;
+		m_httpStatus = 0;
+		m_body.clear();
+		if (m_graceTimer)
+			m_graceTimer->stop();
 		return true;
 	}
 
 	void trackReply(QNetworkReply* reply, bool isTest)
 	{
 		m_reply = reply;
+		m_isTest = isTest;
 
 		// An explicit timer rather than setTransferTimeout(), because a
 		// timeout and a user cancel both arrive as OperationCanceledError and
@@ -331,11 +347,52 @@ private:
 			connect(m_timer, &QTimer::timeout, this, [this]() {
 				if (!m_reply)
 					return;
+				// If the head already carried an error status then the server
+				// did answer, and reporting a timeout would be both wrong and
+				// useless. Say what it said.
+				if (m_httpStatus >= 400)
+				{
+					concludeFromResponseSoFar();
+					return;
+				}
 				m_timedOut = true;
 				m_reply->abort();
 			});
 		}
 		m_timer->start(qMax(1, m_timeoutSeconds) * 1000);
+
+		if (!m_graceTimer)
+		{
+			m_graceTimer = new QTimer(this);
+			m_graceTimer->setSingleShot(true);
+			connect(m_graceTimer, &QTimer::timeout, this, [this]() {
+				concludeFromResponseSoFar();
+			});
+		}
+
+		// Read the body as it arrives rather than once at the end. readAll()
+		// in the finished() handler only ever sees anything for a reply that
+		// reaches a clean finish, and the replies that matter here are exactly
+		// the ones that do not.
+		connect(reply, &QNetworkReply::readyRead, this, [this, reply]() {
+			if (!m_reported)
+				m_body.append(reply->readAll());
+		});
+
+		// The status code is known as soon as the head lands, which is the
+		// moment a failure is already decided. Waiting for the rest of a body
+		// that may never complete is what turned a fast rejection into a
+		// sixty-second timeout.
+		connect(reply, &QNetworkReply::metaDataChanged, this, [this, reply]() {
+			const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			if (status <= 0)
+				return;
+			m_httpStatus = status;
+			// 3xx is not a verdict: QNetworkAccessManager follows redirects on
+			// its own and the real status arrives in a later head.
+			if (status >= 400 && m_graceTimer && !m_graceTimer->isActive())
+				m_graceTimer->start(ErrorBodyGraceMs);
+		});
 
 		connect(reply, &QNetworkReply::finished, this, [this, reply, isTest]() {
 			handleReply(reply, isTest);
@@ -346,7 +403,62 @@ private:
 	{
 		if (m_timer)
 			m_timer->stop();
+		if (m_graceTimer)
+			m_graceTimer->stop();
 		m_reply = nullptr;
+	}
+
+	/*! \brief Report the failure the response head already described, without
+	    waiting for a reply that may never finish.
+
+	    Reached from the error-body grace timer and from the overall timeout.
+	    Whatever body arrived is used; for every status a user can act on the
+	    status alone is enough. */
+	void concludeFromResponseSoFar()
+	{
+		if (m_reported || !m_reply)
+			return;
+		if (m_reply->bytesAvailable() > 0)
+			m_body.append(m_reply->readAll());
+
+		const int status = m_httpStatus;
+		const QByteArray body = m_body;
+		const bool isTest = m_isTest;
+
+		m_reported = true;
+		QNetworkReply* reply = m_reply;
+		finishRequest();
+		// The verdict is in, and this one is being paid for by the second:
+		// nothing is gained by leaving the transfer running. The finished()
+		// that follows is ignored, m_reported having been set above.
+		reply->abort();
+		reply->deleteLater();
+
+		m_cancelled = false;
+		m_timedOut = false;
+
+		emitStatusFailure(status, body, isTest);
+	}
+
+	//! The verdict for a response that carried an HTTP error status, wherever
+	//! we came to learn of it: a clean finish, the grace timer, or the timeout.
+	void emitStatusFailure(int status, const QByteArray& body, bool isTest)
+	{
+		// Moderation is not a fault, and the answer to it is a different model
+		// rather than another go, so it is marked as a refusal.
+		const QString moderation = moderationReasonOf(body);
+		if (!isTest && !moderation.isEmpty())
+		{
+			emit failed(OpenRouterInpaintService::refusalMarker()
+			            + tr("%1 declined this edit: %2")
+			              .arg(OpenRouterInpaintService::displayNameFor(m_model), moderation));
+			return;
+		}
+		const QString message = describeStatus(status, body);
+		if (isTest)
+			emit tested(false, message);
+		else
+			emit failed(message);
 	}
 
 	//! The user-facing sentence for an HTTP status. These are the four that
@@ -381,11 +493,27 @@ private:
 
 	void handleReply(QNetworkReply* reply, bool isTest)
 	{
+		if (m_reported)
+		{
+			// Already answered from the response head. This is the finished()
+			// that follows the abort() in concludeFromResponseSoFar(), and the
+			// reply is on its way out.
+			return;
+		}
+
 		const QNetworkReply::NetworkError netError = reply->error();
-		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+		// A connection that broke after the head arrived loses the attribute,
+		// but not what the head said. That happens whenever the far end rejects
+		// a large upload without draining it, which is the common shape of a
+		// refusal here: the picture is megabytes and the verdict is instant.
+		if (status <= 0)
+			status = m_httpStatus;
 		// An aborted reply has nothing to read and complains if asked.
 		const bool aborted = m_cancelled || m_timedOut;
-		const QByteArray body = aborted ? QByteArray() : reply->readAll();
+		if (!aborted && reply->bytesAvailable() > 0)
+			m_body.append(reply->readAll());
+		const QByteArray body = aborted ? QByteArray() : m_body;
 		const QString transportError = reply->errorString();
 
 		finishRequest();
@@ -428,21 +556,7 @@ private:
 
 		if (status < 200 || status > 299)
 		{
-			// Moderation is not a fault, and the answer to it is a different
-			// model rather than another go, so it is marked as a refusal.
-			const QString moderation = moderationReasonOf(body);
-			if (!isTest && !moderation.isEmpty())
-			{
-				emit failed(OpenRouterInpaintService::refusalMarker()
-				            + tr("%1 declined this edit: %2")
-				              .arg(OpenRouterInpaintService::displayNameFor(m_model), moderation));
-				return;
-			}
-			const QString message = describeStatus(status, body);
-			if (isTest)
-				emit tested(false, message);
-			else
-				emit failed(message);
+			emitStatusFailure(status, body, isTest);
 			return;
 		}
 
@@ -554,6 +668,23 @@ private:
 	QNetworkAccessManager* m_nam {nullptr};
 	QPointer<QNetworkReply> m_reply;
 	QTimer* m_timer {nullptr};
+	//! Bounds the wait for the rest of an error body once the head has already
+	//! shown an error status.
+	QTimer* m_graceTimer {nullptr};
+	//! Everything the response has said so far, accumulated as it arrives. A
+	//! reply that never finishes cleanly still has to be able to report what
+	//! the server already told us.
+	QByteArray m_body;
+	//! Status from the response head, known long before the body is complete.
+	//! 0 until the head lands.
+	int m_httpStatus {0};
+	//! Whether the request in flight is a key check rather than an edit, so
+	//! that the paths which report without a finished() reply know which
+	//! signal to raise.
+	bool m_isTest {false};
+	//! Set once a verdict has been emitted, so that the finished() following
+	//! our own abort() does not emit a second one.
+	bool m_reported {false};
 	QString m_apiKey;
 	QString m_model;
 	QString m_apiBase;

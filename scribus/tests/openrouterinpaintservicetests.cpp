@@ -66,6 +66,17 @@ namespace
 		QByteArray body;
 		bool hang {false};
 		int delayMs {0};
+		/*! \brief Answer with the head and the first few bytes of the body,
+		    then go quiet with the connection still open.
+
+		    This is what a fast rejection from the live API looked like, and it
+		    is the shape none of the other tests here produce: they all send a
+		    complete response and close, so the reply reaches finished() and
+		    every code path is the happy one. A response whose head has arrived
+		    but whose body never completes used to sit until the timeout and be
+		    reported as "did not answer", which is both wrong and unactionable -
+		    the server had answered, in milliseconds, and said why. */
+		bool stallAfterHead {false};
 
 		QList<Request> received;
 		int disconnectedEarly {0};
@@ -145,10 +156,14 @@ namespace
 					out += "Content-Type: " + contentType + "\r\n";
 					out += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
 					out += "Connection: close\r\n\r\n";
-					out += body;
+					// Truncating the body while promising the full Content-Length
+					// is what leaves the reply unfinished. The connection stays
+					// open, so there is no error either - just silence.
+					out += stallAfterHead ? body.left(qMin(4, body.size())) : body;
 					socket->write(out);
 					socket->flush();
-					socket->disconnectFromHost();
+					if (!stallAfterHead)
+						socket->disconnectFromHost();
 				};
 				if (delayMs > 0)
 					QTimer::singleShot(delayMs, socket, reply);
@@ -654,6 +669,111 @@ void OpenRouterInpaintServiceTests::testMissingKeyIsRefusedBeforeAnyRequest()
 	// Nothing was sent. There is no point spending a round trip to be told
 	// what we already know.
 	QCOMPARE(server.received.size(), 0);
+}
+
+/*!
+ \brief A rejection that arrives at once must be reported at once.
+
+ The regression this pins: OpenRouter answered 402 in well under a second, and
+ Scribus said "OpenRouter did not answer within 60 seconds". The response head
+ had arrived immediately and carried both the status and the reason; nothing
+ read it, because the only thing that read the response at all ran on
+ finished(), and this reply never finished.
+
+ The service is given the production sixty-second timeout on purpose. If the
+ timeout is what ends the request, this test takes a minute and fails; passing
+ inside two seconds is the whole assertion.
+ */
+void OpenRouterInpaintServiceTests::testFastRejectionDoesNotBecomeATimeout()
+{
+	MockOpenRouter server;
+	QVERIFY(server.startOnAnyPort());
+	server.status = 402;
+	server.body = errorBody(402, QStringLiteral("Insufficient credits"));
+	server.stallAfterHead = true;
+
+	QScopedPointer<OpenRouterInpaintService> service(
+		serviceFor(server, QStringLiteral("openai/gpt-image-2"), 60));
+	QSignalSpy failed(service.data(), &AIInpaintService::inpaintFailed);
+
+	QElapsedTimer elapsed;
+	elapsed.start();
+	service->inpaint(sampleImage(), sampleMask());
+	QVERIFY2(failed.wait(2000), "a 402 that arrived in milliseconds was still not reported after two seconds");
+	QVERIFY2(elapsed.elapsed() < 2000, qPrintable(QString::number(elapsed.elapsed())));
+
+	const QString error = failed.first().at(0).toString();
+	QVERIFY2(error.contains(QStringLiteral("credits")), qPrintable(error));
+	// The two ways of saying the wrong thing. Either would mean the request
+	// fell through to the timeout again.
+	QVERIFY2(!error.contains(QStringLiteral("did not answer")), qPrintable(error));
+	QVERIFY2(!error.contains(QStringLiteral("timeout"), Qt::CaseInsensitive), qPrintable(error));
+	// A failure is not a cancel either.
+	QVERIFY(!AIInpaintService::isCancelled(error));
+}
+
+void OpenRouterInpaintServiceTests::testErrorStatusesAreReportedPromptly_data()
+{
+	QTest::addColumn<int>("status");
+	QTest::addColumn<QString>("serverMessage");
+	QTest::addColumn<QString>("expected");
+	QTest::addColumn<bool>("stall");
+
+	// Every status a user can meet, answered the way the live API answered the
+	// 402: head first, body never completed. None of them may wait for the
+	// timeout, and each has to keep saying the thing that tells the user what
+	// to do about it.
+	QTest::newRow("400 bad request")  << 400 << QStringLiteral("Invalid model")             << QStringLiteral("400")         << true;
+	QTest::newRow("402 no credits")   << 402 << QStringLiteral("Insufficient credits")      << QStringLiteral("credits")     << true;
+	QTest::newRow("403 forbidden")    << 403 << QStringLiteral("Forbidden")                 << QStringLiteral("403")         << true;
+	QTest::newRow("429 rate limited") << 429 << QStringLiteral("Rate limit exceeded")       << QStringLiteral("rate limit")  << true;
+	QTest::newRow("500 server error") << 500 << QStringLiteral("Internal server error")     << QStringLiteral("server error")<< true;
+	QTest::newRow("503 unavailable")  << 503 << QStringLiteral("Service unavailable")       << QStringLiteral("server error")<< true;
+
+	/* 401 is not stalled, and that is a limitation rather than an oversight.
+	   401 and 407 are the two HTTP authentication statuses, and Qt withholds
+	   the whole response for them - no metaDataChanged, no readyRead, no
+	   errorOccurred, not even authenticationRequired - until the response body
+	   is complete, because it may have to resend the request with credentials.
+	   A 401 whose body never completes therefore offers the client nothing to
+	   act on and can only end at the timeout; measured on Qt 6.8.2, where every
+	   other status above fired metaDataChanged within 3 ms and 401 and 407
+	   fired nothing at all.
+
+	   This is not the case that bit us: OpenRouter's error bodies are small and
+	   arrive whole, which is the row below, and it has to be prompt too. */
+	QTest::newRow("401 bad key")      << 401 << QStringLiteral("No auth credentials found") << QStringLiteral("API key")     << false;
+}
+
+void OpenRouterInpaintServiceTests::testErrorStatusesAreReportedPromptly()
+{
+	QFETCH(int, status);
+	QFETCH(QString, serverMessage);
+	QFETCH(QString, expected);
+	QFETCH(bool, stall);
+
+	MockOpenRouter server;
+	QVERIFY(server.startOnAnyPort());
+	server.status = status;
+	server.body = errorBody(status, serverMessage);
+	server.stallAfterHead = stall;
+
+	QScopedPointer<OpenRouterInpaintService> service(
+		serviceFor(server, QStringLiteral("openai/gpt-image-2"), 60));
+	QSignalSpy failed(service.data(), &AIInpaintService::inpaintFailed);
+
+	QElapsedTimer elapsed;
+	elapsed.start();
+	service->inpaint(sampleImage(), sampleMask());
+	QVERIFY2(failed.wait(2000), qPrintable(QStringLiteral("status %1 was not reported within two seconds").arg(status)));
+	QVERIFY2(elapsed.elapsed() < 2000, qPrintable(QString::number(elapsed.elapsed())));
+
+	const QString error = failed.first().at(0).toString();
+	QVERIFY2(error.contains(expected, Qt::CaseInsensitive), qPrintable(error));
+	QVERIFY2(!error.contains(QStringLiteral("did not answer")), qPrintable(error));
+	QVERIFY2(!error.contains(QStringLiteral("timeout"), Qt::CaseInsensitive), qPrintable(error));
+	// Nothing the user sent may come back out in the message.
+	QVERIFY(!error.contains(QString::fromLatin1(TestKey)));
 }
 
 void OpenRouterInpaintServiceTests::testTimeoutIsReported()

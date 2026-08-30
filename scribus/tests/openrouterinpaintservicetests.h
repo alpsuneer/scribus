@@ -56,6 +56,9 @@ private slots:
 	void testServerErrorNamesTheProvider();
 
 	void testMissingKeyIsRefusedBeforeAnyRequest();
+	void testFastRejectionDoesNotBecomeATimeout();
+	void testErrorStatusesAreReportedPromptly_data();
+	void testErrorStatusesAreReportedPromptly();
 	void testTimeoutIsReported();
 	void testCancelAbortsAndStaysQuiet();
 
