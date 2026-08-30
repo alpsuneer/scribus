@@ -17,6 +17,7 @@ for which a new license (GPL+exception) is in place.
 #include <QTcpSocket>
 
 #include "openrouterinpaintservicetests.h"
+#include "ai/aiinpaintprompts.h"
 #include "ai/openrouterinpaintservice.h"
 
 namespace
@@ -344,7 +345,12 @@ void OpenRouterInpaintServiceTests::testRequestWireFormat()
 
 	const QJsonObject body = request.json();
 	QCOMPARE(body.value("model").toString(), QStringLiteral("openai/gpt-image-2"));
-	QVERIFY(body.value("prompt").toString().contains(QStringLiteral("red")));
+	// Pinned to the shared constant rather than to a word in it: the prompt is
+	// part of the wire format, and OpenRouter and Gemini have to send exactly
+	// the same one or the same removal comes out differently depending on
+	// which provider the user happened to pick.
+	QCOMPARE(body.value("prompt").toString(),
+	         QString::fromLatin1(AIInpaintPrompts::REMOVE_OBJECT_COMPOSITE));
 
 	// The field is input_references, not reference_images, and each entry is
 	// an object rather than a bare string. Both of those were guessed wrong

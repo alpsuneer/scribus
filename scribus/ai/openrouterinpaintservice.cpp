@@ -6,6 +6,8 @@ for which a new license (GPL+exception) is in place.
 */
 #include "ai/openrouterinpaintservice.h"
 
+#include "ai/aiinpaintprompts.h"
+
 #include <QBuffer>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -48,20 +50,6 @@ namespace
 	    expected to surface in: an error body that has not arrived by then is
 	    not going to arrive. */
 	const int ErrorBodyGraceMs = 1200;
-
-	/*! \brief The instruction that goes with the picture.
-
-	    It has to do the job a mask channel does elsewhere: say what the red is,
-	    say that everything else must come back untouched, and shut the door on
-	    the things these models like to add unasked. */
-	const char* const RemovalPrompt =
-		"You are an expert photo editor. The reference image has an area highlighted "
-		"with a bright red mask overlay. Return the exact same image with the "
-		"red-highlighted area completely removed and the background naturally "
-		"reconstructed. Match the surrounding lighting, texture, perspective, colors, "
-		"and content. The result must look photorealistic, as if the object was never "
-		"there. Do not modify any other parts of the image. Do not add watermarks, "
-		"borders, or text. Return only the edited image.";
 
 	/*! \brief Paint the mask onto the picture in red.
 
@@ -264,7 +252,7 @@ public slots:
 
 		QJsonObject body;
 		body.insert(QStringLiteral("model"), m_model);
-		body.insert(QStringLiteral("prompt"), QString::fromLatin1(RemovalPrompt));
+		body.insert(QStringLiteral("prompt"), QString::fromLatin1(AIInpaintPrompts::REMOVE_OBJECT_COMPOSITE));
 		body.insert(QStringLiteral("input_references"), references);
 
 		QNetworkRequest request { QUrl(m_apiBase + ImagesPath) };
