@@ -262,15 +262,34 @@ namespace
 	}
 
 	//! Google's documented error envelope.
-	QByteArray errorBody(int code, const QString& message, const QString& statusText = QString())
+	QByteArray errorBody(int code, const QString& message, const QString& statusText = QString(),
+	                     const QString& reason = QString(), bool wrapInArray = false)
 	{
 		QJsonObject error;
 		error.insert("code", code);
 		error.insert("message", message);
 		if (!statusText.isEmpty())
 			error.insert("status", statusText);
+		if (!reason.isEmpty())
+		{
+			QJsonObject info;
+			info.insert("@type", "type.googleapis.com/google.rpc.ErrorInfo");
+			info.insert("reason", reason);
+			info.insert("domain", "googleapis.com");
+			QJsonArray details;
+			details.append(info);
+			error.insert("details", details);
+		}
 		QJsonObject root;
 		root.insert("error", error);
+		if (wrapInArray)
+		{
+			// What POST /v1beta/interactions actually sends. See the test that
+			// pins this for where that was measured.
+			QJsonArray wrapper;
+			wrapper.append(root);
+			return QJsonDocument(wrapper).toJson(QJsonDocument::Compact);
+		}
 		return QJsonDocument(root).toJson(QJsonDocument::Compact);
 	}
 
@@ -705,6 +724,82 @@ void GeminiInpaintServiceTests::testErrorStatusesAreReportedPromptly()
 	QVERIFY2(!error.contains(QStringLiteral("timeout"), Qt::CaseInsensitive), qPrintable(error));
 	QVERIFY(!AIInpaintService::isCancelled(error));
 	// Nothing the user sent may come back out in the message.
+	QVERIFY(!error.contains(QString::fromLatin1(TestKey)));
+}
+
+/*!
+ \brief The inpaint endpoint wraps its error envelope in an array.
+
+ Measured against the live API on 30 Aug 2026 with a deliberately invalid key:
+ GET /v1beta/models answers with a bare object, and POST /v1beta/interactions
+ answers with the identical envelope inside a one-element array. A parser that
+ only understands the object shape drops the message on exactly the endpoint
+ that does the work, and the user is shown a byte count instead of a reason.
+
+ This is the sort of thing a mock server cannot tell you, because the mock only
+ ever sends what its author already believed.
+ */
+void GeminiInpaintServiceTests::testArrayWrappedErrorEnvelopeIsUnderstood()
+{
+	MockGemini server;
+	QVERIFY(server.startOnAnyPort());
+	server.status = 429;
+	server.body = errorBody(429, QStringLiteral("Quota exceeded"),
+	                        QStringLiteral("RESOURCE_EXHAUSTED"), QString(), /*wrapInArray*/ true);
+
+	QScopedPointer<GeminiInpaintService> service(serviceFor(server));
+	QSignalSpy failed(service.data(), &AIInpaintService::inpaintFailed);
+	service->inpaint(sampleImage(), sampleMask());
+	QVERIFY(failed.wait(5000));
+
+	const QString error = failed.first().at(0).toString();
+	QVERIFY2(error.contains(QStringLiteral("rate limit"), Qt::CaseInsensitive), qPrintable(error));
+	// Not the "answered with something that is not JSON" fallback.
+	QVERIFY2(!error.contains(QStringLiteral("not JSON")), qPrintable(error));
+}
+
+void GeminiInpaintServiceTests::testRejectedKeyIsReportedAsAKeyProblem_data()
+{
+	QTest::addColumn<int>("status");
+	QTest::addColumn<QByteArray>("body");
+
+	/* An invalid key does not come back as 401. Measured against the live API
+	   on 30 Aug 2026, on both endpoints this client uses: it is HTTP 400 with
+	   status INVALID_ARGUMENT and a detail reason of API_KEY_INVALID. Keying
+	   off the number alone would report the single most common mistake a user
+	   can make - a mistyped or expired key - as an unexplained bad request,
+	   and send them looking in the wrong place. */
+	QTest::newRow("live shape: 400 + reason")
+		<< 400 << errorBody(400, QStringLiteral("API key not valid. Please pass a valid API key."),
+		                    QStringLiteral("INVALID_ARGUMENT"), QStringLiteral("API_KEY_INVALID"), true);
+	// The same verdict with the details array missing, which is the fallback.
+	QTest::newRow("400, message only")
+		<< 400 << errorBody(400, QStringLiteral("API key not valid. Please pass a valid API key."),
+		                    QStringLiteral("INVALID_ARGUMENT"));
+	// And should Google ever start sending the status everyone expects.
+	QTest::newRow("401, as one would expect")
+		<< 401 << errorBody(401, QStringLiteral("Unauthenticated"), QStringLiteral("UNAUTHENTICATED"));
+}
+
+void GeminiInpaintServiceTests::testRejectedKeyIsReportedAsAKeyProblem()
+{
+	QFETCH(int, status);
+	QFETCH(QByteArray, body);
+
+	MockGemini server;
+	QVERIFY(server.startOnAnyPort());
+	server.status = status;
+	server.body = body;
+
+	QScopedPointer<GeminiInpaintService> service(serviceFor(server));
+	QSignalSpy failed(service.data(), &AIInpaintService::inpaintFailed);
+	service->inpaint(sampleImage(), sampleMask());
+	QVERIFY(failed.wait(5000));
+
+	const QString error = failed.first().at(0).toString();
+	// The user has to be sent to the box that is wrong.
+	QVERIFY2(error.contains(QStringLiteral("Gemini API key")), qPrintable(error));
+	QVERIFY2(error.contains(QStringLiteral("Preferences")), qPrintable(error));
 	QVERIFY(!error.contains(QString::fromLatin1(TestKey)));
 }
 

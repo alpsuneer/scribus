@@ -52,6 +52,9 @@ private slots:
 
 	void testErrorStatusesAreReportedPromptly_data();
 	void testErrorStatusesAreReportedPromptly();
+	void testArrayWrappedErrorEnvelopeIsUnderstood();
+	void testRejectedKeyIsReportedAsAKeyProblem_data();
+	void testRejectedKeyIsReportedAsAKeyProblem();
 
 	void testMissingKeyIsRefusedBeforeAnyRequest();
 	void testTimeoutIsReported();

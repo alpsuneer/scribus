@@ -46,16 +46,79 @@ namespace
 	    the two seconds a rejection is expected to surface in. */
 	const int ErrorBodyGraceMs = 1200;
 
-	//! The "error" object out of a response body, or an empty object.
-	QJsonObject errorObjectOf(const QByteArray& body)
+	/*! \brief The body as an object, unwrapping the array Google sometimes
+	    puts around it.
+
+	    Observed against the live API on 30 Aug 2026: a bad key on
+	    <tt>GET /v1beta/models</tt> answers with a bare object, and the same bad
+	    key on <tt>POST /v1beta/interactions</tt> answers with the identical
+	    envelope wrapped in a one-element array. Reading only one of the two
+	    shapes throws away the message on whichever endpoint is not the one that
+	    was tested, and the inpaint path is the one that matters. */
+	QJsonObject rootObjectOf(const QByteArray& body)
 	{
 		if (body.isEmpty())
 			return QJsonObject();
 		QJsonParseError parseError {};
 		const QJsonDocument doc = QJsonDocument::fromJson(body, &parseError);
-		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+		if (parseError.error != QJsonParseError::NoError)
 			return QJsonObject();
-		return doc.object().value(QLatin1String("error")).toObject();
+		if (doc.isObject())
+			return doc.object();
+		if (doc.isArray())
+		{
+			const QJsonArray array = doc.array();
+			for (const QJsonValue& value : array)
+			{
+				if (value.isObject())
+					return value.toObject();
+			}
+		}
+		return QJsonObject();
+	}
+
+	//! The "error" object out of a response body, or an empty object.
+	QJsonObject errorObjectOf(const QByteArray& body)
+	{
+		return rootObjectOf(body).value(QLatin1String("error")).toObject();
+	}
+
+	/*! \brief Google's own classification of a failure.
+
+	    The HTTP code is not the reliable part. An invalid API key comes back as
+	    400 INVALID_ARGUMENT with a detail reason of API_KEY_INVALID, not as the
+	    401 anyone would expect - measured against the live API on 30 Aug 2026,
+	    on both endpoints this client uses. Reading the status and the reason
+	    rather than the number is what lets the most common mistake a user can
+	    make be reported as the thing they should go and fix. */
+	QString errorStatusOf(const QByteArray& body)
+	{
+		return errorObjectOf(body).value(QLatin1String("status")).toString().trimmed();
+	}
+
+	//! First machine-readable reason in the error details, e.g. API_KEY_INVALID.
+	QString errorReasonOf(const QByteArray& body)
+	{
+		const QJsonArray details = errorObjectOf(body).value(QLatin1String("details")).toArray();
+		for (const QJsonValue& value : details)
+		{
+			const QString reason = value.toObject().value(QLatin1String("reason")).toString().trimmed();
+			if (!reason.isEmpty())
+				return reason;
+		}
+		return QString();
+	}
+
+	//! Whether a failure is "this key is no good", however it was dressed up.
+	bool isBadKey(const QByteArray& body)
+	{
+		if (errorReasonOf(body) == QLatin1String("API_KEY_INVALID"))
+			return true;
+		// The reason array is the dependable signal; the sentence is a fallback
+		// for the day it is not sent.
+		const QString message = errorObjectOf(body).value(QLatin1String("message")).toString();
+		return message.contains(QLatin1String("API key not valid"), Qt::CaseInsensitive)
+		    || message.contains(QLatin1String("API key is invalid"), Qt::CaseInsensitive);
 	}
 
 	//! Whatever the far end actually said, or an empty string if it said
@@ -420,6 +483,18 @@ private:
 	QString describeStatus(int status, const QByteArray& body) const
 	{
 		const QString detail = messageOf(body);
+
+		// What Google says went wrong, before what the HTTP code implies. A
+		// rejected key arrives as 400, so keying off the number alone would
+		// report the commonest mistake of all as an unexplained bad request.
+		if (isBadKey(body))
+			return tr("Invalid Gemini API key. Check your Gemini API key in Preferences > AI Services.");
+		const QString googleStatus = errorStatusOf(body);
+		if (googleStatus == QLatin1String("PERMISSION_DENIED"))
+			return tr("Gemini API access denied. Check that billing is enabled for your key at aistudio.google.com.");
+		if (googleStatus == QLatin1String("RESOURCE_EXHAUSTED"))
+			return tr("Gemini rate limit - try again in a moment.");
+
 		switch (status)
 		{
 		case 400:
@@ -517,9 +592,11 @@ private:
 			return;
 		}
 
-		QJsonParseError parseError {};
-		const QJsonDocument doc = QJsonDocument::fromJson(body, &parseError);
-		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+		// Unwrapped the same way as an error body: this endpoint has been seen
+		// to wrap its envelope in a one-element array, and there is no reason
+		// to assume it does that only when it is unhappy.
+		const QJsonObject root = rootObjectOf(body);
+		if (root.isEmpty())
 		{
 			const QString message = tr("Gemini answered with something that is not JSON (%1 bytes).")
 			                        .arg(body.size());
@@ -529,7 +606,6 @@ private:
 				emit failed(message);
 			return;
 		}
-		const QJsonObject root = doc.object();
 
 		if (isTest)
 		{
