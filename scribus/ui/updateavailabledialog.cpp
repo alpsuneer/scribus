@@ -9,7 +9,9 @@ for which a new license (GPL+exception) is in place.
 #include "api/api_application.h"
 #include "scpaths.h"
 
+#include <QCloseEvent>
 #include <QDialogButtonBox>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QMessageBox>
@@ -56,10 +58,30 @@ UpdateAvailableDialog::~UpdateAvailableDialog()
 		m_client->cancelDownload();
 	if (m_installProcess)
 	{
+		// Never kill it: interrupting dpkg -i as root can leave the package
+		// half-configured. reject() already refuses to close while it runs,
+		// so this only happens if the parent is torn down; let it finish.
 		m_installProcess->disconnect(this);
-		m_installProcess->kill();
+		m_installProcess->waitForFinished(-1);
 		m_installProcess->deleteLater();
 	}
+}
+
+void UpdateAvailableDialog::reject()
+{
+	if (m_installProcess)
+		return; // dpkg is running; the dialog closes itself when it finishes
+	QDialog::reject();
+}
+
+void UpdateAvailableDialog::closeEvent(QCloseEvent* event)
+{
+	if (m_installProcess)
+	{
+		event->ignore();
+		return;
+	}
+	QDialog::closeEvent(event);
 }
 
 void UpdateAvailableDialog::updateNowClicked()
@@ -80,7 +102,7 @@ void UpdateAvailableDialog::updateNowClicked()
 	});
 	m_progressDialog->show();
 
-	m_client->downloadUpdate(m_info.downloadUrl, m_apiKey, destPath);
+	m_client->downloadUpdate(m_info, m_apiKey, destPath);
 }
 
 void UpdateAvailableDialog::onDownloadProgress(qint64 received, qint64 total)
@@ -129,19 +151,30 @@ void UpdateAvailableDialog::onDownloadFailed(const QString& message)
 
 void UpdateAvailableDialog::installUpdate(const QString& path)
 {
+	// Checked again here, not only after the download: the file sits in a
+	// user-writable folder while the "Install now?" question is open.
+	if (ScUpdateClient::fileSha256(path) != m_info.sha256)
+	{
+		QFile::remove(path);
+		QMessageBox::critical(this, tr("Install Failed"),
+			tr("The downloaded update changed after it was verified, so it was deleted and not installed."));
+		m_updateButton->setEnabled(true);
+		return;
+	}
+
 	m_installProcess = new QProcess(this);
 	connect(m_installProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
 		this, &UpdateAvailableDialog::onInstallFinished);
 	connect(m_installProcess, &QProcess::errorOccurred, this, &UpdateAvailableDialog::onInstallError);
 
 	m_progressDialog = new QProgressDialog(
-		tr("Installing update…\nEnter your password if prompted."), tr("Cancel"), 0, 0, this);
+		tr("Installing update…\nEnter your password if prompted. Do not turn off the computer."), QString(), 0, 0, this);
+	// No Cancel: once pkexec hands over, dpkg must be allowed to finish.
+	// Dismissing the password prompt is the way to back out before that.
+	m_progressDialog->setCancelButton(nullptr);
+	m_progressDialog->setWindowFlag(Qt::WindowCloseButtonHint, false);
 	m_progressDialog->setWindowModality(Qt::WindowModal);
 	m_progressDialog->setMinimumDuration(0);
-	connect(m_progressDialog, &QProgressDialog::canceled, this, [this]() {
-		if (m_installProcess)
-			m_installProcess->kill();
-	});
 	m_progressDialog->show();
 
 	m_installProcess->start(QStringLiteral("pkexec"), { QStringLiteral("dpkg"), QStringLiteral("-i"), path });

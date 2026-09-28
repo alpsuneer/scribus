@@ -14,6 +14,7 @@ for which a new license (GPL+exception) is in place.
 #include <QProcess>
 #include <QString>
 
+class QCloseEvent;
 class QPushButton;
 class QProgressDialog;
 
@@ -34,6 +35,12 @@ class SCRIBUS_API UpdateAvailableDialog : public QDialog
 public:
 	UpdateAvailableDialog(const ScUpdateInfo& info, const QString& apiKey, QWidget* parent = nullptr);
 	~UpdateAvailableDialog() override;
+
+public slots:
+	void reject() override;
+
+protected:
+	void closeEvent(QCloseEvent* event) override;
 
 private slots:
 	void updateNowClicked();

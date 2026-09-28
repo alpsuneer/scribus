@@ -347,6 +347,23 @@ if (Qt6Keychain_FOUND)
 	target_link_libraries(${EXE_NAME} PRIVATE Qt6Keychain::Qt6Keychain)
 endif()
 
+# Updater: the installer runs as root, so a manifest is only trusted when it
+# carries an Ed25519 signature from the release key. Without OpenSSL or
+# without SCRIBUS_UPDATE_PUBKEY every update is refused (fail closed).
+set(SCRIBUS_UPDATE_PUBKEY "" CACHE STRING "Base64 raw Ed25519 public key that signs update manifests")
+find_package(OpenSSL QUIET COMPONENTS Crypto)
+if (OpenSSL_FOUND OR OPENSSL_FOUND)
+	target_link_libraries(${EXE_NAME} PRIVATE OpenSSL::Crypto)
+	target_compile_definitions(${EXE_NAME} PRIVATE HAVE_UPDATE_SIGNING)
+else()
+	message(WARNING "OpenSSL not found: the updater will refuse every update")
+endif()
+if (SCRIBUS_UPDATE_PUBKEY)
+	target_compile_definitions(${EXE_NAME} PRIVATE SCRIBUS_UPDATE_PUBKEY="${SCRIBUS_UPDATE_PUBKEY}")
+else()
+	message(STATUS "SCRIBUS_UPDATE_PUBKEY is empty: the updater will refuse every update")
+endif()
+
 if (HAVE_OSG)
 	target_link_libraries(${EXE_NAME}
 		PUBLIC
