@@ -10842,7 +10842,7 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 	box.setText(tr("Default keyboard shortcuts are set to Photoshop-compatible for an easier workflow.\n\n"
 	               "You can change them anytime via:\n"
 	               "File → Preferences → Keyboard Shortcuts"));
-	QPushButton* keepBtn = box.addButton(tr("Keep Malayalam DTP defaults"), QMessageBox::AcceptRole);
+	QPushButton* keepBtn = box.addButton(tr("Keep Newspaper defaults"), QMessageBox::AcceptRole);
 	box.addButton(tr("Use standard Scribus defaults"), QMessageBox::RejectRole);
 	box.exec();
 	if (box.clickedButton() == keepBtn)
