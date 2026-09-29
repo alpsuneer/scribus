@@ -168,7 +168,6 @@ public:
 	void getScreenDPI(int& dpiX, int& dpiY) const;
 	void addScToolBar(ScToolBar *tb, const QString& name, Qt::ToolBarArea area = Qt::ToolBarArea::TopToolBarArea);
 	bool warningVersion(QWidget *parent);
-	void SetShortCut();
 	void startUpDialog();
 	void setDefaultPrinter(const QString&, const QString&, const QString&);
 	void getDefaultPrinter(QString& name, QString& file, QString& command) const;

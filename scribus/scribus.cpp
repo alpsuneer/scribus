@@ -10836,6 +10836,16 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 	if (settings.contains(QStringLiteral("malayalamDtpFirstRun")))
 		return;   // already prompted — never overwrite an established config
 
+	// QSettings is keyed on the process name (scribus.conf vs scribus.bin.conf),
+	// so the flag above can be missing for a profile that already has saved
+	// shortcuts. The profile itself is the reliable signal: if scribus172.rc
+	// exists, this is not a first run and the keyset must not touch it.
+	if (QFile::exists(m_prefsManager.preferencesLocation() + "scribus172.rc"))
+	{
+		settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
+		return;
+	}
+
 	QMessageBox box(this);
 	box.setWindowTitle(tr("Welcome to Scribus (Malayalam DTP Edition)"));
 	box.setIcon(QMessageBox::Information);
@@ -10849,57 +10859,6 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 		applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
 
 	settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
-}
-
-void ScribusMainWindow::SetShortCut()
-{
-
-QMap<QString, Keys>& keyActionsRef =
-    m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
-
-QString keyFile = QDir::homePath() + "/.config/scribus/shortkey170626.xml";
-
-if (QFile::exists(keyFile))
-{
-    QDomDocument docXml("keymapentries");
-    QFile f(keyFile);
-
-    if (f.open(QIODevice::ReadOnly))
-    {
-        if (docXml.setContent(&f))
-        {
-            QDomElement root = docXml.documentElement();
-
-            if (root.tagName() == "shortcutset")
-            {
-                for (QDomNode n = root.firstChild(); !n.isNull(); n = n.nextSibling())
-                {
-                    QDomElement e = n.toElement();
-
-                    if (e.hasAttribute("name") && e.hasAttribute("shortcut"))
-                    {
-                        QString name = e.attribute("name");
-                        QString sc   = e.attribute("shortcut");
-
-                        if (keyActionsRef.contains(name))
-                            keyActionsRef[name].keySequence = QKeySequence(sc);
-                    }
-                }
-            }
-        }
-        f.close();
-    }
-}
-
-const auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
-
-
-	for (auto it = keyActions.begin(); it != keyActions.end(); ++it )
-	{
-		if (!it.value().actionName.isEmpty())
-			if (scrActions[it.value().actionName])
-				scrActions[it.value().actionName]->setShortcut(it.value().keySequence);
-	}
 }
 
 void ScribusMainWindow::PutScrap(int scID)
