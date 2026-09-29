@@ -142,6 +142,11 @@ void ActionManager::initFileMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "fileImportVector";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	// No default shortcut: Ctrl+D is itemDuplicate and Ctrl+Shift+D is
+	// itemMulDuplicate already, so a Place shortcut needs a deliberate choice
+	// (e.g. remapping one of those) rather than silently colliding with them.
+	name = "filePlace";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 
 	//File Export Menu
 	name = "fileExportText";
@@ -204,6 +209,7 @@ void ActionManager::initFileMenuActions()
 	connect( (*scrActions)["fileImportAppendText"], SIGNAL(triggered()), mainWindow, SLOT(slotFileAppend()) );
 	connect( (*scrActions)["fileImportImage"], SIGNAL(triggered()), mainWindow, SLOT(slotGetContent()) );
 	connect( (*scrActions)["fileImportVector"], SIGNAL(triggered()), mainWindow, SLOT(importVectorFile()) );
+	connect( (*scrActions)["filePlace"], SIGNAL(triggered()), mainWindow, SLOT(slotFilePlace()) );
 	//File Export Menu
 	connect( (*scrActions)["fileExportText"], SIGNAL(triggered()), mainWindow, SLOT(SaveText()) );
 	connect( (*scrActions)["fileExportAsEPS"], SIGNAL(triggered()), mainWindow, SLOT(SaveAsEps()) );
@@ -1699,6 +1705,7 @@ void ActionManager::languageChange()
 	(*scrActions)["fileImportAppendText"]->setTexts( tr("Append &Text..."));
 	(*scrActions)["fileImportImage"]->setTexts( tr("Get Image..."));
 	(*scrActions)["fileImportVector"]->setTexts( tr("Get Vector File..."));
+	(*scrActions)["filePlace"]->setTexts( tr("Place..."));
 
 	(*scrActions)["fileExportText"]->setTexts( tr("Save &Text..."));
 	(*scrActions)["fileExportAsEPS"]->setTexts( tr("Save as &EPS..."));
@@ -2184,6 +2191,10 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("fileSaveAs", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
 	defKeys.insert("fileImportText", QKeySequence());
 	defKeys.insert("fileImportImage", QKeySequence());
+	// Left unbound: Ctrl+D and Ctrl+Shift+D are already itemDuplicate and
+	// itemMulDuplicate. Pick a shortcut deliberately in Preferences > Shortcuts
+	// rather than have this collide with either.
+	defKeys.insert("filePlace", QKeySequence());
 	defKeys.insert("filePrint", QKeySequence::Print);
 	// F9 is free in the shipped keysets (including malayalam-dtp) and in the
 	// compiled defaults; the palettes take F2/F3/F6/F8/F11/F12 around it.
@@ -2397,6 +2408,7 @@ void ActionManager::createDefaultMenus()
 		<< "fileSaveAs"
 		<< "fileRevert"
 		<< "fileCollect"
+		<< "filePlace"
 		<< "fileImportText"
 		<< "fileImportAppendText"
 		<< "fileImportImage"

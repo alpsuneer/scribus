@@ -146,6 +146,7 @@ for which a new license (GPL+exception) is in place.
 #include "pageitem_imageframe.h"
 #include "ui/scimageeditor.h"
 #include "pageitem_latexframe.h"
+#include "pageitem_placedpdf.h"
 #include "pageitem_table.h"
 #include "pageitem_textframe.h"
 #include "pagesize.h"
@@ -1217,6 +1218,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("fileSaveAs", "File");
 	scrMenuMgr->addMenuItemString("fileRevert", "File");
 	scrMenuMgr->addMenuItemString("fileCollect", "File");
+	scrMenuMgr->addMenuItemString("filePlace", "File");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "File");
 	scrMenuMgr->createMenu("FileImport", tr("&Import"), "File");
 	scrMenuMgr->addMenuItemString("FileImport", "File");
@@ -3583,6 +3585,70 @@ void ScribusMainWindow::importVectorFile()
 		}
 	}
 	requestUpdate(reqColorsUpdate | reqSymbolsUpdate | reqLineStylesUpdate | reqTextStylesUpdate);
+}
+
+void ScribusMainWindow::slotFilePlace()
+{
+	if (!HaveDoc)
+		return;
+
+	PrefsContext* dirs = PrefsManager::instance().prefsFile->getContext("dirs");
+	QString wdir = dirs->get("place", dirs->get("images", "."));
+	CustomFDialog dia(this, wdir, tr("Place"), tr("PDF Files (*.pdf *.PDF)"), fdExistingFiles | fdDisableOk);
+	if (dia.exec() != QDialog::Accepted)
+		return;
+
+	QString fileName = dia.selectedFile();
+	if (fileName.isEmpty())
+		return;
+	dirs->set("place", fileName.left(fileName.lastIndexOf("/")));
+
+	// Phase 1: no interactive "loaded cursor" click/drag placement (that
+	// needs a dedicated CanvasMode, deferred). The frame lands at the
+	// current page's top-left margin, sized to the source PDF page's native
+	// size in points; the user repositions/resizes it like any other frame.
+	ScPage* pg = doc->currentPage();
+	double x = pg->xOffset() + pg->Margins.left();
+	double y = pg->yOffset() + pg->Margins.top();
+
+	UndoTransaction placeAction;
+	if (UndoManager::undoEnabled())
+		placeAction = m_undoManager->beginTransaction(Um::ImageFrame, Um::IImageFrame, Um::Create, QString(), Um::ICreate);
+
+	int z = doc->itemAdd(PageItem::PlacedPDF, PageItem::Unspecified, x, y, 1, 1, doc->itemToolPrefs().shapeLineWidth, CommonStrings::None, CommonStrings::None);
+	PageItem* newItem = doc->Items->at(z);
+	newItem->m_layerID = doc->activeLayer();
+	newItem->pixm.imgInfo.actualPageNumber = 1;
+	doc->loadPict(fileName, newItem);
+	if (!newItem->imageIsAvailable)
+	{
+		// Loading failed (corrupt/encrypted/not really a PDF): undo the
+		// frame rather than leave an empty placeholder behind.
+		Selection failedSel(this, false);
+		failedSel.addItem(newItem);
+		doc->itemSelection_DeleteItem(&failedSel);
+		if (placeAction)
+			placeAction.cancel();
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not load \"%1\" as a PDF.").arg(fileName));
+		return;
+	}
+	newItem->setWidth(newItem->OrigW * 72.0 / static_cast<double>(newItem->pixm.imgInfo.xres));
+	newItem->setHeight(newItem->OrigH * 72.0 / static_cast<double>(newItem->pixm.imgInfo.yres));
+	newItem->OldB2 = newItem->width();
+	newItem->OldH2 = newItem->height();
+	newItem->updateClip();
+	newItem->adjustPictScale();
+	newItem->setLineColor(CommonStrings::None);
+
+	if (placeAction)
+		placeAction.commit();
+
+	doc->m_Selection->clear();
+	doc->m_Selection->addItem(newItem);
+	doc->setRedrawBounding(newItem);
+	view->DrawNew();
+	newItem->emitAllToGUI();
+	slotDocCh(false);
 }
 
 void ScribusMainWindow::rebuildLayersList()

@@ -434,6 +434,7 @@ public slots:
 	void pasteRecent(const QString& fn);
 	void pasteFromScrapbook(const QString& fn);
 	void importVectorFile();
+	void slotFilePlace();
 	void rebuildLayersList();
 	bool slotFileOpen();
 	bool loadDoc(const QString& );

@@ -66,6 +66,7 @@ for which a new license (GPL+exception) is in place.
 #include "pageitem_line.h"
 #include "pageitem_noteframe.h"
 #include "pageitem_pathtext.h"
+#include "pageitem_placedpdf.h"
 #include "pageitem_polygon.h"
 #include "pageitem_polyline.h"
 #include "pageitem_table.h"
@@ -5539,6 +5540,10 @@ PageItem* ScribusDoc::createPageItem(const PageItem::ItemType itemType, const Pa
 			newItem = new PageItem_LatexFrame(this, x, y, b, h, w, m_docPrefsData.itemToolPrefs.imageFillColor, m_docPrefsData.itemToolPrefs.imageStrokeColor);
 //			Q_ASSERT(frameType == PageItem::Rectangle || frameType == PageItem::Unspecified);
 			break;
+		case PageItem::PlacedPDF:
+			newItem = new PageItem_PlacedPDF(this, x, y, b, h, w, m_docPrefsData.itemToolPrefs.imageFillColor, m_docPrefsData.itemToolPrefs.imageStrokeColor);
+//			Q_ASSERT(frameType == PageItem::Rectangle || frameType == PageItem::Unspecified);
+			break;
 #ifdef HAVE_OSG
 		case PageItem::OSGFrame:
 			newItem = new PageItem_OSGFrame(this, x, y, b, h, w, m_docPrefsData.itemToolPrefs.imageFillColor, m_docPrefsData.itemToolPrefs.imageStrokeColor);
@@ -5801,6 +5806,7 @@ void ScribusDoc::itemAddDetails(const PageItem::ItemType itemType, const PageIte
 			break;
 		case PageItem::LatexFrame:
 		case PageItem::OSGFrame:
+		case PageItem::PlacedPDF:
 			newItem->setFillShade(m_docPrefsData.itemToolPrefs.imageFillColorShade);
 			newItem->setLineShade(m_docPrefsData.itemToolPrefs.imageStrokeColorShade);
 			break;

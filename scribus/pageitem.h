@@ -79,6 +79,7 @@ class PageItem_Line;
 class PageItem_NoteFrame;
 class PageItem_OSGFrame;
 class PageItem_PathText;
+class PageItem_PlacedPDF;
 class PageItem_PolyLine;
 class PageItem_Polygon;
 class PageItem_RegularPolygon;
@@ -186,6 +187,7 @@ public:	// Start enumerator definitions
 		Spiral			= 15,
 		Table			= 16,
 		NoteFrame		= 17,
+		PlacedPDF		= 18,
 		Multiple		= 99
 	};
 
@@ -247,6 +249,7 @@ public: // Start public functions
 	virtual PageItem_NoteFrame * asNoteFrame()				{ return nullptr; } ///< Return self if Note item, otherwise null
 	virtual PageItem_OSGFrame * asOSGFrame()				{ return nullptr; } ///< Return self if OSG item, otherwise null
 	virtual PageItem_PathText * asPathText()				{ return nullptr; } ///< Return self if Path Text item, otherwise null
+	virtual PageItem_PlacedPDF * asPlacedPDF()				{ return nullptr; } ///< Return self if Placed PDF item, otherwise null
 	virtual PageItem_PolyLine * asPolyLine()				{ return nullptr; } ///< Return self if Poly Line item, otherwise null
 	virtual PageItem_Polygon * asPolygon()					{ return nullptr; } ///< Return self if Polygon item, otherwise null
 	virtual PageItem_RegularPolygon * asRegularPolygon()	{ return nullptr; } ///< Return self if Regular Polygon item, otherwise null
@@ -280,6 +283,7 @@ public: // Start public functions
 	virtual bool isNoteFrame()		const { return false; } ///< Return true if Note item, otherwise false
 	virtual bool isOSGFrame()		const { return false; } ///< Return true if OSG item, otherwise false
 	virtual bool isPathText()		const { return false; } ///< Return true if Text Path Text, otherwise false
+	virtual bool isPlacedPDF()		const { return false; } ///< Return true if Placed PDF item, otherwise false
 	virtual bool isPolyLine()		const { return false; } ///< Return true if Poly Line item, otherwise false
 	virtual bool isPolygon()		const { return false; } ///< Return true if Polygon item, otherwise false
 	virtual bool isRegularPolygon()	const { return false; } ///< Return true if Regular Polygon item, otherwise false

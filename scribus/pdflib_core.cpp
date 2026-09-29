@@ -9917,7 +9917,10 @@ void PDFLibCore::PDF_Bookmark(const PageItem *currItem, double ypos)
 
 bool PDFLibCore::PDF_EmbeddedPDF(PageItem* c, const QString& fn, double sx, double sy, double x, double y, ShIm& imgInfo, bool &fatalError)
 {
-	if (!Options.embedPDF)
+	// A PlacedPDF item's whole point is vector fidelity, so it always
+	// attempts the real Form-XObject embed below, regardless of whether the
+	// "Embed PDF" export option is on for the rest of the document.
+	if (!Options.embedPDF && !c->isPlacedPDF())
 		return false;
 	fatalError = false;
 	
@@ -10781,15 +10784,27 @@ bool PDFLibCore::PDF_Image(PageItem* item, const QString& fn, double sx, double 
 			ImInfo.isEmbeddedPDF = true;
 			ImInfo.Page = item->pixm.imgInfo.actualPageNumber;
 		}
-		if (!imageLoaded && extensionIndicatesPDF(ext) && item->effectsInUse.isEmpty() && Options.embedPDF)
+		if (!imageLoaded && extensionIndicatesPDF(ext) && item->effectsInUse.isEmpty() && (Options.embedPDF || item->isPlacedPDF()))
 		{
-			if (fatalError)
+			if (item->isPlacedPDF())
+			{
+				// Never fail the whole export over one placed ad: report the
+				// fidelity loss loudly and fall through to the raster path
+				// below, rather than silently rasterizing (the old behaviour
+				// for a plain image frame) or aborting every other item on
+				// the page (the old behaviour for fatalError).
+				PDF_Error( tr("Could not embed the placed PDF \"%1\" as vector content; "
+				              "it will be exported as a raster image instead. Overprint, "
+				              "transparency and colour fidelity are not guaranteed for this item.").arg(pdfFile) );
+			}
+			else if (fatalError)
 			{
 				PDF_Error( tr("Failed to embed the PDF file : %1.\n"
 				              "Please disable experimental PDF and PS embedding and try again.").arg(pdfFile) );
 				return false;
 			}
-			qDebug() << "Failed to embed the PDF file: " << pdfFile;
+			else
+				qDebug() << "Failed to embed the PDF file: " << pdfFile;
 		}
 		// no embedded PDF:
 		if (!imageLoaded)

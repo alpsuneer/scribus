@@ -124,6 +124,7 @@ set(SCRIBUS_SOURCES
 	pageitem_latexframe.cpp
 	pageitem_line.cpp
 	pageitem_pathtext.cpp
+	pageitem_placedpdf.cpp
 	pageitem_polygon.cpp
 	pageitem_polyline.cpp
 	pageitem_regularpolygon.cpp
