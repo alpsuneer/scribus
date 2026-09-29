@@ -23,6 +23,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QDateTime>
 #include "pslib.h"
+#include "proof_fit.h"
 
 #include <cstdlib>
 
@@ -803,15 +804,23 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 	GetBleeds(pg, bleedLeft, bleedRight);
 	double maxBoxX = pg->width() + bleedLeft + bleedRight + markOffs * 2.0;
 	double maxBoxY = pg->height() + Options.bleeds.bottom() + Options.bleeds.top() + markOffs * 2.0;
+	// Proof Print "Reduce to fit paper": the page goes onto one sheet of the
+	// proof paper, so that sheet is what is declared. The page is placed on
+	// it further down.
+	const bool proofFitSheet = (m_outputFormat == OutputPS) && Options.isProofPrint && Options.proofReduceToFit
+		&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0);
+	double declaredBoxX = proofFitSheet ? Options.proofPaperWidth  : maxBoxX;
+	double declaredBoxY = proofFitSheet ? Options.proofPaperHeight : maxBoxY;
 	PageIndex++;
 	PutStream("%%Page: " + IToStr(PageIndex) + " " + IToStr(PageIndex) + "\n");
 	if (m_outputFormat == OutputPS)
 	{
-		if (pg->orientation() == 0)
+		if ((pg->orientation() == 0) || proofFitSheet)
 		{
 			PutStream("%%PageOrientation: Portrait\n");
-			PutStream("%%PageBoundingBox: 0 0 " + IToStr(qRound(maxBoxX)) + " " + IToStr(qRound(maxBoxY)) + "\n");
-			PutStream("%%PageCropBox: " + ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " " + ToStr(maxBoxX - bleedRight - markOffs * 2.0) + " " + ToStr(maxBoxY - Options.bleeds.top() - markOffs * 2.0) + "\n");
+			PutStream("%%PageBoundingBox: 0 0 " + IToStr(qRound(declaredBoxX)) + " " + IToStr(qRound(declaredBoxY)) + "\n");
+			if (!proofFitSheet)
+				PutStream("%%PageCropBox: " + ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " " + ToStr(maxBoxX - bleedRight - markOffs * 2.0) + " " + ToStr(maxBoxY - Options.bleeds.top() - markOffs * 2.0) + "\n");
 		}
 		else
 		{
@@ -821,43 +830,70 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 		}
 	}
 	PutStream("Scribusdict begin\n");
-	if ((m_outputFormat == OutputPS) && (Options.setDevParam))
+	if ((m_outputFormat == OutputPS) && (Options.setDevParam || proofFitSheet))
 	{
-		if (pg->orientation() == 0)
-			PutStream("<< /PageSize [ " + ToStr(maxBoxX) + " " + ToStr(maxBoxY) + " ]\n");
+		if ((pg->orientation() == 0) || proofFitSheet)
+			PutStream("<< /PageSize [ " + ToStr(declaredBoxX) + " " + ToStr(declaredBoxY) + " ]\n");
 		else
 			PutStream("<< /PageSize [ " + ToStr(maxBoxY) + " " + ToStr(maxBoxX) + " ]\n");
 		PutStream(">> setpagedevice\n");
 	}
 	PutStream("save\n");
-	if ((pg->orientation() == 1) && (m_outputFormat == OutputPS))
+	if ((pg->orientation() == 1) && (m_outputFormat == OutputPS) && !proofFitSheet)
 		PutStream("90 rotate 0 " + IToStr(qRound(maxBoxY)) + " neg translate\n");
+	if (proofFitSheet)
+	{
+		// "Reduce to fit paper": the whole page on this one sheet, scaled
+		// down proportionally (never up), turned 90 degrees when that fits
+		// larger, and centred. The same proofFitOnSheet() gives the Proof
+		// Print dialog its "Scale: N%", so the two always agree.
+		const double paperW = Options.proofPaperWidth;
+		const double paperH = Options.proofPaperHeight;
+		const ProofFit fit = proofFitOnSheet(maxBoxX, maxBoxY, paperW, paperH);
+		const double s = fit.scale;
+		if (fit.rotated)
+		{
+			// After "tx ty translate 90 rotate s s scale" a page point (x, y)
+			// lands at (tx - y*s, ty + x*s); these put the turned page's
+			// box centred on the sheet.
+			PutStream(ToStr((paperW + maxBoxY * s) / 2.0) + " " + ToStr((paperH - maxBoxX * s) / 2.0) + " translate\n");
+			PutStream("90 rotate\n");
+		}
+		else
+			PutStream(ToStr((paperW - maxBoxX * s) / 2.0) + " " + ToStr((paperH - maxBoxY * s) / 2.0) + " translate\n");
+		PutStream(ToStr(s) + " " + ToStr(s) + " scale\n");
+		m_proofScale = s;
+		qDebug("Proof print (reduce to fit): paper %.1fx%.1f pt, page %.1fx%.1f pt, %s, scale %.1f%%",
+		       paperW, paperH, maxBoxX, maxBoxY, fit.rotated ? "turned" : "upright", s * 100.0);
+	}
+	else if ((m_outputFormat == OutputPS) && Options.isProofPrint
+		&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0))
+	{
 		// A proof sheet is smaller than the page: content is drawn in document
 		// coordinates, so without this a broadsheet runs off an A4 sheet and the
 		// printer clips it. The job-level fit-to-page option cannot be relied on:
 		// it is a filter feature, and a PostScript queue can pass the job through
 		// unscaled. Scale here instead, centred, so the geometry is right
 		// whatever the queue does downstream.
-		if ((m_outputFormat == OutputPS) && Options.isProofPrint
-			&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0))
+		// (This block used to be indented as if it belonged to the rotate
+		// above; it never did. Braces now say what the code always did.)
+		double srcW = (pg->orientation() == 0) ? maxBoxX : maxBoxY;
+		double srcH = (pg->orientation() == 0) ? maxBoxY : maxBoxX;
+		const double proofMargin = 12.0;
+		double availW = qMax(1.0, Options.proofPaperWidth  - proofMargin * 2.0);
+		double availH = qMax(1.0, Options.proofPaperHeight - proofMargin * 2.0);
+		double proofScale = qMin(availW / srcW, availH / srcH);
+		if ((proofScale > 0.0) && (proofScale < 1.0))
 		{
-			double srcW = (pg->orientation() == 0) ? maxBoxX : maxBoxY;
-			double srcH = (pg->orientation() == 0) ? maxBoxY : maxBoxX;
-			const double proofMargin = 12.0;
-			double availW = qMax(1.0, Options.proofPaperWidth  - proofMargin * 2.0);
-			double availH = qMax(1.0, Options.proofPaperHeight - proofMargin * 2.0);
-			double proofScale = qMin(availW / srcW, availH / srcH);
-			if ((proofScale > 0.0) && (proofScale < 1.0))
-			{
-				double offX = (Options.proofPaperWidth  - srcW * proofScale) / 2.0;
-				double offY = (Options.proofPaperHeight - srcH * proofScale) / 2.0;
-				PutStream(ToStr(offX) + " " + ToStr(offY) + " translate\n");
-				PutStream(ToStr(proofScale) + " " + ToStr(proofScale) + " scale\n");
-				m_proofScale = proofScale;
-				qDebug("Proof print: paper %.1fx%.1f pt, page %.1fx%.1f pt, scale %.1f%%",
-				       Options.proofPaperWidth, Options.proofPaperHeight, srcW, srcH, proofScale * 100.0);
-			}
+			double offX = (Options.proofPaperWidth  - srcW * proofScale) / 2.0;
+			double offY = (Options.proofPaperHeight - srcH * proofScale) / 2.0;
+			PutStream(ToStr(offX) + " " + ToStr(offY) + " translate\n");
+			PutStream(ToStr(proofScale) + " " + ToStr(proofScale) + " scale\n");
+			m_proofScale = proofScale;
+			qDebug("Proof print: paper %.1fx%.1f pt, page %.1fx%.1f pt, scale %.1f%%",
+			       Options.proofPaperWidth, Options.proofPaperHeight, srcW, srcH, proofScale * 100.0);
 		}
+	}
 	PutStream("/DeviceCMYK setcolorspace\n");
 	// Clip to bleeds
 	QString clipStr;

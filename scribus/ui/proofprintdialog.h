@@ -13,6 +13,7 @@ for which a new license (GPL+exception) is in place.
 
 #include "scribusapi.h"
 
+class QCheckBox;
 class QComboBox;
 class QPushButton;
 class QLabel;
@@ -53,6 +54,11 @@ public:
 	//! Remember the choices for next time. Called on accept.
 	void saveChoices();
 
+	//! "Reduce to fit paper": one sheet per page, scaled down, instead of tiles.
+	bool reduceToFit() const;
+	//! The page being proofed, in points, so the dialog can show its scale.
+	void setPageSize(const QSizeF& pagePts);
+
 protected:
 	//! Qt reassigns focus when a dialog is shown, so a setFocus() in the
 	//! constructor is overridden: claim it here instead.
@@ -60,6 +66,7 @@ protected:
 
 private slots:
 	void printerChanged();
+	void updateFitScale();
 
 private:
 	void loadPrinters();
@@ -71,6 +78,9 @@ private:
 	QLabel*    m_sourceLabel { nullptr };
 	QComboBox* m_sourceCombo { nullptr };
 	QSpinBox*  m_copiesSpin { nullptr };
+	QCheckBox* m_reduceToFitCheck { nullptr };
+	QLabel*    m_fitScaleLabel { nullptr };
+	QSizeF     m_pageSize;
 	QPushButton* m_printButton { nullptr };
 	bool       m_paperAssumed { false };
 	//! Explicit state rather than widget visibility: once exec() returns the

@@ -6,7 +6,9 @@ for which a new license (GPL+exception) is in place.
 */
 #include "ui/proofprintdialog.h"
 
+#include <QCheckBox>
 #include <QComboBox>
+#include <QHBoxLayout>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -19,6 +21,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefscontext.h"
 #include "prefsfile.h"
 #include "prefsmanager.h"
+#include "proof_fit.h"
 #include "util_printer.h"
 
 namespace
@@ -70,6 +73,21 @@ ProofPrintDialog::ProofPrintDialog(QWidget* parent) : QDialog(parent)
 	m_copiesSpin->setValue(1);
 	form->addRow(tr("&Copies:"), m_copiesSpin);
 
+	// Off: a page bigger than the paper is tiled across several sheets, as
+	// the print settings say. On: each page on one sheet, reduced to fit.
+	m_reduceToFitCheck = new QCheckBox(tr("&Reduce to fit paper"), this);
+	m_reduceToFitCheck->setToolTip(tr("Print each page on one sheet, scaled down to fit and turned if that fits larger. "
+	                                  "Off: a page larger than the paper is split across several sheets."));
+	m_reduceToFitCheck->setChecked(proofPrefs()->getBool("ReduceToFit", false));
+	m_fitScaleLabel = new QLabel(this);
+	auto* fitRow = new QHBoxLayout();
+	fitRow->setContentsMargins(0, 0, 0, 0);
+	fitRow->addWidget(m_reduceToFitCheck);
+	fitRow->addWidget(m_fitScaleLabel);
+	fitRow->addStretch(1);
+	form->addRow(QString(), fitRow);
+	connect(m_reduceToFitCheck, &QCheckBox::toggled, this, &ProofPrintDialog::updateFitScale);
+
 	// Use the standard Ok slot relabelled, rather than a hand-added AcceptRole
 	// button: QDialog recomputes the default button when it is shown, and only
 	// the standard one reliably keeps default status, which is what makes Enter
@@ -99,7 +117,36 @@ ProofPrintDialog::ProofPrintDialog(QWidget* parent) : QDialog(parent)
 	loadPrinters();
 	reloadCapabilities();
 	connect(m_printerCombo, &QComboBox::currentTextChanged, this, &ProofPrintDialog::printerChanged);
+	connect(m_paperCombo, &QComboBox::currentTextChanged, this, &ProofPrintDialog::updateFitScale);
+	updateFitScale();
+}
 
+void ProofPrintDialog::setPageSize(const QSizeF& pagePts)
+{
+	m_pageSize = pagePts;
+	updateFitScale();
+}
+
+bool ProofPrintDialog::reduceToFit() const
+{
+	return m_reduceToFitCheck && m_reduceToFitCheck->isChecked();
+}
+
+void ProofPrintDialog::updateFitScale()
+{
+	if (!m_fitScaleLabel)
+		return;
+	const QSizeF paper = paperSizePoints();
+	if (!reduceToFit() || m_pageSize.isEmpty() || paper.isEmpty())
+	{
+		m_fitScaleLabel->clear();
+		return;
+	}
+	// Same calculation PSLib uses for the sheet, so this is what prints.
+	const ProofFit fit = proofFitOnSheet(m_pageSize.width(), m_pageSize.height(), paper.width(), paper.height());
+	const int percent = qRound(fit.scale * 100.0);
+	m_fitScaleLabel->setText(fit.rotated ? tr("Scale: %1% (landscape)").arg(percent)
+	                                     : tr("Scale: %1%").arg(percent));
 }
 
 void ProofPrintDialog::loadPrinters()
@@ -127,6 +174,7 @@ void ProofPrintDialog::showEvent(QShowEvent* event)
 void ProofPrintDialog::printerChanged()
 {
 	reloadCapabilities();
+	updateFitScale();
 }
 
 void ProofPrintDialog::reloadCapabilities()
@@ -246,6 +294,8 @@ void ProofPrintDialog::saveChoices()
 		return;
 	PrefsContext* prefs = proofPrefs();
 	prefs->set("LastPrinter", printer);
+	// Not per printer: whether a proof is reduced or tiled is a way of working.
+	prefs->set("ReduceToFit", reduceToFit());
 	prefs->set(paperKey(printer), paperName());
 	const QString slot = inputSlot();
 	if (!slot.isEmpty())

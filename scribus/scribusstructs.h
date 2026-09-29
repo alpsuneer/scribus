@@ -454,6 +454,10 @@ struct PrintOptions
 	//! not enough, a PostScript printer receives the job unscaled and clips it.
 	double proofPaperWidth { 0.0 };
 	double proofPaperHeight { 0.0 };
+	//! Proof Print "Reduce to fit paper": one sheet per page, scaled down and
+	//! turned if that fits larger (proof_fit.h), instead of tiling a page that
+	//! is bigger than the paper across several sheets.
+	bool proofReduceToFit { false };
 	//! Paper chosen for a proof (PPD keyword, e.g. "A4"). Empty means fall back
 	//! to whatever the queue reports as its default.
 	QString proofMedia;

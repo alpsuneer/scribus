@@ -287,6 +287,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_formats.h"
 #include "util_printer.h"
 #include "ui/proofprintdialog.h"
+#include "proof_fit.h"
 #include "ui/updatesettingsdialog.h"
 #include "ui/impositiondialog.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
@@ -5114,6 +5115,7 @@ void ScribusMainWindow::slotFileProofPrint()
 	// F9 opens this: the paper a proof is scaled onto depends on what is
 	// actually loaded in the tray, which only the operator knows.
 	ProofPrintDialog dialog(this);
+	dialog.setPageSize(QSizeF(doc->currentPage()->width(), doc->currentPage()->height()));
 	if (dialog.exec() != QDialog::Accepted)
 		return;
 	dialog.saveChoices();
@@ -5149,6 +5151,9 @@ void ScribusMainWindow::slotFileProofPrint()
 		sheet = QSizeF(595.276, 841.89);   // A4 in points
 	proof.proofPaperWidth = sheet.width();
 	proof.proofPaperHeight = sheet.height();
+	// "Reduce to fit paper": one sheet per page, scaled down (and turned if
+	// that fits larger) - see proof_fit.h.
+	proof.proofReduceToFit = dialog.reduceToFit();
 
 	m_mainWindowStatusLabel->setText( tr("Proof printing..."));
 	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
@@ -5174,7 +5179,9 @@ void ScribusMainWindow::slotFileProofPrint()
 		double srcW = doc->currentPage()->width();
 		double srcH = doc->currentPage()->height();
 		int scalePercent = 100;
-		if ((srcW > 0.0) && (srcH > 0.0))
+		if (proof.proofReduceToFit)
+			scalePercent = qRound(proofFitOnSheet(srcW, srcH, proof.proofPaperWidth, proof.proofPaperHeight).scale * 100.0);
+		else if ((srcW > 0.0) && (srcH > 0.0))
 		{
 			double fit = qMin((proof.proofPaperWidth - 24.0) / srcW,
 			                  (proof.proofPaperHeight - 24.0) / srcH);
