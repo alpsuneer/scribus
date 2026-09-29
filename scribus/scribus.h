@@ -637,6 +637,7 @@ public slots:
 	void outputPreviewPDF();
 	void doOutputPreviewPS();
 	void outputPreviewPS();
+	void viewPDFSeparations();
 	void SaveAsEps();
 	void reallySaveAsEps();
 	void SaveAsPDF();

@@ -246,6 +246,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/colorsandfills.h"
 #include "ui/pdfexportdialog.h"
 #include "ui/preferences/prefs_keyboardshortcuts.h"
+#include "ui/pdfseparationsviewer.h"
 #include "ui/pdftoolbar.h"
 #include "ui/picstatus.h"
 #include "ui/preferences/preferencesdialog.h"
@@ -1243,6 +1244,16 @@ void ScribusMainWindow::initMenuBar()
 		scrMenuMgr->createMenu("FileOutputPreview", tr("&Output Preview"), "File");
 		scrMenuMgr->addMenuItemString("OutputPreviewPDF", "FileOutputPreview");
 		scrMenuMgr->addMenuItemString("OutputPreviewPS", "FileOutputPreview");
+		scrMenuMgr->addMenuItemString("SEPARATOR", "File");
+	}
+	if (ScCore->haveGS())
+	{
+		// Unlike Output Preview above, these tools work on an arbitrary
+		// external PDF and don't need a Scribus document open, so this menu
+		// is never disabled the way FileOutputPreview is below.
+		scrMenuMgr->addMenuItemString("PDFTools", "File");
+		scrMenuMgr->createMenu("PDFTools", tr("PDF &Tools"), "File");
+		scrMenuMgr->addMenuItemString("ViewPDFSeparations", "PDFTools");
 		scrMenuMgr->addMenuItemString("SEPARATOR", "File");
 	}
 	scrMenuMgr->addMenuItemString("fileQuit", "File");
@@ -8746,6 +8757,17 @@ void ScribusMainWindow::doOutputPreviewPS()
 	}
 
 	delete dia;
+}
+
+void ScribusMainWindow::viewPDFSeparations()
+{
+	// Unlike Print Preview / PostScript preview above, this checks an
+	// arbitrary external PDF (e.g. an ad supplied by a client) rather than
+	// the current document, so it doesn't need HaveDoc, Ghostscript's
+	// availability is checked lazily when a file is actually opened, and the
+	// dialog is left non-modal so several ads can be checked side by side.
+	auto* dia = new PDFSeparationsViewer(this, this);
+	dia->show();
 }
 
 bool ScribusMainWindow::DoSaveAsEps(const QString& fn, QString& error)

@@ -221,6 +221,8 @@ if(HAVE_OSG)
 		ui/tile_preview_widget.cpp
 		offset_separation_presets.cpp
 		offset_tiling.cpp
+		ui/pdfseparationsviewer.cpp
+		util_pdfsep.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -305,6 +307,8 @@ else()
 		ui/tile_preview_widget.cpp
 		offset_separation_presets.cpp
 		offset_tiling.cpp
+		ui/pdfseparationsviewer.cpp
+		util_pdfsep.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}

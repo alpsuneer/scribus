@@ -43,6 +43,7 @@ void ScMWMenuManager::languageChange()
 	setText("FileImport", tr("&Import"));
 	setText("FileExport", tr("&Export"));
 	setText("FileOutputPreview", tr("&Output Preview"));
+	setText("PDFTools", tr("PDF &Tools"));
 	setText("Edit", ActionManager::defaultMenuNameEntryTranslated("Edit"));
 	setText("EditContents", tr("Contents"));
 	setText("Item", ActionManager::defaultMenuNameEntryTranslated("Item"));
