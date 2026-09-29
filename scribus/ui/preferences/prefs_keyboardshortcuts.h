@@ -39,9 +39,16 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 		static QString getKeyText(const QKeySequence& KeyC);
 		static QString getTrKeyText(const QKeySequence& KeyC);
 
-		// Suneer: the user's own saved set ("Save as Default"), in the keyset
-		// XML format. Also used as the first-run set for a fresh profile.
-		static QString myDefaultShortcutsPath();
+		// Suneer: named shortcut sets. Built-in sets are computed; user sets are
+		// keyset XML files in userSetsDir(). The default set's name is kept in
+		// prefs172.xml ("keyboard_shortcuts" / "default_set").
+		static QString scribusDefaultSetName();
+		static QString newspaperDefaultSetName();
+		static QString userSetsDir();
+		static QString defaultSetName();
+		static void setDefaultSetName(const QString& name);
+		// Moves a pre-shortcut-sets my-default-shortcuts.xml into userSetsDir() once.
+		static void migrateOldMyDefault();
 		// Writes keys in the keyset XML format, without any dialog.
 		static bool writeKeySet(const QMap<QString, Keys>& keys, const QString& fileName, const QString& setName);
 
@@ -57,7 +64,17 @@ protected:
 	QVector< QPair<QString, QStringList> >* defMenus;
 	QVector< QPair<QString, QStringList> >* defNonMenuActions;
 	QTreeWidgetItem * selectedLVI { nullptr };
-	QPushButton* resetMyDefaultButton { nullptr };
+	QComboBox* shortcutSetCombo { nullptr };
+	QPushButton* saveSetButton { nullptr };
+	QPushButton* deleteSetButton { nullptr };
+	QMap<QString, QString> userSetFiles; // set name -> file
+
+	void refreshShortcutSets(const QString& selectName);
+	QString selectedSetName() const;
+	bool isBuiltinSet(const QString& name) const;
+	void loadNamedSet(const QString& name);
+	void overlayKeySetFile(const QString& fileName);
+	void updateSetButtons();
 	int keyCode { 0 };
 
 	void insertActions();
@@ -82,8 +99,11 @@ protected slots:
 	void importKeySetFile();
 	void exportKeySetFile();
 	void resetKeySet();
-	void saveAsMyDefault();
-	void resetToMyDefault();
+	void shortcutSetSelected(int index);
+	void saveShortcutSetAs();
+	void saveShortcutSet();
+	void makeShortcutSetDefault();
+	void deleteShortcutSet();
 	void clearSearchString();
 	void applySearch( const QString & newss );
 };

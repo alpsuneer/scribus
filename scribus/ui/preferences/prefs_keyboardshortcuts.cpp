@@ -7,6 +7,12 @@ for which a new license (GPL+exception) is in place.
 
 #include <QDebug>
 #include <QDomDocument>
+#include <QSignalBlocker>
+#include <QRegularExpression>
+#include <QHBoxLayout>
+#include <QGroupBox>
+#include <QDir>
+#include <QComboBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -86,18 +92,33 @@ Prefs_KeyboardShortcuts::Prefs_KeyboardShortcuts(QWidget* parent, ScribusDoc* /*
 	connect( clearSearchButton, SIGNAL(clicked()), this, SLOT(clearSearchString()));
 	connect( searchTextLineEdit, SIGNAL(textChanged(QString)), this, SLOT(applySearch(QString)));
 
-	// Suneer: the user's own default set, next to the Scribus-defaults Reset.
 	resetSetButton->setText(tr("&Reset to Scribus Defaults"));
-	auto* saveMyDefaultButton = new QPushButton(tr("Save as Default"), this);
-	saveMyDefaultButton->setToolTip(tr("Save the shortcuts shown here as your own default set"));
-	resetMyDefaultButton = new QPushButton(tr("Reset to My Default"), this);
-	resetMyDefaultButton->setToolTip(tr("Restore the set saved with \"Save as Default\""));
-	resetMyDefaultButton->setEnabled(QFile::exists(myDefaultShortcutsPath()));
-	const int resetIndex = horizontalLayout_2->indexOf(resetSetButton);
-	horizontalLayout_2->insertWidget(resetIndex, resetMyDefaultButton);
-	horizontalLayout_2->insertWidget(resetIndex, saveMyDefaultButton);
-	connect(saveMyDefaultButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::saveAsMyDefault);
-	connect(resetMyDefaultButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::resetToMyDefault);
+
+	// Suneer: named shortcut sets, at the top of the page.
+	auto* setBox = new QGroupBox(tr("Shortcut Set"), this);
+	auto* setLayout = new QHBoxLayout(setBox);
+	shortcutSetCombo = new QComboBox(setBox);
+	shortcutSetCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+	shortcutSetCombo->setToolTip(tr("Selecting a set loads it into the list below"));
+	auto* saveAsButton = new QPushButton(tr("Save As..."), setBox);
+	saveSetButton = new QPushButton(tr("Save"), setBox);
+	auto* defaultButton = new QPushButton(tr("Set as Default"), setBox);
+	deleteSetButton = new QPushButton(tr("Delete"), setBox);
+	saveAsButton->setToolTip(tr("Save the shortcuts below as a new named set"));
+	saveSetButton->setToolTip(tr("Update the selected set with the shortcuts below"));
+	defaultButton->setToolTip(tr("Make the selected set the default"));
+	deleteSetButton->setToolTip(tr("Delete the selected set"));
+	setLayout->addWidget(shortcutSetCombo, 1);
+	setLayout->addWidget(saveAsButton);
+	setLayout->addWidget(saveSetButton);
+	setLayout->addWidget(defaultButton);
+	setLayout->addWidget(deleteSetButton);
+	verticalLayout->insertWidget(1, setBox);
+	connect(shortcutSetCombo, &QComboBox::activated, this, &Prefs_KeyboardShortcuts::shortcutSetSelected);
+	connect(saveAsButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::saveShortcutSetAs);
+	connect(saveSetButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::saveShortcutSet);
+	connect(defaultButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::makeShortcutSetDefault);
+	connect(deleteSetButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::deleteShortcutSet);
 
 }
 
@@ -115,6 +136,7 @@ void Prefs_KeyboardShortcuts::restoreDefaults(struct ApplicationPrefs *prefsData
 	loadableSets->addItems(scanForSets());
 	insertActions();
 	dispKey(nullptr);
+	refreshShortcutSets(defaultSetName());
 }
 
 void Prefs_KeyboardShortcuts::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
@@ -279,32 +301,222 @@ bool Prefs_KeyboardShortcuts::writeKeySet(const QMap<QString, Keys>& keys, const
 	return ok;
 }
 
-QString Prefs_KeyboardShortcuts::myDefaultShortcutsPath()
+QString Prefs_KeyboardShortcuts::scribusDefaultSetName()
 {
-	return PrefsManager::instance().preferencesLocation() + "my-default-shortcuts.xml";
+	return QStringLiteral("Scribus Default");
 }
 
-void Prefs_KeyboardShortcuts::saveAsMyDefault()
+QString Prefs_KeyboardShortcuts::newspaperDefaultSetName()
 {
-	const QString path = myDefaultShortcutsPath();
-	if (!writeKeySet(keyMap, path, tr("My Default")))
-	{
-		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not save your default shortcuts to %1").arg(path));
-		return;
-	}
-	resetMyDefaultButton->setEnabled(true);
-	ScMessageBox::information(this, tr("Save as Default"), tr("Your default shortcuts were saved to %1").arg(path));
+	return QStringLiteral("Newspaper Default");
 }
 
-void Prefs_KeyboardShortcuts::resetToMyDefault()
+QString Prefs_KeyboardShortcuts::userSetsDir()
 {
-	const QString path = myDefaultShortcutsPath();
-	if (!QFile::exists(path))
+	return PrefsManager::instance().preferencesLocation() + "shortcut-sets/";
+}
+
+QString Prefs_KeyboardShortcuts::defaultSetName()
+{
+	PrefsContext* ctx = PrefsManager::instance().prefsFile->getContext("keyboard_shortcuts");
+	return ctx->get("default_set", newspaperDefaultSetName());
+}
+
+void Prefs_KeyboardShortcuts::setDefaultSetName(const QString& name)
+{
+	PrefsManager& prefsManager = PrefsManager::instance();
+	prefsManager.prefsFile->getContext("keyboard_shortcuts")->set("default_set", name);
+	prefsManager.prefsFile->write();
+}
+
+void Prefs_KeyboardShortcuts::migrateOldMyDefault()
+{
+	const QString oldFile = PrefsManager::instance().preferencesLocation() + "my-default-shortcuts.xml";
+	if (!QFile::exists(oldFile))
+		return;
+	const QString newFile = userSetsDir() + "My Default.xml";
+	if (!QDir().mkpath(userSetsDir()) || QFile::exists(newFile) || !QFile::rename(oldFile, newFile))
+		return;
+	if (!PrefsManager::instance().prefsFile->getContext("keyboard_shortcuts")->contains("default_set"))
+		setDefaultSetName(QStringLiteral("My Default"));
+}
+
+bool Prefs_KeyboardShortcuts::isBuiltinSet(const QString& name) const
+{
+	return name == scribusDefaultSetName() || name == newspaperDefaultSetName();
+}
+
+QString Prefs_KeyboardShortcuts::selectedSetName() const
+{
+	return shortcutSetCombo->currentData().toString();
+}
+
+void Prefs_KeyboardShortcuts::refreshShortcutSets(const QString& selectName)
+{
+	userSetFiles.clear();
+	QDir dir(userSetsDir(), "*.xml", QDir::Name, QDir::Files);
+	const QStringList files = dir.entryList();
+	for (const QString& file : files)
 	{
-		resetMyDefaultButton->setEnabled(false);
+		QFile f(dir.filePath(file));
+		if (!f.open(QIODevice::ReadOnly))
+			continue;
+		QDomDocument doc("keymapentries");
+		if (doc.setContent(&f))
+		{
+			QDomElement root = doc.documentElement();
+			QString name = root.attribute("name").trimmed();
+			if (root.tagName() == "shortcutset" && !name.isEmpty() && !isBuiltinSet(name))
+				userSetFiles.insert(name, dir.filePath(file));
+		}
+	}
+
+	const QString defName = defaultSetName();
+	QStringList names { scribusDefaultSetName(), newspaperDefaultSetName() };
+	names += userSetFiles.keys();
+	QSignalBlocker blocker(shortcutSetCombo);
+	shortcutSetCombo->clear();
+	for (const QString& name : names)
+	{
+		QString label = (name == defName) ? tr("%1 (Default)").arg(name) : name;
+		shortcutSetCombo->addItem(label, name);
+	}
+	int index = shortcutSetCombo->findData(selectName);
+	shortcutSetCombo->setCurrentIndex(index >= 0 ? index : 0);
+	updateSetButtons();
+}
+
+void Prefs_KeyboardShortcuts::updateSetButtons()
+{
+	const bool userSet = !isBuiltinSet(selectedSetName());
+	saveSetButton->setEnabled(userSet);
+	deleteSetButton->setEnabled(userSet);
+}
+
+void Prefs_KeyboardShortcuts::overlayKeySetFile(const QString& fileName)
+{
+	QFile f(fileName);
+	if (!f.open(QIODevice::ReadOnly))
+		return;
+	QDomDocument doc("keymapentries");
+	if (!doc.setContent(&f))
+		return;
+	for (QDomNode n = doc.documentElement().firstChild(); !n.isNull(); n = n.nextSibling())
+	{
+		QDomElement e = n.toElement();
+		if (e.hasAttribute("name") && e.hasAttribute("shortcut") && keyMap.contains(e.attribute("name")))
+			keyMap[e.attribute("name")].keySequence = QKeySequence(e.attribute("shortcut"));
+	}
+}
+
+void Prefs_KeyboardShortcuts::loadNamedSet(const QString& name)
+{
+	if (isBuiltinSet(name))
+	{
+		// Built-in sets start from the shortcuts compiled into this build, so
+		// the custom actions keep theirs; Newspaper adds its keyset on top.
+		const QMap<QString, QKeySequence>* defaults = ActionManager::defaultShortcuts();
+		for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
+			it.value().keySequence = defaults->value(it.key());
+		if (name == newspaperDefaultSetName())
+			overlayKeySetFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
+		insertActions();
+		dispKey(nullptr);
 		return;
 	}
-	importKeySet(path);
+	if (userSetFiles.contains(name))
+	{
+		importKeySet(userSetFiles.value(name));
+		dispKey(nullptr);
+	}
+}
+
+void Prefs_KeyboardShortcuts::shortcutSetSelected(int index)
+{
+	Q_UNUSED(index);
+	updateSetButtons();
+	loadNamedSet(selectedSetName());
+}
+
+void Prefs_KeyboardShortcuts::saveShortcutSetAs()
+{
+	bool ok = false;
+	const QString name = QInputDialog::getText(this, tr("Save Shortcut Set As"), tr("Name of the new shortcut set:"),
+		QLineEdit::Normal, QString(), &ok).trimmed();
+	if (!ok || name.isEmpty())
+		return;
+	if (isBuiltinSet(name))
+	{
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("\"%1\" is a built-in set and cannot be replaced. Please choose another name.").arg(name));
+		return;
+	}
+	QString fileName = userSetFiles.value(name);
+	if (!fileName.isEmpty())
+	{
+		if (ScMessageBox::question(this, tr("Save Shortcut Set As"),
+				tr("A shortcut set named \"%1\" already exists. Replace it?").arg(name),
+				QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+			return;
+	}
+	else
+	{
+		QString base = name;
+		base.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9 _.-]")), QStringLiteral("_"));
+		fileName = userSetsDir() + base + ".xml";
+		for (int i = 2; QFile::exists(fileName); ++i)
+			fileName = userSetsDir() + QString("%1-%2.xml").arg(base).arg(i);
+	}
+	if (!QDir().mkpath(userSetsDir()) || !writeKeySet(keyMap, fileName, name))
+	{
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not save the shortcut set to %1").arg(fileName));
+		return;
+	}
+	refreshShortcutSets(name);
+}
+
+void Prefs_KeyboardShortcuts::saveShortcutSet()
+{
+	const QString name = selectedSetName();
+	if (isBuiltinSet(name) || !userSetFiles.contains(name))
+		return;
+	if (!writeKeySet(keyMap, userSetFiles.value(name), name))
+	{
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not save the shortcut set to %1").arg(userSetFiles.value(name)));
+		return;
+	}
+	ScMessageBox::information(this, tr("Save"), tr("The shortcut set \"%1\" was updated.").arg(name));
+}
+
+void Prefs_KeyboardShortcuts::makeShortcutSetDefault()
+{
+	const QString name = selectedSetName();
+	setDefaultSetName(name);
+	refreshShortcutSets(name);
+}
+
+void Prefs_KeyboardShortcuts::deleteShortcutSet()
+{
+	const QString name = selectedSetName();
+	if (isBuiltinSet(name) || !userSetFiles.contains(name))
+		return;
+	if (ScMessageBox::question(this, tr("Delete Shortcut Set"),
+			tr("Delete the shortcut set \"%1\"? This cannot be undone.").arg(name),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+		return;
+	if (!QFile::remove(userSetFiles.value(name)))
+	{
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not delete %1").arg(userSetFiles.value(name)));
+		return;
+	}
+	if (name == defaultSetName())
+	{
+		// The default is gone: fall back to Newspaper Default and show it.
+		setDefaultSetName(newspaperDefaultSetName());
+		refreshShortcutSets(newspaperDefaultSetName());
+		loadNamedSet(newspaperDefaultSetName());
+		return;
+	}
+	refreshShortcutSets(defaultSetName());
 }
 
 void Prefs_KeyboardShortcuts::resetKeySet()

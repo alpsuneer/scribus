@@ -622,26 +622,44 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
     Claude-നും OpenAI-ക്കും ഇവിടെ account ഇല്ല; Gemini-ക്ക് ഉണ്ടെങ്കിലും
     അതിന്റെ rate limit പ്രശ്നം ഇനിയും ബാക്കിയാണ്
 
-### 28. Keyboard Shortcuts — സ്വന്തം Default, Export/Import (പുതിയത്)
+### 28. Keyboard Shortcuts — പേരുള്ള Shortcut Sets (പുതിയത്)
 
 - `File › Preferences › Keyboard Shortcuts`-ൽ മാറ്റുന്ന shortcut
-  **Scribus അടച്ചു തുറന്നാലും മാറില്ല**. Newspaper set **ആദ്യ
-  തവണ മാത്രം** (profile-ൽ `scribus172.rc` ഇല്ലാത്തപ്പോൾ)
-- **Save as Default** — ഇപ്പോഴത്തെ shortcuts നിങ്ങളുടെ സ്വന്തം
-  default ആയി `~/.config/scribus/my-default-shortcuts.xml`-ൽ
-  സൂക്ഷിക്കും
-- **Reset to My Default** — ആ സൂക്ഷിച്ച set തിരികെ കൊണ്ടുവരും.
-  പഴയ **Reset** ഇപ്പോൾ **Reset to Scribus Defaults** ആണ്
+  **Scribus അടച്ചു തുറന്നാലും മാറില്ല** — അടയ്ക്കുമ്പോൾ ഉണ്ടായിരുന്ന
+  shortcuts തന്നെ അടുത്ത തവണയും. Newspaper set **ആദ്യ തവണ മാത്രം**
+  (profile-ൽ `scribus172.rc` ഇല്ലാത്തപ്പോൾ)
+- Page-ന്റെ മുകളിൽ **Shortcut Set** എന്ന പുതിയ ഭാഗം:
+  - **Dropdown** — "Scribus Default", "Newspaper Default", പിന്നെ
+    നിങ്ങളുടെ sets. Default set-ന് ശേഷം **"(Default)"** എന്ന് കാണിക്കും.
+    ഒരു set തിരഞ്ഞെടുത്താൽ അത് താഴെയുള്ള list-ൽ വരും
+  - **Save As…** — ഇപ്പോഴത്തെ shortcuts ഒരു പുതിയ പേരിൽ സൂക്ഷിക്കും.
+    ആ പേര് നേരത്തേ ഉണ്ടെങ്കിൽ **മാറ്റണോ എന്ന് ചോദിക്കും**
+  - **Save** — തിരഞ്ഞെടുത്ത set-ൽ ഇപ്പോഴത്തെ മാറ്റങ്ങൾ സൂക്ഷിക്കും
+  - **Set as Default** — തിരഞ്ഞെടുത്ത set default ആക്കും
+  - **Delete** — ചോദിച്ച ശേഷം set മായ്ക്കും. Default set ആണ്
+    മായ്ച്ചതെങ്കിൽ **"Newspaper Default"** default ആകും
+  - Built-in sets-ൽ **Save-ഉം Delete-ഉം മങ്ങിക്കിടക്കും**
+- **എവിടെ സൂക്ഷിക്കുന്നു:** ഓരോ set-ഉം
+  `~/.config/scribus/shortcut-sets/<പേര്>.xml` എന്ന വേറെ ഫയലിൽ.
+  Default set-ന്റെ പേര് `prefs172.xml`-ൽ (`default_set`)
+- **Default set മാറ്റി OK അമർത്തിയാൽ** അടുത്ത തവണ അത് തന്നെ വരും.
+  പിന്നീട് Save ചെയ്യാതെ മാറ്റിയ shortcuts-ഉം അടുത്ത തവണ അങ്ങനെ തന്നെ
+  ഉണ്ടാകും (അവസാനം ഉപയോഗിച്ചത് ജയിക്കും)
+- പഴയ **"Save as Default"** കൊണ്ട് സൂക്ഷിച്ച
+  `my-default-shortcuts.xml` ആദ്യ തവണ തുറക്കുമ്പോൾ
+  `shortcut-sets/My Default.xml` ആയി മാറും
 - **Export… / Import…** — set ഒരു `.xml` ഫയലാക്കി മറ്റൊരു
-  കമ്പ്യൂട്ടറിലേക്ക് കൊണ്ടുപോകാം. പേരിനൊപ്പം `.xml` ചേർത്തില്ലെങ്കിലും
-  ഇപ്പോൾ ശരിയായ പേരിൽ തന്നെ save ആകും
-- **പുതിയ profile-ൽ ആദ്യം തുറക്കുമ്പോൾ**, ചോദിക്കാതെ ഈ ക്രമത്തിൽ:
-  1. profile-ൽ `my-default-shortcuts.xml` ഉണ്ടെങ്കിൽ അത്
-  2. ഇല്ലെങ്കിൽ `/usr/local/share/scribus/default-shortcuts.xml`
-     (install ചെയ്യുന്ന ആൾ എല്ലാവർക്കുമായി വെക്കുന്നത്)
-  3. രണ്ടും ഇല്ലെങ്കിൽ മാത്രം "Welcome" dialog
-- **⚠️ ശ്രദ്ധിക്കുക:** Ctrl+Shift+C / Ctrl+Shift+V എപ്പോഴും Styled
-  Copy/Paste-നാണ്; മറ്റൊന്നിന് കൊടുത്താൽ തുറക്കുമ്പോൾ മാറിപ്പോകും
+  കമ്പ്യൂട്ടറിലേക്ക് കൊണ്ടുപോകാം. പഴയ **Reset** ഇപ്പോൾ
+  **Reset to Scribus Defaults** ആണ്
+- **പുതിയ profile-ൽ ആദ്യം തുറക്കുമ്പോൾ:**
+  `/usr/local/share/scribus/default-shortcuts.xml` ഉണ്ടെങ്കിൽ ചോദിക്കാതെ
+  അത്; ഇല്ലെങ്കിൽ "Welcome" dialog — അതിലെ തിരഞ്ഞെടുപ്പ് ആദ്യത്തെ
+  default set (Newspaper / Scribus) ആകും
+- **⚠️ ശ്രദ്ധിക്കുക:**
+  - Ctrl+Shift+C / Ctrl+Shift+V എപ്പോഴും Styled Copy/Paste-നാണ്;
+    മറ്റൊന്നിന് കൊടുത്താൽ തുറക്കുമ്പോൾ മാറിപ്പോകും
+  - Set-ന്റെ പേരിൽ മലയാളം ആകാം, പക്ഷേ ഫയലിന്റെ പേരിൽ ആ
+    അക്ഷരങ്ങൾ `_` ആയി മാറും
 
 ### 29. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)

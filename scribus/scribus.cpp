@@ -10833,6 +10833,8 @@ void ScribusMainWindow::applyKeySetFromFile(const QString& path)
 
 void ScribusMainWindow::checkMalayalamDtpFirstRun()
 {
+	Prefs_KeyboardShortcuts::migrateOldMyDefault();
+
 	QSettings settings;
 	if (settings.contains(QStringLiteral("malayalamDtpFirstRun")))
 		return;   // already prompted — never overwrite an established config
@@ -10847,18 +10849,12 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 		return;
 	}
 
-	// A fresh profile starts from a set chosen ahead of time, when there is one,
-	// without asking: the user's own "Save as Default" set (e.g. copied in from
-	// another computer), else the installer's site-wide set.
-	const QStringList presetSets {
-		Prefs_KeyboardShortcuts::myDefaultShortcutsPath(),
-		ScPaths::instance().shareDir() + "default-shortcuts.xml"
-	};
-	for (const QString& presetSet : presetSets)
+	// A fresh profile starts from the installer's site-wide set, when there is
+	// one, without asking.
+	const QString siteSet = ScPaths::instance().shareDir() + "default-shortcuts.xml";
+	if (QFile::exists(siteSet))
 	{
-		if (!QFile::exists(presetSet))
-			continue;
-		applyKeySetFromFile(presetSet);
+		applyKeySetFromFile(siteSet);
 		settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
 		return;
 	}
@@ -10872,8 +10868,15 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 	QPushButton* keepBtn = box.addButton(tr("Keep Newspaper defaults"), QMessageBox::AcceptRole);
 	box.addButton(tr("Use standard Scribus defaults"), QMessageBox::RejectRole);
 	box.exec();
+	// The choice only picks the initial default set; later startups keep
+	// whatever shortcuts were in use when Scribus was closed.
 	if (box.clickedButton() == keepBtn)
+	{
 		applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
+		Prefs_KeyboardShortcuts::setDefaultSetName(Prefs_KeyboardShortcuts::newspaperDefaultSetName());
+	}
+	else
+		Prefs_KeyboardShortcuts::setDefaultSetName(Prefs_KeyboardShortcuts::scribusDefaultSetName());
 
 	settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
 }
