@@ -40,6 +40,8 @@ for which a new license (GPL+exception) is in place.
 #include "api/api_application.h"
 #include "cmsettings.h"
 #include "commonstrings.h"
+#include "offset_separation_presets.h"
+#include "offset_tiling.h"
 #include "scconfig.h"
 #include "pluginapi.h"
 #include "pageitemiterator.h"
@@ -63,7 +65,9 @@ for which a new license (GPL+exception) is in place.
 #include "ui/multiprogressdialog.h"
 #include "util.h"
 #include "util_formats.h"
+#include "units.h"
 #include "util_math.h"
+#include "util_printer.h"
 #include "text/boxes.h"
 
 using namespace TableUtils;
@@ -662,6 +666,25 @@ bool PSLib::PS_begin_doc(double x, double y, double width, double height, int nu
 		PutStream(grayCalc);
 	}
 
+	if (Options.offsetSepEnabled && (offsetOutputModeFromName(Options.offsetOutputMode) == OffsetOutputMode::CmykSeparations))
+	{
+		// Combined four-colorant + /Default screening dictionary, for a RIP
+		// that resolves HalftoneType 5 entries by Separation/DeviceN colorant
+		// name. Each plate page also gets its own HalftoneType 1 dict from
+		// PS_plate() below, which is what actually screens that page once
+		// PS_plate() has remapped it to DeviceGray - see the note there.
+		// Grayscale/FullColor modes have no plates to screen this way - see
+		// the offsetMode override in createPS().
+		OffsetSepPreset offsetPreset;
+		offsetPreset.resolution = Options.offsetSepResolution;
+		offsetPreset.dotShape = offsetDotShapeFromName(Options.offsetSepDotShape);
+		offsetPreset.cyan    = { Options.offsetSepCyanLPI, Options.offsetSepCyanAngle, Options.offsetSepCyanPrint };
+		offsetPreset.magenta = { Options.offsetSepMagentaLPI, Options.offsetSepMagentaAngle, Options.offsetSepMagentaPrint };
+		offsetPreset.yellow  = { Options.offsetSepYellowLPI, Options.offsetSepYellowAngle, Options.offsetSepYellowPrint };
+		offsetPreset.black   = { Options.offsetSepBlackLPI, Options.offsetSepBlackAngle, Options.offsetSepBlackPrint };
+		PutStream(offsetSepHalftoneDict(offsetPreset));
+	}
+
 	Optimization optim = m_optimization;
 	m_optimization = OptimizeSize;
 	QStringList patterns = m_Doc->getPatternDependencyList(m_Doc->getUsedPatterns());
@@ -792,7 +815,7 @@ void PSLib::PS_TemplateEnd()
 	PutStream("} bind def\n");
 }
 
-void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
+void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping, const PSPageTile* tile)
 {
 	double bleedRight = 0.0;
 	double bleedLeft = 0.0;
@@ -804,13 +827,24 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 	GetBleeds(pg, bleedLeft, bleedRight);
 	double maxBoxX = pg->width() + bleedLeft + bleedRight + markOffs * 2.0;
 	double maxBoxY = pg->height() + Options.bleeds.bottom() + Options.bleeds.top() + markOffs * 2.0;
+	// A tiled page is declared at its own physical sheet size, not the full
+	// document page size - see PSPageTile in pslib.h for why: a PostScript
+	// queue can receive the job unfiltered, and if the declared page size
+	// were still the full (e.g. broadsheet) page while content is clipped to
+	// one small corner, the queue would try to image the full declared size
+	// rather than the small physical sheet actually loaded.
+	double declaredBoxX = tile ? tile->sheetWidth  : maxBoxX;
+	double declaredBoxY = tile ? tile->sheetHeight : maxBoxY;
 	// Proof Print "Reduce to fit paper": the page goes onto one sheet of the
-	// proof paper, so that sheet is what is declared. The page is placed on
-	// it further down.
-	const bool proofFitSheet = (m_outputFormat == OutputPS) && Options.isProofPrint && Options.proofReduceToFit
+	// proof paper, so that sheet is what is declared, exactly as a tile
+	// declares its own sheet. The page is placed on it further down.
+	const bool proofFitSheet = (m_outputFormat == OutputPS) && Options.isProofPrint && Options.proofReduceToFit && !tile
 		&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0);
-	double declaredBoxX = proofFitSheet ? Options.proofPaperWidth  : maxBoxX;
-	double declaredBoxY = proofFitSheet ? Options.proofPaperHeight : maxBoxY;
+	if (proofFitSheet)
+	{
+		declaredBoxX = Options.proofPaperWidth;
+		declaredBoxY = Options.proofPaperHeight;
+	}
 	PageIndex++;
 	PutStream("%%Page: " + IToStr(PageIndex) + " " + IToStr(PageIndex) + "\n");
 	if (m_outputFormat == OutputPS)
@@ -819,28 +853,35 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 		{
 			PutStream("%%PageOrientation: Portrait\n");
 			PutStream("%%PageBoundingBox: 0 0 " + IToStr(qRound(declaredBoxX)) + " " + IToStr(qRound(declaredBoxY)) + "\n");
-			if (!proofFitSheet)
+			if (!tile && !proofFitSheet)
 				PutStream("%%PageCropBox: " + ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " " + ToStr(maxBoxX - bleedRight - markOffs * 2.0) + " " + ToStr(maxBoxY - Options.bleeds.top() - markOffs * 2.0) + "\n");
 		}
 		else
 		{
 			PutStream("%%PageOrientation: Landscape\n");
-			PutStream("%%PageBoundingBox: 0 0 " + IToStr(qRound(maxBoxY)) + " " + IToStr(qRound(maxBoxX)) + "\n");
-			PutStream("%%PageCropBox: " + ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " " + ToStr(maxBoxY - Options.bleeds.top() - markOffs * 2.0) + " " + ToStr(maxBoxX - bleedRight - markOffs * 2.0) + "\n");
+			PutStream("%%PageBoundingBox: 0 0 " + IToStr(qRound(declaredBoxY)) + " " + IToStr(qRound(declaredBoxX)) + "\n");
+			if (!tile)
+				PutStream("%%PageCropBox: " + ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " " + ToStr(maxBoxY - Options.bleeds.top() - markOffs * 2.0) + " " + ToStr(maxBoxX - bleedRight - markOffs * 2.0) + "\n");
 		}
 	}
 	PutStream("Scribusdict begin\n");
-	if ((m_outputFormat == OutputPS) && (Options.setDevParam || proofFitSheet))
+	if ((m_outputFormat == OutputPS) && (Options.setDevParam || tile || proofFitSheet))
 	{
 		if ((pg->orientation() == 0) || proofFitSheet)
 			PutStream("<< /PageSize [ " + ToStr(declaredBoxX) + " " + ToStr(declaredBoxY) + " ]\n");
 		else
-			PutStream("<< /PageSize [ " + ToStr(maxBoxY) + " " + ToStr(maxBoxX) + " ]\n");
+			PutStream("<< /PageSize [ " + ToStr(declaredBoxY) + " " + ToStr(declaredBoxX) + " ]\n");
 		PutStream(">> setpagedevice\n");
+	}
+	if ((m_outputFormat == OutputPS) && Options.offsetSepEnabled)
+	{
+		// Requested output resolution for the imagesetter/platesetter,
+		// independent of Options.setDevParam's PageSize block above.
+		PutStream("<< /HWResolution [ " + IToStr(Options.offsetSepResolution) + " " + IToStr(Options.offsetSepResolution) + " ] >> setpagedevice\n");
 	}
 	PutStream("save\n");
 	if ((pg->orientation() == 1) && (m_outputFormat == OutputPS) && !proofFitSheet)
-		PutStream("90 rotate 0 " + IToStr(qRound(maxBoxY)) + " neg translate\n");
+		PutStream("90 rotate 0 " + IToStr(qRound(declaredBoxY)) + " neg translate\n");
 	if (proofFitSheet)
 	{
 		// "Reduce to fit paper": the whole page on this one sheet, scaled
@@ -866,7 +907,7 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 		qDebug("Proof print (reduce to fit): paper %.1fx%.1f pt, page %.1fx%.1f pt, %s, scale %.1f%%",
 		       paperW, paperH, maxBoxX, maxBoxY, fit.rotated ? "turned" : "upright", s * 100.0);
 	}
-	else if ((m_outputFormat == OutputPS) && Options.isProofPrint
+	else if ((m_outputFormat == OutputPS) && Options.isProofPrint && !tile
 		&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0))
 	{
 		// A proof sheet is smaller than the page: content is drawn in document
@@ -874,7 +915,9 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 		// printer clips it. The job-level fit-to-page option cannot be relied on:
 		// it is a filter feature, and a PostScript queue can pass the job through
 		// unscaled. Scale here instead, centred, so the geometry is right
-		// whatever the queue does downstream.
+		// whatever the queue does downstream. Skipped for a tile: tiling already
+		// repositions content onto its own sheet below at 1:1 physical size,
+		// and scaling on top of that would be a second, conflicting transform.
 		// (This block used to be indented as if it belonged to the rotate
 		// above; it never did. Braces now say what the code always did.)
 		double srcW = (pg->orientation() == 0) ? maxBoxX : maxBoxY;
@@ -895,18 +938,39 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 		}
 	}
 	PutStream("/DeviceCMYK setcolorspace\n");
-	// Clip to bleeds
-	QString clipStr;
-	double bbWidth  = pg->width()  + bleedLeft + bleedRight;
-	double bbHeight = pg->height() + Options.bleeds.bottom() + Options.bleeds.top();
-	clipStr += ToStr(markOffs) + " " + ToStr(markOffs) + " m\n";
-	clipStr += ToStr(markOffs + bbWidth) + " " + ToStr(markOffs) + " li\n";
-	clipStr += ToStr(markOffs + bbWidth) + " " + ToStr(markOffs + bbHeight) + " li\n";
-	clipStr += ToStr(markOffs) + " " + ToStr(markOffs + bbHeight) + " li cl clip newpath\n";
-	PutStream(clipStr);
+	if (!tile)
+	{
+		// Clip to bleeds - not meaningful for a single tile, which clips to
+		// its own rect a little further down instead.
+		QString clipStr;
+		double bbWidth  = pg->width()  + bleedLeft + bleedRight;
+		double bbHeight = pg->height() + Options.bleeds.bottom() + Options.bleeds.top();
+		clipStr += ToStr(markOffs) + " " + ToStr(markOffs) + " m\n";
+		clipStr += ToStr(markOffs + bbWidth) + " " + ToStr(markOffs) + " li\n";
+		clipStr += ToStr(markOffs + bbWidth) + " " + ToStr(markOffs + bbHeight) + " li\n";
+		clipStr += ToStr(markOffs) + " " + ToStr(markOffs + bbHeight) + " li cl clip newpath\n";
+		PutStream(clipStr);
+	}
 	// Move to page origin
 	PutStream(ToStr(bleedLeft + markOffs) + " " + ToStr(Options.bleeds.bottom() + markOffs) + " tr\n");
 	m_currentPage = pg;
+	if (tile)
+	{
+		// Shift this tile's own bottom-left corner (in the page-local
+		// coordinates just established above) to be centred on its sheet,
+		// then clip to exactly its rect - using the same page-local numbers,
+		// which after this translate resolve to the correct centred device
+		// position. See PSPageTile in pslib.h for the coordinate convention.
+		double originX = (tile->sheetWidth  - tile->width)  / 2.0 - tile->left;
+		double originY = (tile->sheetHeight - tile->height) / 2.0 - tile->bottom;
+		PutStream(ToStr(originX) + " " + ToStr(originY) + " tr\n");
+		QString tileClip;
+		tileClip += ToStr(tile->left) + " " + ToStr(tile->bottom) + " m\n";
+		tileClip += ToStr(tile->left + tile->width) + " " + ToStr(tile->bottom) + " li\n";
+		tileClip += ToStr(tile->left + tile->width) + " " + ToStr(tile->bottom + tile->height) + " li\n";
+		tileClip += ToStr(tile->left) + " " + ToStr(tile->bottom + tile->height) + " li cl clip newpath\n";
+		PutStream(tileClip);
+	}
 	// Clip to margins if requested
 	if (clipping)
 	{
@@ -918,7 +982,7 @@ void PSLib::PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping)
 	}
 }
 
-void PSLib::PS_end_page()
+void PSLib::PS_end_page(const PSPageTile* tile)
 {
 	PutStream("%%PageTrailer\nrestore\n");
 	// Proof slug. Drawn after the restore, so it is in sheet coordinates at a
@@ -940,6 +1004,40 @@ void PSLib::PS_end_page()
 		PutStream("14 8 moveto\n");
 		PutStream("(" + slug + ") show\n");
 		PutStream("gr\n");
+	}
+	// Per-tile registration marks, cut marks and position label - three
+	// independently-gated pieces (see the Offset Separations tab's Tiling
+	// group checkboxes), each self-contained. Drawn after the restore too,
+	// in the same clean sheet-local (0,0)-(sheetWidth, sheetHeight) frame
+	// the proof slug above uses - the %%PageBoundingBox/setpagedevice this
+	// tile's PS_begin_page() declared. Independent of the
+	// Options.cropMarks/bleedMarks/registrationMarks/colorMarks block below,
+	// which is a different (whole-page proof/crop) feature.
+	if (tile && (Options.offsetTileRegMarks || Options.offsetTileCutMarks || Options.offsetTileShowLabel))
+	{
+		if (Options.offsetTileRegMarks)
+			PutStream(offsetTileRegistrationMarks(tile->sheetWidth, tile->sheetHeight));
+		if (Options.offsetTileCutMarks)
+			PutStream(offsetTileCutMarks(tile->sheetWidth, tile->sheetHeight));
+		if (Options.offsetTileShowLabel)
+		{
+			OffsetTileRect tileRect;
+			tileRect.col = tile->col;
+			tileRect.row = tile->row;
+			tileRect.left = tile->left;
+			tileRect.bottom = tile->bottom;
+			tileRect.width = tile->width;
+			tileRect.height = tile->height;
+			OffsetTileGrid tileGrid;
+			tileGrid.cols = tile->cols;
+			tileGrid.rows = tile->rows;
+			// offsetTileLabel()/offsetTileLabelPS() only read cols/rows and
+			// the one OffsetTileRect passed separately - the grid's own
+			// tiles vector (the full tile list) is not needed just to label
+			// one sheet.
+			QString plateName = DoSep ? currentSpot : QString();
+			PutStream(offsetTileLabelPS(tileRect, tileGrid, plateName, tile->sheetWidth, tile->sheetHeight));
+		}
 	}
 	double markOffs = 0.0;
 	if ((Options.cropMarks) || (Options.bleedMarks) || (Options.registrationMarks) || (Options.colorMarks))
@@ -1683,6 +1781,26 @@ void PSLib::PS_plate(int nr, const QString& name)
 	Plate = nr;
 	currentSpot = name;
 	DoSep = true;
+
+	if (Options.offsetSepEnabled && (m_outputFormat == OutputPS))
+	{
+		// The single dict that actually screens this page: PS_plate() has
+		// just remapped setcmykcolor/setrgbcolor to DeviceGray for this one
+		// plate, so a HalftoneType 5 dict keyed by colorant name (emitted
+		// once in PS_begin_doc()) is not guaranteed to be consulted here.
+		double lpi = Options.offsetSepBlackLPI;
+		double angle = Options.offsetSepBlackAngle;
+		switch (nr)
+		{
+			case 0: lpi = Options.offsetSepBlackLPI;   angle = Options.offsetSepBlackAngle;   break;
+			case 1: lpi = Options.offsetSepCyanLPI;    angle = Options.offsetSepCyanAngle;    break;
+			case 2: lpi = Options.offsetSepMagentaLPI; angle = Options.offsetSepMagentaAngle; break;
+			case 3: lpi = Options.offsetSepYellowLPI;  angle = Options.offsetSepYellowAngle;  break;
+			default: break; // spot colour plate: falls back to the black/Default screen
+		}
+		OffsetDotShape shape = offsetDotShapeFromName(Options.offsetSepDotShape);
+		PutStream(offsetSepPlateHalftone(lpi, angle, shape));
+	}
 }
 
 void PSLib::PS_setGray()
@@ -1804,12 +1922,101 @@ int PSLib::createPS(const QString& outputFileName)
 	bool Hm = Options.mirrorH;
 	bool Vm = Options.mirrorV;
 	bool doClip = Options.doClip;
+
+	// Offset Separations tab: Output Mode. When the tab's master switch is
+	// on, it is authoritative and self-contained: it overrides the Options
+	// tab's own Print Separations/colour settings rather than layering on
+	// top of them, so "Grayscale" or "Full Color" here means that regardless
+	// of what the Options tab's separations combo happens to be set to.
+	// Local variable overrides only - Options itself, and the Options tab's
+	// widgets, are untouched, so nothing changes for a job that leaves this
+	// tab's master switch off.
+	bool offsetModeActive = Options.offsetSepEnabled;
+	OffsetOutputMode offsetMode = offsetOutputModeFromName(Options.offsetOutputMode);
+	if (offsetModeActive)
+	{
+		if (offsetMode == OffsetOutputMode::CmykSeparations)
+		{
+			outputSep = true;
+			separationName = QStringLiteral("All");
+			separations = QStringList{ QStringLiteral("Cyan"), QStringLiteral("Magenta"), QStringLiteral("Yellow"), QStringLiteral("Black") };
+		}
+		else
+		{
+			// Grayscale or FullColor: one sheet per tile, no CMYK plate
+			// iteration - see the offsetMode branch in the per-tile loop
+			// below for how Grayscale still gets a single halftone screen
+			// without going through PS_plate() at all.
+			outputSep = false;
+			separationName = QStringLiteral("All");
+		}
+	}
+
 	int sepac;
 	int pagemult;
 	if (outputSep && (separationName == "All"))
+	{
 		pagemult = separations.count();
+		if (Options.offsetSepEnabled)
+		{
+			// A process-colour plate whose "Print" checkbox is off in the
+			// Offset Separations tab gets no page at all (see the skip below,
+			// in the aa/sepac loop) - keep %%Pages: in PS_begin_doc() honest
+			// about how many %%Page: markers will actually follow.
+			int disabledPlates = 0;
+			for (const QString& sepName : std::as_const(separations))
+			{
+				if ((sepName == "Cyan" && !Options.offsetSepCyanPrint)
+					|| (sepName == "Magenta" && !Options.offsetSepMagentaPrint)
+					|| (sepName == "Yellow" && !Options.offsetSepYellowPrint)
+					|| (sepName == "Black" && !Options.offsetSepBlackPrint))
+					disabledPlates++;
+			}
+			pagemult = qMax(1, pagemult - disabledPlates);
+		}
+	}
 	else
 		pagemult = 1;
+
+	// Offset Separations tab: Tiling. Resolved once up front - the tile
+	// paper size and the printer's margin on it are workflow-level
+	// constants; only a page's own width/height varies per page below.
+	// EPS output is excluded: it is a single reusable graphic, not a
+	// multi-page print run, so "tile it across several sheets" has no
+	// meaning there.
+	bool tilingRequested = Options.offsetTileEnabled && (m_outputFormat == OutputPS);
+	QSizeF tilePaperPts;
+	double tileMarginPts = 0.0;
+	if (tilingRequested)
+	{
+		if (Options.offsetTilePaperSize == QStringLiteral("Custom"))
+			tilePaperPts = QSizeF(Options.offsetTileCustomWidthPts, Options.offsetTileCustomHeightPts);
+		else
+			tilePaperPts = PrinterUtil::paperSizePoints(Options.offsetTilePaperSize);
+		if (!tilePaperPts.isValid() || (tilePaperPts.width() <= 0.0) || (tilePaperPts.height() <= 0.0))
+			tilingRequested = false; // nothing sane to tile onto - fall back to one sheet per page, exactly as if tiling were off
+		else
+		{
+			QMarginsF tileMargins;
+			if (PrinterUtil::getPrinterMarginValues(Options.printer, tilePaperPts, tileMargins))
+				tileMarginPts = qMax(qMax(tileMargins.left(), tileMargins.right()), qMax(tileMargins.top(), tileMargins.bottom()));
+			else
+				tileMarginPts = mm2pts(5.0); // same fallback as PrintDialog::offsetTileCurrentMarginPoints(), so the live preview and the actual output agree when the queue can't be queried
+		}
+	}
+	if (tilingRequested && !pageNs.empty())
+	{
+		// Orientation is a per-job choice (one physical sheet feed
+		// direction for the whole run, not a per-page one), resolved once
+		// here using the first page as the representative document size -
+		// matching the print dialog's own live preview, which does the same
+		// with the document's current page. Portrait/Landscape swap
+		// tilePaperPts outright; Auto picks whichever needs fewer tiles.
+		OffsetTileOrientation orientation = offsetTileOrientationFromName(Options.offsetTileOrientation);
+		ScPage* firstPage = m_Doc->Pages->at(pageNs[0] - 1);
+		QSizeF firstDocSize(firstPage->width(), firstPage->height());
+		tilePaperPts = offsetOrientedPaperSize(firstDocSize, tilePaperPts, orientation, tileMarginPts, Options.offsetTileOverlapPts);
+	}
 //	QVector<double> dum;
 	double gx = 0.0;
 	double gy = 0.0;
@@ -1817,7 +2024,10 @@ int PSLib::createPS(const QString& outputFileName)
 	double gh = 0.0;
 	PS_set_Info("Author", m_Doc->documentInfo().author());
 	PS_set_Info("Title", m_Doc->documentInfo().title());
-	if (!Options.useColor)
+	// Grayscale mode forces the conversion regardless of the Options tab's
+	// own colour/grayscale radio, for the same "this tab is self-contained"
+	// reason the outputSep override above is.
+	if (!Options.useColor || (offsetModeActive && (offsetMode == OffsetOutputMode::Grayscale)))
 		PS_setGray();
 	if ((m_Doc->HasCMS) && (ScCore->haveCMS()))
 		solidTransform = m_Doc->colorEngine.createTransform(m_Doc->DocInputCMYKProf, Format_CMYK_16, m_Doc->DocPrinterProf, Format_CMYK_16, m_Doc->IntentColors, 0);
@@ -1895,13 +2105,33 @@ int PSLib::createPS(const QString& outputFileName)
 	{
 		double maxWidth = 0.0;
 		double maxHeight = 0.0;
+		// Exact %%Pages: count, including tiling: unlike pagemult (plate
+		// count), tile count can differ per page - a document mixing a
+		// broadsheet with an inserted A4 page, say - so this is a per-page
+		// sum rather than a single multiplication. pagemult already equals
+		// offsetTotalSheets()'s "enabled plate count, or 1 for non-CMYK
+		// modes" argument by construction (see the offsetMode override
+		// above: outputSep/separations are only ever CMYK-shaped when
+		// offsetMode == CmykSeparations, and force pagemult back to 1
+		// otherwise) - offset_tiling.h's offsetTotalSheets() is the same
+		// formula, written down once for PrintDialog's live preview.
+		int totalOutputPages = 0;
 		for (size_t i = 0; i < pageNs.size(); ++i)
 		{
 			int pgNum = pageNs[i] - 1;
-			maxWidth = qMax(m_Doc->Pages->at(pgNum)->width(), maxWidth);
-			maxHeight = qMax(m_Doc->Pages->at(pgNum)->height(), maxHeight);
+			ScPage* countPage = m_Doc->Pages->at(pgNum);
+			maxWidth = qMax(countPage->width(), maxWidth);
+			maxHeight = qMax(countPage->height(), maxHeight);
+			int tilesForThisPage = 1;
+			if (tilingRequested)
+			{
+				OffsetTileGrid countGrid = offsetCalculateTileGrid(QSizeF(countPage->width(), countPage->height()), tilePaperPts, tileMarginPts, Options.offsetTileOverlapPts);
+				if (!countGrid.isSingleSheet())
+					tilesForThisPage = countGrid.tileCount();
+			}
+			totalOutputPages += pagemult * tilesForThisPage;
 		}
-		errorOccured = !PS_begin_doc(0.0, 0.0, maxWidth, maxHeight, pageNs.size() * pagemult);
+		errorOccured = !PS_begin_doc(0.0, 0.0, maxWidth, maxHeight, totalOutputPages);
 	}
 
 	sepac = 0;
@@ -1917,60 +2147,140 @@ int PSLib::createPS(const QString& outputFileName)
 		}
 		a = pageNs[aa]-1;
 		ScPage* page = m_Doc->Pages->at(a);
-		if ((m_outputFormat == OutputEPS) && (m_Doc->m_Selection->count() != 0))
+
+		// A process-colour plate whose "Print" checkbox is off in the Offset
+		// Separations tab gets no page at all: no %%Page:, no content. This
+		// only applies to the C/M/Y/K entries of a separationName == "All"
+		// job - a single named separation or a spot colour plate is unaffected.
+		bool skipPlatePage = false;
+		if (outputSep && Options.offsetSepEnabled && (separationName == "All"))
 		{
-			MarginStruct Ma;
-			Ma.setLeft(gx);
-			Ma.setTop(gy);
-			Ma.setBottom(page->height() - (gy + gh));
-			Ma.setRight(page->width() - (gx + gw));
-			PS_begin_page(page, &Ma, true);
+			const QString& sepName = separations[sepac];
+			if ((sepName == "Cyan" && !Options.offsetSepCyanPrint)
+				|| (sepName == "Magenta" && !Options.offsetSepMagentaPrint)
+				|| (sepName == "Yellow" && !Options.offsetSepYellowPrint)
+				|| (sepName == "Black" && !Options.offsetSepBlackPrint))
+				skipPlatePage = true;
 		}
-		else
-			PS_begin_page(page, &page->Margins, doClip);
-		if (Hm)
+		if (!skipPlatePage) {
+		// Offset Separations tab: Tiling. When this page is larger than the
+		// selected tile paper size (minus margin and overlap), emit one
+		// sheet per tile instead of one sheet for the whole page - see
+		// PSPageTile in pslib.h for the coordinate contract PS_begin_page()/
+		// PS_end_page() expect. A page that already fits the tile paper
+		// (pageTileGrid.isSingleSheet()) falls through to the same single,
+		// non-tiled PS_begin_page()/PS_end_page() call as before tiling
+		// existed - tilePtr stays nullptr and nothing about this loop
+		// iteration's output changes.
+		//
+		// NOT YET IMPLEMENTED: Options.offsetTilePrintOrder only changes
+		// emission order for PlateFirst (the default - this loop is already
+		// nested inside the sepac/plate loop below, so tiles for a given
+		// plate are naturally grouped together). TileFirst and
+		// SheetOptimized are accepted, persisted and round-trip through the
+		// dialog correctly, but currently emit in the same PlateFirst order -
+		// see the delivery report.
+		OffsetTileGrid pageTileGrid;
+		bool pageIsTiled = false;
+		if (tilingRequested)
 		{
-			PS_translate(page->width(), 0);
-			PS_scale(-1, 1);
+			pageTileGrid = offsetCalculateTileGrid(QSizeF(page->width(), page->height()), tilePaperPts, tileMarginPts, Options.offsetTileOverlapPts);
+			pageIsTiled = !pageTileGrid.isSingleSheet();
 		}
-		if (Vm)
+		int tileIterations = pageIsTiled ? pageTileGrid.tileCount() : 1;
+
+		for (int tileIdx = 0; (tileIdx < tileIterations) && !abortExport && !errorOccured; ++tileIdx)
 		{
-			PS_translate(0, page->height());
-			PS_scale(1, -1);
-		}
-		if (outputSep)
-		{
-			if (separationName == "Black")
-				PS_plate(0);
-			else if (separationName == "Cyan")
-				PS_plate(1);
-			else if (separationName == "Magenta")
-				PS_plate(2);
-			else if (separationName == "Yellow")
-				PS_plate(3);
-			else if (separationName == "All")
-				PS_plate(sepac, separations[sepac]);
-			else
-				PS_plate(4, separationName);
-		}
-		ScLayer ll;
-		ll.isPrintable = false;
-		for (int lam = 0; lam < m_Doc->Layers.count() && !abortExport && !errorOccured; ++lam)
-		{
-			m_Doc->Layers.levelToLayer(ll, lam);
-			if (!ll.isPrintable)
-				continue;
-			if (!page->masterPageNameEmpty() && !abortExport && !errorOccured)
+			PSPageTile tileInfo;
+			const PSPageTile* tilePtr = nullptr;
+			if (pageIsTiled)
 			{
-				errorOccured |= !ProcessMasterPageLayer(page, ll, a + 1);
+				const OffsetTileRect& r = pageTileGrid.tiles.at(tileIdx);
+				tileInfo.left = r.left;
+				tileInfo.bottom = r.bottom;
+				tileInfo.width = r.width;
+				tileInfo.height = r.height;
+				tileInfo.sheetWidth = tilePaperPts.width();
+				tileInfo.sheetHeight = tilePaperPts.height();
+				tileInfo.col = r.col;
+				tileInfo.row = r.row;
+				tileInfo.cols = pageTileGrid.cols;
+				tileInfo.rows = pageTileGrid.rows;
+				tilePtr = &tileInfo;
+			}
+
+			if ((m_outputFormat == OutputEPS) && (m_Doc->m_Selection->count() != 0))
+			{
+				MarginStruct Ma;
+				Ma.setLeft(gx);
+				Ma.setTop(gy);
+				Ma.setBottom(page->height() - (gy + gh));
+				Ma.setRight(page->width() - (gx + gw));
+				PS_begin_page(page, &Ma, true, tilePtr);
+			}
+			else
+				PS_begin_page(page, &page->Margins, doClip, tilePtr);
+			// Mirroring is skipped for a tiled sheet: the tile clip established
+			// inside PS_begin_page() is already fixed in device space by the
+			// time this mirror transform would run, so mirroring here would
+			// make a tile's window show flipped content from a different part
+			// of the page rather than a mirrored version of its own content.
+			// Not a workflow this fork currently needs; flagged in the
+			// delivery report rather than guessed at blind.
+			if (Hm && !pageIsTiled)
+			{
+				PS_translate(page->width(), 0);
+				PS_scale(-1, 1);
+			}
+			if (Vm && !pageIsTiled)
+			{
+				PS_translate(0, page->height());
+				PS_scale(1, -1);
+			}
+			if (outputSep)
+			{
+				if (separationName == "Black")
+					PS_plate(0);
+				else if (separationName == "Cyan")
+					PS_plate(1);
+				else if (separationName == "Magenta")
+					PS_plate(2);
+				else if (separationName == "Yellow")
+					PS_plate(3);
+				else if (separationName == "All")
+					PS_plate(sepac, separations[sepac]);
+				else
+					PS_plate(4, separationName);
+			}
+			else if (offsetModeActive && (offsetMode == OffsetOutputMode::Grayscale) && (m_outputFormat == OutputPS))
+			{
+				// Grayscale mode has no plates to iterate (outputSep is
+				// false - see the offsetMode override above), but the sheet
+				// still needs a single halftone screen. Reuses the Black
+				// plate's LPI/angle: every bundled preset already screens
+				// Black at 45 degrees, the conventional single-colour angle.
+				PutStream(offsetSepPlateHalftone(Options.offsetSepBlackLPI, Options.offsetSepBlackAngle, offsetDotShapeFromName(Options.offsetSepDotShape)));
+			}
+			ScLayer ll;
+			ll.isPrintable = false;
+			for (int lam = 0; lam < m_Doc->Layers.count() && !abortExport && !errorOccured; ++lam)
+			{
+				m_Doc->Layers.levelToLayer(ll, lam);
+				if (!ll.isPrintable)
+					continue;
+				if (!page->masterPageNameEmpty() && !abortExport && !errorOccured)
+				{
+					errorOccured |= !ProcessMasterPageLayer(page, ll, a + 1);
+				}
+				if (!abortExport && !errorOccured)
+				{
+					errorOccured |= !ProcessPageLayer(page, ll, a + 1);
+				}
 			}
 			if (!abortExport && !errorOccured)
-			{
-				errorOccured |= !ProcessPageLayer(page, ll, a + 1);
-			}
-		}
-		if (!abortExport && !errorOccured)
-			PS_end_page();
+				PS_end_page(tilePtr);
+		} // for tileIdx
+		} // if (!skipPlatePage)
 		if (outputSep)
 		{
 			if (separationName != "All")

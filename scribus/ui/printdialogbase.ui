@@ -602,6 +602,724 @@ a range of pages or a single page number</string>
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_5">
+      <attribute name="title">
+       <string>Offset Separations</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="tab_5Layout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="offsetSepScrollArea">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="offsetSepScrollAreaContents">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>540</width>
+            <height>900</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="offsetSepScrollLayout">
+           <item>
+            <widget class="QCheckBox" name="offsetSepEnabledCheck">
+         <property name="toolTip">
+          <string>Route this print job through the Offset Separations pipeline below instead of the Options tab's own output settings</string>
+         </property>
+         <property name="text">
+          <string>Enable Offset Separations output for this print job</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="offsetModeGroup">
+         <property name="title">
+          <string>Output Mode</string>
+         </property>
+         <layout class="QVBoxLayout">
+          <item>
+           <widget class="QRadioButton" name="offsetModeCmykRadio">
+            <property name="toolTip">
+             <string>One grayscale plate page per enabled process colour (Cyan, Magenta, Yellow, Black), each screened per its own LPI/angle/dot shape below</string>
+            </property>
+            <property name="text">
+             <string>CMYK Separations (4 plates)</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QRadioButton" name="offsetModeGrayscaleRadio">
+            <property name="toolTip">
+             <string>A single grayscale sheet per tile, screened with one LPI/angle (reuses the Black plate row below) - no per-colour plates</string>
+            </property>
+            <property name="text">
+             <string>Grayscale / Black &amp;&amp; White (1 plate)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QRadioButton" name="offsetModeFullColorRadio">
+            <property name="toolTip">
+             <string>A single full-colour composite sheet per tile - no halftone screening override, tiling and marks still apply</string>
+            </property>
+            <property name="text">
+             <string>Full Color Composite</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="offsetSepOutputGroup">
+         <property name="title">
+          <string>Output Settings</string>
+         </property>
+         <layout class="QGridLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="offsetSepResolutionLabel">
+            <property name="text">
+             <string>Resolution:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetSepResolution</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="offsetSepResolution">
+            <property name="toolTip">
+             <string>Imagesetter/platesetter output resolution</string>
+            </property>
+            <property name="suffix">
+             <string> DPI</string>
+            </property>
+            <property name="minimum">
+             <number>300</number>
+            </property>
+            <property name="maximum">
+             <number>4800</number>
+            </property>
+            <property name="singleStep">
+             <number>100</number>
+            </property>
+            <property name="value">
+             <number>2400</number>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="offsetSepDotShapeLabel">
+            <property name="text">
+             <string>Dot shape:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetSepDotShapeCombo</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="offsetSepDotShapeCombo"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="offsetSepPlatesGroup">
+         <property name="title">
+          <string>Per-Plate Settings</string>
+         </property>
+         <layout class="QGridLayout">
+          <item row="0" column="1">
+           <widget class="QLabel" name="offsetSepLPIHeader">
+            <property name="text">
+             <string>LPI</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QLabel" name="offsetSepAngleHeader">
+            <property name="text">
+             <string>Angle</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="3">
+           <widget class="QLabel" name="offsetSepPrintHeader">
+            <property name="text">
+             <string>Print</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="offsetSepCyanLabel">
+            <property name="text">
+             <string>Cyan</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="offsetCyanLPI">
+            <property name="minimum">
+             <number>50</number>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="value">
+             <number>100</number>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2">
+           <widget class="QDoubleSpinBox" name="offsetCyanAngle">
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>90.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="value">
+             <double>15.000000000000000</double>
+            </property>
+            <property name="suffix">
+             <string>°</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="3">
+           <widget class="QCheckBox" name="offsetCyanPrint">
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="offsetSepMagentaLabel">
+            <property name="text">
+             <string>Magenta</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="offsetMagentaLPI">
+            <property name="minimum">
+             <number>50</number>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="value">
+             <number>100</number>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="2">
+           <widget class="QDoubleSpinBox" name="offsetMagentaAngle">
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>90.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="value">
+             <double>75.000000000000000</double>
+            </property>
+            <property name="suffix">
+             <string>°</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="3">
+           <widget class="QCheckBox" name="offsetMagentaPrint">
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="offsetSepYellowLabel">
+            <property name="text">
+             <string>Yellow</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QSpinBox" name="offsetYellowLPI">
+            <property name="minimum">
+             <number>50</number>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="value">
+             <number>100</number>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="2">
+           <widget class="QDoubleSpinBox" name="offsetYellowAngle">
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>90.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="suffix">
+             <string>°</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="3">
+           <widget class="QCheckBox" name="offsetYellowPrint">
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="offsetSepBlackLabel">
+            <property name="text">
+             <string>Black</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QSpinBox" name="offsetBlackLPI">
+            <property name="minimum">
+             <number>50</number>
+            </property>
+            <property name="maximum">
+             <number>300</number>
+            </property>
+            <property name="value">
+             <number>100</number>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="2">
+           <widget class="QDoubleSpinBox" name="offsetBlackAngle">
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>90.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.100000000000000</double>
+            </property>
+            <property name="value">
+             <double>45.000000000000000</double>
+            </property>
+            <property name="suffix">
+             <string>°</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="3">
+           <widget class="QCheckBox" name="offsetBlackPrint">
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="offsetSepTilingGroup">
+         <property name="title">
+          <string>Tiling</string>
+         </property>
+         <layout class="QGridLayout">
+          <item row="0" column="0" colspan="4">
+           <widget class="QCheckBox" name="offsetTileEnabledCheck">
+            <property name="toolTip">
+             <string>Split each plate page into multiple sheets when the document page is larger than the selected tile paper size, so it can still be output on a smaller printer</string>
+            </property>
+            <property name="text">
+             <string>Auto-tile if document &gt; printer paper</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="offsetTilePaperLabel">
+            <property name="text">
+             <string>Printer paper size:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetTilePaperCombo</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1" colspan="3">
+           <widget class="QComboBox" name="offsetTilePaperCombo">
+            <property name="toolTip">
+             <string>Detected from the selected printer where possible; choose Custom to enter a size by hand</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="offsetTileCustomSizeLabel">
+            <property name="text">
+             <string>Custom size:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetTileCustomWidth</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QDoubleSpinBox" name="offsetTileCustomWidth">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="suffix">
+             <string> mm</string>
+            </property>
+            <property name="minimum">
+             <double>10.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>3000.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>297.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="2">
+           <widget class="QLabel" name="offsetTileCustomSizeXLabel">
+            <property name="text">
+             <string>×</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="3">
+           <widget class="QDoubleSpinBox" name="offsetTileCustomHeight">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="suffix">
+             <string> mm</string>
+            </property>
+            <property name="minimum">
+             <double>10.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>3000.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>420.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="4">
+           <widget class="QGroupBox" name="offsetTileOrientationGroup">
+            <property name="title">
+             <string>Orientation</string>
+            </property>
+            <layout class="QVBoxLayout">
+             <item>
+              <widget class="QRadioButton" name="offsetTileOrientPortraitRadio">
+               <property name="text">
+                <string>Portrait</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QRadioButton" name="offsetTileOrientLandscapeRadio">
+               <property name="text">
+                <string>Landscape</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QRadioButton" name="offsetTileOrientAutoRadio">
+               <property name="toolTip">
+                <string>Use whichever orientation needs fewer tiles for this document</string>
+               </property>
+               <property name="text">
+                <string>Auto-suggest best</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="offsetTileOrientRecommendedLabel">
+               <property name="text">
+                <string/>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="offsetTileOverlapLabel">
+            <property name="text">
+             <string>Tile overlap:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetTileOverlap</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QDoubleSpinBox" name="offsetTileOverlap">
+            <property name="toolTip">
+             <string>How much neighbouring tiles overlap, for trim and registration once the film/plate output is cut and assembled</string>
+            </property>
+            <property name="decimals">
+             <number>1</number>
+            </property>
+            <property name="suffix">
+             <string> mm</string>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>100.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.500000000000000</double>
+            </property>
+            <property name="value">
+             <double>5.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="2" colspan="2">
+           <widget class="QCheckBox" name="offsetTileRegMarksCheck">
+            <property name="toolTip">
+             <string>Draw corner registration crosshairs on every tile sheet</string>
+            </property>
+            <property name="text">
+             <string>Registration marks per tile</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="0" colspan="2">
+           <widget class="QCheckBox" name="offsetTileCutMarksCheck">
+            <property name="toolTip">
+             <string>Draw short trim tick marks at each tile edge's midpoint, marking where neighbouring tiles should be cut and butted together</string>
+            </property>
+            <property name="text">
+             <string>Cut marks per tile</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="2" colspan="2">
+           <widget class="QCheckBox" name="offsetTileLabelCheck">
+            <property name="toolTip">
+             <string>Draw a "Plate / Tile N of M / position" text label on every tile sheet, e.g. "Cyan / Tile 1 of 4 / Top-Left"</string>
+            </property>
+            <property name="text">
+             <string>Tile label (e.g. "Tile 1/4, Cyan")</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="offsetTilePrintOrderLabel">
+            <property name="text">
+             <string>Print order:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetTilePrintOrderCombo</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1" colspan="3">
+           <widget class="QComboBox" name="offsetTilePrintOrderCombo">
+            <property name="toolTip">
+             <string>Plate-first: all tiles of Cyan, then Magenta, Yellow, Black - easiest for film assembly. Tile-first: tile 1 of every plate, then tile 2, and so on. Sheet-optimized: tile-first in a serpentine order to minimise repositioning between sheets</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="0" colspan="4">
+           <widget class="Line" name="offsetTileInfoSeparator">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+           </widget>
+          </item>
+          <item row="8" column="0" colspan="4">
+           <widget class="QLabel" name="offsetTileInfoLabel">
+            <property name="text">
+             <string>Document: —
+Printer:  —
+Tiles:    —</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="9" column="0" colspan="4">
+           <widget class="QWidget" name="offsetTilePreviewContainer" native="true">
+            <layout class="QVBoxLayout" name="offsetTilePreviewContainerLayout">
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+            </layout>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="offsetSepPresetsGroup">
+         <property name="title">
+          <string>Presets</string>
+         </property>
+         <layout class="QGridLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="offsetSepPresetLabel">
+            <property name="text">
+             <string>Current:</string>
+            </property>
+            <property name="buddy">
+             <cstring>offsetSepPresetCombo</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1" colspan="3">
+           <widget class="QComboBox" name="offsetSepPresetCombo"/>
+          </item>
+          <item row="1" column="1">
+           <widget class="QPushButton" name="offsetSepSaveButton">
+            <property name="text">
+             <string>Save Current as Preset</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2">
+           <widget class="QPushButton" name="offsetSepDeleteButton">
+            <property name="text">
+             <string>Delete Selected Preset</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="3">
+           <widget class="QPushButton" name="offsetSepResetButton">
+            <property name="text">
+             <string>Reset to Defaults</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="offsetSepVerticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Orientation::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
    <item>
@@ -701,6 +1419,40 @@ a range of pages or a single page number</string>
   <tabstop>bleedRight</tabstop>
   <tabstop>bleedTop</tabstop>
   <tabstop>bleedBottom</tabstop>
+  <tabstop>offsetSepEnabledCheck</tabstop>
+  <tabstop>offsetModeCmykRadio</tabstop>
+  <tabstop>offsetModeGrayscaleRadio</tabstop>
+  <tabstop>offsetModeFullColorRadio</tabstop>
+  <tabstop>offsetSepResolution</tabstop>
+  <tabstop>offsetSepDotShapeCombo</tabstop>
+  <tabstop>offsetCyanLPI</tabstop>
+  <tabstop>offsetCyanAngle</tabstop>
+  <tabstop>offsetCyanPrint</tabstop>
+  <tabstop>offsetMagentaLPI</tabstop>
+  <tabstop>offsetMagentaAngle</tabstop>
+  <tabstop>offsetMagentaPrint</tabstop>
+  <tabstop>offsetYellowLPI</tabstop>
+  <tabstop>offsetYellowAngle</tabstop>
+  <tabstop>offsetYellowPrint</tabstop>
+  <tabstop>offsetBlackLPI</tabstop>
+  <tabstop>offsetBlackAngle</tabstop>
+  <tabstop>offsetBlackPrint</tabstop>
+  <tabstop>offsetTileEnabledCheck</tabstop>
+  <tabstop>offsetTilePaperCombo</tabstop>
+  <tabstop>offsetTileCustomWidth</tabstop>
+  <tabstop>offsetTileCustomHeight</tabstop>
+  <tabstop>offsetTileOrientPortraitRadio</tabstop>
+  <tabstop>offsetTileOrientLandscapeRadio</tabstop>
+  <tabstop>offsetTileOrientAutoRadio</tabstop>
+  <tabstop>offsetTileOverlap</tabstop>
+  <tabstop>offsetTileRegMarksCheck</tabstop>
+  <tabstop>offsetTileCutMarksCheck</tabstop>
+  <tabstop>offsetTileLabelCheck</tabstop>
+  <tabstop>offsetTilePrintOrderCombo</tabstop>
+  <tabstop>offsetSepPresetCombo</tabstop>
+  <tabstop>offsetSepSaveButton</tabstop>
+  <tabstop>offsetSepDeleteButton</tabstop>
+  <tabstop>offsetSepResetButton</tabstop>
   <tabstop>previewButton</tabstop>
   <tabstop>okButton</tabstop>
   <tabstop>cancelButton</tabstop>

@@ -218,6 +218,9 @@ if(HAVE_OSG)
 		scimpositionengine.cpp
 		ui/impositiondialog.cpp
 		ui/impositionpreviewwidget.cpp
+		ui/tile_preview_widget.cpp
+		offset_separation_presets.cpp
+		offset_tiling.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}
@@ -299,6 +302,9 @@ else()
 		scimpositionengine.cpp
 		ui/impositiondialog.cpp
 		ui/impositionpreviewwidget.cpp
+		ui/tile_preview_widget.cpp
+		offset_separation_presets.cpp
+		offset_tiling.cpp
 		${SCRIBUS_API_SOURCES}
 		${SCRIBUS_COLORMGMT_SOURCES}
 		${SCRIBUS_DESAXE_SOURCES}

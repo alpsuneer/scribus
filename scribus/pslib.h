@@ -47,6 +47,48 @@ class ScImage;
 class ScLayer;
 class PSPainter;
 
+/*! \brief Optional per-call override for PSLib::PS_begin_page(): render only
+    one tile of the page, clipped to it and repositioned onto its own
+    sheetWidth x sheetHeight physical sheet instead of the full page.
+
+    left/bottom/width/height are in the same page-local, bottom-left-origin
+    point space PS_begin_page() already clips its Ma (margins) argument in
+    (see the Ma->bottom()/pg->height()-Ma->top() clip path there) - not Qt's
+    top-down QRectF convention. Deliberately plain doubles rather than a
+    QRectF/QSizeF member so pslib.h does not need to depend on
+    offset_tiling.h's OffsetTileRect for this; scribus/offset_tiling.h is the
+    type the print pipeline actually builds these from (see createPS()).
+
+    sheetWidth/sheetHeight are the physical paper size this tile prints on -
+    what PS_begin_page() declares as the page's %%PageBoundingBox and
+    setpagedevice /PageSize instead of the full document page size. This
+    matters: a PostScript queue can receive a job unfiltered, so if the
+    declared page size were still the full (broadsheet) page while content
+    is clipped to one small corner, the queue would try to image the full
+    declared size and clip or scale unpredictably - the same class of bug
+    this fork's printer pipeline was already burned by once with CUPS
+    fit-to-page (see CLAUDE.md's print-changes section: "the file was
+    perfect, the paper was one quadrant"). Declaring the tile's own sheet
+    size instead avoids relying on the queue to do that filtering.
+*/
+struct PSPageTile
+{
+	double left { 0.0 };
+	double bottom { 0.0 };
+	double width { 0.0 };
+	double height { 0.0 };
+	double sheetWidth { 0.0 };
+	double sheetHeight { 0.0 };
+	//! This tile's position and the grid's overall size, carried as plain
+	//! ints purely so PS_end_page() can label the sheet ("Tile N of M /
+	//! Top-Left") without pslib.h depending on offset_tiling.h's
+	//! OffsetTileRect/OffsetTileGrid - only pslib.cpp needs that header.
+	int col { 0 };
+	int row { 0 };
+	int cols { 1 };
+	int rows { 1 };
+};
+
 /**
   *@author Franz Schmid
   * Diese Klasse erzeugt PostScript-Dateien
@@ -92,8 +134,8 @@ class SCRIBUS_API PSLib : public QObject
 		virtual bool PS_set_file(const QString& fn);
 
 		virtual bool PS_begin_doc( double x, double y, double width, double height, int numpage);
-		virtual void PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping);
-		virtual void PS_end_page();
+		virtual void PS_begin_page(ScPage* pg, MarginStruct* Ma, bool clipping, const PSPageTile* tile = nullptr);
+		virtual void PS_end_page(const PSPageTile* tile = nullptr);
 		virtual void PS_curve(double x1, double y1, double x2, double y2, double x3, double y3);
 		virtual void PS_moveto(double x, double y);
 		virtual void PS_lineto(double x, double y);

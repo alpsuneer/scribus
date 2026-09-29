@@ -5154,6 +5154,10 @@ void ScribusMainWindow::slotFileProofPrint()
 	// "Reduce to fit paper": one sheet per page, scaled down (and turned if
 	// that fits larger) - see proof_fit.h.
 	proof.proofReduceToFit = dialog.reduceToFit();
+	// A reduced proof is one sheet per page, so the print settings' tiling
+	// of a page larger than the paper is switched off for it.
+	if (proof.proofReduceToFit)
+		proof.offsetTileEnabled = false;
 
 	m_mainWindowStatusLabel->setText( tr("Proof printing..."));
 	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));

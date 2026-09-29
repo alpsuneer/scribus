@@ -475,6 +475,78 @@ struct PrintOptions
 	QStringList allSeparations;
 	QString printerCommand;
 	QByteArray devMode; // printer specific options on Windows
+
+	// --- Offset Separations tab (scribus/ui/printdialog.cpp) ---
+	//! Master switch for the tab. When set, createPS() emits one grayscale
+	//! plate page per enabled process colorant (Cyan/Magenta/Yellow/Black,
+	//! honouring the four *Print flags below) with per-plate halftone
+	//! screening, instead of relying on separationName/allSeparations alone.
+	bool offsetSepEnabled { false };
+	//! Output resolution in DPI, written as PostScript HWResolution.
+	int offsetSepResolution { 2400 };
+	//! Dot shape name, e.g. "Round" - see offsetDotShapeName() in
+	//! offset_separation_presets.h. Held as a string rather than the enum so
+	//! this header stays free of that include.
+	QString offsetSepDotShape { "Round" };
+	double offsetSepCyanLPI { 100.0 };
+	double offsetSepCyanAngle { 15.0 };
+	bool offsetSepCyanPrint { true };
+	double offsetSepMagentaLPI { 100.0 };
+	double offsetSepMagentaAngle { 75.0 };
+	bool offsetSepMagentaPrint { true };
+	double offsetSepYellowLPI { 100.0 };
+	double offsetSepYellowAngle { 0.0 };
+	bool offsetSepYellowPrint { true };
+	double offsetSepBlackLPI { 100.0 };
+	double offsetSepBlackAngle { 45.0 };
+	bool offsetSepBlackPrint { true };
+	//! What the tab's master switch (offsetSepEnabled) actually produces -
+	//! CMYK plate separations (the four *Print/*LPI/*Angle fields above),
+	//! a single grayscale sheet, or a full-colour composite. Held as the
+	//! display name string (see OffsetOutputMode in
+	//! offset_separation_presets.h) for the same reason offsetSepDotShape
+	//! is - keeps this header free of that include.
+	QString offsetOutputMode { "CmykSeparations" };
+
+	// --- Offset Separations tab: Tiling (scribus/offset_tiling.h) ---
+	//! When set and a document page is larger than the selected tile paper
+	//! size (minus the printer's margin and the overlap below), createPS()
+	//! emits one sheet per tile per plate instead of one sheet at full
+	//! document size. Defaults on: a broadsheet sent unmodified to a printer
+	//! that cannot hold it is the failure mode this whole tab exists to
+	//! prevent, so the safety net should not need to be found and enabled
+	//! first.
+	bool offsetTileEnabled { true };
+	//! PPD paper keyword tiles are cut to, e.g. "A3" - see
+	//! PrinterUtil::paperSizePoints(). "Custom" uses the two fields below.
+	QString offsetTilePaperSize { "A3" };
+	double offsetTileCustomWidthPts { 0.0 };
+	double offsetTileCustomHeightPts { 0.0 };
+	//! Overlap between neighbouring tiles, in points. Default is 5mm
+	//! (5 * 72/25.4), matching the tab's default display value.
+	double offsetTileOverlapPts { 14.173228346456694 };
+	//! Portrait, Landscape, or Auto (resolved per job to whichever needs
+	//! fewer tiles - see offsetSuggestOrientation() in offset_tiling.h).
+	//! Held as the display name string for the same reason offsetOutputMode
+	//! above is.
+	QString offsetTileOrientation { "Auto" };
+	//! Corner registration crosshairs on every tile sheet - see
+	//! offsetTileRegistrationMarks() in offset_tiling.h. Independent of
+	//! Options.registrationMarks, which is a whole-page mark for the
+	//! non-tiled path.
+	bool offsetTileRegMarks { true };
+	//! Cut/trim tick marks at each tile edge's midpoint - see
+	//! offsetTileCutMarks() in offset_tiling.h. Independent of the
+	//! registration crosshairs above; an operator may want one without the
+	//! other.
+	bool offsetTileCutMarks { true };
+	//! "Plate / Tile N of M / position" text label on every tile sheet -
+	//! see offsetTileLabelPS() in offset_tiling.h.
+	bool offsetTileShowLabel { true };
+	//! Held as the display name string (see OffsetTilePrintOrder in
+	//! offset_tiling.h) for the same reason offsetSepDotShape is - keeps
+	//! this header free of that include.
+	QString offsetTilePrintOrder { "Plate-first" };
 };
 
 enum class PreflightError

@@ -6,10 +6,14 @@ for which a new license (GPL+exception) is in place.
 */
 #include "printdialog.h"
 
+#include <QApplication>
 #include <QDir>
 #include <QMap>
+#include <QScreen>
 #include <QStringList>
 #include <QByteArray>
+#include <QInputDialog>
+#include <QLineEdit>
 
 #include "scconfig.h"
 
@@ -20,6 +24,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefscontext.h"
 #include "prefsfile.h"
 #include "cupsoptions.h"
+#include "ui/scmessagebox.h"
 #if defined(_WIN32)
 	#include <Windows.h>
 	#include <winspool.h>
@@ -32,7 +37,9 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scrspinbox.h"
 #include "ui/createrange.h"
+#include "ui/tile_preview_widget.h"
 #include "units.h"
+#include "offset_tiling.h"
 #include "usertaskstructs.h"
 #include "util.h"
 #include "util_printer.h"
@@ -139,7 +146,29 @@ PrintDialog::PrintDialog( QWidget* parent, ScribusDoc* doc, const PrintOptions& 
 		altComCheckBox->setEnabled(false);
 	}
 
-	setMaximumSize(sizeHint());
+	offsetSepInit();
+	offsetTileInit();
+
+	// The Offset Separations tab (printdialogbase.ui) can be tall enough
+	// that this dialog's natural sizeHint() exceeds a normal desktop's
+	// available height, pushing the Print/Cancel/Preview button row below
+	// the screen edge with no way to reach it by mouse - reported directly
+	// against a real 768-900px-tall screen. Clamp the maximum height to the
+	// screen instead of the dialog's own (possibly oversized) sizeHint();
+	// the Offset Separations tab's own QScrollArea (printdialogbase.ui) is
+	// what keeps that tab's content usable once this constrains the dialog
+	// below the tab's full natural height. Width is left exactly as before.
+	QSize hint = sizeHint();
+	int maxHeight = hint.height();
+	if (QScreen* screen = QApplication::primaryScreen())
+	{
+		int availableHeight = screen->availableGeometry().height() - 100;
+		// A floor, not just the screen-derived ceiling: a very short or
+		// misreported screen must not shrink the dialog to something the
+		// Print Destination group and tab bar alone couldn't fit in.
+		maxHeight = qMin(maxHeight, qMax(400, availableHeight));
+	}
+	setMaximumSize(hint.width(), maxHeight);
 	PrintDest->setFocus();
 
 	// signals and slots connections
@@ -358,6 +387,14 @@ void PrintDialog::selectPrinter(const QString& prn)
 		setCurrentComboItem(printSepCombo, tr("Print Normal"));
 		setCurrentComboItem(separationsCombo, tr("All"));
 	}
+	// Offset separation screening is PostScript-only output (see
+	// PSLib::PS_plate()/createPS()); a PDF or GDI target has no plate pages
+	// to screen, so the tab's master switch follows the same PS-support test
+	// as the existing Print Separations combo above.
+	offsetSepEnabledCheck->setEnabled(psSupported);
+	if (!psSupported)
+		offsetSepEnabledCheck->setChecked(false);
+	offsetTilePopulatePaperCombo();
 
 	bool pdfMarksSupported = (prnLanguage == PrintLanguage::PDF);
 	pdfMarksSupported |= (prnLanguage == PrintLanguage::PostScript1);
@@ -403,6 +440,9 @@ void PrintDialog::selectPrintLanguage(const QString& prnLanguage)
 		setCurrentComboItem(printSepCombo, tr("Print Normal"));
 		setCurrentComboItem(separationsCombo, tr("All"));
 	}
+	offsetSepEnabledCheck->setEnabled(psSupported);
+	if (!psSupported)
+		offsetSepEnabledCheck->setChecked(false);
 
 	bool pdfMarksSupported = (prnLanguage == CommonStrings::trPDF);
 	pdfMarksSupported |= (prnLanguage == CommonStrings::trPostScript1);
@@ -511,6 +551,8 @@ void PrintDialog::storeValues()
 		m_doc->Print_Options.useAltPrintCommand = false;
 	m_doc->Print_Options.printerOptions = getOptions();
 	m_doc->Print_Options.devMode = m_devMode;
+	offsetSepStoreValues();
+	offsetTileStoreValues();
 }
 
 void PrintDialog::okButtonClicked()
@@ -604,6 +646,8 @@ void PrintDialog::setStoredValues(const QString& fileName)
 	registrationMarks->setChecked(m_doc->Print_Options.registrationMarks);
 	colorMarks->setChecked(m_doc->Print_Options.colorMarks);
 	usePDFMarks->setChecked(m_doc->Print_Options.includePDFMarks);
+	offsetSepSetStoredValues();
+	offsetTileSetStoredValues();
 }
 
 QString PrintDialog::printerName() const
@@ -771,4 +815,718 @@ void PrintDialog::setPrintLanguage(PrintLanguage prnLanguage)
 		else
 			printLanguages->setCurrentIndex(printLanguages->count() - 1);
 	}
+}
+
+// -------------------------------------------------------------------------
+// Offset Separations tab
+// -------------------------------------------------------------------------
+
+void PrintDialog::offsetSepInit()
+{
+	m_offsetUpdatingUI = true;
+
+	for (const QString& shapeName : offsetDotShapeNames())
+		offsetSepDotShapeCombo->addItem(shapeName);
+
+	offsetCyanAngle->setDecimals(1);
+	offsetMagentaAngle->setDecimals(1);
+	offsetYellowAngle->setDecimals(1);
+	offsetBlackAngle->setDecimals(1);
+
+	m_offsetBuiltInPresets = OffsetSepPresetLibrary::bundledPresets();
+	offsetSepLoadCustomPresets();
+	offsetSepPopulatePresetCombo();
+
+	m_offsetUpdatingUI = false;
+
+	connect(offsetSepEnabledCheck, SIGNAL(toggled(bool)), this, SLOT(offsetSepToggled(bool)));
+	connect(offsetModeCmykRadio, SIGNAL(toggled(bool)), this, SLOT(offsetModeChanged()));
+	connect(offsetModeGrayscaleRadio, SIGNAL(toggled(bool)), this, SLOT(offsetModeChanged()));
+	connect(offsetModeFullColorRadio, SIGNAL(toggled(bool)), this, SLOT(offsetModeChanged()));
+	connect(offsetSepPresetCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(offsetSepPresetChanged(int)));
+	connect(offsetSepSaveButton, SIGNAL(clicked()), this, SLOT(offsetSepSavePreset()));
+	connect(offsetSepDeleteButton, SIGNAL(clicked()), this, SLOT(offsetSepDeletePreset()));
+	connect(offsetSepResetButton, SIGNAL(clicked()), this, SLOT(offsetSepResetDefaults()));
+
+	connect(offsetSepResolution, SIGNAL(valueChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetSepDotShapeCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetCyanLPI, SIGNAL(valueChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetCyanAngle, SIGNAL(valueChanged(double)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetCyanPrint, SIGNAL(toggled(bool)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetMagentaLPI, SIGNAL(valueChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetMagentaAngle, SIGNAL(valueChanged(double)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetMagentaPrint, SIGNAL(toggled(bool)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetYellowLPI, SIGNAL(valueChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetYellowAngle, SIGNAL(valueChanged(double)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetYellowPrint, SIGNAL(toggled(bool)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetBlackLPI, SIGNAL(valueChanged(int)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetBlackAngle, SIGNAL(valueChanged(double)), this, SLOT(offsetSepFieldChanged()));
+	connect(offsetBlackPrint, SIGNAL(toggled(bool)), this, SLOT(offsetSepFieldChanged()));
+
+	offsetSepUpdateEnableState();
+}
+
+void PrintDialog::offsetSepUpdateEnableState()
+{
+	bool enabled = offsetSepEnabledCheck->isChecked();
+	offsetModeGroup->setEnabled(enabled);
+	offsetSepOutputGroup->setEnabled(enabled);
+	// Per-plate LPI/angle/print only means anything in CMYK Separations mode -
+	// Grayscale screens with a single angle (see offsetSelectedOutputMode())
+	// and Full Color applies no screening at all.
+	offsetSepPlatesGroup->setEnabled(enabled && (offsetSelectedOutputMode() == OffsetOutputMode::CmykSeparations));
+	// Composite colour/grayscale choice does not apply once separations are
+	// being screened plate by plate - see the deliverable's mutual-exclusion
+	// requirement for this checkbox.
+	colorType->setEnabled(!enabled);
+}
+
+void PrintDialog::offsetSepToggled(bool checked)
+{
+	Q_UNUSED(checked)
+	offsetSepUpdateEnableState();
+	offsetTileUpdateInfo();
+}
+
+OffsetOutputMode PrintDialog::offsetSelectedOutputMode() const
+{
+	if (offsetModeGrayscaleRadio->isChecked())
+		return OffsetOutputMode::Grayscale;
+	if (offsetModeFullColorRadio->isChecked())
+		return OffsetOutputMode::FullColor;
+	return OffsetOutputMode::CmykSeparations;
+}
+
+void PrintDialog::offsetModeChanged()
+{
+	if (m_offsetUpdatingUI)
+		return;
+	offsetSepUpdateEnableState();
+	offsetTileUpdateInfo();
+}
+
+void PrintDialog::offsetSepPopulatePresetCombo()
+{
+	bool wasUpdating = m_offsetUpdatingUI;
+	m_offsetUpdatingUI = true;
+	QString previousData = offsetSepPresetCombo->currentData().toString();
+	offsetSepPresetCombo->clear();
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+		offsetSepPresetCombo->addItem(preset.name, preset.name);
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetCustomPresets))
+		offsetSepPresetCombo->addItem(preset.name, preset.name);
+	if (!previousData.isEmpty())
+	{
+		int idx = offsetSepFindPresetIndex(previousData);
+		if (idx >= 0)
+			offsetSepPresetCombo->setCurrentIndex(idx);
+	}
+	m_offsetUpdatingUI = wasUpdating;
+}
+
+int PrintDialog::offsetSepFindPresetIndex(const QString& name) const
+{
+	for (int i = 0; i < offsetSepPresetCombo->count(); ++i)
+	{
+		if (offsetSepPresetCombo->itemData(i).toString() == name)
+			return i;
+	}
+	return -1;
+}
+
+OffsetSepPreset PrintDialog::offsetSepCollectSettings() const
+{
+	OffsetSepPreset preset;
+	preset.name = m_offsetActivePresetName;
+	preset.resolution = offsetSepResolution->value();
+	preset.dotShape = static_cast<OffsetDotShape>(offsetSepDotShapeCombo->currentIndex());
+	preset.cyan    = { static_cast<double>(offsetCyanLPI->value()), offsetCyanAngle->value(), offsetCyanPrint->isChecked() };
+	preset.magenta = { static_cast<double>(offsetMagentaLPI->value()), offsetMagentaAngle->value(), offsetMagentaPrint->isChecked() };
+	preset.yellow  = { static_cast<double>(offsetYellowLPI->value()), offsetYellowAngle->value(), offsetYellowPrint->isChecked() };
+	preset.black   = { static_cast<double>(offsetBlackLPI->value()), offsetBlackAngle->value(), offsetBlackPrint->isChecked() };
+	return preset;
+}
+
+void PrintDialog::offsetSepApplyPreset(const OffsetSepPreset& preset)
+{
+	bool wasUpdating = m_offsetUpdatingUI;
+	m_offsetUpdatingUI = true;
+
+	offsetSepResolution->setValue(preset.resolution);
+	offsetSepDotShapeCombo->setCurrentIndex(static_cast<int>(preset.dotShape));
+	offsetCyanLPI->setValue(qRound(preset.cyan.lpi));
+	offsetCyanAngle->setValue(preset.cyan.angle);
+	offsetCyanPrint->setChecked(preset.cyan.printPlate);
+	offsetMagentaLPI->setValue(qRound(preset.magenta.lpi));
+	offsetMagentaAngle->setValue(preset.magenta.angle);
+	offsetMagentaPrint->setChecked(preset.magenta.printPlate);
+	offsetYellowLPI->setValue(qRound(preset.yellow.lpi));
+	offsetYellowAngle->setValue(preset.yellow.angle);
+	offsetYellowPrint->setChecked(preset.yellow.printPlate);
+	offsetBlackLPI->setValue(qRound(preset.black.lpi));
+	offsetBlackAngle->setValue(preset.black.angle);
+	offsetBlackPrint->setChecked(preset.black.printPlate);
+
+	m_offsetActivePresetName = preset.name;
+
+	int idx = offsetSepFindPresetIndex(preset.name);
+	if (idx >= 0)
+	{
+		offsetSepPresetCombo->setItemText(idx, preset.name);
+		offsetSepPresetCombo->setCurrentIndex(idx);
+	}
+	offsetSepDeleteButton->setEnabled(!preset.builtIn && (idx >= 0));
+
+	m_offsetUpdatingUI = wasUpdating;
+}
+
+void PrintDialog::offsetSepFieldChanged()
+{
+	if (m_offsetUpdatingUI)
+		return;
+	int idx = offsetSepPresetCombo->currentIndex();
+	if (idx < 0)
+		return;
+	QString baseName = offsetSepPresetCombo->itemData(idx).toString();
+	QString modifiedText = baseName + QStringLiteral(" *");
+	if (offsetSepPresetCombo->itemText(idx) != modifiedText)
+		offsetSepPresetCombo->setItemText(idx, modifiedText);
+}
+
+void PrintDialog::offsetSepPresetChanged(int index)
+{
+	if (m_offsetUpdatingUI)
+		return;
+	if ((index < 0) || (index >= offsetSepPresetCombo->count()))
+		return;
+	QString name = offsetSepPresetCombo->itemData(index).toString();
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name == name)
+		{
+			offsetSepApplyPreset(preset);
+			return;
+		}
+	}
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetCustomPresets))
+	{
+		if (preset.name == name)
+		{
+			offsetSepApplyPreset(preset);
+			return;
+		}
+	}
+}
+
+void PrintDialog::offsetSepSavePreset()
+{
+	bool activeIsBuiltIn = false;
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name == m_offsetActivePresetName)
+		{
+			activeIsBuiltIn = true;
+			break;
+		}
+	}
+
+	bool ok = false;
+	QString suggested = activeIsBuiltIn ? QString() : m_offsetActivePresetName;
+	QString name = QInputDialog::getText(this, tr("Save Offset Separation Preset"),
+		tr("Preset name:"), QLineEdit::Normal, suggested, &ok);
+	if (!ok)
+		return;
+	name = name.trimmed();
+	if (name.isEmpty())
+		return;
+
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name.compare(name, Qt::CaseInsensitive) == 0)
+		{
+			ScMessageBox::warning(this, CommonStrings::trWarning,
+				tr("\"%1\" is a bundled preset and cannot be overwritten. Choose a different name.").arg(name));
+			return;
+		}
+	}
+
+	OffsetSepPreset preset = offsetSepCollectSettings();
+	preset.name = name;
+	preset.builtIn = false;
+
+	bool replaced = false;
+	for (OffsetSepPreset& existing : m_offsetCustomPresets)
+	{
+		if (existing.name.compare(name, Qt::CaseInsensitive) == 0)
+		{
+			existing = preset;
+			replaced = true;
+			break;
+		}
+	}
+	if (!replaced)
+		m_offsetCustomPresets.append(preset);
+
+	offsetSepPersistCustomPresets();
+	offsetSepPopulatePresetCombo();
+	offsetSepApplyPreset(preset);
+}
+
+void PrintDialog::offsetSepDeletePreset()
+{
+	int idx = offsetSepPresetCombo->currentIndex();
+	if (idx < 0)
+		return;
+	QString name = offsetSepPresetCombo->itemData(idx).toString();
+
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name == name)
+			return; // bundled presets cannot be deleted; button should already be disabled
+	}
+
+	int removeIdx = -1;
+	for (int i = 0; i < m_offsetCustomPresets.count(); ++i)
+	{
+		if (m_offsetCustomPresets.at(i).name == name)
+		{
+			removeIdx = i;
+			break;
+		}
+	}
+	if (removeIdx < 0)
+		return;
+
+	m_offsetCustomPresets.remove(removeIdx);
+	offsetSepPersistCustomPresets();
+	offsetSepPopulatePresetCombo();
+
+	QString defaultName = OffsetSepPresetLibrary::defaultPresetName();
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name == defaultName)
+		{
+			offsetSepApplyPreset(preset);
+			break;
+		}
+	}
+}
+
+void PrintDialog::offsetSepResetDefaults()
+{
+	QString defaultName = OffsetSepPresetLibrary::defaultPresetName();
+	for (const OffsetSepPreset& preset : std::as_const(m_offsetBuiltInPresets))
+	{
+		if (preset.name == defaultName)
+		{
+			offsetSepApplyPreset(preset);
+			break;
+		}
+	}
+	offsetSepEnabledCheck->setChecked(false);
+}
+
+void PrintDialog::offsetSepLoadCustomPresets()
+{
+	QString json = prefs->get("OffsetSepCustomPresets", QString());
+	m_offsetCustomPresets = OffsetSepPresetLibrary::parseCustomPresets(json);
+}
+
+void PrintDialog::offsetSepPersistCustomPresets()
+{
+	prefs->set("OffsetSepCustomPresets", OffsetSepPresetLibrary::serializeCustomPresets(m_offsetCustomPresets));
+	// Custom presets are user-authored data the operator explicitly asked to
+	// save/delete, unlike the rest of this dialog's per-field prefs (which
+	// only reach disk at application quit) - flush immediately so a save
+	// survives a crash between now and the next quit.
+	PrefsManager::instance().savePrefsXML();
+}
+
+void PrintDialog::offsetSepStoreValues()
+{
+	OffsetSepPreset current = offsetSepCollectSettings();
+
+	m_doc->Print_Options.offsetSepEnabled = offsetSepEnabledCheck->isChecked();
+	m_doc->Print_Options.offsetSepResolution = current.resolution;
+	m_doc->Print_Options.offsetSepDotShape = offsetDotShapeName(current.dotShape);
+	m_doc->Print_Options.offsetSepCyanLPI = current.cyan.lpi;
+	m_doc->Print_Options.offsetSepCyanAngle = current.cyan.angle;
+	m_doc->Print_Options.offsetSepCyanPrint = current.cyan.printPlate;
+	m_doc->Print_Options.offsetSepMagentaLPI = current.magenta.lpi;
+	m_doc->Print_Options.offsetSepMagentaAngle = current.magenta.angle;
+	m_doc->Print_Options.offsetSepMagentaPrint = current.magenta.printPlate;
+	m_doc->Print_Options.offsetSepYellowLPI = current.yellow.lpi;
+	m_doc->Print_Options.offsetSepYellowAngle = current.yellow.angle;
+	m_doc->Print_Options.offsetSepYellowPrint = current.yellow.printPlate;
+	m_doc->Print_Options.offsetSepBlackLPI = current.black.lpi;
+	m_doc->Print_Options.offsetSepBlackAngle = current.black.angle;
+	m_doc->Print_Options.offsetSepBlackPrint = current.black.printPlate;
+	m_doc->Print_Options.offsetOutputMode = offsetOutputModeName(offsetSelectedOutputMode());
+
+	prefs->set("OffsetSepEnabled", m_doc->Print_Options.offsetSepEnabled);
+	prefs->set("OffsetOutputMode", m_doc->Print_Options.offsetOutputMode);
+	prefs->set("OffsetSepResolution", m_doc->Print_Options.offsetSepResolution);
+	prefs->set("OffsetSepDotShape", m_doc->Print_Options.offsetSepDotShape);
+	prefs->set("OffsetSepCyanLPI", m_doc->Print_Options.offsetSepCyanLPI);
+	prefs->set("OffsetSepCyanAngle", m_doc->Print_Options.offsetSepCyanAngle);
+	prefs->set("OffsetSepCyanPrint", m_doc->Print_Options.offsetSepCyanPrint);
+	prefs->set("OffsetSepMagentaLPI", m_doc->Print_Options.offsetSepMagentaLPI);
+	prefs->set("OffsetSepMagentaAngle", m_doc->Print_Options.offsetSepMagentaAngle);
+	prefs->set("OffsetSepMagentaPrint", m_doc->Print_Options.offsetSepMagentaPrint);
+	prefs->set("OffsetSepYellowLPI", m_doc->Print_Options.offsetSepYellowLPI);
+	prefs->set("OffsetSepYellowAngle", m_doc->Print_Options.offsetSepYellowAngle);
+	prefs->set("OffsetSepYellowPrint", m_doc->Print_Options.offsetSepYellowPrint);
+	prefs->set("OffsetSepBlackLPI", m_doc->Print_Options.offsetSepBlackLPI);
+	prefs->set("OffsetSepBlackAngle", m_doc->Print_Options.offsetSepBlackAngle);
+	prefs->set("OffsetSepBlackPrint", m_doc->Print_Options.offsetSepBlackPrint);
+}
+
+void PrintDialog::offsetSepSetStoredValues()
+{
+	const PrintOptions& opts = m_doc->Print_Options;
+
+	OffsetSepPreset preset;
+	preset.name = m_offsetActivePresetName.isEmpty() ? OffsetSepPresetLibrary::defaultPresetName() : m_offsetActivePresetName;
+	preset.resolution = opts.offsetSepResolution;
+	preset.dotShape = offsetDotShapeFromName(opts.offsetSepDotShape, nullptr);
+	preset.cyan    = { opts.offsetSepCyanLPI, opts.offsetSepCyanAngle, opts.offsetSepCyanPrint };
+	preset.magenta = { opts.offsetSepMagentaLPI, opts.offsetSepMagentaAngle, opts.offsetSepMagentaPrint };
+	preset.yellow  = { opts.offsetSepYellowLPI, opts.offsetSepYellowAngle, opts.offsetSepYellowPrint };
+	preset.black   = { opts.offsetSepBlackLPI, opts.offsetSepBlackAngle, opts.offsetSepBlackPrint };
+
+	// If these values still match a known preset exactly (true on first use,
+	// where they come straight from PrinterUtil::getDefaultPrintOptions()'s
+	// Malayalam-Newspaper-shaped defaults) show that preset selected and
+	// unmodified; otherwise just load the values with no preset highlighted.
+	bool matched = false;
+	for (const OffsetSepPreset& candidate : std::as_const(m_offsetBuiltInPresets))
+	{
+		if ((candidate.resolution == preset.resolution) && (candidate.dotShape == preset.dotShape)
+			&& (candidate.cyan == preset.cyan) && (candidate.magenta == preset.magenta)
+			&& (candidate.yellow == preset.yellow) && (candidate.black == preset.black))
+		{
+			offsetSepApplyPreset(candidate);
+			matched = true;
+			break;
+		}
+	}
+	if (!matched)
+	{
+		for (const OffsetSepPreset& candidate : std::as_const(m_offsetCustomPresets))
+		{
+			if ((candidate.resolution == preset.resolution) && (candidate.dotShape == preset.dotShape)
+				&& (candidate.cyan == preset.cyan) && (candidate.magenta == preset.magenta)
+				&& (candidate.yellow == preset.yellow) && (candidate.black == preset.black))
+			{
+				offsetSepApplyPreset(candidate);
+				matched = true;
+				break;
+			}
+		}
+	}
+	if (!matched)
+	{
+		bool wasUpdating = m_offsetUpdatingUI;
+		m_offsetUpdatingUI = true;
+		offsetSepResolution->setValue(preset.resolution);
+		offsetSepDotShapeCombo->setCurrentIndex(static_cast<int>(preset.dotShape));
+		offsetCyanLPI->setValue(qRound(preset.cyan.lpi));
+		offsetCyanAngle->setValue(preset.cyan.angle);
+		offsetCyanPrint->setChecked(preset.cyan.printPlate);
+		offsetMagentaLPI->setValue(qRound(preset.magenta.lpi));
+		offsetMagentaAngle->setValue(preset.magenta.angle);
+		offsetMagentaPrint->setChecked(preset.magenta.printPlate);
+		offsetYellowLPI->setValue(qRound(preset.yellow.lpi));
+		offsetYellowAngle->setValue(preset.yellow.angle);
+		offsetYellowPrint->setChecked(preset.yellow.printPlate);
+		offsetBlackLPI->setValue(qRound(preset.black.lpi));
+		offsetBlackAngle->setValue(preset.black.angle);
+		offsetBlackPrint->setChecked(preset.black.printPlate);
+		m_offsetActivePresetName.clear();
+		offsetSepPresetCombo->setCurrentIndex(-1);
+		offsetSepDeleteButton->setEnabled(false);
+		m_offsetUpdatingUI = wasUpdating;
+	}
+
+	bool okMode = false;
+	OffsetOutputMode mode = offsetOutputModeFromName(opts.offsetOutputMode, &okMode);
+	if (!okMode)
+		mode = OffsetOutputMode::CmykSeparations;
+	if (mode == OffsetOutputMode::Grayscale)
+		offsetModeGrayscaleRadio->setChecked(true);
+	else if (mode == OffsetOutputMode::FullColor)
+		offsetModeFullColorRadio->setChecked(true);
+	else
+		offsetModeCmykRadio->setChecked(true);
+
+	offsetSepEnabledCheck->setChecked(opts.offsetSepEnabled);
+	offsetSepUpdateEnableState();
+}
+
+// -------------------------------------------------------------------------
+// Offset Separations tab: Tiling
+// -------------------------------------------------------------------------
+
+void PrintDialog::offsetTileInit()
+{
+	for (const QString& name : offsetTilePrintOrderNames())
+		offsetTilePrintOrderCombo->addItem(name);
+
+	offsetTileCustomWidth->setDecimals(1);
+	offsetTileCustomHeight->setDecimals(1);
+	offsetTileOverlap->setDecimals(1);
+
+	connect(offsetTileEnabledCheck, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTilePaperCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(offsetTilePaperChanged(int)));
+	connect(offsetTileCustomWidth, SIGNAL(valueChanged(double)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileCustomHeight, SIGNAL(valueChanged(double)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileOrientPortraitRadio, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileOrientLandscapeRadio, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileOrientAutoRadio, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileOverlap, SIGNAL(valueChanged(double)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileRegMarksCheck, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileCutMarksCheck, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTileLabelCheck, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+	connect(offsetTilePrintOrderCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(offsetTileFieldChanged()));
+	// The separations master switch and output mode change the total-sheets
+	// figure the live info label shows below - keep it in sync too.
+	connect(offsetSepEnabledCheck, SIGNAL(toggled(bool)), this, SLOT(offsetTileFieldChanged()));
+
+	// Small schematic tile-arrangement preview, built here rather than in
+	// Designer XML (see offsetTilePreviewContainer in printdialogbase.ui) so
+	// this .ui stays free of a <customwidgets> promotion entry to keep in
+	// sync by hand.
+	m_offsetTilePreview = new TilePreviewWidget(offsetTilePreviewContainer);
+	offsetTilePreviewContainer->layout()->addWidget(m_offsetTilePreview);
+
+	offsetTilePopulatePaperCombo(); // also applies enable-state and the first info update
+}
+
+void PrintDialog::offsetTilePopulatePaperCombo()
+{
+	QString previous = (offsetTilePaperCombo->count() > 0)
+		? offsetTilePaperCombo->currentData().toString()
+		: m_doc->Print_Options.offsetTilePaperSize;
+
+	bool wasBlocked = offsetTilePaperCombo->blockSignals(true);
+	offsetTilePaperCombo->clear();
+
+	QStringList names;
+	QString defaultName;
+	// Print-to-file has no queue to ask, and lpoptions can simply fail to
+	// answer for a queue that's offline - either way fall back to a fixed
+	// list of sizes this dialog already knows how to size (see the A0-A2
+	// entries PrinterUtil::paperSizePoints() gained for this feature).
+	bool detected = !outputToFile() && PrinterUtil::getSupportedPaperSizes(PrintDest->currentText(), names, defaultName);
+	if (!detected || names.isEmpty())
+	{
+		names = { QStringLiteral("A3"), QStringLiteral("A4"), QStringLiteral("A2"),
+			QStringLiteral("A1"), QStringLiteral("A0"), QStringLiteral("Letter"),
+			QStringLiteral("Legal"), QStringLiteral("Tabloid") };
+	}
+	for (const QString& name : std::as_const(names))
+	{
+		if (!PrinterUtil::paperSizePoints(name).isValid())
+			continue; // a PPD keyword this dialog has no geometry for - offering it would let the user pick a size the live preview and pslib.cpp cannot compute tiles against
+		offsetTilePaperCombo->addItem(name, name);
+	}
+	offsetTilePaperCombo->addItem(tr("Custom"), QStringLiteral("Custom"));
+
+	int idx = offsetTilePaperCombo->findData(previous);
+	offsetTilePaperCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+	offsetTilePaperCombo->blockSignals(wasBlocked);
+
+	offsetTileFieldChanged();
+}
+
+QSizeF PrintDialog::offsetTileCurrentPaperSizePoints() const
+{
+	QString name = offsetTilePaperCombo->currentData().toString();
+	if (name == QStringLiteral("Custom"))
+		return QSizeF(mm2pts(offsetTileCustomWidth->value()), mm2pts(offsetTileCustomHeight->value()));
+	QSizeF size = PrinterUtil::paperSizePoints(name);
+	if (!size.isValid())
+		size = PrinterUtil::paperSizePoints(QStringLiteral("A3")); // last-resort fallback so the live preview never shows a blank/degenerate grid
+	return size;
+}
+
+double PrintDialog::offsetTileCurrentMarginPoints() const
+{
+	const double fallbackMM = 5.0;
+	if (outputToFile())
+		return mm2pts(fallbackMM);
+	QMarginsF margins;
+	if (!PrinterUtil::getPrinterMarginValues(PrintDest->currentText(), offsetTileCurrentPaperSizePoints(), margins))
+		return mm2pts(fallbackMM);
+	// A single scalar margin for offsetCalculateTileGrid(): the largest of
+	// the four, so no edge is ever asked to hold content the printer can't
+	// actually image, even on a printer with asymmetric margins.
+	return qMax(qMax(margins.left(), margins.right()), qMax(margins.top(), margins.bottom()));
+}
+
+OffsetTileOrientation PrintDialog::offsetSelectedOrientation() const
+{
+	if (offsetTileOrientPortraitRadio->isChecked())
+		return OffsetTileOrientation::Portrait;
+	if (offsetTileOrientLandscapeRadio->isChecked())
+		return OffsetTileOrientation::Landscape;
+	return OffsetTileOrientation::Auto;
+}
+
+void PrintDialog::offsetTileUpdateInfo()
+{
+	QSizeF docSize(m_doc->pageWidth(), m_doc->pageHeight());
+	QSizeF basePaperSize = offsetTileCurrentPaperSizePoints(); // portrait convention, before orientation
+	double margin = offsetTileCurrentMarginPoints();
+	double overlap = mm2pts(offsetTileOverlap->value());
+
+	OffsetTileOrientation chosenOrientation = offsetSelectedOrientation();
+	OffsetTileOrientation resolvedOrientation = (chosenOrientation == OffsetTileOrientation::Auto)
+		? offsetSuggestOrientation(docSize, basePaperSize, margin, overlap)
+		: chosenOrientation;
+	QSizeF paperSize = offsetOrientedPaperSize(docSize, basePaperSize, chosenOrientation, margin, overlap);
+
+	// Recommended-orientation hint: shown regardless of which radio is
+	// selected, so switching to Auto later still tells the operator what it
+	// will pick for this document.
+	int portraitTiles = offsetCalculateTileGrid(docSize, basePaperSize, margin, overlap).tileCount();
+	QSizeF landscapeBase(basePaperSize.height(), basePaperSize.width());
+	int landscapeTiles = offsetCalculateTileGrid(docSize, landscapeBase, margin, overlap).tileCount();
+	if (offsetTileEnabledCheck->isChecked() && (portraitTiles != landscapeTiles))
+	{
+		bool landscapeWins = (landscapeTiles < portraitTiles);
+		offsetTileOrientRecommendedLabel->setText(tr("Recommended: %1 (%2 tiles vs %3)")
+			.arg(landscapeWins ? tr("Landscape") : tr("Portrait"))
+			.arg(qMin(portraitTiles, landscapeTiles))
+			.arg(qMax(portraitTiles, landscapeTiles)));
+	}
+	else
+		offsetTileOrientRecommendedLabel->setText(QString());
+
+	OffsetTileGrid grid = offsetCalculateTileGrid(docSize, paperSize, margin, overlap);
+	bool tilingActive = offsetTileEnabledCheck->isChecked() && !grid.isSingleSheet();
+	int tileCount = tilingActive ? grid.tileCount() : 1;
+
+	OffsetOutputMode mode = offsetSelectedOutputMode();
+	int enabledPlates = 0;
+	if (offsetCyanPrint->isChecked())    enabledPlates++;
+	if (offsetMagentaPrint->isChecked()) enabledPlates++;
+	if (offsetYellowPrint->isChecked())  enabledPlates++;
+	if (offsetBlackPrint->isChecked())   enabledPlates++;
+	int totalSheets = offsetTotalSheets(1, tileCount, mode, enabledPlates);
+
+	QString modeText = (mode == OffsetOutputMode::Grayscale) ? tr("Grayscale")
+		: (mode == OffsetOutputMode::FullColor) ? tr("Full Color")
+		: tr("CMYK Separations");
+
+	QStringList lines;
+	lines << tr("Document: %1 × %2 mm").arg(pts2mm(docSize.width()), 0, 'f', 1).arg(pts2mm(docSize.height()), 0, 'f', 1);
+	lines << tr("Paper:    %1 × %2 mm (%3)").arg(pts2mm(paperSize.width()), 0, 'f', 1).arg(pts2mm(paperSize.height()), 0, 'f', 1)
+		.arg((resolvedOrientation == OffsetTileOrientation::Landscape) ? tr("Landscape") : tr("Portrait"));
+	if (tilingActive)
+		lines << tr("Tiles:    %1 × %2 = %3 per plate").arg(grid.cols).arg(grid.rows).arg(tileCount);
+	else if (offsetTileEnabledCheck->isChecked())
+		lines << tr("Tiles:    not needed - document fits the selected paper");
+	else
+		lines << tr("Tiles:    auto-tiling is off");
+	lines << tr("Mode:     %1").arg(modeText);
+	lines << QString();
+	lines << tr("Total sheets to print: %1").arg(totalSheets);
+
+	offsetTileInfoLabel->setText(lines.join(QStringLiteral("\n")));
+
+	if (m_offsetTilePreview)
+	{
+		m_offsetTilePreview->setGrid(tilingActive ? grid : OffsetTileGrid(),
+			QSizeF(pts2mm(docSize.width()), pts2mm(docSize.height())));
+	}
+}
+
+void PrintDialog::offsetTileFieldChanged()
+{
+	bool enabled = offsetTileEnabledCheck->isChecked();
+	bool isCustom = offsetTilePaperCombo->currentData().toString() == QStringLiteral("Custom");
+	offsetTilePaperCombo->setEnabled(enabled);
+	offsetTileCustomWidth->setEnabled(enabled && isCustom);
+	offsetTileCustomHeight->setEnabled(enabled && isCustom);
+	offsetTileOrientationGroup->setEnabled(enabled);
+	offsetTileOverlap->setEnabled(enabled);
+	offsetTileRegMarksCheck->setEnabled(enabled);
+	offsetTileCutMarksCheck->setEnabled(enabled);
+	offsetTileLabelCheck->setEnabled(enabled);
+	offsetTilePrintOrderCombo->setEnabled(enabled);
+	offsetTileUpdateInfo();
+}
+
+void PrintDialog::offsetTilePaperChanged(int index)
+{
+	Q_UNUSED(index)
+	offsetTileFieldChanged();
+}
+
+void PrintDialog::offsetTileStoreValues()
+{
+	m_doc->Print_Options.offsetTileEnabled = offsetTileEnabledCheck->isChecked();
+	m_doc->Print_Options.offsetTilePaperSize = offsetTilePaperCombo->currentData().toString();
+	m_doc->Print_Options.offsetTileCustomWidthPts = mm2pts(offsetTileCustomWidth->value());
+	m_doc->Print_Options.offsetTileCustomHeightPts = mm2pts(offsetTileCustomHeight->value());
+	m_doc->Print_Options.offsetTileOverlapPts = mm2pts(offsetTileOverlap->value());
+	m_doc->Print_Options.offsetTileOrientation = offsetTileOrientationName(offsetSelectedOrientation());
+	m_doc->Print_Options.offsetTileRegMarks = offsetTileRegMarksCheck->isChecked();
+	m_doc->Print_Options.offsetTileCutMarks = offsetTileCutMarksCheck->isChecked();
+	m_doc->Print_Options.offsetTileShowLabel = offsetTileLabelCheck->isChecked();
+	m_doc->Print_Options.offsetTilePrintOrder = offsetTilePrintOrderCombo->currentText();
+
+	prefs->set("OffsetTilingEnabled", m_doc->Print_Options.offsetTileEnabled);
+	prefs->set("OffsetTilePaperSize", m_doc->Print_Options.offsetTilePaperSize);
+	prefs->set("OffsetTileCustomWidthPts", m_doc->Print_Options.offsetTileCustomWidthPts);
+	prefs->set("OffsetTileCustomHeightPts", m_doc->Print_Options.offsetTileCustomHeightPts);
+	// Stored in mm, like the LPI/angle keys above are in their own human
+	// units - see PrinterUtil::getDefaultPrintOptions()'s matching mm2pts().
+	prefs->set("OffsetTileOverlapMM", offsetTileOverlap->value());
+	prefs->set("OffsetTileOrientation", m_doc->Print_Options.offsetTileOrientation);
+	prefs->set("OffsetTileRegMarks", m_doc->Print_Options.offsetTileRegMarks);
+	prefs->set("OffsetTileCutMarks", m_doc->Print_Options.offsetTileCutMarks);
+	prefs->set("OffsetTileShowLabel", m_doc->Print_Options.offsetTileShowLabel);
+	prefs->set("OffsetTilePrintOrder", m_doc->Print_Options.offsetTilePrintOrder);
+}
+
+void PrintDialog::offsetTileSetStoredValues()
+{
+	const PrintOptions& opts = m_doc->Print_Options;
+
+	offsetTileEnabledCheck->setChecked(opts.offsetTileEnabled);
+
+	int paperIdx = offsetTilePaperCombo->findData(opts.offsetTilePaperSize);
+	offsetTilePaperCombo->setCurrentIndex(paperIdx >= 0 ? paperIdx : 0);
+
+	if (opts.offsetTileCustomWidthPts > 0.0)
+		offsetTileCustomWidth->setValue(pts2mm(opts.offsetTileCustomWidthPts));
+	if (opts.offsetTileCustomHeightPts > 0.0)
+		offsetTileCustomHeight->setValue(pts2mm(opts.offsetTileCustomHeightPts));
+
+	offsetTileOverlap->setValue(pts2mm(opts.offsetTileOverlapPts));
+
+	bool okOrient = false;
+	OffsetTileOrientation orientation = offsetTileOrientationFromName(opts.offsetTileOrientation, &okOrient);
+	if (!okOrient)
+		orientation = OffsetTileOrientation::Auto;
+	if (orientation == OffsetTileOrientation::Portrait)
+		offsetTileOrientPortraitRadio->setChecked(true);
+	else if (orientation == OffsetTileOrientation::Landscape)
+		offsetTileOrientLandscapeRadio->setChecked(true);
+	else
+		offsetTileOrientAutoRadio->setChecked(true);
+
+	offsetTileRegMarksCheck->setChecked(opts.offsetTileRegMarks);
+	offsetTileCutMarksCheck->setChecked(opts.offsetTileCutMarks);
+	offsetTileLabelCheck->setChecked(opts.offsetTileShowLabel);
+
+	bool ok = false;
+	OffsetTilePrintOrder order = offsetTilePrintOrderFromName(opts.offsetTilePrintOrder, &ok);
+	int orderIdx = offsetTilePrintOrderCombo->findText(offsetTilePrintOrderName(ok ? order : OffsetTilePrintOrder::PlateFirst));
+	if (orderIdx >= 0)
+		offsetTilePrintOrderCombo->setCurrentIndex(orderIdx);
+
+	offsetTileFieldChanged();
 }

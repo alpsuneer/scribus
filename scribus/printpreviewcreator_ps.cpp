@@ -341,6 +341,18 @@ bool PrintPreviewCreator_PS::createPreviewFile(int pageIndex)
 	printOptions.allSeparations = QStringList();
 	printOptions.setDevParam = false;
 
+	// Offset Separations tab: Tiling. When m_printOptions came from the real
+	// Print dialog, offsetTileEnabled can be true for a page too large for the
+	// selected paper (see util_printer.cpp's OffsetTilingEnabled default).
+	// That splits pslib's output into one PS page per tile, and neither
+	// renderPreview() nor renderPreviewSep() below is tile-aware: they run gs
+	// against a single fixed (non-%d) output filename, so only the first
+	// tile's raster ever reaches the preview image. Force tiling off for the
+	// preview file only -- the on-screen preview should show the whole page
+	// as one image regardless of how it will be split onto sheets when
+	// actually printed; the real print path still uses m_printOptions as-is.
+	printOptions.offsetTileEnabled = false;
+
 	// Disable crop marks
 	printOptions.cropMarks = false;
 	printOptions.bleedMarks = false;

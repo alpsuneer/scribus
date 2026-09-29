@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsfile.h"
 #include "prefsmanager.h"
 #include "scribuscore.h"
+#include "units.h"
 #include "util_os.h"
 
 void PrinterUtil::getDefaultPrintOptions(PrintOptions& options, const MarginStruct& docBleeds)
@@ -62,6 +63,43 @@ void PrinterUtil::getDefaultPrintOptions(PrintOptions& options, const MarginStru
 	options.registrationMarks = prnPrefs->getBool("registrationMarks", false);
 	options.colorMarks = prnPrefs->getBool("colorMarks", false);
 	options.includePDFMarks = prnPrefs->getBool("includePDFMarks", true);
+
+	// Offset Separations tab. Defaults match the bundled "Malayalam
+	// Newspaper" preset (offset_separation_presets.cpp) so a fresh profile's
+	// tab shows the same values that preset would apply, without forcing
+	// offsetSepEnabled on for documents that never asked for separations.
+	options.offsetSepEnabled = prnPrefs->getBool("OffsetSepEnabled", false);
+	options.offsetSepResolution = prnPrefs->getInt("OffsetSepResolution", 2400);
+	options.offsetSepDotShape = prnPrefs->get("OffsetSepDotShape", QString("Round"));
+	options.offsetSepCyanLPI = prnPrefs->getDouble("OffsetSepCyanLPI", 100.0);
+	options.offsetSepCyanAngle = prnPrefs->getDouble("OffsetSepCyanAngle", 15.0);
+	options.offsetSepCyanPrint = prnPrefs->getBool("OffsetSepCyanPrint", true);
+	options.offsetSepMagentaLPI = prnPrefs->getDouble("OffsetSepMagentaLPI", 100.0);
+	options.offsetSepMagentaAngle = prnPrefs->getDouble("OffsetSepMagentaAngle", 75.0);
+	options.offsetSepMagentaPrint = prnPrefs->getBool("OffsetSepMagentaPrint", true);
+	options.offsetSepYellowLPI = prnPrefs->getDouble("OffsetSepYellowLPI", 100.0);
+	options.offsetSepYellowAngle = prnPrefs->getDouble("OffsetSepYellowAngle", 0.0);
+	options.offsetSepYellowPrint = prnPrefs->getBool("OffsetSepYellowPrint", true);
+	options.offsetSepBlackLPI = prnPrefs->getDouble("OffsetSepBlackLPI", 100.0);
+	options.offsetSepBlackAngle = prnPrefs->getDouble("OffsetSepBlackAngle", 45.0);
+	options.offsetSepBlackPrint = prnPrefs->getBool("OffsetSepBlackPrint", true);
+	options.offsetOutputMode = prnPrefs->get("OffsetOutputMode", QString("CmykSeparations"));
+
+	// Offset Separations tab: Tiling. Overlap is stored in the prefs file as
+	// millimetres (a human-inspected value, like the LPI/angle keys above are
+	// human units already) and converted to points here - see
+	// PrintDialog::offsetTileStoreValues()/offsetTileSetStoredValues() for the
+	// matching conversion on the dialog side.
+	options.offsetTileEnabled = prnPrefs->getBool("OffsetTilingEnabled", true);
+	options.offsetTilePaperSize = prnPrefs->get("OffsetTilePaperSize", QString("A3"));
+	options.offsetTileCustomWidthPts = prnPrefs->getDouble("OffsetTileCustomWidthPts", 0.0);
+	options.offsetTileCustomHeightPts = prnPrefs->getDouble("OffsetTileCustomHeightPts", 0.0);
+	options.offsetTileOverlapPts = mm2pts(prnPrefs->getDouble("OffsetTileOverlapMM", 5.0));
+	options.offsetTileOrientation = prnPrefs->get("OffsetTileOrientation", QString("Auto"));
+	options.offsetTileRegMarks = prnPrefs->getBool("OffsetTileRegMarks", true);
+	options.offsetTileCutMarks = prnPrefs->getBool("OffsetTileCutMarks", true);
+	options.offsetTileShowLabel = prnPrefs->getBool("OffsetTileShowLabel", true);
+	options.offsetTilePrintOrder = prnPrefs->get("OffsetTilePrintOrder", QString("Plate-first"));
 }
 
 QString PrinterUtil::getDefaultPrinterName()
@@ -174,10 +212,14 @@ bool PrinterUtil::getInputSlots(const QString& printerName, QStringList& traySlo
 
 QSizeF PrinterUtil::paperSizePoints(const QString& mediaName)
 {
-	// Only the sizes a proof is ever scaled onto need to be resolvable here;
-	// anything else is reported as unknown so the caller can fall back rather
-	// than invent a geometry.
+	// Sizes a proof is scaled onto, or a print-dialog tile sheet is cut to,
+	// need to be resolvable here (A0-A2 added for the Offset Separations
+	// tab's large-format tiling paper sizes); anything else is reported as
+	// unknown so the caller can fall back rather than invent a geometry.
 	static const QHash<QString, QPageSize::PageSizeId> sizeIds {
+		{ QStringLiteral("A0"),      QPageSize::A0 },
+		{ QStringLiteral("A1"),      QPageSize::A1 },
+		{ QStringLiteral("A2"),      QPageSize::A2 },
 		{ QStringLiteral("A3"),      QPageSize::A3 },
 		{ QStringLiteral("A4"),      QPageSize::A4 },
 		{ QStringLiteral("A5"),      QPageSize::A5 },

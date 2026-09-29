@@ -134,3 +134,21 @@ add_executable(openaitextservicetests
 	openaitextservicetests.cpp ${AITEXT_SHARED_SOURCES} ../ai/openaitextservice.cpp)
 target_link_libraries(openaitextservicetests ${TESTS_LIBRARIES} Qt6::Network)
 add_test(NAME openaitextservicetests COMMAND openaitextservicetests)
+
+# Unit tests for the Offset Separations print-dialog tab: bundled preset
+# values, custom preset JSON round-trip, and the PostScript halftone/spot
+# function text generation. Pure data/string logic - no GUI, no ScribusDoc,
+# no PostScript interpreter involved, so this never touches pslib.cpp itself.
+set(OFFSETSEPARATIONTESTS_SOURCES offsetseparationtests.cpp ../offset_separation_presets.cpp)
+add_executable(offsetseparationtests ${OFFSETSEPARATIONTESTS_SOURCES})
+target_link_libraries(offsetseparationtests ${TESTS_LIBRARIES})
+add_test(NAME offsetseparationtests COMMAND offsetseparationtests)
+
+# Unit tests for the Offset Separations tab's auto-tiling math (grid
+# calculation, overlap, labelling) and per-tile PostScript mark/label text
+# generation. Pure data/string logic, same rationale as offsetseparationtests
+# above - never touches pslib.cpp or a live printer.
+set(OFFSETTILINGTESTS_SOURCES offsettilingtests.cpp ../offset_tiling.cpp)
+add_executable(offsettilingtests ${OFFSETTILINGTESTS_SOURCES})
+target_link_libraries(offsettilingtests ${TESTS_LIBRARIES})
+add_test(NAME offsettilingtests COMMAND offsettilingtests)
