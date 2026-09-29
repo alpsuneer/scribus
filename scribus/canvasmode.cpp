@@ -806,7 +806,11 @@ void CanvasMode::commonDrawTextCursor(QPainter* p, PageItem_TextFrame* textframe
 	// normalize Current Position
 	textframe->itemText.normalizeCursorPosition();
 	int textCursorPos (textframe->itemText.cursorPosition());
-	cursor = textframe->textLayout.positionToPoint(textCursorPos);
+	// Suneer: render the caret on whichever side of a soft-wrap boundary the
+	// cursor actually arrived from — see cursorBiasBackward's declaration in
+	// pageitem_textframe.h.
+	bool bias = textframe->caretBiasBackward();
+	cursor = textframe->textLayout.positionToPoint(textCursorPos, bias);
 
 	cPen.setColor(ScColorEngine::getRGBColor(m_doc->PageColors[textframe->itemText.charStyle(textCursorPos).fillColor()], m_doc));
 

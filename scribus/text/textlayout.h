@@ -61,6 +61,11 @@ public:
 
 	int pointToPosition(const QPointF& coord) const;
 	QLineF positionToPoint(int pos) const;
+	// Suneer: pos may be a soft-wrap boundary, shared by "end of the line
+	// above" and "start of the line below" (see cursorBiasBackward,
+	// pageitem_textframe.h). preferEndOfPrevLine renders it at the former
+	// when that boundary is a genuine wrap, not a hard break.
+	QLineF positionToPoint(int pos, bool preferEndOfPrevLine) const;
 
 	uint lines() const;
 	

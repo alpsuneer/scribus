@@ -4382,6 +4382,10 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		else
 		{
 			itemText.moveCursorLeft();
+			// Suneer: arrived by moving backward — if this lands exactly on a
+			// soft-wrap boundary, the caret should render at the end of the
+			// line above, not the (default) start of the line below.
+			cursorBiasBackward = true;
 			if (itemText.cursorPosition() < firstInFrame())
 			{
 				itemText.setCursorPosition( firstInFrame() );
@@ -4421,6 +4425,10 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		else
 		{
 			itemText.moveCursorRight(); // new position within text ?
+			// Suneer: arrived by moving forward — the default caret rendering
+			// (start of the line below, at a soft-wrap boundary) is already
+			// correct for this direction.
+			cursorBiasBackward = false;
 			if (itemText.cursorPosition() > lastInFrame())
 			{
 //				--CPos;
@@ -5339,7 +5347,34 @@ int PageItem_TextFrame::textPositionFromPoint(const QPointF& canvasPoint)
 	if (imageFlippedV())
 		point.setY(height() - point.y());
 
-	return textLayout.pointToPosition(point.toQPointF());
+	int result = textLayout.pointToPosition(point.toQPointF());
+
+	// Suneer: caret-rendering affinity for a click resolving to a soft-wrap
+	// boundary — see cursorBiasBackward's declaration in pageitem_textframe.h.
+	// GroupBox::positionToPoint always renders that shared story position at
+	// the start of the line below; if the click's own Y actually landed on
+	// the line above, prefer rendering the caret there instead of the
+	// (arbitrary) default, so it lands where the person clicked. Columns sit
+	// at y=0 within the frame (TextLayout::addColumn()), so line y() is
+	// already frame-relative and needs no extra translation here.
+	cursorBiasBackward = false;
+	bool wrapGuardPassed = result > 0 && !SpecialChars::isBreak(itemText.text(result - 1));
+	if (wrapGuardPassed)
+	{
+		for (uint i = 1; i < textLayout.lines(); ++i)
+		{
+			const LineBox* ls = textLayout.line(i);
+			if (!ls || ls->firstChar() != result)
+				continue;
+			const LineBox* prevLs = textLayout.line(i - 1);
+			bool inPrevRow = prevLs && point.y() >= prevLs->y() && point.y() <= prevLs->y() + prevLs->height();
+			if (inPrevRow)
+				cursorBiasBackward = true;
+			break;
+		}
+	}
+
+	return result;
 }
 
 void PageItem_TextFrame::replaceSpellingErrorText(const SpellError& error, const QString& suggestion)

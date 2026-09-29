@@ -877,3 +877,40 @@ QLineF TextLayout::positionToPoint(int pos) const
 
 	return result;
 }
+
+QLineF TextLayout::positionToPoint(int pos, bool preferEndOfPrevLine) const
+{
+	// Suneer: only a genuine soft wrap is ambiguous — a hard break (paragraph/
+	// line/frame/column mark) actually consumed a character to get here, so
+	// the caret unambiguously belongs on the new line and the default
+	// (GroupBox::positionToPoint, always resolves to the start of the next
+	// line) is already correct.
+	bool guardPassed = preferEndOfPrevLine && pos > 0 && (pos - 1 < m_story->length()) && !SpecialChars::isBreak(m_story->text(pos - 1));
+	if (guardPassed)
+	{
+		const Box* prevColumn = nullptr;
+		const LineBox* prevLine = nullptr;
+		for (const Box* colBox : m_box->boxes())
+		{
+			for (const Box* lb : colBox->boxes())
+			{
+				const auto* ls = dynamic_cast<const LineBox*>(lb);
+				if (!ls)
+					continue;
+				if (ls->firstChar() == pos && prevLine)
+				{
+					bool isRTL = (m_story->paragraphStyle().direction() == ParagraphStyle::RTL);
+					const Box* glyph = prevLine->boxes().isEmpty() ? nullptr : prevLine->boxes().last();
+					double x = (isRTL || !glyph) ? prevLine->x() : prevLine->x() + glyph->x() + glyph->width();
+					QLineF result(x, prevLine->y(), x, prevLine->y() + prevLine->height());
+					result.translate(prevColumn->x(), prevColumn->y());
+					result.translate(m_box->x(), m_box->y());
+					return result;
+				}
+				prevColumn = colBox;
+				prevLine = ls;
+			}
+		}
+	}
+	return positionToPoint(pos);
+}

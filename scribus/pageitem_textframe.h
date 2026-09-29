@@ -92,6 +92,14 @@ public:
 	QRegion availableRegion() { return m_availableRegion; }
 	int textPositionFromPoint(const QPointF& canvasPoint);
 
+	// Suneer: caret-rendering affinity at a soft-wrap boundary. The story
+	// position at a wrap is shared between "end of the line above" and
+	// "start of the line below" (see NOTES.md) — cursorBiasBackward already
+	// existed to record approach direction for ExpandSel() but was never
+	// read; commonDrawTextCursor() (canvasmode.cpp) now consumes it through
+	// this accessor to pick which of the two the blinking caret renders at.
+	bool caretBiasBackward() const { return cursorBiasBackward; }
+
 	void replaceSpellingErrorText(const SpellError& error, const QString& suggestion);
 
 
