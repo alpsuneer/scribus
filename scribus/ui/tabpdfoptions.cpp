@@ -281,6 +281,13 @@ TabPDFOptions::TabPDFOptions(QWidget* parent, PDFOptions & Optionen,
 	ImageP->setToolTip( "<qt>" + tr( "Color profile for images" ) + "</qt>" );
 	IntendI->setToolTip( "<qt>" + tr( "Rendering intent for images" ) + "</qt>" );
 	useSpot->setToolTip("<qt>" + tr( "Enables Spot Colors to be converted to composite colors. Unless you are planning to print spot colors at a commercial printer, this is probably best left enabled." ) + "</qt>");
+	PreserveCMYUnderBlack->setToolTip("<qt>"
+		+ tr("Recommended for newspaper printing. When checked, 100 percent Black (C=M=Y=0) text and vector fills "
+			 "are overprinted instead of knocking out the CMY plates underneath, so the background survives when "
+			 "the Black separation is switched off in the Separations Viewer or at the press.")
+		+ "<br/><br/>"
+		+ QString::fromUtf8("Black Text-ന് കീഴിൽ CMY Background നിലനിർത്തുക (Overprint)")
+		+ "</qt>");
 
 	// Tooltips : PrePress tab 
 	cropMarks->setToolTip( "<qt>" + tr( "Creates crop marks in the PDF indicating where the paper should be cut or trimmed after printing" ) + "</qt>" );
@@ -513,6 +520,7 @@ void TabPDFOptions::restoreDefaults(const PDFOptions & Optionen,
 	else
 		OutCombo->setCurrentIndex(1);
 	useSpot->setChecked(!Opts.UseSpotColors);
+	PreserveCMYUnderBlack->setChecked(Opts.preserveCMYUnderBlackText);
 	UseLPI->setChecked(Opts.UseLPI);
 	LPIcolor->clear();
 	for (auto itlp = Opts.LPISettings.cbegin(); itlp != Opts.LPISettings.cend(); ++itlp)
@@ -736,6 +744,71 @@ void TabPDFOptions::applyNewspaperPreset()
 	m_applyingPreset = false;
 }
 
+void TabPDFOptions::applyDeshabhimaniPreset()
+{
+	m_applyingPreset = true;
+
+	// Images: Automatic method, Maximum quality, no forced downsampling.
+	CMethod->setCurrentIndex(PDFOptions::Compression_Auto);
+	handleCompressionMethod(PDFOptions::Compression_Auto);
+	CQuality->setCurrentIndex(0); // Maximum
+
+	// Color: printer output; newsprint rendering intents. Intents are set
+	// while the profile groups are still live.
+	OutCombo->setCurrentIndex(1);
+	EnablePr(1);
+	EmbedProfs->setChecked(true);
+	EnablePG();
+	EmbedProfs2->setChecked(true);
+	EnablePGI();
+	IntendS->setCurrentIndex(1); // Relative Colorimetric for solids
+	IntendI->setCurrentIndex(0); // Perceptual for images
+
+	// Overprint pure-K black text/fills so the CMY background under them
+	// survives a Black-plate pull, instead of showing a knocked-out white
+	// gap - this is the whole point of running this preset on newsprint.
+	PreserveCMYUnderBlack->setChecked(true);
+
+	// WAN-IFRA newsprint profile for solids, images AND output intent
+	// alike - applyNewspaperPreset() only ever set the output-intent
+	// profile, leaving Solid/Images on whatever was last selected (often
+	// sRGB). Never fall back to a coated-stock or screen profile.
+	const QStringList wanted { "WAN-IFRAnewspaper26v5", "ISOnewspaper",
+	                           "IFRA26S 2004 Newsprint", "SNAP TR002 Newsprint",
+	                           "newsprint", "newspaper" };
+	auto selectNewsprintProfile = [&wanted](QComboBox* combo)
+	{
+		for (const QString& want : wanted)
+		{
+			for (int i = 0; i < combo->count(); ++i)
+			{
+				if (combo->itemText(i).contains(want, Qt::CaseInsensitive))
+				{
+					combo->setCurrentIndex(i);
+					return;
+				}
+			}
+		}
+	};
+	selectNewsprintProfile(SolidPr);
+	selectNewsprintProfile(ImageP);
+	selectNewsprintProfile(PrintProfC);
+
+	// Embed every font used, subset it, embed placed PDF/EPS, keep layers.
+	fontEmbeddingCombo->setEmbeddingMode(PDFOptions::EmbedFonts);
+	EmbedList->clearSelection();
+	SubsetList->clearSelection();
+	useLayers->setChecked(true);
+	EmbedPDF->setChecked(true);
+
+	// PDF/X-4 last: unlike X-1a, this keeps live transparency and overprint
+	// through export instead of flattening them against an opaque backdrop.
+	PDFVersionCombo->setVersion(PDFVersion::PDF_X4);
+	EnablePDFX(PDFVersionCombo->currentIndex());
+
+	m_applyingPreset = false;
+}
+
 void TabPDFOptions::storeValues(PDFOptions& pdfOptions) const
 {
 	pdfOptions.Thumbnails = CheckBox1->isChecked();
@@ -757,6 +830,7 @@ void TabPDFOptions::storeValues(PDFOptions& pdfOptions) const
 	pdfOptions.Encrypt = Encry->isChecked();
 	pdfOptions.UseLPI = UseLPI->isChecked();
 	pdfOptions.UseSpotColors = !useSpot->isChecked();
+	pdfOptions.preserveCMYUnderBlackText = PreserveCMYUnderBlack->isChecked();
 	pdfOptions.doMultiFile = false;
 	pdfOptions.cropMarks  = cropMarks->isChecked();
 	pdfOptions.bleedMarks = bleedMarks->isChecked();
@@ -1037,6 +1111,11 @@ void TabPDFOptions::EnablePr(int a)
 
 	solidsProfileGroup->setEnabled(setter);
 	imageProfileGroup->setEnabled(setter);
+
+	// Overprint is a CMYK-plate concept: meaningless for RGB/Web or
+	// Grayscale output, but (unlike the profile groups above) still fully
+	// valid under PDF/X-1a, which is plain CMYK.
+	OverprintGroup->setEnabled(a == 1);
 }
 
 void TabPDFOptions::EnableLPI(int a)

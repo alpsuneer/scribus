@@ -119,6 +119,7 @@ PDFExportDialog::PDFExportDialog( QWidget* parent, const QString & docFileName,
 	presetCombo = new QComboBox( this );
 	presetCombo->addItem( tr( "Custom" ) );
 	presetCombo->addItem( "News_Paper" );
+	presetCombo->addItem( "Deshabhimani_Newspaper" );
 	presetLayout->addWidget( presetLabel );
 	presetLayout->addWidget( presetCombo );
 	presetLayout->addStretch();
@@ -169,9 +170,9 @@ void PDFExportDialog::disableSave()
 
 void PDFExportDialog::handlePresetChange(int index)
 {
-	if (index != 1) // News_Paper
+	if (index != 1 && index != 2) // News_Paper, Deshabhimani_Newspaper
 		return;
-	// PDF/X-1a needs document color management; newspaper docs commonly
+	// Both presets need document color management; newspaper docs commonly
 	// have it off, so switch it on for the document (same as Document
 	// Setup would) before applying the preset.
 	if (!m_doc->HasCMS && ScCore->haveCMS())
@@ -179,7 +180,10 @@ void PDFExportDialog::handlePresetChange(int index)
 		m_doc->enableCMS(true);
 		Options->enableCMS(true);
 	}
-	Options->applyNewspaperPreset();
+	if (index == 1)
+		Options->applyNewspaperPreset();
+	else
+		Options->applyDeshabhimaniPreset();
 }
 
 void PDFExportDialog::presetToCustom()

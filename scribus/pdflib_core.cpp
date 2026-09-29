@@ -116,6 +116,38 @@ static inline QByteArray TransformToStr(const QTransform& tr)
 	return FToStr(tr.m11()) + " " + FToStr(tr.m12()) + " " + FToStr(tr.m21()) + " " + FToStr(tr.m22()) + " " + FToStr(tr.dx()) + " " + FToStr(tr.dy());
 }
 
+// True for a process color that paints K only (C=M=Y=0, K>0): the case
+// where /OP true + /OPM 1 in the ExtGState leaves the CMY plates untouched
+// and lets whatever is underneath show through once the Black separation is
+// pulled. Spot and Registration colors are excluded: they are not painted
+// via the plain "k"/"g" operators this check assumes, and Registration
+// already prints on every plate by definition.
+static bool isPureBlackFillColor(const ScribusDoc& doc, const QString& colorName)
+{
+	if (colorName.isEmpty() || colorName == CommonStrings::None)
+		return false;
+	if (!doc.PageColors.contains(colorName))
+		return false;
+
+	const ScColor& col = doc.PageColors[colorName];
+	if (col.isSpotColor() || col.isRegistrationColor())
+		return false;
+
+	if (col.getColorModel() == colorModelCMYK)
+	{
+		double c, m, y, k;
+		col.getCMYK(&c, &m, &y, &k);
+		return (c < 0.001 && m < 0.001 && y < 0.001 && k > 0.001);
+	}
+	if (col.getColorModel() == colorModelRGB)
+	{
+		int r, g, b;
+		col.getRGB(&r, &g, &b);
+		return (r == 0 && g == 0 && b == 0);
+	}
+	return false;
+}
+
 class PdfTextState
 {
 public:
@@ -132,7 +164,15 @@ public:
 	{
 		QByteArray result;
 
-		if (firstUse || 
+		// Activate/deactivate overprint before anything is painted with this
+		// state. overprintGSName is only ever non-empty when the "Preserve
+		// CMY Background Under Black Text" export option is on; otherwise
+		// this is always empty on both sides and never emits anything, so
+		// export is byte-for-byte unchanged when the option is off.
+		if ((firstUse || (overprintGSName != prevState.overprintGSName)) && !overprintGSName.isEmpty())
+			result += Pdf::toName(overprintGSName) + " gs\n";
+
+		if (firstUse ||
 			(fontName != prevState.fontName) ||
 			(fontSize != prevState.fontSize))
 		{
@@ -171,6 +211,10 @@ public:
 	double     strokeWidth { -1.0 };
 	int        renderingMode { 0 };
 	QTransform textMatrix;
+	/// Name of the ExtGState resource to activate for overprint before this
+	/// glyph is shown. Empty unless the "Preserve CMY Background Under
+	/// Black Text" option is active for the current export.
+	QByteArray overprintGSName;
 };
 
 class PdfPainter: public TextLayoutPainter
@@ -180,6 +224,7 @@ class PdfPainter: public TextLayoutPainter
 	QByteArray m_pathBuffer;
 	QMap<QString, PdfFont>  m_UsedFontsP;
 	QByteArray m_overprintGState;
+	QByteArray m_noOverprintGState;
 	PDFLibCore *m_pdf { nullptr };
 	uint m_PNr { 0 };
 	const ScPage* m_page { nullptr };
@@ -190,6 +235,43 @@ class PdfPainter: public TextLayoutPainter
 	QByteArray transformToStr(const QTransform& tr) const
 	{
 		return FToStr(tr.m11()) + " " + FToStr(-tr.m12()) + " " + FToStr(-tr.m21()) + " " + FToStr(tr.m22()) + " " + FToStr(tr.dx()) + " " + FToStr(-tr.dy());
+	}
+
+	// Lazily creates (once per item) and returns the ExtGState resource name
+	// that turns overprint on or off. Shares the "on" resource with
+	// drawRect()'s frame-background overprint so the two never duplicate an
+	// identical ExtGState object.
+	QByteArray overprintGStateName(bool on)
+	{
+		QByteArray& cached = on ? m_overprintGState : m_noOverprintGState;
+		if (cached.isEmpty())
+		{
+			cached = m_pdf->ResNam + Pdf::toPdf(m_pdf->ResCount);
+			m_pdf->ResCount++;
+			m_pdf->Transpar[cached] = m_pdf->writeGState(on ? "/OP true\n"
+																"/op true\n"
+																"/OPM 1\n"
+															 : "/OP false\n"
+																"/op false\n"
+																"/OPM 1\n");
+		}
+		return cached;
+	}
+
+	// Resolves the overprint ExtGState to activate for the glyph currently
+	// being painted with the given fill color, honouring the "Preserve CMY
+	// Background Under Black Text" export option. Returns an empty name
+	// (meaning: don't touch the overprint state at all) when the option is
+	// off, so export output is unchanged when the feature is disabled.
+	QByteArray glyphOverprintGState(const QString& fillColorName)
+	{
+		if (!m_pdf->Options.preserveCMYUnderBlackText)
+			return QByteArray();
+		if (m_pdf->Options.UseRGB || m_pdf->Options.isGrayscale)
+			return QByteArray();
+
+		bool pureBlack = isPureBlackFillColor(m_pdf->doc, fillColorName);
+		return overprintGStateName(pureBlack);
 	}
 
 public:
@@ -274,6 +356,8 @@ public:
 				m_textState.strokeColor = StrokeColor;
 				m_textState.fillColor = FillColor;
 				m_textState.renderingMode = 0;
+				if (fillColor().color != CommonStrings::None)
+					m_textState.overprintGSName = glyphOverprintGState(fillColor().color);
 
 				transform.translate(x() + gl.xoffset + current_x , y() + gl.yoffset);
 				transform.scale(qMax(gl.scaleH, 0.1), qMax(gl.scaleV, 0.1));
@@ -423,6 +507,8 @@ public:
 				m_textState.fontSize = fontSize();
 				m_textState.strokeColor = StrokeColor;
 				m_textState.fillColor = FillColor;
+				if (fill && fillColor().color != CommonStrings::None)
+					m_textState.overprintGSName = glyphOverprintGState(fillColor().color);
 
 				if (pdfFont.method == Use_Type3 && !StrokeColor.isEmpty())
 				{

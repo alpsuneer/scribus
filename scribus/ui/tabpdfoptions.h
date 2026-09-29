@@ -63,6 +63,13 @@ public:
 	 *  240 dpi cap, printer output with newsprint profile and PDF/X-1a. */
 	void applyNewspaperPreset();
 
+	/** @brief Deshabhimani production settings: PDF/X-4 (keeps live
+	 *  transparency and overprint, unlike X-1a's mandatory flattening),
+	 *  WAN-IFRA newsprint profile applied to solids, images and output
+	 *  intent alike, Automatic/Maximum image compression, full font
+	 *  embedding+subsetting. */
+	void applyDeshabhimaniPreset();
+
 	PDFOptions::PDFFontEmbedding fontEmbeddingMode() const;
 	QStringList fontsToEmbed() const;
 	QStringList fontsToSubset() const;

@@ -155,6 +155,7 @@ void PDFOptionsIO::buildSettings()
 	addElem(m_root, "useProfiles2", m_opts->UseProfiles2);
 	addElem(m_root, "useLPI", m_opts->UseLPI);
 	addElem(m_root, "useSpotColors", m_opts->UseSpotColors);
+	addElem(m_root, "preserveCMYUnderBlackText", m_opts->preserveCMYUnderBlackText);
 	addElem(m_root, "doMultiFile", m_opts->doMultiFile);
 	addLPISettings();
 	addElem(m_root, "solidProf", m_opts->SolidProf);
@@ -410,6 +411,8 @@ bool PDFOptionsIO::readSettings()
 		return false;
 	if (!readElem(m_root, "useSpotColors", &m_opts->UseSpotColors))
 		return false;
+	if (!readElem(m_root, "preserveCMYUnderBlackText", &m_opts->preserveCMYUnderBlackText))
+		m_opts->preserveCMYUnderBlackText = true; // absent in presets saved before this option existed
 	if (!readElem(m_root, "doMultiFile", &m_opts->doMultiFile))
 		return false;
 	if (!readLPISettings())

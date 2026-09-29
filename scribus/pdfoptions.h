@@ -129,6 +129,10 @@ public:
 	bool UseProfiles2 { false };
 	bool UseLPI { false };
 	bool UseSpotColors { true };
+	/** @brief Overprint 100% K-only (pure black, C=M=Y=0) text so the CMY
+	 *  plates underneath are not knocked out. Newspaper production default:
+	 *  ON. Ignored when exporting RGB or grayscale. */
+	bool preserveCMYUnderBlackText { true };
 	bool doMultiFile { false };
 	bool openAfterExport { false };
 	QMap<QString,LPIData> LPISettings;
