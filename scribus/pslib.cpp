@@ -579,6 +579,23 @@ bool PSLib::PS_begin_doc(double x, double y, double width, double height, int nu
 	PutStream("%%Creator: " + Creator + "\n");
 	PutStream("%%Pages: " + IToStr(numpage) + "\n");
 
+	// Proof Print "Reduce to fit paper": every page declares the proof sheet
+	// (see begin_page), so the document header must declare that sheet too.
+	// Left at the document page size, a filter that scales by the header
+	// %%BoundingBox would shrink the already-fitted page a second time.
+	if ((m_outputFormat == OutputPS) && Options.isProofPrint && Options.proofReduceToFit && !Options.offsetTileEnabled
+		&& (Options.proofPaperWidth > 0.0) && (Options.proofPaperHeight > 0.0))
+	{
+		x = 0.0;
+		y = 0.0;
+		width = Options.proofPaperWidth;
+		height = Options.proofPaperHeight;
+		QString media = Options.proofMedia.simplified().replace(' ', '_');
+		if (media.isEmpty())
+			media = "ProofSheet";
+		PutStream("%%DocumentMedia: " + media + " " + IToStr(qRound(width)) + " " + IToStr(qRound(height)) + " 0 () ()\n");
+	}
+
 	QString bbox, bboxH;
 	if ((width <= height) || (m_outputFormat == OutputEPS))
 	{
