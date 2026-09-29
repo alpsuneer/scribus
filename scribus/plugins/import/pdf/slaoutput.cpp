@@ -1604,6 +1604,8 @@ void SlaOutputDev::stroke(GfxState *state)
 		ite->setDashes(m_dashValues);
 		ite->setDashOffset(m_dashOffset);
 		ite->setLineTransparency(1.0 - state->getStrokeOpacity());
+		if (state->getStrokeOverprint())
+			ite->setOverprint(true);
 		return;
 	}
 
@@ -1637,6 +1639,8 @@ void SlaOutputDev::stroke(GfxState *state)
 			lItem->setDashes(m_dashValues);
 			lItem->setDashOffset(m_dashOffset);
 			lItem->setTextFlowMode(PageItem::TextFlowDisabled);
+			if (state->getStrokeOverprint())
+				lItem->setOverprint(true);
 			m_doc->Items->removeAll(ite);
 		}
 		else
@@ -1649,6 +1653,7 @@ void SlaOutputDev::stroke(GfxState *state)
 			ite->setDashes(m_dashValues);
 			ite->setDashOffset(m_dashOffset);
 			ite->setTextFlowMode(PageItem::TextFlowDisabled);
+			ite->setOverprint(state->getStrokeOverprint());
 			m_Elements->append(ite);
 			if (!m_groupStack.isEmpty())
 				m_groupStack.top().Items.append(ite);
@@ -1664,6 +1669,7 @@ void SlaOutputDev::stroke(GfxState *state)
 		ite->setDashes(m_dashValues);
 		ite->setDashOffset(m_dashOffset);
 		ite->setTextFlowMode(PageItem::TextFlowDisabled);
+		ite->setOverprint(state->getStrokeOverprint());
 		m_Elements->append(ite);
 		if (!m_groupStack.isEmpty())
 			m_groupStack.top().Items.append(ite);
@@ -1730,6 +1736,7 @@ void SlaOutputDev::createFillItem(GfxState *state, Qt::FillRule fillRule)
 	ite->setFillEvenOdd(clippedPath.fillRule() == Qt::OddEvenFill);
 	ite->setFillTransparency(1.0 - state->getFillOpacity());
 	ite->setFillBlendmode(getBlendMode(state));
+	ite->setOverprint(state->getFillOverprint());
 	ite->setLineEnd(m_lineEnd);
 	ite->setLineJoin(m_lineJoin);
 	ite->setWidthHeight(bbox.width(),bbox.height());
