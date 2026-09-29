@@ -565,6 +565,7 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 #endif
 
 	checkMalayalamDtpFirstRun();
+	applyDefaultShortcutSet();
 
 	return retVal;
 }
@@ -5364,13 +5365,21 @@ static void suneerFlattenStoryText(StoryText& clip, const StoryText& src, int sr
 
 void ScribusMainWindow::enforceClipboardShortcuts()
 {
-	const QKeySequence copySeq(Qt::CTRL | Qt::SHIFT | Qt::Key_C);
-	const QKeySequence pasteSeq(Qt::CTRL | Qt::SHIFT | Qt::Key_V);
 	auto& keyActions = m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions;
+	ScrAction* styledCopy = scrActions.value("editStyledCopy");
+	ScrAction* styledPaste = scrActions.value("editStyledPaste");
 
-	// A user's saved keymap (or a loaded keyset) can bind Ctrl+Shift+C/V to other
-	// actions. Clear those combinations so the two clipboard actions remain the
-	// sole owners and Qt cannot report an ambiguous shortcut.
+	// Styled Copy/Paste keep whatever keys the user's set gives them; only
+	// when a set leaves them with none (e.g. a stock keyset that predates
+	// them) do they get their defaults back. This used to force
+	// Ctrl+Shift+C/V on every startup, which overwrote a user's own choice.
+	const QKeySequence copySeq = (styledCopy && !styledCopy->shortcut().isEmpty())
+		? styledCopy->shortcut() : QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C);
+	const QKeySequence pasteSeq = (styledPaste && !styledPaste->shortcut().isEmpty())
+		? styledPaste->shortcut() : QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V);
+
+	// Keep the two clipboard actions the sole owners of their keys, so Qt
+	// cannot report an ambiguous shortcut.
 	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
 	{
 		const QString& name = it.key();
@@ -5386,19 +5395,30 @@ void ScribusMainWindow::enforceClipboardShortcuts()
 				keyActions[name].keySequence = QKeySequence();
 		}
 	}
-	// Re-assert the clipboard shortcuts in case a keyset cleared or changed them.
-	// Ctrl+Shift+V goes to editStyledPaste, the partner of editStyledCopy. It
-	// used to be asserted on editPasteOriginalPosition instead, which left
-	// Styled Paste with no shortcut at all and made the pair asymmetric — and
-	// because this runs on every startup, it re-imposed that on saved profiles.
-	if (ScrAction* c = scrActions.value("editStyledCopy"))
-		c->setShortcut(copySeq);
-	if (ScrAction* v = scrActions.value("editStyledPaste"))
-		v->setShortcut(pasteSeq);
+	if (styledCopy)
+		styledCopy->setShortcut(copySeq);
+	if (styledPaste)
+		styledPaste->setShortcut(pasteSeq);
 	if (keyActions.contains("editStyledCopy"))
 		keyActions["editStyledCopy"].keySequence = copySeq;
 	if (keyActions.contains("editStyledPaste"))
 		keyActions["editStyledPaste"].keySequence = pasteSeq;
+}
+
+void ScribusMainWindow::applyShortcutsFromPrefs()
+{
+	m_prefsManager.applyLoadedShortCuts();
+	enforceClipboardShortcuts();
+}
+
+void ScribusMainWindow::applyDefaultShortcutSet()
+{
+	// Last thing at startup that touches shortcuts: the Default set wins over
+	// the shortcuts saved in scribus172.rc, the first-run keyset, and the
+	// clipboard fix-up above.
+	if (!Prefs_KeyboardShortcuts::applyDefaultSet(m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions))
+		return;
+	applyShortcutsFromPrefs();
 }
 
 void ScribusMainWindow::slotEditStyledCopy()
@@ -11043,8 +11063,7 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 	QPushButton* keepBtn = box.addButton(tr("Keep Newspaper defaults"), QMessageBox::AcceptRole);
 	box.addButton(tr("Use standard Scribus defaults"), QMessageBox::RejectRole);
 	box.exec();
-	// The choice only picks the initial default set; later startups keep
-	// whatever shortcuts were in use when Scribus was closed.
+	// The choice picks the Default set, which every later startup applies.
 	if (box.clickedButton() == keepBtn)
 	{
 		applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");

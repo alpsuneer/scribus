@@ -299,6 +299,8 @@ public:
 	//! Read and clear m_pendingFrameShapeId in one step, so a later activation - after a cancel,
 	//! or entered some other way - can never see a stale id.
 	QString takePendingFrameShapeId() { QString id = m_pendingFrameShapeId; m_pendingFrameShapeId.clear(); return id; }
+	//! Push the shortcuts in the prefs onto the live actions and menus.
+	void applyShortcutsFromPrefs();
 	SuneerNewsPanel *m_suneerNewsPanel {nullptr};
 	SymbolPalette *symbolPalette {nullptr};
 	InlinePalette *inlinePalette {nullptr};
@@ -671,6 +673,7 @@ public slots:
 	void applyKeySetFromFile(const QString& path);
 	/*! \brief One-time opt-in prompt to activate the Malayalam DTP shortcut set. */
 	void checkMalayalamDtpFirstRun();
+	void applyDefaultShortcutSet();
 	void docCheckToggle(bool visible);
 	//! \brief Scan a document for errors, return true on errors found
 	bool scanDocument();

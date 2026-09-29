@@ -47,6 +47,11 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 		static QString userSetsDir();
 		static QString defaultSetName();
 		static void setDefaultSetName(const QString& name);
+		// Fills keys with the named set (built-in, stock keyset or user set).
+		static bool buildSetKeys(const QString& name, QMap<QString, Keys>& keys);
+		// Fills keys with the Default set, if one was ever chosen. Called on
+		// every startup. True if keys were changed.
+		static bool applyDefaultSet(QMap<QString, Keys>& keys);
 		// Moves a pre-shortcut-sets my-default-shortcuts.xml into userSetsDir() once.
 		static void migrateOldMyDefault();
 		// Writes keys in the keyset XML format, without any dialog.
@@ -58,29 +63,26 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 protected:
 	QMap<QString,Keys> keyMap;
 	QMap<QString,Keys>::Iterator currentKeyMapRow;
-	QMap<QString, QString> keySetList;
 	QMap<QTreeWidgetItem*, QString> lviToActionMap;
 	QList<QTreeWidgetItem*> lviToMenuMap;
 	QVector< QPair<QString, QStringList> >* defMenus;
 	QVector< QPair<QString, QStringList> >* defNonMenuActions;
 	QTreeWidgetItem * selectedLVI { nullptr };
-	QComboBox* shortcutSetCombo { nullptr };
 	QPushButton* saveSetButton { nullptr };
 	QPushButton* deleteSetButton { nullptr };
 	QMap<QString, QString> userSetFiles; // set name -> file
+	QString m_loadedSet; // the set last loaded into the list, if any
 
 	void refreshShortcutSets(const QString& selectName);
 	QString selectedSetName() const;
 	bool isBuiltinSet(const QString& name) const;
 	void loadNamedSet(const QString& name);
-	void overlayKeySetFile(const QString& fileName);
 	void updateSetButtons();
 	int keyCode { 0 };
 
 	void insertActions();
 	void importKeySet(const QString&);
 	bool exportKeySet(const QString&);
-	QStringList scanForSets();
 	// excludeAction lets the action currently being edited be skipped, so re-pressing an
 	// action's own shortcut is not reported as a conflict with itself.
 	bool checkKey(int code, const QString& excludeAction = QString());

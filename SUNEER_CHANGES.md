@@ -624,42 +624,46 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 
 ### 28. Keyboard Shortcuts — പേരുള്ള Shortcut Sets (പുതിയത്)
 
-- `File › Preferences › Keyboard Shortcuts`-ൽ മാറ്റുന്ന shortcut
-  **Scribus അടച്ചു തുറന്നാലും മാറില്ല** — അടയ്ക്കുമ്പോൾ ഉണ്ടായിരുന്ന
-  shortcuts തന്നെ അടുത്ത തവണയും. Newspaper set **ആദ്യ തവണ മാത്രം**
-  (profile-ൽ `scribus172.rc` ഇല്ലാത്തപ്പോൾ)
-- Page-ന്റെ മുകളിൽ **Shortcut Set** എന്ന പുതിയ ഭാഗം:
-  - **Dropdown** — "Scribus Default", "Newspaper Default", പിന്നെ
-    നിങ്ങളുടെ sets. Default set-ന് ശേഷം **"(Default)"** എന്ന് കാണിക്കും.
-    ഒരു set തിരഞ്ഞെടുത്താൽ അത് താഴെയുള്ള list-ൽ വരും
-  - **Save As…** — ഇപ്പോഴത്തെ shortcuts ഒരു പുതിയ പേരിൽ സൂക്ഷിക്കും.
-    ആ പേര് നേരത്തേ ഉണ്ടെങ്കിൽ **മാറ്റണോ എന്ന് ചോദിക്കും**
+- `File › Preferences › Keyboard Shortcuts`-ലെ **Loadable Shortcut Sets**
+  എന്ന **ഒറ്റ list**-ൽ എല്ലാ sets-ഉം:
+  - "Scribus Default", "Newspaper Default", Scribus-ന്റെ സ്വന്തം sets
+    (iCalamus, Photoshop Style, Scribus 1.7.0 …)
+  - പിന്നെ ഒരു വരയ്ക്ക് താഴെ **നിങ്ങളുടെ sets**, പേരിനൊപ്പം **[User]**
+  - Default set-ന് ശേഷം **"(Default)"** — ഉദാ. "My Layout [User] (Default)"
+  - List-ൽ ഒരു set തിരഞ്ഞെടുത്താൽ (അല്ലെങ്കിൽ **Load**) അത് മുകളിലെ
+    list-ൽ വരും; **OK** അമർത്തിയാൽ menus-ൽ
+- Load-ന്റെ അടുത്ത് നാല് buttons:
+  - **Save As…** — പുതിയ പേരിൽ സൂക്ഷിക്കും. പേര് നേരത്തേ ഉണ്ടെങ്കിൽ
+    **മാറ്റണോ എന്ന് ചോദിക്കും**
   - **Save** — തിരഞ്ഞെടുത്ത set-ൽ ഇപ്പോഴത്തെ മാറ്റങ്ങൾ സൂക്ഷിക്കും
-  - **Set as Default** — തിരഞ്ഞെടുത്ത set default ആക്കും
-  - **Delete** — ചോദിച്ച ശേഷം set മായ്ക്കും. Default set ആണ്
-    മായ്ച്ചതെങ്കിൽ **"Newspaper Default"** default ആകും
+  - **Set as Default** — ആ set default ആക്കും, **ഉടനെ തന്നെ menus-ൽ
+    വരും** (Cancel അമർത്തിയാലും)
+  - **Delete** — ചോദിച്ച ശേഷം മായ്ക്കും. Default ആണ് മായ്ച്ചതെങ്കിൽ
+    **"Newspaper Default"** default ആകും
   - Built-in sets-ൽ **Save-ഉം Delete-ഉം മങ്ങിക്കിടക്കും**
+- **Scribus തുറക്കുമ്പോഴെല്ലാം Default set ആണ് വരുന്നത്.**
+  - Default **നിങ്ങളുടെ set** ആണെങ്കിൽ, shortcut മാറ്റി **OK**
+    അമർത്തുമ്പോൾ ആ മാറ്റം **ആ set-ൽ തന്നെ സൂക്ഷിക്കും** — അടുത്ത തവണയും
+    ഉണ്ടാകും
+  - Default **built-in set** ആണെങ്കിൽ മാറ്റങ്ങൾ അടുത്ത തവണ **പോകും**.
+    സ്വന്തം keys വേണമെങ്കിൽ Save As… ചെയ്ത് ആ set default ആക്കുക
+  - ഒരിക്കലും Default തിരഞ്ഞെടുക്കാത്ത profile-ൽ അടച്ചപ്പോഴുള്ള
+    shortcuts തന്നെ
 - **എവിടെ സൂക്ഷിക്കുന്നു:** ഓരോ set-ഉം
-  `~/.config/scribus/shortcut-sets/<പേര്>.xml` എന്ന വേറെ ഫയലിൽ.
-  Default set-ന്റെ പേര് `prefs172.xml`-ൽ (`default_set`)
-- **Default set മാറ്റി OK അമർത്തിയാൽ** അടുത്ത തവണ അത് തന്നെ വരും.
-  പിന്നീട് Save ചെയ്യാതെ മാറ്റിയ shortcuts-ഉം അടുത്ത തവണ അങ്ങനെ തന്നെ
-  ഉണ്ടാകും (അവസാനം ഉപയോഗിച്ചത് ജയിക്കും)
-- പഴയ **"Save as Default"** കൊണ്ട് സൂക്ഷിച്ച
-  `my-default-shortcuts.xml` ആദ്യ തവണ തുറക്കുമ്പോൾ
-  `shortcut-sets/My Default.xml` ആയി മാറും
+  `~/.config/scribus/shortcut-sets/<പേര്>.xml`-ൽ. Default-ന്റെ പേര്
+  `prefs172.xml`-ൽ (`default_set`)
+- പഴയ `my-default-shortcuts.xml` ആദ്യ തവണ `shortcut-sets/My Default.xml`
+  ആയി മാറും
 - **Export… / Import…** — set ഒരു `.xml` ഫയലാക്കി മറ്റൊരു
-  കമ്പ്യൂട്ടറിലേക്ക് കൊണ്ടുപോകാം. പഴയ **Reset** ഇപ്പോൾ
-  **Reset to Scribus Defaults** ആണ്
-- **പുതിയ profile-ൽ ആദ്യം തുറക്കുമ്പോൾ:**
-  `/usr/local/share/scribus/default-shortcuts.xml` ഉണ്ടെങ്കിൽ ചോദിക്കാതെ
-  അത്; ഇല്ലെങ്കിൽ "Welcome" dialog — അതിലെ തിരഞ്ഞെടുപ്പ് ആദ്യത്തെ
-  default set (Newspaper / Scribus) ആകും
-- **⚠️ ശ്രദ്ധിക്കുക:**
-  - Ctrl+Shift+C / Ctrl+Shift+V എപ്പോഴും Styled Copy/Paste-നാണ്;
-    മറ്റൊന്നിന് കൊടുത്താൽ തുറക്കുമ്പോൾ മാറിപ്പോകും
-  - Set-ന്റെ പേരിൽ മലയാളം ആകാം, പക്ഷേ ഫയലിന്റെ പേരിൽ ആ
-    അക്ഷരങ്ങൾ `_` ആയി മാറും
+  കമ്പ്യൂട്ടറിലേക്ക്. പഴയ **Reset** ഇപ്പോൾ **Reset to Scribus Defaults**
+- **പുതിയ profile-ൽ ആദ്യം:** `/usr/local/share/scribus/default-shortcuts.xml`
+  ഉണ്ടെങ്കിൽ ചോദിക്കാതെ അത്; ഇല്ലെങ്കിൽ "Welcome" dialog — അതിലെ
+  തിരഞ്ഞെടുപ്പ് ആദ്യത്തെ Default set ആകും
+- **Styled Copy / Styled Paste**-ന് set-ൽ കൊടുത്ത keys തന്നെ നിൽക്കും
+  (ഉദാ. Ctrl+Shift+M). Set-ൽ key ഇല്ലെങ്കിൽ മാത്രം Ctrl+Shift+C /
+  Ctrl+Shift+V
+- **⚠️ ശ്രദ്ധിക്കുക:** Set-ന്റെ പേരിൽ മലയാളം ആകാം, പക്ഷേ ഫയലിന്റെ
+  പേരിൽ ആ അക്ഷരങ്ങൾ `_` ആയി മാറും
 
 ### 29. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
