@@ -4000,6 +4000,21 @@ void PageItem_TextFrame::truncateContents()
 	}
 }
 
+// Suneer: switch the active edited/selected item to a chain-linked frame while
+// keeping the story-wide text selection intact. selectItemsFromOutlines()
+// (scribus.cpp) always calls deselectItems() first, which would wipe the shared
+// StoryText selection that Shift+<key> cross-frame navigation is trying to
+// extend — see canvasmode_edit.cpp's textFramesShareChain() for the mouse-side
+// half of this same investigation.
+static void suneerActivateChainFrameKeepingSelection(ScribusDoc* doc, PageItem* newItem)
+{
+	doc->m_Selection->delaySignalsOn();
+	doc->m_Selection->clear();
+	doc->m_Selection->addItem(newItem);
+	doc->m_Selection->delaySignalsOff();
+	doc->m_Selection->connectItemToGUI();
+}
+
 void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 {
 	if (frameUnderflows())
@@ -4202,6 +4217,23 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 	switch (kk)
 	{
 	case Qt::Key_Home:
+		if ((buttonModifiers & Qt::ControlModifier) && (buttonModifiers & Qt::ShiftModifier))
+		{
+			// Suneer: Ctrl+Shift+Home selects from the anchor to the very start of
+			// the linked story, crossing into m_backBox as far as the chain goes.
+			// Checked before the "already at this frame's own start" early-out below,
+			// since that would otherwise swallow the keypress for any frame that
+			// isn't the first in the chain.
+			PageItem_TextFrame* startFrame = this;
+			while (startFrame->prevInChain())
+				startFrame = startFrame->prevInChain()->asTextFrame();
+			itemText.setCursorPosition(0);
+			itemText.extendSelection(oldPos, 0);
+			if (startFrame != this)
+				suneerActivateChainFrameKeepingSelection(m_Doc, startFrame);
+			m_Doc->scMW()->setTBvals(startFrame);
+			break;
+		}
 		// go to begin of line
 		if ( (pos = itemText.cursorPosition()) == firstInFrame() )
 			break; // at begin of frame
@@ -4225,6 +4257,24 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		m_Doc->scMW()->setTBvals(this);
 		break;
 	case Qt::Key_End:
+		if ((buttonModifiers & Qt::ControlModifier) && (buttonModifiers & Qt::ShiftModifier))
+		{
+			// Suneer: Ctrl+Shift+End selects from the anchor to the very end of
+			// the linked story, crossing into m_nextBox as far as the chain goes.
+			// Checked before the "already at this frame's own end" early-out below,
+			// since that would otherwise swallow the keypress for any frame that
+			// isn't the last in the chain.
+			PageItem_TextFrame* endFrame = this;
+			while (endFrame->nextInChain())
+				endFrame = endFrame->nextInChain()->asTextFrame();
+			int storyEnd = itemText.length();
+			itemText.setCursorPosition(storyEnd);
+			itemText.extendSelection(oldPos, storyEnd);
+			if (endFrame != this)
+				suneerActivateChainFrameKeepingSelection(m_Doc, endFrame);
+			m_Doc->scMW()->setTBvals(endFrame);
+			break;
+		}
 		// go to end of line
 		len = lastInFrame();
 		if ( itemText.cursorPosition() >= (len + 1))
@@ -4262,7 +4312,19 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 				{
 					if ( buttonModifiers & Qt::AltModifier )
 						itemText.setCursorPosition (lastInFrame() + 1);
-					ExpandSel(oldPos);
+					// Suneer: same "clamped at the bottom of this frame" condition the
+					// non-Shift branch below uses to decide whether to jump frames —
+					// extend the (shared) selection into the next frame instead of
+					// stopping here.
+					if ((textLayout.lines() > 0) && (oldPos >= textLayout.line(textLayout.lines() - 1)->firstChar())
+						&& (itemText.cursorPosition() >= lastInFrame()) && (m_nextBox != nullptr) && m_nextBox->frameDisplays(itemText.cursorPosition()))
+					{
+						itemText.setCursorPosition(m_nextBox->firstInFrame());
+						itemText.extendSelection(oldPos, itemText.cursorPosition());
+						suneerActivateChainFrameKeepingSelection(m_Doc, m_nextBox);
+					}
+					else
+						ExpandSel(oldPos);
 				}
 				else if ((textLayout.lines() > 0) && (oldPos >= textLayout.line(textLayout.lines() - 1)->firstChar()) && (itemText.cursorPosition() >= lastInFrame()) && (m_nextBox != nullptr))
 				{
@@ -4314,7 +4376,19 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 				{
 					if ( buttonModifiers & Qt::AltModifier )
 						itemText.setCursorPosition( firstInFrame() );
-					ExpandSel(oldPos);
+					// Suneer: same "clamped at the top of this frame" condition the
+					// non-Shift branch below uses to decide whether to jump frames —
+					// extend the (shared) selection into the previous linked frame
+					// instead of stopping here.
+					if ((textLayout.lines() > 0) && (oldPos <= textLayout.line(0)->lastChar())
+						&& (itemText.cursorPosition() == firstInFrame()) && (m_backBox != nullptr))
+					{
+						itemText.setCursorPosition(m_backBox->lastInFrame());
+						itemText.extendSelection(oldPos, itemText.cursorPosition());
+						suneerActivateChainFrameKeepingSelection(m_Doc, m_backBox);
+					}
+					else
+						ExpandSel(oldPos);
 				}
 				else if ((textLayout.lines() > 0) && (oldPos <= textLayout.line(0)->lastChar()) && (itemText.cursorPosition()  == firstInFrame()) && (m_backBox != nullptr))
 				{
@@ -4377,7 +4451,17 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		else if ( buttonModifiers & Qt::ShiftModifier )
 		{
 			itemText.moveCursorLeft();
-			ExpandSel(oldPos);
+			// Suneer: same frame-start clamp the non-Shift branch below checks —
+			// extend the (shared) selection into the previous linked frame instead
+			// of stopping at this frame's own start.
+			if (itemText.cursorPosition() < firstInFrame() && m_backBox != nullptr)
+			{
+				itemText.setCursorPosition(m_backBox->lastInFrame());
+				itemText.extendSelection(oldPos, itemText.cursorPosition());
+				suneerActivateChainFrameKeepingSelection(m_Doc, m_backBox);
+			}
+			else
+				ExpandSel(oldPos);
 		}
 		else
 		{
@@ -4420,7 +4504,16 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 		else if ( buttonModifiers & Qt::ShiftModifier )
 		{
 			itemText.moveCursorRight();
-			ExpandSel(oldPos);
+			// Suneer: same frame-end clamp the non-Shift branch below checks —
+			// extend the (shared) selection into the next linked frame instead
+			// of stopping at this frame's own end.
+			if (itemText.cursorPosition() > lastInFrame() && m_nextBox != nullptr && m_nextBox->frameDisplays(itemText.cursorPosition()))
+			{
+				itemText.extendSelection(oldPos, itemText.cursorPosition());
+				suneerActivateChainFrameKeepingSelection(m_Doc, m_nextBox);
+			}
+			else
+				ExpandSel(oldPos);
 		}
 		else
 		{

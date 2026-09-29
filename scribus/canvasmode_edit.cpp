@@ -66,11 +66,31 @@ CanvasMode_Edit::CanvasMode_Edit(ScribusView* view) : CanvasMode(view), m_ScMW(v
 }
 
 inline bool CanvasMode_Edit::GetItem(PageItem** pi)
-{ 
-	*pi = m_doc->m_Selection->itemAt(0); 
+{
+	*pi = m_doc->m_Selection->itemAt(0);
 	return (*pi) != nullptr;
 }
 
+// Suneer: cross-frame text selection. PageItem::link() (pageitem.cpp) makes every
+// linked frame's itemText share one StoryText::d, so a selection set through any
+// frame in the chain is already visible from every other frame once each repaints
+// (see NOTES.md investigation). This just confirms two frames belong to that chain.
+static bool textFramesShareChain(PageItem* a, PageItem* b)
+{
+	if (!a || !b)
+		return false;
+	for (PageItem* it = a; it; it = it->nextInChain())
+	{
+		if (it == b)
+			return true;
+	}
+	for (PageItem* it = a->prevInChain(); it; it = it->prevInChain())
+	{
+		if (it == b)
+			return true;
+	}
+	return false;
+}
 
 void CanvasMode_Edit::blinkTextCursor()
 {
@@ -618,7 +638,33 @@ void CanvasMode_Edit::mouseMoveEvent(QMouseEvent *m)
 				int refEndSel(currItem->asTextFrame()->itemText.endOfSelection());
 				currItem->itemText.deselectAll();
 				currItem->HasSel = false;
-				m_view->slotSetCurs(globalPos.x(), globalPos.y());
+				PageItem_TextFrame* dragCrossFrame = nullptr;
+				if (!m_view->slotSetCurs(globalPos.x(), globalPos.y()))
+				{
+					// Suneer: dragged past the edge of currItem. If the point under the
+					// mouse is a linked frame in the same story, keep the selection
+					// growing into it — itemText is shared across the whole chain
+					// (see textFramesShareChain(), PageItem::link()), so moving the
+					// cursor here is exactly what setCursorPosition() on currItem does.
+					PageItem* hitItem = m_canvas->itemUnderCursor(m->globalPosition(), nullptr, false);
+					if (hitItem && hitItem->isTextFrame() && hitItem != currItem
+						&& textFramesShareChain(currItem, hitItem))
+					{
+						PageItem_TextFrame* hitFrame = hitItem->asTextFrame();
+						QPointF dragCanvasPoint(mousePointDoc.x(), mousePointDoc.y());
+						if (m_canvas->frameHitTest(dragCanvasPoint, hitFrame) == Canvas::INSIDE)
+						{
+							if (hitFrame->invalid)
+								hitFrame->layout();
+							int pos = hitFrame->textPositionFromPoint(dragCanvasPoint);
+							if (pos >= 0)
+							{
+								currItem->itemText.setCursorPosition(pos);
+								dragCrossFrame = hitFrame;
+							}
+						}
+					}
+				}
 				//Make sure we don't go here if the old cursor position was not set
 				if (oldCp!=-1 && currItem->itemText.isNotEmpty())
 				{
@@ -642,6 +688,11 @@ void CanvasMode_Edit::mouseMoveEvent(QMouseEvent *m)
 					{
 						QRectF br(currItem->getBoundingRect());
 						m_canvas->update(QRectF(m_canvas->canvasToLocal(br.topLeft()), br.size() * m_canvas->scale()).toRect());
+						if (dragCrossFrame)
+						{
+							QRectF br2(dragCrossFrame->getBoundingRect());
+							m_canvas->update(QRectF(m_canvas->canvasToLocal(br2.topLeft()), br2.size() * m_canvas->scale()).toRect());
+						}
 					}
 					// We have to call this unconditionally because slotSetCurs() doesn't know selection
 					// when it is called
@@ -753,6 +804,57 @@ void CanvasMode_Edit::mousePressEvent(QMouseEvent *m)
 			FPoint canvasPoint = m_canvas->globalToCanvas(m->globalPosition());
 			if (m_canvas->frameHitTest(QPointF(canvasPoint.x(), canvasPoint.y()), currItem) < 0)
 			{
+				// Suneer: Shift+click into a different frame of the same linked story
+				// extends the existing (shared) selection instead of deselecting and
+				// starting a fresh edit in the clicked frame. See textFramesShareChain().
+				if ((m->modifiers() & Qt::ShiftModifier) && currItem->isTextFrame() && oldCp >= 0)
+				{
+					PageItem* clickedItem = m_canvas->itemUnderCursor(m->globalPosition(), nullptr, false);
+					if (clickedItem && clickedItem->isTextFrame() && clickedItem != currItem
+						&& textFramesShareChain(currItem, clickedItem))
+					{
+						PageItem_TextFrame* clickedFrame = clickedItem->asTextFrame();
+						QPointF clickCanvasPoint(canvasPoint.x(), canvasPoint.y());
+						if (m_canvas->frameHitTest(clickCanvasPoint, clickedFrame) == Canvas::INSIDE)
+						{
+							if (clickedFrame->invalid)
+								clickedFrame->layout();
+							int newPos = clickedFrame->textPositionFromPoint(clickCanvasPoint);
+							if (newPos >= 0)
+							{
+								StoryText& story = clickedFrame->itemText; // same shared StoryText as currItem->itemText
+								int anchor;
+								if (story.hasSelection())
+								{
+									// Same rule as the same-frame Shift+click path below: keep
+									// extending from whichever edge of the existing selection
+									// is farther from this click, not from the last click.
+									if (newPos < (story.startOfSelection() + story.endOfSelection()) / 2)
+										anchor = story.startOfSelection();
+									else
+										anchor = story.endOfSelection();
+								}
+								else
+									anchor = oldCp;
+
+								m_doc->m_Selection->delaySignalsOn();
+								m_doc->m_Selection->clear();
+								m_doc->m_Selection->addItem(clickedItem);
+								m_doc->m_Selection->delaySignalsOff();
+								story.setCursorPosition(newPos);
+								story.extendSelection(anchor, newPos);
+								oldCp = newPos;
+								m_ScMW->setTBvals(clickedFrame);
+								m_ScMW->setCopyCutEnabled(story.hasSelection());
+								m_doc->regionsChanged()->update(currItem->getBoundingRect());
+								m_doc->regionsChanged()->update(clickedItem->getBoundingRect());
+								m->accept();
+								return;
+							}
+						}
+					}
+				}
+
 				m_doc->m_Selection->delaySignalsOn();
 				m_view->deselectItems(true);
 				bool wantNormal = true;
