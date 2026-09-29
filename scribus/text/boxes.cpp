@@ -47,23 +47,151 @@ int GroupBox::pointToPosition(const QPointF& coord, const StoryText &story) cons
 			}
 		}
 	}
-	for (const Box *box : boxes())
+	if (m_direction == D_Vertical)
 	{
-		if (box->containsPoint(rel))
+		// Suneer: children here are stacked LineBoxes. With leading tighter than
+		// a line's own ascent+descent (routine in condensed newspaper columns),
+		// two consecutive line boxes overlap in y, and a point in the overlap
+		// is "contained" by both. Taking the first match (top-to-bottom order)
+		// always favoured the upper line, so a drag ending visually on line N
+		// could resolve to line N-1 instead — the selection endpoint "jumped up"
+		// a line, most noticeable dragging toward a line's end. Pick whichever
+		// containing line's own vertical center is nearest the point instead;
+		// when at most one line contains the point (the normal, non-overlapping
+		// case) this is unchanged.
+		const Box* bestBox = nullptr;
+		double bestDist = 0.0;
+		for (const Box* box : boxes())
 		{
-			int result = box->pointToPosition(rel, story);
+			bool hit = box->containsPoint(rel);
+			if (!hit)
+				continue;
+			double center = box->y() + box->height() / 2.0;
+			double dist = qAbs(rel.y() - center);
+			if (!bestBox || dist < bestDist)
+			{
+				bestBox = box;
+				bestDist = dist;
+			}
+		}
+		if (bestBox)
+		{
+			int result = bestBox->pointToPosition(rel, story);
 			if (result >= 0)
 				return result;
+		}
+	}
+	else
+	{
+		for (const Box *box : boxes())
+		{
+			bool hit = box->containsPoint(rel);
+			if (hit)
+			{
+				int result = box->pointToPosition(rel, story);
+				if (result >= 0)
+					return result;
+			}
+		}
+
+		// Suneer: this branch is shared by two different callers — the root box
+		// (children are column GroupBoxes) and any LineBox (children are glyphs,
+		// which supplies its own past-line-end fallback afterward, so it needs
+		// nothing here). Only add column recovery when the children actually are
+		// columns, checked once via the first child like the span-columns lookup
+		// above, not a per-column dynamic_cast in the hot loop.
+		//
+		// No column's own bbox strictly contained the click. That's expected for
+		// a genuine inter-column gap or past the frame's last column, but it also
+		// fires for a click that a person would call "inside" the near column: a
+		// justified line's rightmost glyphs are positioned during layout against
+		// PageItem_TextFrame::columnWidth() (pageitem_textframe.cpp), while this
+		// column's own tested width comes from the same call via addColumn() —
+		// same source, but summed through a different chain of column-index
+		// multiplication and inset/gap subtraction, so float error can leave the
+		// tested edge a fraction of a pixel short of where the glyph actually
+		// sits. Rather than drop the click, snap to whichever column's own band
+		// is horizontally nearest — mirroring the y-gap snap below for lines.
+		if (!m_boxes.isEmpty() && dynamic_cast<const GroupBox*>(m_boxes.constFirst()))
+		{
+			const GroupBox* nearestCol = nullptr;
+			double bestDist = 0.0;
+			double nearestLeft = 0.0, nearestRight = 0.0;
+			for (const Box* box : boxes())
+			{
+				const auto* col = static_cast<const GroupBox*>(box);
+				double left = col->x();
+				double right = left + col->width();
+				double dist = (rel.x() < left) ? (left - rel.x()) : qMax(0.0, rel.x() - right);
+				if (!nearestCol || dist < bestDist)
+				{
+					nearestCol = col;
+					bestDist = dist;
+					nearestLeft = left;
+					nearestRight = right;
+				}
+			}
+			if (nearestCol)
+			{
+				// Suneer: rel is the click's coordinate in THIS box's frame — it's
+				// exactly what put us in this fallback, i.e. outside every column's
+				// own [left,right] band (the gap between columns, or past the last
+				// column's edge). Passing it through unclamped just relocates the
+				// same "outside every bbox" failure one level down: the callee's
+				// own containsPoint(coord) check — used both for its internal line
+				// search and its own edge-fallback block below — rejects this same
+				// coordinate for the same reason, and pointToPosition() still
+				// returns -1. Clamp into the chosen column's own band first, in
+				// THIS box's frame (not [0,width] — that's the callee's *local*
+				// frame after it subtracts its own x(), one step further down).
+				QPointF adjustedRel(qBound(nearestLeft, rel.x(), nearestRight), rel.y());
+				int result = nearestCol->pointToPosition(adjustedRel, story);
+				if (result >= 0)
+					return result;
+			}
 		}
 	}
 	if (containsPoint(coord) && (m_boxes.count() > 0))
 	{
 		const LineBox* firstLine = dynamic_cast<LineBox*>(m_boxes.first());
 		if (firstLine && (coord.y() < firstLine->y()))
+		{
 			return firstLine->firstChar();
+		}
 		const LineBox* lastLine = dynamic_cast<LineBox*>(m_boxes.last());
 		if (lastLine && (coord.y() > lastLine->y() + lastLine->naturalHeight()))
+		{
 			return lastLine->lastChar() + 1;
+		}
+
+		// Suneer: coord.y() is within this block's overall line range but didn't
+		// land inside any single line's own rect above (line spacing/leading can
+		// exceed a line's naturalHeight, leaving a gap between consecutive
+		// lines). Snap to the nearer line's edge instead of falling through to
+		// -1: callers (e.g. ScribusView::slotSetCurs, used by drag-selection)
+		// pass the result straight to StoryText::setCursorPosition(), which
+		// clamps a negative position to 0 — jumping the selection to the very
+		// start of the frame whenever a drag crosses a line gap.
+		LineBox* prevLine = nullptr;
+		for (Box* b : m_boxes)
+		{
+			LineBox* line = dynamic_cast<LineBox*>(b);
+			if (!line)
+				continue;
+			if (prevLine)
+			{
+				double gapTop = prevLine->y() + prevLine->naturalHeight();
+				double gapBottom = line->y();
+				if (coord.y() >= gapTop && coord.y() <= gapBottom)
+				{
+					double distToPrev = coord.y() - gapTop;
+					double distToNext = gapBottom - coord.y();
+					int result = (distToPrev <= distToNext) ? (prevLine->lastChar() + 1) : line->firstChar();
+					return result;
+				}
+			}
+			prevLine = line;
+		}
 	}
 	return -1;
 }
@@ -182,26 +310,36 @@ int LineBox::pointToPosition(const QPointF& coord, const StoryText &story) const
 	if (position < 0 && containsPoint(coord))
 	{
 		const ParagraphStyle& style = story.paragraphStyle(firstChar());
-		if (style.direction() == ParagraphStyle::RTL)
+		bool rtl = (style.direction() == ParagraphStyle::RTL);
+		// Past this line's own content, in reading order (RTL: left of the
+		// line's origin; LTR: right of it) — reached whenever the point fell
+		// through every glyph box's own bounds above.
+		bool pastLineEnd = rtl ? (coord.x() < x()) : (coord.x() >= x());
+
+		if (pastLineEnd)
 		{
-			if (coord.x() < x())
-				position = lastChar();
-			else
-				position = firstChar();
+			position = lastChar();
+			// Suneer: lastChar() means "before the character at that index" —
+			// the same convention GlyphBox::pointToPosition uses for a point
+			// in a glyph's right half (it returns firstChar+i+1, past that
+			// character). A point landing past the whole line's glyphs used
+			// to stop one short of that convention, excluding the line's own
+			// final visible character from the resulting selection — on
+			// EVERY line's end, any script, not only multi-codepoint
+			// Malayalam clusters. This used to be patched only for the very
+			// last character of the whole story (position == story.length()-1);
+			// generalize it to every line. Leave a break character (paragraph/
+			// line/frame/column mark) unbumped — selection shouldn't reach
+			// past it — and leave a single-character line alone, since that
+			// position is also this line's firstChar() and bumping it would
+			// instead break "before start of line" semantics for that line.
+			bool willBump = (m_firstChar != m_lastChar) && !SpecialChars::isBreak(story.text(position));
+			if (willBump)
+				position = qMin(position + 1, story.length());
 		}
 		else
 		{
-			if (coord.x() < x())
-				position = firstChar();
-			else
-				position = lastChar();
-		}
-		if (position == story.length() - 1)
-		{
-			if (m_firstChar == m_lastChar)
-				position = m_lastChar;
-			else if (!SpecialChars::isBreak(story.text(position)))
-				position = story.length();
+			position = firstChar();
 		}
 	}
 
@@ -813,9 +951,10 @@ int GlyphBox::pointToPosition(const QPointF& coord, const StoryText& story) cons
 
 			if ((coord.x() >= componentX) && (coord.x() <= componentX + componentWidth))
 			{
-				if (coord.x() <= componentX + componentWidth / 2.0)
-					return rtlLayout ? (firstChar() + i + 1) : (firstChar() + i);
-				return rtlLayout ? (firstChar() + i) : (firstChar() + i + 1);
+				int result = (coord.x() <= componentX + componentWidth / 2.0)
+					? (rtlLayout ? (firstChar() + i + 1) : (firstChar() + i))
+					: (rtlLayout ? (firstChar() + i) : (firstChar() + i + 1));
+				return result;
 			}
 		}
 	}
@@ -824,9 +963,10 @@ int GlyphBox::pointToPosition(const QPointF& coord, const StoryText& story) cons
 		if (coord.x() >= x() && coord.x() <= x() + width())
 		{
 			bool rtlLayout = m_glyphRun.hasFlag(ScLayout_RightToLeft);
-			if (coord.x() <= x() + width() / 2.0)
-				return rtlLayout ? (firstChar() + 1) : firstChar();
-			return rtlLayout ? firstChar() : (firstChar() + 1);
+			int result = (coord.x() <= x() + width() / 2.0)
+				? (rtlLayout ? (firstChar() + 1) : firstChar())
+				: (rtlLayout ? firstChar() : (firstChar() + 1));
+			return result;
 		}
 	}
 
