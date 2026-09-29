@@ -622,7 +622,28 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
     Claude-നും OpenAI-ക്കും ഇവിടെ account ഇല്ല; Gemini-ക്ക് ഉണ്ടെങ്കിലും
     അതിന്റെ rate limit പ്രശ്നം ഇനിയും ബാക്കിയാണ്
 
-### 28. Authors
+### 28. Keyboard Shortcuts — സ്വന്തം Default, Export/Import (പുതിയത്)
+
+- `File › Preferences › Keyboard Shortcuts`-ൽ മാറ്റുന്ന shortcut
+  **Scribus അടച്ചു തുറന്നാലും മാറില്ല**. Newspaper set **ആദ്യ
+  തവണ മാത്രം** (profile-ൽ `scribus172.rc` ഇല്ലാത്തപ്പോൾ)
+- **Save as Default** — ഇപ്പോഴത്തെ shortcuts നിങ്ങളുടെ സ്വന്തം
+  default ആയി `~/.config/scribus/my-default-shortcuts.xml`-ൽ
+  സൂക്ഷിക്കും
+- **Reset to My Default** — ആ സൂക്ഷിച്ച set തിരികെ കൊണ്ടുവരും.
+  പഴയ **Reset** ഇപ്പോൾ **Reset to Scribus Defaults** ആണ്
+- **Export… / Import…** — set ഒരു `.xml` ഫയലാക്കി മറ്റൊരു
+  കമ്പ്യൂട്ടറിലേക്ക് കൊണ്ടുപോകാം. പേരിനൊപ്പം `.xml` ചേർത്തില്ലെങ്കിലും
+  ഇപ്പോൾ ശരിയായ പേരിൽ തന്നെ save ആകും
+- **പുതിയ profile-ൽ ആദ്യം തുറക്കുമ്പോൾ**, ചോദിക്കാതെ ഈ ക്രമത്തിൽ:
+  1. profile-ൽ `my-default-shortcuts.xml` ഉണ്ടെങ്കിൽ അത്
+  2. ഇല്ലെങ്കിൽ `/usr/local/share/scribus/default-shortcuts.xml`
+     (install ചെയ്യുന്ന ആൾ എല്ലാവർക്കുമായി വെക്കുന്നത്)
+  3. രണ്ടും ഇല്ലെങ്കിൽ മാത്രം "Welcome" dialog
+- **⚠️ ശ്രദ്ധിക്കുക:** Ctrl+Shift+C / Ctrl+Shift+V എപ്പോഴും Styled
+  Copy/Paste-നാണ്; മറ്റൊന്നിന് കൊടുത്താൽ തുറക്കുമ്പോൾ മാറിപ്പോകും
+
+### 29. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

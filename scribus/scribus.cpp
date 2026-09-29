@@ -244,6 +244,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/pageselector.h"
 #include "ui/colorsandfills.h"
 #include "ui/pdfexportdialog.h"
+#include "ui/preferences/prefs_keyboardshortcuts.h"
 #include "ui/pdftoolbar.h"
 #include "ui/picstatus.h"
 #include "ui/preferences/preferencesdialog.h"
@@ -10842,6 +10843,22 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 	// exists, this is not a first run and the keyset must not touch it.
 	if (QFile::exists(m_prefsManager.preferencesLocation() + "scribus172.rc"))
 	{
+		settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
+		return;
+	}
+
+	// A fresh profile starts from a set chosen ahead of time, when there is one,
+	// without asking: the user's own "Save as Default" set (e.g. copied in from
+	// another computer), else the installer's site-wide set.
+	const QStringList presetSets {
+		Prefs_KeyboardShortcuts::myDefaultShortcutsPath(),
+		ScPaths::instance().shareDir() + "default-shortcuts.xml"
+	};
+	for (const QString& presetSet : presetSets)
+	{
+		if (!QFile::exists(presetSet))
+			continue;
+		applyKeySetFromFile(presetSet);
 		settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
 		return;
 	}

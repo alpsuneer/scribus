@@ -7,9 +7,12 @@ for which a new license (GPL+exception) is in place.
 
 #include <QDebug>
 #include <QDomDocument>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QPushButton>
 
 #include "actionmanager.h"
 #include "api/api_application.h"
@@ -83,6 +86,19 @@ Prefs_KeyboardShortcuts::Prefs_KeyboardShortcuts(QWidget* parent, ScribusDoc* /*
 	connect( clearSearchButton, SIGNAL(clicked()), this, SLOT(clearSearchString()));
 	connect( searchTextLineEdit, SIGNAL(textChanged(QString)), this, SLOT(applySearch(QString)));
 
+	// Suneer: the user's own default set, next to the Scribus-defaults Reset.
+	resetSetButton->setText(tr("&Reset to Scribus Defaults"));
+	auto* saveMyDefaultButton = new QPushButton(tr("Save as Default"), this);
+	saveMyDefaultButton->setToolTip(tr("Save the shortcuts shown here as your own default set"));
+	resetMyDefaultButton = new QPushButton(tr("Reset to My Default"), this);
+	resetMyDefaultButton->setToolTip(tr("Restore the set saved with \"Save as Default\""));
+	resetMyDefaultButton->setEnabled(QFile::exists(myDefaultShortcutsPath()));
+	const int resetIndex = horizontalLayout_2->indexOf(resetSetButton);
+	horizontalLayout_2->insertWidget(resetIndex, resetMyDefaultButton);
+	horizontalLayout_2->insertWidget(resetIndex, saveMyDefaultButton);
+	connect(saveMyDefaultButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::saveAsMyDefault);
+	connect(resetMyDefaultButton, &QPushButton::clicked, this, &Prefs_KeyboardShortcuts::resetToMyDefault);
+
 }
 
 Prefs_KeyboardShortcuts::~Prefs_KeyboardShortcuts() = default;
@@ -132,7 +148,10 @@ void Prefs_KeyboardShortcuts::importKeySetFile()
 	QString currentPath = dirs->get("keymapprefs_import", ScPaths::instance().shareDir() + "keysets/");
 	QString s = QFileDialog::getOpenFileName(this, tr("Select a Key set file to read"), currentPath, tr("Key Set XML Files (*.xml)"));
 	if (!s.isEmpty())
+	{
+		dirs->set("keymapprefs_import", QFileInfo(s).absolutePath());
 		importKeySet(s);
+	}
 }
 void Prefs_KeyboardShortcuts::exportKeySetFile()
 {
@@ -140,7 +159,10 @@ void Prefs_KeyboardShortcuts::exportKeySetFile()
 	QString currentPath= dirs->get("keymapprefs_export", ".");
 	QString s = QFileDialog::getSaveFileName(this, tr("Select a Key set file to save to"), currentPath, tr("Key Set XML Files (*.xml)") );
 	if (!s.isEmpty())
+	{
+		dirs->set("keymapprefs_export", QFileInfo(s).absolutePath());
 		exportKeySet(s);
+	}
 }
 
 void Prefs_KeyboardShortcuts::importKeySet(const QString& filename)
@@ -223,31 +245,66 @@ bool Prefs_KeyboardShortcuts::exportKeySet(const QString& filename)
 		QString setName = QInputDialog::getText(this, tr("Export Keyboard Shortcuts to File"), tr("Enter the name of the shortcut set:"), QLineEdit::Normal, QString(), &ok);
 		if (!( ok && !setName.isEmpty()) )
 			return false;
-
-		QDomDocument doc( "keymapentries" );
-		QString keyset = QString("<shortcutset name=\"%1\"></shortcutset>").arg(setName);
-		doc.setContent(keyset);
-		QDomElement keySetElement = doc.documentElement();
-		for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
+		if (!writeKeySet(keyMap, exportFileName, setName))
 		{
-			if (it.value().keySequence.isEmpty() && it.key().isEmpty())
-				continue;
-			QDomElement function_shortcut = doc.createElement("function");
-			function_shortcut.setAttribute("name", it.key());
-			function_shortcut.setAttribute("shortcut", getKeyText(it.value().keySequence));
-			keySetElement.appendChild(function_shortcut);
-		}
-		QFile f(filename);
-		if(!f.open(QIODevice::WriteOnly))
+			ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not write the shortcut set to %1").arg(exportFileName));
 			return false;
-		QDataStream s(&f);
-		QByteArray xmltag("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-		s.writeRawData(xmltag.data(), xmltag.length());
-		QByteArray xmldoc = doc.toByteArray(4);
-		s.writeRawData(xmldoc, xmldoc.length());
-		f.close();
+		}
 	}
 	return true;
+}
+
+bool Prefs_KeyboardShortcuts::writeKeySet(const QMap<QString, Keys>& keys, const QString& fileName, const QString& setName)
+{
+	QDomDocument doc( "keymapentries" );
+	QDomElement keySetElement = doc.createElement("shortcutset");
+	keySetElement.setAttribute("name", setName);
+	doc.appendChild(keySetElement);
+	for (auto it = keys.begin(); it != keys.end(); ++it)
+	{
+		if (it.key().isEmpty())
+			continue;
+		QDomElement function_shortcut = doc.createElement("function");
+		function_shortcut.setAttribute("name", it.key());
+		function_shortcut.setAttribute("shortcut", getKeyText(it.value().keySequence));
+		keySetElement.appendChild(function_shortcut);
+	}
+	QFile f(fileName);
+	if (!f.open(QIODevice::WriteOnly))
+		return false;
+	QByteArray data("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+	data += doc.toByteArray(4);
+	bool ok = (f.write(data) == data.size());
+	f.close();
+	return ok;
+}
+
+QString Prefs_KeyboardShortcuts::myDefaultShortcutsPath()
+{
+	return PrefsManager::instance().preferencesLocation() + "my-default-shortcuts.xml";
+}
+
+void Prefs_KeyboardShortcuts::saveAsMyDefault()
+{
+	const QString path = myDefaultShortcutsPath();
+	if (!writeKeySet(keyMap, path, tr("My Default")))
+	{
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("Could not save your default shortcuts to %1").arg(path));
+		return;
+	}
+	resetMyDefaultButton->setEnabled(true);
+	ScMessageBox::information(this, tr("Save as Default"), tr("Your default shortcuts were saved to %1").arg(path));
+}
+
+void Prefs_KeyboardShortcuts::resetToMyDefault()
+{
+	const QString path = myDefaultShortcutsPath();
+	if (!QFile::exists(path))
+	{
+		resetMyDefaultButton->setEnabled(false);
+		return;
+	}
+	importKeySet(path);
 }
 
 void Prefs_KeyboardShortcuts::resetKeySet()

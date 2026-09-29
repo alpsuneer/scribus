@@ -39,6 +39,12 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 		static QString getKeyText(const QKeySequence& KeyC);
 		static QString getTrKeyText(const QKeySequence& KeyC);
 
+		// Suneer: the user's own saved set ("Save as Default"), in the keyset
+		// XML format. Also used as the first-run set for a fresh profile.
+		static QString myDefaultShortcutsPath();
+		// Writes keys in the keyset XML format, without any dialog.
+		static bool writeKeySet(const QMap<QString, Keys>& keys, const QString& fileName, const QString& setName);
+
 	public slots:
 		void languageChange();
 
@@ -51,6 +57,7 @@ protected:
 	QVector< QPair<QString, QStringList> >* defMenus;
 	QVector< QPair<QString, QStringList> >* defNonMenuActions;
 	QTreeWidgetItem * selectedLVI { nullptr };
+	QPushButton* resetMyDefaultButton { nullptr };
 	int keyCode { 0 };
 
 	void insertActions();
@@ -75,6 +82,8 @@ protected slots:
 	void importKeySetFile();
 	void exportKeySetFile();
 	void resetKeySet();
+	void saveAsMyDefault();
+	void resetToMyDefault();
 	void clearSearchString();
 	void applySearch( const QString & newss );
 };
