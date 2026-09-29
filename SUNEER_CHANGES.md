@@ -659,6 +659,13 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - **പുതിയ profile-ൽ ആദ്യം:** `/usr/local/share/scribus/default-shortcuts.xml`
   ഉണ്ടെങ്കിൽ ചോദിക്കാതെ അത്; ഇല്ലെങ്കിൽ "Welcome" dialog — അതിലെ
   തിരഞ്ഞെടുപ്പ് ആദ്യത്തെ Default set ആകും
+- **"Newspaper Default" ഇപ്പോൾ ഓഫീസിലെ "dbi" set തന്നെയാണ്** (393
+  actions). ഇത് `resources/keysets/malayalam-dtp.xml`-ൽ നിന്ന് വരുന്നു,
+  `.deb`-ൽ `/usr/local/share/scribus/keysets/malayalam-dtp.xml` ആയി
+  പോകും. Shortcuts മാറ്റിയ ശേഷം പുതിയത് Newspaper Default ആക്കാൻ:
+  ആ set **Set as Default** ആക്കി,
+  `tools/update-newspaper-shortcuts.sh --deb` ഓടിക്കുക (keyset
+  പുതുക്കി, build, install, `.deb` ഉണ്ടാക്കും)
 - **Styled Copy / Styled Paste**-ന് set-ൽ കൊടുത്ത keys തന്നെ നിൽക്കും
   (ഉദാ. Ctrl+Shift+M). Set-ൽ key ഇല്ലെങ്കിൽ മാത്രം Ctrl+Shift+C /
   Ctrl+Shift+V
