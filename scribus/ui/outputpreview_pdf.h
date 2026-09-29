@@ -52,6 +52,11 @@ protected:
 	bool m_haveTiffSep { false };
 	int  m_gsVersion { 0 };
 
+	// Set by the Close button while a renderPreview()/renderPreviewSep() call
+	// is blocked inside System(), so the Ghostscript child gets killed instead
+	// of the dialog hanging until it exits on its own.
+	bool m_cancelRender { false };
+
 	// PDF export options
 	PDFVersion m_pdfVersion;
 	int  m_pdfOutputMode { 0 };
@@ -93,6 +98,7 @@ protected:
 	void imageLoadError(QPixmap &pixmap);
 
 protected slots:
+	void requestCancelRender();
 	void onPdfVersionChanged(int index);
 	void onPdfOutputModeChanged(int index);
 	void onInkTableCellDoubleClicked(int row);

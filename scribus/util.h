@@ -132,12 +132,30 @@ bool SCRIBUS_API loadRawBytes(const QString & filename, QByteArray & buf, int ma
    * @param fileStdErr Path to save error output to, or "" to discard.
    * @param fileStdOut Path to save normal output to, or "" to discard
 	\param cancel a reference(!) to bool - flag used to kill the process
-   * @return Program exit code, or 1 on failure.
+   * @param timeoutMs kill the process and give up after this many milliseconds
+   *        of wall time, or wait indefinitely (subject only to cancel) when <= 0.
+   *        Existing callers all pass the default, so their unbounded-wait
+   *        behaviour is unchanged.
+   * @return Program exit code; 1 on failure; -1 if cancelled; -2 if timeoutMs
+   *         was exceeded.
    *
 */
 int SCRIBUS_API System(const QString& exename, const QStringList & args,
 					   const QString& fileStdErr = QString(), const QString& fileStdOut = QString(),
-					   const bool* cancel = nullptr);
+					   const bool* cancel = nullptr, int timeoutMs = -1);
+
+/*! \brief Kill any "gs" process left running with no parent (PPID 1) whose
+ *  command line points at one of Scribus's own temp-file locations.
+ *
+ *  Ghostscript is invoked synchronously from previews and separations
+ *  rendering (see System() above); force-killing Scribus (kill -9, an OOM
+ *  kill, a crash that bypasses the handler) does not propagate to that
+ *  child, so it is orphaned and keeps burning a full CPU core indefinitely.
+ *  Left unnoticed across sessions these accumulate and starve every
+ *  subsequent render, turning a merely slow page into an apparent hang.
+ *  Call once at startup, before any of this session's own gs children
+ *  exist. Linux only (reads /proc); a no-op elsewhere. */
+void SCRIBUS_API reapOrphanedGhostscriptChildren();
 
 /*!
  \fn QString checkFileExtension(const QString &currName, const QString &extension)

@@ -27,6 +27,9 @@ for which a new license (GPL+exception) is in place.
 #include <qglobal.h>
 #include <QApplication>
 #include <QCryptographicHash>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
 #include <QImage>
 #include <QImageWriter>
 #include <QPainter>
@@ -46,6 +49,10 @@ for which a new license (GPL+exception) is in place.
 #include "ui/scmessagebox.h"
 
 #include <csignal>
+#if defined(Q_OS_LINUX)
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #if !defined(_WIN32) && !defined(Q_OS_MACOS) 
 #include <execinfo.h>
@@ -66,7 +73,7 @@ QString cleanupLang(const QString& lang)
 	return lang.left(dotIndex);
 }
 
-int System(const QString& exename, const QStringList& args, const QString& fileStdErr, const QString& fileStdOut, const bool* cancel)
+int System(const QString& exename, const QStringList& args, const QString& fileStdErr, const QString& fileStdOut, const bool* cancel, int timeoutMs)
 {
 	QProcess proc;
 	if (!fileStdOut.isEmpty())
@@ -74,8 +81,11 @@ int System(const QString& exename, const QStringList& args, const QString& fileS
 	if (!fileStdErr.isEmpty())
 		proc.setStandardErrorFile(fileStdErr);
 	proc.start(exename, args);
+	bool timedOut = false;
 	if (proc.waitForStarted(15000))
 	{
+		QElapsedTimer elapsed;
+		elapsed.start();
 		while (!proc.waitForFinished(15000))
 		{
 			QApplication::processEvents();
@@ -84,11 +94,74 @@ int System(const QString& exename, const QStringList& args, const QString& fileS
 				proc.kill();
 				break;
 			}
+			if (timeoutMs > 0 && elapsed.hasExpired(timeoutMs))
+			{
+				timedOut = true;
+				proc.kill();
+				break;
+			}
 		}
 	}
+	if (timedOut)
+		return -2;
 	if (cancel && (*cancel))
 		return -1;
 	return proc.exitCode();
+}
+
+void reapOrphanedGhostscriptChildren()
+{
+#if defined(Q_OS_LINUX)
+	const QStringList pidDirs = QDir(QStringLiteral("/proc")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+	for (const QString& pidStr : pidDirs)
+	{
+		bool pidOk = false;
+		long pid = pidStr.toLong(&pidOk);
+		if (!pidOk)
+			continue;
+
+		QFile statFile(QStringLiteral("/proc/%1/stat").arg(pidStr));
+		if (!statFile.open(QIODevice::ReadOnly))
+			continue;
+		QString stat = QString::fromLatin1(statFile.readAll());
+		statFile.close();
+
+		// comm is the 2nd field, wrapped in parens, and can itself contain
+		// spaces or parens - so locate it by the LAST ')' before splitting
+		// the (fixed-format) fields that follow.
+		qsizetype openParen = stat.indexOf('(');
+		qsizetype closeParen = stat.lastIndexOf(')');
+		if (openParen < 0 || closeParen < openParen)
+			continue;
+		QString comm = stat.mid(openParen + 1, closeParen - openParen - 1);
+		if (comm != QLatin1String("gs"))
+			continue;
+
+		const QStringList fields = stat.mid(closeParen + 2).split(' ', Qt::SkipEmptyParts);
+		if (fields.size() < 2) // fields[0] = state, fields[1] = ppid
+			continue;
+		bool ppidOk = false;
+		long ppid = fields.at(1).toLong(&ppidOk);
+		if (!ppidOk || ppid != 1) // only ever touch a process whose parent is already gone
+			continue;
+
+		QFile cmdlineFile(QStringLiteral("/proc/%1/cmdline").arg(pidStr));
+		if (!cmdlineFile.open(QIODevice::ReadOnly))
+			continue;
+		QString cmdline = QString::fromLocal8Bit(cmdlineFile.readAll());
+		cmdlineFile.close();
+
+		// Only reap gs children Scribus itself spawned: previews and
+		// separations rendering always write into a scribus-owned temp path
+		// (ScPaths::tempFileDir()'s "scribus-XXXXXX" QTemporaryDir, or
+		// ~/.local/share/scribus/temp/). A parentless "gs" that references
+		// neither is somebody else's process and is left alone.
+		if (!cmdline.contains(QLatin1String("/scribus-")) && !cmdline.contains(QLatin1String("/scribus/temp/")))
+			continue;
+
+		::kill((pid_t) pid, SIGKILL);
+	}
+#endif
 }
 
 // On Windows, return short path name, else return longPath

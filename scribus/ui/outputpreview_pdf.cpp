@@ -26,11 +26,21 @@ for which a new license (GPL+exception) is in place.
 #include "scribus.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "ui/scmessagebox.h"
 #include "util.h"
 #include "util_ghostscript.h"
 
 #include "ui_outputpreviewbase.h"
 #include "ui_outputpreview_pdf.h"
+
+// Interactive preview/separations rendering is something the operator is
+// sitting and watching, unlike a batch export - so unlike other System()
+// callers in this codebase, it gets a hard deadline instead of an unbounded
+// wait. A genuinely complex page (many thousand vector objects, as an
+// imported PDF with outlined text can produce) can legitimately take a
+// couple of minutes at low preview resolution; past that, something is
+// wrong and the operator needs an error, not a frozen-looking window.
+static constexpr int previewRenderTimeoutMs = 5 * 60 * 1000;
 
 OutputPreview_PDF::OutputPreview_PDF(QWidget* parent, ScribusDoc* doc) :
 	OutputPreviewBase(parent, doc),
@@ -193,6 +203,10 @@ OutputPreview_PDF::OutputPreview_PDF(QWidget* parent, ScribusDoc* doc) :
 
 	//signals and slots
 	connect(m_uiBase->pageSelector, SIGNAL(pageChanged(int)), this, SLOT(jumpToPage(int)));
+	// requestCancelRender() first: while a preview render is blocked inside
+	// System(), this is what actually unsticks it (close() alone just queues
+	// a close that System()'s wait loop won't see until the child gs exits).
+	connect(m_uiBase->closeButton, SIGNAL(clicked()), this, SLOT(requestCancelRender()));
 	connect(m_uiBase->closeButton, SIGNAL(clicked()), this, SLOT(close()));
 	connect(m_uiBase->exportButton, SIGNAL(clicked()), this, SIGNAL(doExport()));
 	connect(m_uiBase->scaleBox, SIGNAL(activated(int)), this, SLOT(onScaleBoxValueChanged(int)));
@@ -214,6 +228,11 @@ OutputPreview_PDF::~OutputPreview_PDF()
 {
 	cleanupTemporaryFiles();
 	delete m_optionsUi;
+}
+
+void OutputPreview_PDF::requestCancelRender()
+{
+	m_cancelRender = true;
 }
 
 bool OutputPreview_PDF::isCMYKPreviewEnabled() const
@@ -287,6 +306,16 @@ QPixmap OutputPreview_PDF::createPreview(int pageIndex, int res)
 			ret = renderPreviewSep(pageIndex, gsRes);
 		else
 			ret = renderPreview(pageIndex, gsRes);
+		if (ret == -2)
+		{
+			qApp->restoreOverrideCursor();
+			ScMessageBox::warning(this, tr("Separations Preview"),
+				tr("Ghostscript did not finish rendering this page within %1 minutes and was stopped. "
+				   "The page may be unusually complex (for example, a placed PDF with a large number of "
+				   "outlined-text vector objects). Try a lower preview resolution.")
+					.arg(previewRenderTimeoutMs / 60000));
+			qApp->setOverrideCursor(QCursor(Qt::WaitCursor));
+		}
 		if (ret > 0)
 		{
 			imageLoadError(pixmap);
@@ -576,6 +605,7 @@ int OutputPreview_PDF::renderPreview(int pageIndex, int res)
 {
 	int ret = -1;
 	QString cmd1;
+	m_cancelRender = false;
 
 	QStringList args;
 	QString tmp, tmp2, tmp3;
@@ -646,7 +676,7 @@ int OutputPreview_PDF::renderPreview(int pageIndex, int res)
 	args.append( "showpage" );
 	args.append( "-c" );
 	args.append( "quit" );
-	ret = System(m_prefsManager.ghostscriptExecutable(), args);
+	ret = System(m_prefsManager.ghostscriptExecutable(), args, QString(), QString(), &m_cancelRender, previewRenderTimeoutMs);
 	return ret;
 }
 
@@ -655,6 +685,7 @@ int OutputPreview_PDF::renderPreviewSep(int pageIndex, int res)
 	int ret = -1;
 	QString cmd;
 	QStringList args, args1, args2, args3;
+	m_cancelRender = false;
 
 	QString tmp, tmp2, tmp3;
 	int w = qRound(m_doc->Pages->at(pageIndex)->width() * res / 72.0);
@@ -701,7 +732,10 @@ int OutputPreview_PDF::renderPreviewSep(int pageIndex, int res)
 	m_doc->getUsedColors(usedSpots, true);
 	QStringList spots = usedSpots.keys();
 	args3.append( "-sDEVICE=tiffsep" );
-	if (m_gsVersion >= 954)
+	// Only relevant when the document actually has spot colors to convert;
+	// skip it otherwise, so a CMYK-only preview never touches Ghostscript's
+	// spot-to-CMYK codepath in tiffsep at all.
+	if (m_gsVersion >= 954 && spots.count() > 0)
 		args3.append( "-dPrintSpotCMYK=true" );
 
 	QString allSeps ="[ /Cyan /Magenta /Yellow /Black ";
@@ -730,7 +764,7 @@ int OutputPreview_PDF::renderPreviewSep(int pageIndex, int res)
 	}
 
 	QString gsExe(getShortPathName(m_prefsManager.ghostscriptExecutable()));
-	ret = System(gsExe, args1 + args3 + args2, ScPaths::tempFileDir() + "/" +  m_tempBaseName + ".tif.txt" );
+	ret = System(gsExe, args1 + args3 + args2, ScPaths::tempFileDir() + "/" +  m_tempBaseName + ".tif.txt", QString(), &m_cancelRender, previewRenderTimeoutMs );
 
 	QFile sepInfo(QDir::toNativeSeparators(ScPaths::tempFileDir() + "/" +  m_tempBaseName + ".tif.txt"));
 	m_sepsToFileNum.clear();
@@ -772,7 +806,7 @@ int OutputPreview_PDF::renderPreviewSep(int pageIndex, int res)
 
 	QString currSeps;
 	uint spc = 0;
-	for (int sp = maxSpotColors; sp < spots.count(); ++sp)
+	for (int sp = maxSpotColors; sp < spots.count() && !m_cancelRender; ++sp)
 	{
 		currSeps += "(" + spots[sp] + ") ";
 		spc++;
@@ -789,7 +823,7 @@ int OutputPreview_PDF::renderPreviewSep(int pageIndex, int res)
 			}
 			args3.append("-f");
 			args3.append(QDir::toNativeSeparators(ScPaths::tempFileDir() + "/" +  m_tempBaseName + ".sep.ps"));
-			ret = System(gsExe, args1 + args3 + args2);
+			ret = System(gsExe, args1 + args3 + args2, QString(), QString(), &m_cancelRender, previewRenderTimeoutMs);
 			currSeps.clear();
 			spc = 0;
 		}

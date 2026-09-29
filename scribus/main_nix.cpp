@@ -46,6 +46,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribuscore.h"
 #include "scribus.h"
 #include "scimagecachemanager.h"
+#include "util.h"
 
 #include "scconfig.h"
 
@@ -84,6 +85,12 @@ int mainApp(int argc, char **argv)
 
 	ScribusQApp app(argc, argv);
 	initCrashHandler();
+	// Before this session spawns any gs of its own: a prior session that was
+	// force-killed (or OOM-killed, or crashed outside the handler above)
+	// leaves its Ghostscript preview/separations child orphaned and still
+	// burning a full core. Left alone these accumulate across sessions and
+	// starve every later render. See util.cpp for the matching criteria.
+	reapOrphanedGhostscriptChildren();
 	app.parseCommandLine();
 	
 	if (QApplication::platformName() == "wayland")
