@@ -50,7 +50,8 @@ enum AppMode
 	modeInsertPDFRadioButton,
 	modeSuneerImageCrop,
 	modeImageEraser,
-	modeRemoveObject
+	modeRemoveObject,
+	modeShapeCrop
 };
 
 #endif // APPMODES_H

@@ -153,6 +153,117 @@ QPainterPath regularPolygonPath(double w, double h, uint c, bool star, double fa
 	return pts;
 }
 
+/* ---------------------------------------------------------------------------
+   Frame shapes.
+
+   Everything below produces geometry in the coordinate space that
+   PageItem::SetFrameShape() and ScribusDoc::item_setFrameShape() read: a flat
+   array of doubles, four to a group, holding percentages of the frame's own
+   width and height. Two groups describe one cubic segment - start point, its
+   outgoing control, end point, its incoming control - which is the order
+   FPointArray stores in as well, so converting between the two is a copy.
+
+   Percent-of-frame is why none of these take a size. The shape is stored once
+   and re-evaluated against the frame's current width and height, which is what
+   makes it survive a resize instead of having to be reapplied.
+   --------------------------------------------------------------------------- */
+
+/*! \brief Scale and translate a path so its bounding box is exactly the frame.
+Regular polygons and stars are inscribed in the frame's ellipse, so a hexagon
+touches the frame at six points and leaves four gaps. Every shape the frame-shape
+menu offers fills the frame, so these are stretched to match rather than being
+left as the odd ones out. */
+static QPainterPath fitPathToFrame(const QPainterPath& path)
+{
+	const QRectF r = path.boundingRect();
+	if ((r.width() <= 0.0) || (r.height() <= 0.0))
+		return path;
+	// Qt applies these in the order written when it maps a point, so this reads
+	// "shift the bounding box onto the origin, then scale it up to 100x100".
+	QTransform t;
+	t.scale(100.0 / r.width(), 100.0 / r.height());
+	t.translate(-r.left(), -r.top());
+	return t.map(path);
+}
+
+QList<double> frameShapeValuesFromPath(const QPainterPath& path)
+{
+	QPainterPath work(path);
+	FPointArray points;
+	points.fromQPainterPath(work, true);
+
+	QList<double> vals;
+	vals.reserve(points.size() * 2);
+	for (int i = 0; i < points.size(); ++i)
+	{
+		if (points.isMarker(i))
+		{
+			/* The two formats spell a subpath break differently: FPointArray
+			   uses four points at DBL_MAX/2, SetFrameShape() looks for a group
+			   of four doubles whose first is negative. Translating is not
+			   optional - copied straight across, the break would be read back
+			   as a real point out at DBL_MAX. A marker is four points on the
+			   FPointArray side and one four-double group on this side, which is
+			   why the index skips four here but only two are written. */
+			vals << -1.0 << -1.0 << -1.0 << -1.0;
+			i += 3;
+			continue;
+		}
+		vals << points.point(i).x() << points.point(i).y();
+	}
+	return vals;
+}
+
+QList<double> polygonFrameShape(uint corners)
+{
+	if (corners < 3)
+		return QList<double>();
+	/* rota 0 puts the first vertex at top centre, so every polygon here is
+	   apex-up. Curvature and inner rotation stay at zero: those belong to the
+	   Polygon *tool*, which has a properties dialog to set them in, and a frame
+	   shape applied from a menu has nowhere to ask. */
+	return frameShapeValuesFromPath(fitPathToFrame(regularPolygonPath(100.0, 100.0, corners, false, 0.0, 0.0)));
+}
+
+QList<double> starFrameShape(uint points, double innerRatio)
+{
+	if (points < 3)
+		return QList<double>();
+	// innerRatio is regularPolygonPath()'s "factor": the inner vertices sit at
+	// that fraction of the outer radius.
+	return frameShapeValuesFromPath(fitPathToFrame(regularPolygonPath(100.0, 100.0, points, true, innerRatio, 0.0)));
+}
+
+QList<double> crossFrameShape(double armFraction)
+{
+	/* Twelve vertices, in the order a pen would draw them: from the top-left of
+	   the vertical arm, clockwise. armFraction is an arm's width as a fraction
+	   of the frame, so it is a proportion of each axis separately - the cross
+	   stretches with the frame the way every other shape here does, rather than
+	   staying square inside a wide one. */
+	/* Clamped just inside 0 and 1 so the twelve vertices always survive: at 0
+	   the cross is a line, and at 1 the arms fill the frame, Qt drops the
+	   zero-length edges and what comes back is a plain rectangle. */
+	const double a = qBound(0.01, armFraction, 0.99);
+	const double lo = 50.0 - a * 50.0;
+	const double hi = 50.0 + a * 50.0;
+	QPainterPath path;
+	path.moveTo(lo,    0.0);
+	path.lineTo(hi,    0.0);
+	path.lineTo(hi,    lo);
+	path.lineTo(100.0, lo);
+	path.lineTo(100.0, hi);
+	path.lineTo(hi,    hi);
+	path.lineTo(hi,    100.0);
+	path.lineTo(lo,    100.0);
+	path.lineTo(lo,    hi);
+	path.lineTo(0.0,   hi);
+	path.lineTo(0.0,   lo);
+	path.lineTo(lo,    lo);
+	path.closeSubpath();
+	return frameShapeValuesFromPath(path);
+}
+
 QPainterPath spiralPath(double spiralWidth, double spiralHeight, double spiralStartAngle, double spiralEndAngle, double spiralFactor)
 {
 	if (spiralStartAngle >= spiralEndAngle)

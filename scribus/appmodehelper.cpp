@@ -486,6 +486,14 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemAITextSummarize"]->setEnabled(aiHasTextFrame);
 	(*a_scrActions)["itemAITextTranslate"]->setEnabled(aiHasTextFrame);
 	(*a_scrActions)["itemAITextImprove"]->setEnabled(aiHasTextFrame);
+	/* Frame Shape. The rule lives in ScribusMainWindow rather than here because
+	   the same question has to be answered twice - once to grey the button, and
+	   once when the shortcut fires it anyway - and two copies of it would drift.
+	   Refreshing the toolbar afterwards is what puts the reason for a greyed
+	   button into its tooltip. */
+	(*a_scrActions)["itemFrameShape"]->setEnabled(scmw->frameShapeSelectionIsUsable());
+	if (scmw->modeToolBar)
+		scmw->modeToolBar->updateFrameShapeButton();
 	(*a_scrActions)["itemToggleInlineImage"]->setEnabled(isImageFrame && currItem->imageIsAvailable);
 	(*a_scrActions)["itemImageIsVisible"]->setEnabled(isImageFrame);
 	(*a_scrActions)["itemPreviewFull"]->setEnabled(isImageFrame);

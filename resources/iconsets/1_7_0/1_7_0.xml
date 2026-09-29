@@ -86,6 +86,7 @@ On Dark:  #e580ff; rgb(229, 128, 255); hsl(288, 100, 75)
 		<icon id="rembg" file="rembg.png" />
 		<icon id="suneer-knife" file="suneer-knife.png" />
 		<icon id="flip-object-vertical" file="16/object-flip-vertical.svg" />
+		<icon id="frame-shape" file="16/frame-shape.svg" />
 		<icon id="frame-no-resize" file="16/object-frame-lock.svg" />
 		<icon id="frame-resize" file="16/object-frame-unlock.svg" />
 		<icon id="go-first" file="16/navigation-first.svg" />

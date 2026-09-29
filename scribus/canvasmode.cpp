@@ -27,6 +27,7 @@
 #include "canvasmode_suneercontour.h"
 #include "canvasmode_imageeraser.h"
 #include "canvasmode_removalmask.h"
+#include "canvasmode_shapecrop.h"
 #include "canvasmode_suneercrop.h"
 #include "canvasmode_drawcalligraphic.h"
 #include "canvasmode_edit.h"
@@ -127,6 +128,9 @@ CanvasMode* CanvasMode::createForAppMode(ScribusView* view, int appMode)
 			break;
 		case modeSuneerImageCrop:
 			result = new CanvasMode_SuneerCrop(view);
+			break;
+		case modeShapeCrop:
+			result = new CanvasMode_ShapeCrop(view);
 			break;
 		case modeImageEraser:
 			result = new CanvasMode_ImageEraser(view);

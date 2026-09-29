@@ -292,6 +292,13 @@ public:
 	ParagraphStylesPanel *paragraphStylesPanelTabs {nullptr};
 	SuneerControlBar *m_suneerControlBar {nullptr};
 	SuneerControlBar* suneerControlBar() { return m_suneerControlBar; }
+	/*! \brief The shape a Frame Shape menu pick is waiting to become an interactive crop overlay
+	    for. Set by startFrameShapeCrop() just before switching into modeShapeCrop;
+	    CanvasMode_ShapeCrop::activate() consumes it via takePendingFrameShapeId(). */
+	QString m_pendingFrameShapeId;
+	//! Read and clear m_pendingFrameShapeId in one step, so a later activation - after a cancel,
+	//! or entered some other way - can never see a stale id.
+	QString takePendingFrameShapeId() { QString id = m_pendingFrameShapeId; m_pendingFrameShapeId.clear(); return id; }
 	SuneerNewsPanel *m_suneerNewsPanel {nullptr};
 	SymbolPalette *symbolPalette {nullptr};
 	InlinePalette *inlinePalette {nullptr};
@@ -328,6 +335,12 @@ public:
 	PageItem* pluginEditItem {nullptr};
 	/** \brief When true, plugin should regenerate silently without showing UI */
 	bool pluginEditSilent {false};
+
+	/** \brief Whether Frame Shape can reshape this item at all. */
+	static bool frameShapeAppliesTo(const PageItem* item);
+	/** \brief Whether the current selection can be reshaped, and why not if it cannot.
+	    \param reason filled with a user-facing explanation when the answer is false. */
+	bool frameShapeSelectionIsUsable(QString* reason = nullptr) const;
 
 public slots:
 	void iconSetChange();
@@ -551,6 +564,19 @@ public slots:
 	void updateImageEraserOptions();
 	/** \brief Trace the selected image's visible region into its contour line. */
 	void slotDetectContourFromImage();
+	/** \brief Apply one of the Frame Shape menu's shapes to the whole selection.
+	    \param shapeId an id from FrameShapeMenu::catalogue(). */
+	void applyFrameShape(const QString& shapeId);
+	/** \brief Apply whatever shape the Frame Shape button is currently offering. */
+	void slotApplyLastFrameShape();
+	/** \brief Enter the interactive Photoshop-style crop overlay (CanvasMode_ShapeCrop) for
+	    \a shapeId, instead of applying it to the frame outright. The overlay starts centred over
+	    the current selection; the user drags it into place and commits with Enter, or cancels
+	    with Escape or a click outside it.
+	    \param shapeId an id from FrameShapeMenu::catalogue(). */
+	void startFrameShapeCrop(const QString& shapeId);
+	/** \brief Open the Properties Palette, which holds the shapes the menu leaves out. */
+	void slotFrameShapeOptions();
 	/*! \brief Run one AI Text Tools task on the selection.
 
 	    \param task the index carried as the action's data; the mapping lives

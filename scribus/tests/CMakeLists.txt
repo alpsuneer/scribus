@@ -54,6 +54,19 @@ target_link_libraries(contourdetecttests ${TESTS_LIBRARIES})
 add_test(NAME contourdetecttests COMMAND contourdetecttests)
 
 
+# Unit tests for the frame-shape geometry in util_math, plus the interactive
+# shape-crop overlay's geometry in util_shapecrop (coordinate transforms,
+# handle hit-testing, resize/rotate maths). Pure maths: no GUI, no document,
+# and no Qt Widgets - which is why it covers the shapes this fork generates
+# and not the four it reuses from Scribus's own tables, and why the overlay
+# geometry lives in its own util_shapecrop.cpp rather than inside
+# CanvasMode_ShapeCrop, which pulls in Canvas/ScribusView/ScribusDoc.
+set(FRAMESHAPETESTS_SOURCES frameshapetests.cpp ../util_math.cpp ../fpointarray.cpp ../fpoint.cpp ../util_shapecrop.cpp)
+add_executable(frameshapetests ${FRAMESHAPETESTS_SOURCES})
+target_link_libraries(frameshapetests ${TESTS_LIBRARIES})
+add_test(NAME frameshapetests COMMAND frameshapetests)
+
+
 # Unit tests for Telea fast-marching inpainting
 set(INPAINTTESTS_SOURCES inpainttests.cpp ../util_inpaint.cpp)
 add_executable(inpainttests ${INPAINTTESTS_SOURCES})

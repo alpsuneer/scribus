@@ -225,6 +225,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/markvariabletext.h"
 #include "ui/mergedoc.h"
 #include "ui/contourdetectdialog.h"
+#include "ui/frameshapemenu.h"
 #include "ui/imageeraseroptions.h"
 #include "ui/removaltoolwidget.h"
 #include "ui/modetoolbar.h"
@@ -7424,6 +7425,180 @@ void ScribusMainWindow::slotDetectContourFromImage()
 		statusBar()->showMessage(message, 8000);
 	else
 		statusBar()->showMessage(tr("Contour detected: %n node(s)", "", contour.size() / 4), 5000);
+}
+
+bool ScribusMainWindow::frameShapeAppliesTo(const PageItem* item)
+{
+	if (!item)
+		return false;
+	/* A shape is an outline the frame's content is clipped to, so it only means
+	   something where there is an area to clip. Lines and polylines have no
+	   interior, text on a path is defined by the path it follows, and a group is
+	   its children rather than an outline of its own - item_setFrameShape()
+	   refuses the last three anyway, and this keeps the button from offering. */
+	switch (item->itemType())
+	{
+	case PageItem::ImageFrame:
+	case PageItem::TextFrame:
+	case PageItem::Polygon:
+		return !item->isGroup();
+	default:
+		return false;
+	}
+}
+
+bool ScribusMainWindow::frameShapeSelectionIsUsable(QString* reason) const
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+	{
+		if (reason)
+			*reason = tr("Select a frame first");
+		return false;
+	}
+	const int count = doc->m_Selection->count();
+	int firstType = -1;
+	for (int i = 0; i < count; ++i)
+	{
+		PageItem* item = doc->m_Selection->itemAt(i);
+		if (!frameShapeAppliesTo(item))
+		{
+			if (reason)
+				*reason = tr("Frame Shape works on image, text, or shape frames");
+			return false;
+		}
+		if (item->locked())
+		{
+			// Its own answer rather than being folded into the type message,
+			// which would send the operator looking for the wrong problem.
+			if (reason)
+				*reason = tr("That frame is locked");
+			return false;
+		}
+		if (firstType == -1)
+			firstType = item->itemType();
+		else if (item->itemType() != firstType)
+		{
+			if (reason)
+				*reason = tr("Select frames of the same type");
+			return false;
+		}
+	}
+	return true;
+}
+
+void ScribusMainWindow::applyFrameShape(const QString& shapeId)
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+		return;
+	const FrameShapeDef* def = FrameShapeMenu::shapeById(shapeId);
+	if (!def)
+		return;
+
+	QString reason;
+	if (!frameShapeSelectionIsUsable(&reason))
+	{
+		statusBar()->showMessage(reason, 6000);
+		return;
+	}
+
+	QList<PageItem*> targets;
+	for (int i = 0; i < doc->m_Selection->count(); ++i)
+		targets << doc->m_Selection->itemAt(i);
+
+	/* One transaction over the whole selection, named for the shape. Each
+	   item_setFrameShape() opens its own transaction underneath and the corner
+	   radius records a state of its own, so without this an operator who
+	   reshaped four frames would have to press undo eight times to get back. */
+	UndoTransaction transaction;
+	if (UndoManager::undoEnabled())
+	{
+		transaction = m_undoManager->beginTransaction(
+			(targets.count() == 1) ? targets.first()->getUName() : Um::SelectionGroup,
+			(targets.count() == 1) ? targets.first()->getUPixmap() : Um::IGroup,
+			tr("Set Frame Shape: %1").arg(def->name()), QString(), Um::IBorder);
+	}
+
+	const QList<double> points = def->values();
+	for (PageItem* item : std::as_const(targets))
+	{
+		doc->item_setFrameShape(item, def->frameType, points.count(), points.constData());
+		if (def->frameType == 0)
+		{
+			/* Rounded corners are not a shape in Scribus, they are a radius on
+			   a rectangle - which is why both rectangle entries go through
+			   frameType 0 and differ only here, and why the Properties
+			   Palette's radius box agrees with the result either way.
+			   item_setFrameShape() leaves the radius alone for frameType 0, so
+			   plain Rectangle has to clear it or a previously rounded frame
+			   would quietly stay rounded. */
+			const double radius = def->cornerRadiusFraction * qMin(item->width(), item->height());
+			item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+			item->setCornerRadius(radius);
+			if (radius > 0.0)
+				item->SetFrameRound();
+			else
+				item->SetRectFrame();
+			doc->setRedrawBounding(item);
+			item->update();
+		}
+	}
+
+	if (transaction)
+		transaction.commit();
+
+	FrameShapeMenu::noteShapeUsed(shapeId);
+	if (modeToolBar)
+		modeToolBar->updateFrameShapeButton();
+
+	doc->changed();
+	doc->changedPagePreview();
+	doc->regionsChanged()->update(QRectF());
+	statusBar()->showMessage(tr("Frame shape: %1").arg(def->name()), 4000);
+}
+
+void ScribusMainWindow::startFrameShapeCrop(const QString& shapeId)
+{
+	if (!HaveDoc || doc->m_Selection->isEmpty())
+		return;
+	if (!FrameShapeMenu::shapeById(shapeId))
+		return;
+
+	QString reason;
+	if (!frameShapeSelectionIsUsable(&reason))
+	{
+		statusBar()->showMessage(reason, 6000);
+		return;
+	}
+
+	// Picked up by CanvasMode_ShapeCrop::activate(), which requestMode(modeShapeCrop) below
+	// switches to next.
+	m_pendingFrameShapeId = shapeId;
+	setAppModeByToggle(true, modeShapeCrop);
+}
+
+void ScribusMainWindow::slotApplyLastFrameShape()
+{
+	QString reason;
+	if (!frameShapeSelectionIsUsable(&reason))
+	{
+		// Reachable from the keyboard even when the button is greyed, so it
+		// says why rather than doing nothing.
+		statusBar()->showMessage(reason, 6000);
+		return;
+	}
+	applyFrameShape(FrameShapeMenu::lastUsedShapeId());
+}
+
+void ScribusMainWindow::slotFrameShapeOptions()
+{
+	/* The menu carries eleven shapes; Scribus has forty-five of them, plus the
+	   node editor, and they all live in the Properties Palette's Shape section.
+	   This opens that rather than growing a second copy of it here. */
+	if (!propertiesPalette)
+		return;
+	propertiesPalette->toggleView(true);
+	propertiesPalette->setAsCurrentTab();
+	propertiesPalette->raise();
 }
 
 void ScribusMainWindow::setMainWindowActive()

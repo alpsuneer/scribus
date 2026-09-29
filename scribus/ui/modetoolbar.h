@@ -37,6 +37,8 @@ class QEvent;
 class QToolButton;
 
 class AutoformButtonGroup;
+class FrameShapeMenu;
+class FrameShapeToolButton;
 class ScrSpinBox;
 class ScribusDoc;
 class ScribusMainWindow;
@@ -57,6 +59,10 @@ public:
 
 	void changeEvent(QEvent *e) override;
 	void setDoc(ScribusDoc* doc);
+	/*! \brief Re-read the Frame Shape button's face from the last shape used.
+	Called after every apply, so the icon and the tooltip name the shape the face
+	will apply next rather than the one it applied when the window opened. */
+	void updateFrameShapeButton();
 
 	int SubMode { 0 };
 	int ValCount { 0 };
@@ -71,6 +77,8 @@ public slots:
 		
 protected:
 	AutoformButtonGroup* autoFormButtonGroup { nullptr };
+	FrameShapeMenu* frameShapeMenu { nullptr };
+	FrameShapeToolButton* frameShapeButton { nullptr };
 	QMenu* insertPolygonButtonMenu { nullptr };
 	QAction* idInsertPolygonButtonMenu { nullptr };
 	ScribusMainWindow* m_ScMW { nullptr };

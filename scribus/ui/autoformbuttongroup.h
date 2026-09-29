@@ -24,7 +24,10 @@ public:
 	~AutoformButtonGroup() {};
 
 	void addShape(QMenu* menu, int shapenum);
-	qreal* getShapeData(int a, int *n);
+	/*! \brief The control points of built-in shape \a a, in percent of the frame.
+	Static because it only ever reads its own tables: the Frame Shape menu reuses
+	the Heart and Triangle out of here rather than keeping a second copy of them. */
+	static qreal* getShapeData(int a, int *n);
 	QPixmap getIconPixmap(int nr, int pixmapSize=22);
 
 public slots:

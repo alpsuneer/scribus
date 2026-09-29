@@ -165,6 +165,7 @@ if(HAVE_OSG)
 		ui/aitranslatedialog.cpp
 		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
+		ui/frameshapemenu.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
 		ui/dialogs/imagesizedialog.cpp
@@ -191,6 +192,8 @@ if(HAVE_OSG)
 	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		canvasmode_shapecrop.cpp
+		util_shapecrop.cpp
 		canvasmode_imageeraser.cpp
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp
@@ -243,6 +246,7 @@ else()
 		ui/aitranslatedialog.cpp
 		ui/inpaintprogressdialog.cpp
 		ui/contourdetectdialog.cpp
+		ui/frameshapemenu.cpp
 		ui/tooloptions/moveoptionswidget.cpp
 		ui/tooloptions/cropoptionswidget.cpp
 		ui/dialogs/imagesizedialog.cpp
@@ -269,6 +273,8 @@ else()
 	documentlock.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
+		canvasmode_shapecrop.cpp
+		util_shapecrop.cpp
 		canvasmode_imageeraser.cpp
 		canvasmode_removalmask.cpp
 		ai/aiinpaintservice.cpp

@@ -123,6 +123,10 @@ struct UIPrefs
 	QString stylePalette; //! UI theme palette, dark, light, auto
 	int recentDocCount {5}; //! Number of recent documents to remember
 	QStringList RecentDocs; //! List of recent documents
+	/*! \brief Shape ids most recently applied by the Frame Shape button, newest first.
+	Capped at three by FrameShapeMenu; kept here rather than per-document because it
+	describes how this operator works, not what any one page contains. */
+	QStringList recentFrameShapes;
 	QString language; //! Language of the user interface
 	QString userPreferredLocale; //! System or interface language number formats
 	bool useSmallWidgets {false}; //! Use small widgets in the palettes

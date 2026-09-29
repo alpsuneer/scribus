@@ -526,6 +526,13 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemDetectContour";
 	scrActions->insert(name, new ScrAction(QString(), QString(), "", defaultKey(name), mainWindow));
+	/* Frame Shape. The toolbar shows this as a split button: the face applies
+	   the last shape used, the arrow opens FrameShapeMenu to pick another. Only
+	   the face is an action, because only the face does something on its own -
+	   the arrow is the menu, and a shortcut for "open a menu" would be a key
+	   spent on nothing. */
+	name = "itemFrameShape";
+	scrActions->insert(name, new ScrAction("frame-shape", "frame-shape", "", defaultKey(name), mainWindow));
 	/* AI Text Tools. One action per task, each carrying its task name as
 	   integer data so that a single slot can dispatch on it rather than there
 	   being six near-identical slots. The order here is the order in the menu:
@@ -599,6 +606,7 @@ void ActionManager::initItemMenuActions()
 	connect( (*scrActions)["itemsAutoArrange"], SIGNAL(triggered()), mainWindow, SLOT(slotAutoArrangeFrames()) );
 	connect( (*scrActions)["itemShapeEdit"], SIGNAL(triggered()), mainWindow, SLOT(toggleNodeEdit()) );
 	connect( (*scrActions)["itemDetectContour"], SIGNAL(triggered()), mainWindow, SLOT(slotDetectContourFromImage()) );
+	connect( (*scrActions)["itemFrameShape"], SIGNAL(triggered()), mainWindow, SLOT(slotApplyLastFrameShape()) );
 	// All six go to one slot, which reads the action's data to learn the task.
 	connect( (*scrActions)["itemAITextCaption"],   SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
 	connect( (*scrActions)["itemAITextAltText"],   SIGNAL(triggeredData(int)), mainWindow, SLOT(slotAITextTask(int)) );
@@ -1821,6 +1829,7 @@ void ActionManager::languageChange()
 	(*scrActions)["itemPDFFieldProps"]->setTexts( tr("Field P&roperties..."));
 	(*scrActions)["itemShapeEdit"]->setTexts( tr("&Edit Shape..."));
 	(*scrActions)["itemDetectContour"]->setTexts( tr("Detect Contour from &Image"));
+	(*scrActions)["itemFrameShape"]->setTexts( tr("&Frame Shape"));
 	(*scrActions)["itemAITextCaption"]->setTexts( tr("Generate &Caption"));
 	(*scrActions)["itemAITextAltText"]->setTexts( tr("Generate &Alt Text"));
 	(*scrActions)["itemAITextHeadline"]->setTexts( tr("Suggest &Headlines"));
@@ -2041,6 +2050,7 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsEditWithStoryEditor"]->setStatusTextAndShortcut( tr("Edit text in story editor"));
 	(*scrActions)["toolsEyeDropper"]->setStatusTextAndShortcut( tr("Eye Dropper"));
 	(*scrActions)["toolsImageEraser"]->setStatusTextAndShortcut( tr("Erase parts of a placed image without changing the image file"));
+	(*scrActions)["itemFrameShape"]->setStatusTextAndShortcut( tr("Clip the selected frame to a shape, leaving the image file untouched"));
 	(*scrActions)["toolsRemoveObject"]->setStatusTextAndShortcut( tr("Paint over an unwanted object and rebuild the pixels underneath it"));
 	(*scrActions)["toolsInsertArc"]->setStatusTextAndShortcut( tr("Insert an arc"));
 	(*scrActions)["toolsInsertBezier"]->setStatusTextAndShortcut( tr("Insert a bezier curve"));
@@ -2207,6 +2217,14 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("itemMulDuplicate", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
 	// Ctrl+Shift+D, the obvious mnemonic, is taken by Multiple Duplicate above.
 	defKeys.insert("itemDetectContour", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K));
+	/* Shift+S, not the Ctrl+Shift+F this was first drafted with. That one is
+	   spoken for: NOTES.md reserves it for Auto Arrange Frames, whose default
+	   binding was cleared while the feature is parked and is to be restored
+	   when the operator verifies it - and SUNEER_CHANGES.md still tells the
+	   operator Ctrl+Shift+F focuses the font box. Shift+S also reads better
+	   beside the two tools it sits next to on the same toolbar: Shift+E for
+	   the eraser and Shift+R for Remove Object. */
+	defKeys.insert("itemFrameShape", QKeySequence(Qt::SHIFT | Qt::Key_S));
 	// Auto Arrange has NO default shortcut. The selection-scoped engine behind it
 	// is correct on a synthetic page but wrong on a real broadsheet, so the
 	// feature is parked; see NOTES.md. The code stays compiled and the action
@@ -2485,6 +2503,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemPDFAnnotationProps" 
 		<< "itemPDFFieldProps" 
 		<< "itemShapeEdit" 
+		<< "itemFrameShape"
 		<< "itemConvertToBezierCurve" 
 		<< "itemConvertToImageFrame" 
 		<< "itemConvertToOutlines" 

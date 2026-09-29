@@ -1501,6 +1501,9 @@ bool PrefsManager::writePref(const QString& filePath)
 	dcUI.setAttribute("UseGrayscaleIcons", appPrefs.uiPrefs.grayscaleIcons);
 	dcUI.setAttribute("IconSet", appPrefs.uiPrefs.iconSet);
 	dcUI.setAttribute("UserPreferredLocale", appPrefs.uiPrefs.userPreferredLocale);
+	// Comma separated: a short ordered list of ids, and one attribute reads more
+	// easily in a hand-inspected profile than three numbered ones.
+	dcUI.setAttribute("RecentFrameShapes", appPrefs.uiPrefs.recentFrameShapes.join(","));
 	elem.appendChild(dcUI);
 
 	QDomElement deDocumentSetup = docu.createElement("DocumentSetup");
@@ -2236,6 +2239,11 @@ bool PrefsManager::readPref(const QString& filePath)
 			if (appPrefs.uiPrefs.iconSet.startsWith("Scribus 1.5"))
 				appPrefs.uiPrefs.iconSet = "Scribus 1.7.0";
 			appPrefs.uiPrefs.userPreferredLocale = dc.attribute("UserPreferredLocale", "System");
+			/* Qt::SkipEmptyParts matters: a profile written before this existed has no
+			   attribute, and splitting "" would otherwise yield one empty id that
+			   FrameShapeMenu would then have to filter out of the Recent section. */
+			appPrefs.uiPrefs.recentFrameShapes =
+				dc.attribute("RecentFrameShapes", "").split(",", Qt::SkipEmptyParts);
 		}
 
 		if (dc.tagName() == "DocumentSetup")

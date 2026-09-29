@@ -30,6 +30,7 @@ for which a new license (GPL+exception) is in place.
 #include "modetoolbar.h"
 
 #include "autoformbuttongroup.h"
+#include "frameshapemenu.h"
 #include "polyprops.h"
 #include "scraction.h"
 #include "scribus.h"
@@ -57,6 +58,19 @@ ModeToolBar::ModeToolBar(ScribusMainWindow* parent) : ScToolBar( tr("Tools"), "T
 	QToolButton* tb = dynamic_cast<QToolButton*>(this->widgetForAction(m_ScMW->scrActions["toolsInsertShape"]));
 	tb->setPopupMode(QToolButton::DelayedPopup);
 	m_ScMW->scrActions["toolsInsertShape"]->setIcon(QIcon(autoFormButtonGroup->getIconPixmap(0,16)));
+
+	/* Frame Shape, as a split button: the face applies the last shape used, the
+	   arrow opens the picker. It sits next to Insert Shape deliberately - that
+	   one gives a page a new shape, this one gives an existing frame a shape,
+	   and an operator looking for the second will look where the first is.
+
+	   Built with addWidget() rather than addAction() because QToolBar makes its
+	   own QToolButton and there is no way to substitute one: the arrow half
+	   needs its own tooltip, and that takes a subclass. */
+	frameShapeMenu = new FrameShapeMenu(this);
+	frameShapeButton = new FrameShapeToolButton(this);
+	frameShapeButton->setMenu(frameShapeMenu);
+	this->addWidget(frameShapeButton);
 
 	this->addAction(m_ScMW->scrActions["toolsInsertPolygon"]);
 	insertPolygonButtonMenu = new QMenu();
@@ -110,6 +124,23 @@ ModeToolBar::ModeToolBar(ScribusMainWindow* parent) : ScToolBar( tr("Tools"), "T
 	languageChange();
 
 	connect(autoFormButtonGroup, SIGNAL(FormSel(int,int,qreal*)), this, SLOT(SelShape(int,int,qreal*)));
+	/* A pick from the dropdown starts the interactive Photoshop-style crop overlay rather than
+	   applying instantly - the direct-apply path (applyFrameShape()) is kept for the button's
+	   own face (see below, which reapplies whatever shape was last used) and for scripting. */
+	connect(frameShapeMenu, &FrameShapeMenu::shapeChosen, m_ScMW, &ScribusMainWindow::startFrameShapeCrop);
+	connect(frameShapeMenu, &FrameShapeMenu::optionsRequested, m_ScMW, &ScribusMainWindow::slotFrameShapeOptions);
+	/* Deliberately not setDefaultAction(). That keeps the button's icon in step
+	   with the action's, re-imposing it on every QAction::changed - and the
+	   enablement sweep emits one on every selection change, so the shape
+	   preview would be wiped off the face a moment after it was drawn. The two
+	   things the default action was wanted for are wired by hand instead. */
+	ScrAction* frameShapeAction = m_ScMW->scrActions["itemFrameShape"];
+	connect(frameShapeButton, &QToolButton::clicked, frameShapeAction, &QAction::trigger);
+	connect(frameShapeAction, &QAction::changed, this, [this, frameShapeAction]() {
+		frameShapeButton->setEnabled(frameShapeAction->isEnabled());
+	});
+	frameShapeButton->setEnabled(frameShapeAction->isEnabled());
+	updateFrameShapeButton();
 	connect(Angle, SIGNAL(valueChanged(double)), this, SLOT(newCalValues()));
 	connect(PWidth, SIGNAL(valueChanged(double)), this, SLOT(newCalValues()));
 	connect(ScQApp, SIGNAL(iconSetChanged()), this, SLOT(iconSetChange()));
@@ -164,9 +195,35 @@ void ModeToolBar::setDoc(ScribusDoc* doc)
 	PWidth->setValue(doc->itemToolPrefs().calligraphicPenWidth);
 }
 
+void ModeToolBar::updateFrameShapeButton()
+{
+	if (!frameShapeButton)
+		return;
+	const QString id = FrameShapeMenu::lastUsedShapeId();
+	const FrameShapeDef* def = FrameShapeMenu::shapeById(id);
+	if (!def)
+		return;
+	/* The face wears the shape it would apply. Without this the button is a
+	   fixed picture that does one of eleven different things depending on
+	   history, which is exactly the thing a toolbar should not be. */
+	frameShapeButton->setIcon(FrameShapeMenu::shapeIcon(*def, 16));
+	frameShapeButton->setArrowToolTip(tr("Choose frame shape"));
+	/* When the button cannot run, its tooltip is the reason rather than the
+	   shape - a greyed control that only says what it would have done leaves
+	   the operator guessing which of three rules they broke. */
+	QString reason;
+	const bool usable = m_ScMW->frameShapeSelectionIsUsable(&reason);
+	frameShapeButton->setToolTip(usable
+		? tr("Frame Shape: %1. Click the arrow to choose another.").arg(def->name())
+		: reason);
+	if (frameShapeMenu)
+		frameShapeMenu->rebuild();
+}
+
 void ModeToolBar::iconSetChange()
 {
 	m_ScMW->scrActions["toolsInsertShape"]->setIcon(QIcon(autoFormButtonGroup->getIconPixmap(0, 16)));
+	updateFrameShapeButton();
 }
 
 void ModeToolBar::languageChange()
@@ -174,5 +231,6 @@ void ModeToolBar::languageChange()
 	AngleTxt->setText(tr("Angle:"));
 	PWidthTxt->setText(tr("Width:"));
 	idInsertPolygonButtonMenu->setText( tr("Properties..."));
+	updateFrameShapeButton();
 	ScToolBar::languageChange();
 }

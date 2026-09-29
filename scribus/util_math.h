@@ -46,6 +46,21 @@ QList<QPainterPath> SCRIBUS_API decomposePath(const QPainterPath &path);
 QList<QPointF> SCRIBUS_API catmullToBezier(const QList<QPointF>& inputPoints, double t = 1);
 QPainterPath  SCRIBUS_API regularPolygonPath(double w, double h, uint c, bool star, double factor, double rota, double factor2 = 0.0, double innerRot = 0.0, double factor3 = 0.0);
 QPainterPath  SCRIBUS_API spiralPath(double spiralWidth, double spiralHeight, double spiralStartAngle, double spiralEndAngle, double spiralFactor);
+
+/* Frame shapes. These return geometry in the percent-of-frame coordinate space
+   that PageItem::SetFrameShape() and ScribusDoc::item_setFrameShape() read:
+   a flat list of doubles, four to a group, two groups per cubic segment. They
+   take no size, because a frame shape is stored as percentages and re-evaluated
+   against the frame's current width and height. */
+
+//! Convert a path drawn in 0..100 frame space into SetFrameShape()'s doubles.
+QList<double> SCRIBUS_API frameShapeValuesFromPath(const QPainterPath& path);
+//! Regular polygon, apex up, stretched to fill the frame. corners >= 3.
+QList<double> SCRIBUS_API polygonFrameShape(uint corners);
+//! Star with \a points points, apex up, inner vertices at \a innerRatio of the outer radius.
+QList<double> SCRIBUS_API starFrameShape(uint points, double innerRatio);
+//! Twelve-vertex plus sign; \a armFraction is an arm's width as a fraction of the frame.
+QList<double> SCRIBUS_API crossFrameShape(double armFraction);
 inline double SCRIBUS_API xy2Deg(double x, double y);
 inline double SCRIBUS_API sind(double);
 inline double SCRIBUS_API cosd(double);
