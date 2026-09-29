@@ -62,6 +62,18 @@ CanvasMode_ImageEraser::CanvasMode_ImageEraser(ScribusView* view)
 {
 }
 
+CanvasMode_ImageEraser::~CanvasMode_ImageEraser()
+{
+	// Safety net: if this mode is torn down while still holding the blank
+	// override cursor (leaveEvent never fired), pop it rather than leaving
+	// it on QApplication's stack for good.
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
+}
+
 PageItem* CanvasMode_ImageEraser::targetItem() const
 {
 	if (!m_doc || m_doc->m_Selection->isEmpty())
@@ -110,6 +122,15 @@ void CanvasMode_ImageEraser::deactivate(bool forGesture)
 	cancelStroke();
 
 	m_cursorValid = false;
+	// Real deactivation (not a temporary gesture pause): the mouse may still
+	// be sitting over the canvas, in which case leaveEvent() never fires and
+	// the blank cursor enterEvent() pushed would otherwise never come off
+	// QApplication's stack. See the flag's comment in the header.
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
 	if (m_ScMW)
 	{
 		m_ScMW->setImageEraserOptionsVisible(false);
@@ -122,13 +143,23 @@ void CanvasMode_ImageEraser::deactivate(bool forGesture)
 void CanvasMode_ImageEraser::enterEvent(QEvent*)
 {
 	// The brush ring drawn in drawControls() is the real cursor; a blank one
-	// keeps the arrow from sitting in the middle of it.
-	QApplication::setOverrideCursor(Qt::BlankCursor);
+	// keeps the arrow from sitting in the middle of it. Guarded so a second
+	// enterEvent before a matching leave never pushes two overrides for one
+	// pop.
+	if (!m_cursorOverridden)
+	{
+		QApplication::setOverrideCursor(Qt::BlankCursor);
+		m_cursorOverridden = true;
+	}
 }
 
 void CanvasMode_ImageEraser::leaveEvent(QEvent*)
 {
-	QApplication::restoreOverrideCursor();
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
 	m_cursorValid = false;
 	if (m_view)
 		m_view->updateCanvas();

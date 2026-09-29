@@ -24,6 +24,18 @@ CanvasMode_SuneerCrop::CanvasMode_SuneerCrop(ScribusView* view)
 {
 }
 
+CanvasMode_SuneerCrop::~CanvasMode_SuneerCrop()
+{
+    // Safety net: if this mode is torn down while still holding the cross
+    // override cursor (leaveEvent never fired), pop it rather than leaving
+    // it on QApplication's stack for good.
+    if (m_cursorOverridden)
+    {
+        QApplication::restoreOverrideCursor();
+        m_cursorOverridden = false;
+    }
+}
+
 PageItem* CanvasMode_SuneerCrop::croppedItem() const
 {
     if (!m_doc || m_doc->m_Selection->isEmpty())
@@ -56,6 +68,18 @@ void CanvasMode_SuneerCrop::deactivate(bool forGesture)
     m_hasCrop = false;
     m_cropRect = QRectF();
     m_cropItemName.clear();
+    // Real deactivation (not a temporary gesture pause): the mouse may still
+    // be sitting over the canvas, in which case leaveEvent() never fires and
+    // the cross cursor enterEvent() pushed would otherwise never come off
+    // QApplication's stack. See the flag's comment in the header. This also
+    // covers the Enter-to-apply and Escape-to-cancel paths in
+    // keyPressEvent(), which used to restore this by hand only on the Enter
+    // branch.
+    if (m_cursorOverridden)
+    {
+        QApplication::restoreOverrideCursor();
+        m_cursorOverridden = false;
+    }
     if (m_ScMW)
     {
         m_ScMW->statusBar()->clearMessage();
@@ -77,12 +101,22 @@ void CanvasMode_SuneerCrop::exitCropMode()
 
 void CanvasMode_SuneerCrop::enterEvent(QEvent*)
 {
-    QApplication::setOverrideCursor(Qt::CrossCursor);
+    // Guarded so a second enterEvent before a matching leave never pushes
+    // two overrides for one pop.
+    if (!m_cursorOverridden)
+    {
+        QApplication::setOverrideCursor(Qt::CrossCursor);
+        m_cursorOverridden = true;
+    }
 }
 
 void CanvasMode_SuneerCrop::leaveEvent(QEvent*)
 {
-    QApplication::restoreOverrideCursor();
+    if (m_cursorOverridden)
+    {
+        QApplication::restoreOverrideCursor();
+        m_cursorOverridden = false;
+    }
 }
 
 void CanvasMode_SuneerCrop::mousePressEvent(QMouseEvent* m)
@@ -303,7 +337,10 @@ void CanvasMode_SuneerCrop::keyPressEvent(QKeyEvent* e)
 
         m_hasCrop = false;
         m_cropRect = QRectF();
-        QApplication::restoreOverrideCursor();
+        // No manual restoreOverrideCursor() here: setAppModeByToggle() below
+        // runs requestMode(modeNormal), which calls this mode's deactivate()
+        // - that's what now pops the cross cursor, on every exit path
+        // (Enter, Escape, a selection change), not just this one.
         m_view->updateCanvas();
         m_ScMW->setAppModeByToggle(false, modeSuneerImageCrop);
     }

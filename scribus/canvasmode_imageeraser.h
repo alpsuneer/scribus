@@ -36,6 +36,7 @@ class CanvasMode_ImageEraser : public CanvasMode
 
 public:
 	explicit CanvasMode_ImageEraser(ScribusView* view);
+	~CanvasMode_ImageEraser() override;
 
 	void activate(bool fromGesture) override;
 	void deactivate(bool forGesture) override;
@@ -101,6 +102,19 @@ private:
 	//! Last mouse position in canvas pixels, for the cursor ring.
 	QPointF m_cursorCanvasPos;
 	bool m_cursorValid {false};
+	/*! \brief Whether this mode currently holds a QApplication override
+	    cursor (the blank one enterEvent() pushes to hide the arrow behind
+	    the brush ring).
+
+	    enterEvent()/leaveEvent() are not guaranteed to pair up: the mode can
+	    be deactivated (Escape, a tool switch) while the mouse never left the
+	    canvas, which would leave the override on QApplication's stack
+	    forever with no widget left that owns popping it. This flag lets
+	    deactivate() and the destructor pop it exactly once, only if
+	    enterEvent actually pushed it and leaveEvent has not already popped
+	    it - restoreOverrideCursor() on an empty stack pops whatever
+	    unrelated override the rest of the app happens to be showing. */
+	bool m_cursorOverridden {false};
 };
 
 #endif

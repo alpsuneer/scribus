@@ -149,6 +149,14 @@ CanvasMode_RemovalMask::~CanvasMode_RemovalMask()
 	}
 	if (s_active == this)
 		s_active = nullptr;
+	// Safety net: if this mode is torn down while still holding the blank
+	// override cursor (leaveEvent never fired), pop it rather than leaving
+	// it on QApplication's stack for good.
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
 }
 
 CanvasMode_RemovalMask* CanvasMode_RemovalMask::active()
@@ -236,6 +244,15 @@ void CanvasMode_RemovalMask::deactivate(bool forGesture)
 	m_cursorValid = false;
 	if (s_active == this)
 		s_active = nullptr;
+	// Real deactivation (not a temporary gesture pause): the mouse may still
+	// be sitting over the canvas, in which case leaveEvent() never fires and
+	// the blank cursor enterEvent() pushed would otherwise never come off
+	// QApplication's stack. See the flag's comment in the header.
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
 	if (m_ScMW)
 	{
 		m_ScMW->setRemovalToolOptionsVisible(false);
@@ -248,13 +265,23 @@ void CanvasMode_RemovalMask::deactivate(bool forGesture)
 void CanvasMode_RemovalMask::enterEvent(QEvent*)
 {
 	// The brush ring drawn in drawControls() is the real cursor; a blank one
-	// keeps the arrow from sitting in the middle of it.
-	QApplication::setOverrideCursor(Qt::BlankCursor);
+	// keeps the arrow from sitting in the middle of it. Guarded so a second
+	// enterEvent before a matching leave (Qt can deliver these in pairs that
+	// do not strictly alternate) never pushes two overrides for one pop.
+	if (!m_cursorOverridden)
+	{
+		QApplication::setOverrideCursor(Qt::BlankCursor);
+		m_cursorOverridden = true;
+	}
 }
 
 void CanvasMode_RemovalMask::leaveEvent(QEvent*)
 {
-	QApplication::restoreOverrideCursor();
+	if (m_cursorOverridden)
+	{
+		QApplication::restoreOverrideCursor();
+		m_cursorOverridden = false;
+	}
 	m_cursorValid = false;
 	if (m_view)
 		m_view->updateCanvas();
