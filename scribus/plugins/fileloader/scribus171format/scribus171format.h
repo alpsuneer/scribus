@@ -232,6 +232,10 @@ class PLUGIN_API Scribus171Format : public LoadSavePlugin
 		
 		QMap<QString, QString> charStyleMap;
 		QMap<QString, QString> parStyleMap;
+		// Suneer: set only while pasting (loadElements()). A pasted paragraph or
+		// character style whose name the target document already has uses the
+		// target's style instead of arriving as a "Name (2)" copy.
+		bool m_keepExistingStyles { false };
 		
 		QMap<int, int> itemRemap;
 		QMap<int, int> itemNext;

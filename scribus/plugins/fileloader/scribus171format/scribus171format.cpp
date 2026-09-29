@@ -12,6 +12,7 @@ for which a new license (GPL+exception) is in place.
 #include <QApplication>
 #include <QByteArray>
 #include <QCursor>
+#include <QScopedValueRollback>
 // #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
@@ -283,6 +284,8 @@ bool Scribus171Format::loadElements(const QString& data, const QString& fileDir,
 
 	parStyleMap.clear();
 	charStyleMap.clear();
+	// Paste keeps the target document's own styles; restored on every return.
+	QScopedValueRollback<bool> keepExistingStyles(m_keepExistingStyles, true);
 	itemRemap.clear();
 	itemNext.clear();
 	itemCount = 0;
@@ -8986,12 +8989,18 @@ void Scribus171Format::getStyle(ParagraphStyle& style, ScXmlStreamReader& reader
 		found = style.equiv(*foundStyle);
 		if (found)
 			return;
+		// Pasting: the target document already has a style by this name, so
+		// the pasted text uses it as it is, whatever the source defined.
+		if (m_keepExistingStyles)
+			return;
 		QString newName = docParagraphStyles.getUniqueCopyName(style.name());
 		parStyleMap[style.name()] = newName;
 		style.setName(newName);
 	}
 
-	if (equiv)
+	// Pasting a name the target does not have creates that style under its
+	// own name, rather than folding it into an equivalent one with another name.
+	if (equiv && !m_keepExistingStyles)
 	{
 		const ParagraphStyle* equivStyle = docParagraphStyles.findEquivalent(style);
 		if (equivStyle)
@@ -9031,12 +9040,18 @@ void Scribus171Format::getStyle(CharStyle& style, ScXmlStreamReader& reader, Sty
 		found = style.equiv(*foundStyle);
 		if (found)
 			return;
+		// Pasting: the target document already has a style by this name, so
+		// the pasted text uses it as it is, whatever the source defined.
+		if (m_keepExistingStyles)
+			return;
 		QString newName = docCharStyles.getUniqueCopyName(style.name());
 		parStyleMap[style.name()] = newName;
 		style.setName(newName);
 	}
 
-	if (equiv)
+	// Pasting a name the target does not have creates that style under its
+	// own name, rather than folding it into an equivalent one with another name.
+	if (equiv && !m_keepExistingStyles)
 	{
 		const CharStyle* equivStyle = docCharStyles.findEquivalent(style);
 		if (equivStyle)
