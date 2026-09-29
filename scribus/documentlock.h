@@ -67,8 +67,31 @@ public:
 	//! Read a lock without taking it. Info::valid is false when absent/unreadable.
 	static Info read(const QString& documentPath);
 
-	//! Delete the lock, but only when this process actually owns it.
+	/*! Delete the lock, but only when this process actually owns it.
+	    Ownership comes from the locks this process created (registerHeld()),
+	    so a transiently unreadable lock on the share is still removed; the
+	    delete is retried and checked, with a warning if it still fails. */
 	static bool release(const QString& documentPath);
+
+	/*! Delete a lock file, retrying briefly: over SMB a delete can fail while
+	    another PC has the file open for a moment (e.g. reading who holds it).
+	    eturns true once the file is gone; logs a warning if it is not. */
+	static bool removeLockFile(const QString& lockPath);
+
+	//! This process's own lock, for a document it no longer has open.
+	static bool isMineThisProcess(const Info& info);
+
+	/*! Tie a held lock to an open document. The document's file name can change
+	    (Save As, an imported file shown as "name(converted)"), so closing it
+	    releases the lock it was opened with, not whatever its name is now. */
+	static void bindDocument(const void* doc, const QString& documentPath);
+	//! Release the lock bound to \a doc, if any. \returns false if none was bound.
+	static bool releaseDocument(const void* doc);
+	//! The document path \a doc's lock was taken for, or empty.
+	static QString boundPath(const void* doc);
+
+	//! Remove every lock this process still holds. For normal application exit.
+	static void releaseAll();
 
 	//! Remove someone else's lock and take it. Only ever on explicit user action.
 	static bool takeOver(const QString& documentPath);
@@ -92,12 +115,15 @@ public:
 	//! Default age past which a foreign lock may be offered for takeover.
 	static const int DefaultStaleHours = 8;
 
-	/*! Install SIGTERM/SIGINT/SIGHUP handlers that unlink any held locks.
+	/*! Install SIGTERM/SIGINT/SIGHUP handlers that unlink any held locks, and
+	    an atexit() hook that does the same on any normal exit.
 	    Without this only File > Quit releases: a killed or crashed Scribus
 	    leaves its lock behind, which was observed leaking five locks across one
 	    regression battery run. Fatal signals (SIGSEGV and friends) are left
 	    alone so the existing crash handler and core dumps are unaffected. */
 	static void installSignalCleanup();
+	//! True if this process created \a lockPath and has not released it.
+	static bool isHeld(const QString& lockPath);
 
 	//! Track/untrack a held lock so the signal handler can remove it.
 	static void registerHeld(const QString& lockPath);

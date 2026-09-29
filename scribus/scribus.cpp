@@ -2249,6 +2249,10 @@ void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 	dockManager->removeAllDockWidgets();
 
 
+	// Every document window is closed by now; drop any lock still held
+	// (e.g. one whose document was closed some other way).
+	DocumentLock::releaseAll();
+
 	// Clean up plugins, THEN save prefs to disk
 	ScCore->pluginManager->cleanupPlugins();
 	if (!m_prefsManager.appPrefs.scrapbookPrefs.persistentScrapbook)
@@ -3908,11 +3912,14 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		DocumentLock::Info holder;
 		if (!DocumentLock::acquire(filename, &holder))
 		{
-			if (DocumentLock::isMineAndDead(holder))
+			if (DocumentLock::isMineThisProcess(holder) || DocumentLock::isMineAndDead(holder))
 			{
-				// Our own user and host, but that PID is gone: a crashed session
-				// of ours. Reclaim silently, which is the only automatic takeover.
-				DocumentLock::takeOver(filename);
+				// Our own lock: either left behind by this very session (the
+				// document is not open here, or we would have returned above -
+				// a release that failed on the share), or by a session of ours
+				// on this PC that is no longer running. Reclaim silently.
+				if (!DocumentLock::takeOver(filename))
+					openReadOnlyDueToLock = true;   // could not replace it: fail safe
 			}
 			else if (!holder.valid)
 			{
@@ -3930,27 +3937,34 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 			else
 			{
 				QApplication::restoreOverrideCursor();
-				const bool stale = DocumentLock::isStale(holder, DocumentLock::DefaultStaleHours);
+				const QString who  = holder.user.isEmpty() ? tr("someone") : holder.user;
+				const QString host = holder.host.isEmpty() ? tr("another PC") : holder.host;
+				const QDateTime when = holder.opened.isValid() ? holder.opened : holder.fileTime;
+				const QString since = !when.isValid() ? tr("an unknown time")
+					: (when.date() == QDate::currentDate()) ? QLocale().toString(when.time(), QLocale::ShortFormat)
+					: QLocale().toString(when, QLocale::ShortFormat);
 				ScMessageBox mb(QMessageBox::Warning, tr("Document In Use"),
-					tr("%1 is in use by %2.").arg(fi.fileName(), DocumentLock::describe(holder)),
+					tr("This file is open on %1 by %2 since %3.").arg(host, who, since),
 					QMessageBox::NoButton, this);
+				mb.setInformativeText(tr("%1\n\nOpen Anyway removes their lock. Only do that if you are "
+				                         "sure the file is no longer open there, or both of you may "
+				                         "overwrite each other's work.").arg(fi.fileName())
+				                      + (DocumentLock::isStale(holder, DocumentLock::DefaultStaleHours)
+				                         ? QStringLiteral("\n\n") + tr("The lock is more than %1 hours old.").arg(DocumentLock::DefaultStaleHours)
+				                         : QString()));
 				QPushButton* ro = mb.addButton(tr("Open Read-Only"), QMessageBox::AcceptRole);
-				QPushButton* take = nullptr;
-				if (stale)
-				{
-					mb.setInformativeText(tr("This lock is more than %1 hours old. If that machine "
-					                         "crashed, you can take it over — but if someone is still "
-					                         "editing, their work will be at risk.")
-					                      .arg(DocumentLock::DefaultStaleHours));
-					take = mb.addButton(tr("Take Over"), QMessageBox::DestructiveRole);
-				}
+				QPushButton* take = mb.addButton(tr("Open Anyway (remove lock)"), QMessageBox::DestructiveRole);
 				mb.addButton(QMessageBox::Cancel);
 				mb.setDefaultButton(ro);
 				mb.exec();
-				if (mb.clickedButton() == take && take)
+				if (mb.clickedButton() == take)
 				{
 					if (!DocumentLock::takeOver(filename))
-						openReadOnlyDueToLock = true;   // lost a race: fail safe
+					{
+						ScMessageBox::warning(this, tr("Document In Use"),
+							tr("The lock could not be removed, so the document opens read-only."));
+						openReadOnlyDueToLock = true;   // lost a race, or cannot delete: fail safe
+					}
 				}
 				else if (mb.clickedButton() == ro)
 					openReadOnlyDueToLock = true;
@@ -4346,7 +4360,13 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		QTimer::singleShot(0, this, [this, loadedFormatID] { suneerMaybeOfferLegacyOverflowFix(loadedFormatID); });
 	// Carry the lock decision onto the document now that it exists.
 	if (ret && doc)
+	{
 		doc->setOpenedReadOnly(openReadOnlyDueToLock);
+		// Close releases the lock this document was opened with, even if its
+		// name changes (an imported file becomes "name(converted)").
+		if (!openReadOnlyDueToLock)
+			DocumentLock::bindDocument(doc, filename);
+	}
 	// The load failed, so hold no lock: another machine must not be blocked by a
 	// document that never opened here.
 	if (!ret && !openReadOnlyDueToLock)
@@ -4776,6 +4796,34 @@ bool ScribusMainWindow::slotFileSaveAs()
 	return ret;
 }
 
+void ScribusMainWindow::moveDocumentLock(const QString& newFileName)
+{
+	// Save As to another name: the old file is no longer open here, so its
+	// lock goes; the new file is, so it takes one. Without this the old lock
+	// stayed on the share until Scribus exited.
+	const QString oldPath = DocumentLock::boundPath(doc);
+	if (!oldPath.isEmpty() && QFileInfo(oldPath).absoluteFilePath() == QFileInfo(newFileName).absoluteFilePath())
+		return;   // same file: keep the lock we have
+	DocumentLock::releaseDocument(doc);
+	DocumentLock::Info holder;
+	bool locked = DocumentLock::acquire(newFileName, &holder);
+	if (!locked && (DocumentLock::isMineThisProcess(holder) || DocumentLock::isMineAndDead(holder)))
+		locked = DocumentLock::takeOver(newFileName);
+	if (locked)
+	{
+		DocumentLock::bindDocument(doc, newFileName);
+		doc->setOpenedReadOnly(false);   // this copy is ours to save
+	}
+	else
+	{
+		doc->setOpenedReadOnly(true);
+		ScMessageBox::warning(this, tr("Document In Use"),
+			holder.valid ? tr("The file was saved, but it is open on %1 by %2, so this copy is now read-only.")
+			                 .arg(holder.host.isEmpty() ? tr("another PC") : holder.host, holder.user.isEmpty() ? tr("someone") : holder.user)
+			             : tr("The file was saved, but Scribus could not create a lock file next to it, so this copy is now read-only."));
+	}
+}
+
 bool ScribusMainWindow::DoFileSave(const QString& fileName, QString* savedFileName, uint formatID)
 {
 	ScCore->fileWatcher->forceScan();
@@ -4784,6 +4832,11 @@ bool ScribusMainWindow::DoFileSave(const QString& fileName, QString* savedFileNa
 	m_mainWindowStatusLabel->setText( tr("Saving..."));
 	mainWindowProgressBar->reset();
 	bool ret = doc->save(fileName, savedFileName, formatID);
+	// Every Save As route (the menu, Collect for Output, scripts) ends here, so
+	// this is where the network lock follows the document to its new name. A
+	// plain Save to the same file keeps the lock it has.
+	if (ret)
+		moveDocumentLock(fileName);
 	QApplication::processEvents();
 	if (ret)
 	{
@@ -4810,7 +4863,7 @@ bool ScribusMainWindow::DoFileClose()
 {
 	// Give up the network lock before anything else: if this throws or returns
 	// early, another machine would be blocked by a document nobody has open.
-	if (doc && !doc->documentFileName().isEmpty() && !doc->openedReadOnly())
+	if (doc && !DocumentLock::releaseDocument(doc) && !doc->documentFileName().isEmpty() && !doc->openedReadOnly())
 		DocumentLock::release(doc->documentFileName());
 	slotEndSpecialEdit();
 	view->deselectItems(false);

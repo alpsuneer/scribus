@@ -674,6 +674,8 @@ public slots:
 	/*! \brief One-time opt-in prompt to activate the Malayalam DTP shortcut set. */
 	void checkMalayalamDtpFirstRun();
 	void applyDefaultShortcutSet();
+	//! After Save As: release the old file's network lock and take the new file's.
+	void moveDocumentLock(const QString& newFileName);
 	void docCheckToggle(bool visible);
 	//! \brief Scan a document for errors, return true on errors found
 	bool scanDocument();
