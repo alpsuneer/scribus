@@ -72,6 +72,22 @@ for which a new license (GPL+exception) is in place.
 
 using namespace TableUtils;
 
+// Name of the plate PS_plate(nr, ...) actually renders. PS_plate() numbers the
+// process plates 0=Black, 1=Cyan, 2=Magenta, 3=Yellow, while a "All" separations
+// list is ordered Cyan, Magenta, Yellow, Black - so the list entry at index nr
+// is not the plate that index produces. Spot plates (nr >= 4) keep their name.
+static QString processPlateName(int nr, const QString& spotName)
+{
+	switch (nr)
+	{
+		case 0: return QStringLiteral("Black");
+		case 1: return QStringLiteral("Cyan");
+		case 2: return QStringLiteral("Magenta");
+		case 3: return QStringLiteral("Yellow");
+		default: return spotName;
+	}
+}
+
 class PSPainter:public TextLayoutPainter
 {
 	public:
@@ -1035,7 +1051,7 @@ void PSLib::PS_end_page(const PSPageTile* tile)
 			// the one OffsetTileRect passed separately - the grid's own
 			// tiles vector (the full tile list) is not needed just to label
 			// one sheet.
-			QString plateName = DoSep ? currentSpot : QString();
+			QString plateName = DoSep ? processPlateName(Plate, currentSpot) : QString();
 			PutStream(offsetTileLabelPS(tileRect, tileGrid, plateName, tile->sheetWidth, tile->sheetHeight));
 		}
 	}
@@ -1964,8 +1980,9 @@ int PSLib::createPS(const QString& outputFileName)
 			// in the aa/sepac loop) - keep %%Pages: in PS_begin_doc() honest
 			// about how many %%Page: markers will actually follow.
 			int disabledPlates = 0;
-			for (const QString& sepName : std::as_const(separations))
+			for (int sepIndex = 0; sepIndex < separations.count(); ++sepIndex)
 			{
+				const QString sepName = processPlateName(sepIndex, separations[sepIndex]);
 				if ((sepName == "Cyan" && !Options.offsetSepCyanPrint)
 					|| (sepName == "Magenta" && !Options.offsetSepMagentaPrint)
 					|| (sepName == "Yellow" && !Options.offsetSepYellowPrint)
@@ -2155,7 +2172,7 @@ int PSLib::createPS(const QString& outputFileName)
 		bool skipPlatePage = false;
 		if (outputSep && Options.offsetSepEnabled && (separationName == "All"))
 		{
-			const QString& sepName = separations[sepac];
+			const QString sepName = processPlateName(sepac, separations[sepac]);
 			if ((sepName == "Cyan" && !Options.offsetSepCyanPrint)
 				|| (sepName == "Magenta" && !Options.offsetSepMagentaPrint)
 				|| (sepName == "Yellow" && !Options.offsetSepYellowPrint)
