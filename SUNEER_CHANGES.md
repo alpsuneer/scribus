@@ -696,7 +696,29 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   പേരിലുള്ള styles-ന് key കിട്ടും; ഇല്ലാത്ത പേരുകൾ report-ൽ കാണിക്കും
 - Character Styles-ന് ഇത് ഇല്ല (അങ്ങനെ ഒരു panel ഇല്ല)
 
-### 30. Authors
+### 30. Column Style config → Design Style (പുതിയത്)
+
+- `Design Style › ⚙ Settings › Column Style`-ൽ ഓരോ config-ന്റെ Add/Edit
+  dialog-ൽ **Design Style** dropdown (None + എല്ലാ Design Style പേരുകളും).
+  Default **None** — പഴയ configs പഴയതുപോലെ തന്നെ
+- Config-ന്റെ key (Ctrl+Alt+1 … 8) അമർത്തിയാൽ: ആദ്യം columns, പിന്നെ
+  അതേ frame-ൽ ആ Design Style — icon-ൽ click ചെയ്തതുപോലെ. രണ്ടും കൂടി
+  **ഒരു Ctrl+Z**-ൽ തിരിച്ചു പോകും (columns, frame width, styles, auto-fit,
+  design ഉണ്ടാക്കിയ image/caption frames എല്ലാം)
+- List-ൽ: `Config 1 | Styles: [] | Split: | Cols: 1 | Design: style-1 | Key: Ctrl+Alt+1`
+- Link ചെയ്ത Design Style ഇല്ലെങ്കിൽ (പേര് മാറ്റി / delete ചെയ്തു): columns
+  വരും, status bar-ൽ **"Design style 'style-3' not found"**
+- Design Style tab-ൽ പേര് മാറ്റി **Save** ചെയ്താൽ links കൂടെ മാറും; Remove
+  ചെയ്താൽ ആ links **None** ആകും
+- **Link Config N → style-N** button: `style-1` … `style-8` (അല്ലെങ്കിൽ
+  "Style 1", "1") എന്ന പേരുള്ള Design Styles ഉള്ള configs-ന് ഒറ്റയടിക്ക് link.
+  Match ഇല്ലാത്തവ അതുപോലെ തന്നെ
+- **Export Column / Import Column**-ൽ link കൂടെ പോകും; പഴയ export file
+  import ചെയ്താൽ എല്ലാം None
+- Settings › Save-ന് ശേഷം design icons click ചെയ്താൽ ഒന്നും ചെയ്യാത്തത്
+  (restart വരെ) ശരിയാക്കി
+
+### 31. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

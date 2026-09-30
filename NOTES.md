@@ -247,6 +247,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
+| Column Style config → Design Style — per-config "Design Style" link applied after the columns, one undo step, missing-style status message, rename/remove follow-through, "Link Config N → style-N", export/import field. Verified by the user | `c0130ad` | feature/ctp-output |
 | Paragraph Styles panel — per-style keyboard shortcut (right-click / ⌨ button), stored in `ParagraphStyle::shortcut()` (the Style Manager field, so in the .sla), conflict check with Replace/Cancel, export/import JSON. Verified by the user | `ea52dc3` | feature/ctp-output |
 | Default workspace layout, Faircode splash, title-bar build stamp | `3590de5`, `f57058a`, `09c2b02` | |
 | Paragraph Shading popup on the control bar — local override, never edits the style; embeds the Style Manager's `SMPShadeWidget`; `itemSelection_ResetParagraphShading()` ⚠ | `7a02607` | feature/paragraph-shading-popup |
@@ -1404,6 +1405,24 @@ to test, since a bad matrix could itself explain "no visible difference".
   Style Manager builds a `ScrAction` per style shortcut but never adds it to a
   widget, so those cannot fire and cannot cause this ambiguity — the panel's
   `QShortcut` is the only thing that applies a style key.
+- **Open the undo transaction before `sizeItem()`, not after.** `applyColumnConfig()`
+  began its transaction after `setColumns`/`sizeItem`, so the frame resize was
+  its own undo step and Ctrl+Z reverted the paragraph styles but left the new
+  width and column count. Every doc call that records undo (`sizeItem`,
+  `createPageItem`, `autoFitFrameHeight`) has to sit inside the transaction.
+- **Column config ↔ Design Style can call each other.** A Design Style has a
+  "columns" config index; a config now has a Design Style name. `applyColumnConfig()`
+  applies the design with its columns step skipped, and `m_applyingDesignStyle` /
+  `m_inColumnConfig` guard the other direction; remove either guard and Ctrl+Alt+N
+  recurses.
+- **Design/Column Style paragraph styles are applied by attributes, not by name**
+  (pre-existing, not changed). `itemText.applyStyle(pos, namedStyle)` copies the
+  named style's attributes; `ParagraphStyle::applyStyle` only sets the parent when
+  the *source* has one, and a document style has none. The text looks styled but
+  the paragraph's parent stays what it was, so later edits to the style do not
+  propagate and the .sla records the old parent. Scribus's own path
+  (`itemSelection_SetNamedParagraphStyle`) applies a style whose *parent* is the
+  name. Two styles with identical attributes make this invisible in a test.
 - **`QKeySequenceEdit` records the Enter that confirms it.** The editor keeps
   focus for ~1 s after a key; an Enter inside that window becomes the recorded
   shortcut. The Assign Shortcut dialog moves focus to OK on `editingFinished`
