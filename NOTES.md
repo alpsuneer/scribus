@@ -247,6 +247,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
+| Paragraph Styles panel — per-style keyboard shortcut (right-click / ⌨ button), stored in `ParagraphStyle::shortcut()` (the Style Manager field, so in the .sla), conflict check with Replace/Cancel, export/import JSON. Verified by the user | `ea52dc3` | feature/ctp-output |
 | Default workspace layout, Faircode splash, title-bar build stamp | `3590de5`, `f57058a`, `09c2b02` | |
 | Paragraph Shading popup on the control bar — local override, never edits the style; embeds the Style Manager's `SMPShadeWidget`; `itemSelection_ResetParagraphShading()` ⚠ | `7a02607` | feature/paragraph-shading-popup |
 | Stock toolbars start hidden on a new profile | `e8a34ae` | autofit-typography |
@@ -1392,6 +1393,21 @@ constructed blue-noise matrix rather than the crude random-shuffle array used
 to test, since a bad matrix could itself explain "no visible difference".
 
 ### Other traps that cost real time
+
+- **Two live `QShortcut`s on one key fire neither.** Qt reports the key as
+  ambiguous and delivers nothing to either. The Paragraph Styles panel owns
+  three families (chains, column configs, per-style keys, all
+  `Qt::ApplicationShortcut`), so a conflict "Replace" that only clears the other
+  owner's *stored* key leaves its `QShortcut` alive until the next rebuild — the
+  new key looks assigned, is saved, and is dead. `resolveShortcutConflict()`
+  ends with `rebuildShortcuts()` for that reason; keep it there. Related: the
+  Style Manager builds a `ScrAction` per style shortcut but never adds it to a
+  widget, so those cannot fire and cannot cause this ambiguity — the panel's
+  `QShortcut` is the only thing that applies a style key.
+- **`QKeySequenceEdit` records the Enter that confirms it.** The editor keeps
+  focus for ~1 s after a key; an Enter inside that window becomes the recorded
+  shortcut. The Assign Shortcut dialog moves focus to OK on `editingFinished`
+  and refuses a bare Return/Enter/Escape as a result.
 
 - **A placed image is drawn by four renderers, and three of them reload it from
   `Pfile` rather than using `pixm`.** `PageItem_ImageFrame::DrawObj_Item` ends

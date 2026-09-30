@@ -672,7 +672,31 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - **⚠️ ശ്രദ്ധിക്കുക:** Set-ന്റെ പേരിൽ മലയാളം ആകാം, പക്ഷേ ഫയലിന്റെ
   പേരിൽ ആ അക്ഷരങ്ങൾ `_` ആയി മാറും
 
-### 29. Authors
+### 29. Paragraph Styles panel — ഏത് style-നും keyboard shortcut (പുതിയത്)
+
+- Panel-ലെ style-ൽ **right-click › Assign Shortcut…**, അല്ലെങ്കിൽ താഴെ
+  ✎-ന്റെ അടുത്തുള്ള **⌨ button**. ചെറിയ dialog: key അമർത്തുക → OK.
+  **Clear** അമർത്തിയാൽ key മാറും
+- Key സൂക്ഷിക്കുന്നത് Scribus-ന്റെ സ്വന്തം style shortcut field-ൽ ആണ്
+  (`Edit › Styles`-ലെ Shortcut tab കാണിക്കുന്നത് ഇതേ key). അതുകൊണ്ട്
+  **.sla-യിലും template-ലും കൂടെ പോകും**
+- ഓരോ row-ന്റെയും വലത്ത് അതിന്റെ key. Next Style Chain-ഉം സ്വന്തം key-ഉം
+  രണ്ടും ഉണ്ടെങ്കിൽ: **⌨ Ctrl+1** (style) + **Ctrl+Shift+1 🔗** (chain)
+- Key അമർത്തിയാൽ: text edit ചെയ്യുമ്പോൾ cursor ഉള്ള paragraph-ന്
+  (അല്ലെങ്കിൽ select ചെയ്ത എല്ലാ paragraph-കൾക്കും); frame മാത്രം select
+  ചെയ്തിട്ടുണ്ടെങ്കിൽ frame മുഴുവനും. Ctrl+Z-ൽ undo ആകും
+- **Conflict warning:** ആ key വേറൊരു style, chain, column config, അല്ലെങ്കിൽ
+  ഇപ്പോഴത്തെ shortcut set-ലെ (Newspaper Default ഉൾപ്പെടെ) ഒരു action
+  ഉപയോഗിക്കുന്നുണ്ടെങ്കിൽ ആരാണെന്ന് കാണിക്കും — **Replace / Cancel**.
+  ⚠️ Menu action-ന്റെ key Replace ചെയ്താൽ അത് **ഈ session-ൽ മാത്രം**;
+  അടുത്ത തവണ Default set വീണ്ടും വരും. സ്ഥിരമായി മാറ്റാൻ
+  `Preferences › Keyboard Shortcuts`-ൽ set മാറ്റി Save ചെയ്യുക
+- ⚙ menu: **Export style shortcuts… / Import style shortcuts…** — style-ന്റെ
+  പേര് വച്ച് ഒരു JSON file. വേറെ document/template-ൽ import ചെയ്താൽ ആ
+  പേരിലുള്ള styles-ന് key കിട്ടും; ഇല്ലാത്ത പേരുകൾ report-ൽ കാണിക്കും
+- Character Styles-ന് ഇത് ഇല്ല (അങ്ങനെ ഒരു panel ഇല്ല)
+
+### 30. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
