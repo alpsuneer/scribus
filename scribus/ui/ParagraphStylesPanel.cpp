@@ -56,6 +56,7 @@
 #include "ui/stylemanager.h"
 #include "styles/charstyle.h"
 #include <functional>
+#include <QRegularExpression>
 #include <QMenu>
 #include <QApplication>
 
@@ -190,9 +191,44 @@ struct SuneerColumnConfigEntry {
 	double columnWidth;
 	QKeySequence shortcut;
 	bool autoFit {false};
+	QString designStyle;     // Design Style (by name) applied after the columns; empty = None
 };
 
 static QList<SuneerColumnConfigEntry> s_columnConfigs;
+
+// Design Style names as the Design Style tab stores them (the "tooltip" field
+// of the SuneerDesignStyle QSettings array), in array order.
+static QStringList designStyleNames()
+{
+	QStringList names;
+	QSettings dsCfg("Scribus", "SuneerDesignStyle");
+	int count = dsCfg.beginReadArray("styles");
+	for (int i = 0; i < count; ++i)
+	{
+		dsCfg.setArrayIndex(i);
+		names << dsCfg.value("tooltip", QString("Style %1").arg(i + 1)).toString();
+	}
+	dsCfg.endArray();
+	return names;
+}
+
+// Does design style name \a name stand for slot \a n (1-based)? Accepts
+// "style-3", "style 3", "Style3", "3" - the names the Link button pairs up.
+static bool designNameMatchesSlot(const QString& name, int n)
+{
+	static const QRegularExpression re("^(?:style[-_ ]?)?(\\d+)$", QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch m = re.match(name.trimmed());
+	return m.hasMatch() && m.captured(1).toInt() == n;
+}
+
+static QString columnConfigLabel(int i, const SuneerColumnConfigEntry& e)
+{
+	QString styles = e.styles.join(", ");
+	QString sc = e.shortcut.isEmpty() ? "No shortcut" : e.shortcut.toString();
+	QString design = e.designStyle.isEmpty() ? QString("None") : e.designStyle;
+	return QString("Config %1 | Styles: [%2] | Split: %3 | Cols: %4 | Design: %5 | Key: %6")
+		.arg(i + 1).arg(styles).arg(e.columnSplitStyle).arg(e.columnNumber).arg(design).arg(sc);
+}
 
 static void loadColumnConfigs()
 {
@@ -217,6 +253,7 @@ static void loadColumnConfigs()
 		e.columnWidth = cfg.value("columnWidth", 100.0).toDouble();
 		e.shortcut = QKeySequence(cfg.value("shortcut").toString());
 		e.autoFit = cfg.value("autoFit", false).toBool();
+		e.designStyle = cfg.value("designStyle").toString();
 		s_columnConfigs.append(e);
 	}
 	cfg.endArray();
@@ -244,6 +281,7 @@ static void saveColumnConfigs()
 		cfg.setValue("columnWidth", e.columnWidth);
 		cfg.setValue("shortcut", e.shortcut.toString());
 		cfg.setValue("autoFit", e.autoFit);
+		cfg.setValue("designStyle", e.designStyle);
 	}
 	cfg.endArray();
 }
@@ -279,6 +317,28 @@ public:
 		m_autoFitCheck->setChecked(entry.autoFit);
 		m_autoFitCheck->setToolTip("Automatically fit frame height after applying styles");
 		leftLay->addWidget(m_autoFitCheck);
+
+		// Design Style applied to the frame after the columns, as if its icon
+		// had been clicked. "None" keeps the old columns-only behaviour.
+		QHBoxLayout* designRow = new QHBoxLayout();
+		designRow->addWidget(new QLabel("Design Style:", this));
+		m_designCombo = new QComboBox(this);
+		m_designCombo->addItem("None");
+		m_designCombo->addItems(designStyleNames());
+		if (!entry.designStyle.isEmpty())
+		{
+			int at = m_designCombo->findText(entry.designStyle);
+			if (at < 0)
+			{
+				// Linked name no longer exists: keep it visible so the user sees
+				// what the config points at and can pick something else.
+				m_designCombo->addItem(entry.designStyle + " (missing)", entry.designStyle);
+				at = m_designCombo->count() - 1;
+			}
+			m_designCombo->setCurrentIndex(at);
+		}
+		designRow->addWidget(m_designCombo, 1);
+		leftLay->addLayout(designRow);
 		// Shortcut section
 		leftLay->addSpacing(10);
 		leftLay->addWidget(new QLabel("<b>Set Short Key</b>"));
@@ -368,11 +428,17 @@ public:
 		e.useGuideGap = m_useGuideGapChk->isChecked();
 		e.shortcut = m_keyEdit->keySequence();
 		e.autoFit = m_autoFitCheck->isChecked();
+		if (m_designCombo && m_designCombo->currentIndex() > 0)
+		{
+			const QVariant data = m_designCombo->currentData();
+			e.designStyle = data.isValid() ? data.toString() : m_designCombo->currentText();
+		}
 		return e;
 	}
 
 private:
 	QCheckBox* m_useGuideGapChk = nullptr;
+	QComboBox* m_designCombo = nullptr;
 	double m_pageWidthMm;
 	double m_marginLeftMm;
 	double m_marginRightMm;
@@ -1672,12 +1738,7 @@ void ParagraphStylesPanel::refreshColTabList()
     if (!m_colList) return;
     m_colList->clear();
     for (int i = 0; i < s_columnConfigs.size(); ++i) {
-        const SuneerColumnConfigEntry& e = s_columnConfigs[i];
-        QString styles = e.styles.join(", ");
-        QString sc = e.shortcut.isEmpty() ? "No shortcut" : e.shortcut.toString();
-        QString label = QString("Config %1 | Styles: [%2] | Split: %3 | Cols: %4 | Key: %5")
-            .arg(i+1).arg(styles).arg(e.columnSplitStyle).arg(e.columnNumber).arg(sc);
-        QListWidgetItem* item = new QListWidgetItem(label);
+        QListWidgetItem* item = new QListWidgetItem(columnConfigLabel(i, s_columnConfigs[i]));
         item->setData(Qt::UserRole, i);
         m_colList->addItem(item);
     }
@@ -1792,11 +1853,21 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 	PageItem* selItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
 	PageItem_TextFrame* tf = selItem ? selItem->asTextFrame() : nullptr;
 	if (!tf) { QMessageBox::warning(this, "Warning", "Select a text frame first!"); return; }
+	const bool outerCall = !m_inColumnConfig;
+	m_inColumnConfig = true;
+
+	// One undo step for the whole config: column count, gap, frame width, the
+	// paragraph styles, auto-fit and the linked Design Style all belong to a
+	// single key press. (The transaction used to start after the column
+	// changes, so sizeItem() left its own separate undo step.)
+	UndoTransaction cfgTransaction;
+	if (UndoManager::undoEnabled())
+		cfgTransaction = UndoManager::instance()->beginTransaction(tf->getUName(), tf->getUPixmap(),
+		                                                           Um::SetStyle, QString(), Um::IFont);
 
 	// Set frame columns
 	// Convert mm to points (1 mm = 2.8346 pts)
 	const double MM2PT = 2.8346;
-	const double PT2MM = 1.0 / MM2PT;
 	qDebug() << "applyColumnConfig: cols=" << e.columnNumber << "gutter=" << e.columnGutter << "useGuideGap=" << e.useGuideGap << "width=" << e.columnWidth;
 	if (e.columnNumber >= 1)
 	{
@@ -1842,13 +1913,6 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 		}
 	}
 
-	// One undo step for the whole config: column count, gap, frame width and the
-	// paragraph styles below all belong to a single button press.
-	UndoTransaction cfgTransaction;
-	if (UndoManager::undoEnabled())
-		cfgTransaction = UndoManager::instance()->beginTransaction(tf->getUName(), tf->getUPixmap(),
-		                                                           Um::SetStyle, QString(), Um::IFont);
-
 	// Apply styles to paragraphs
 	int len = tf->itemText.length();
 	int pos = 0;
@@ -1882,9 +1946,47 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 	// AutoFit — inside the transaction so the height change undoes with the rest.
 	if (e.autoFit)
 		tf->autoFitFrameHeight();
+
+	// Linked Design Style, applied to the same frame as if its icon had been
+	// clicked - still inside the transaction, so one Ctrl+Z reverts both.
+	// Not when a Design Style is what called us (its own "columns" field):
+	// that would loop config -> design -> config.
+	if (!e.designStyle.isEmpty() && !m_applyingDesignStyle)
+	{
+		const int designIdx = designStyleNames().indexOf(e.designStyle);
+		if (designIdx < 0)
+			m_mainWindow->setStatusBarInfoText(QString("Design style '%1' not found").arg(e.designStyle));
+		else
+			applyDesignStyleByIndex(designIdx, /*withColumns=*/false);
+	}
 	if (cfgTransaction)
 		cfgTransaction.commit();
+	if (outerCall)
+		m_inColumnConfig = false;
 	// Force redraw
+}
+
+bool ParagraphStylesPanel::applyDesignStyleByIndex(int index, bool withColumns)
+{
+	QSettings dsCfg("Scribus", "SuneerDesignStyle");
+	const int count = dsCfg.beginReadArray("styles");
+	if (index < 0 || index >= count)
+	{
+		dsCfg.endArray();
+		return false;
+	}
+	dsCfg.setArrayIndex(index);
+	QStringList styles = dsCfg.value("styles").toStringList();
+	QString imgPos = dsCfg.value("imagePosition", "Right").toString();
+	int cols = withColumns ? dsCfg.value("columns", 3).toInt() : -1;
+	QString colBreak = dsCfg.value("colBreakStyle").toString();
+	double sImgX = dsCfg.value("imgOffsetX", 0.0).toDouble();
+	double sImgY = dsCfg.value("imgOffsetY", 0.0).toDouble();
+	double sImgW = dsCfg.value("imgWidth", 0.0).toDouble();
+	double sImgH = dsCfg.value("imgHeight", 0.0).toDouble();
+	dsCfg.endArray();
+	applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH);
+	return true;
 }
 
 QMap<QString, QKeySequence> ParagraphStylesPanel::dynamicShortcuts()
@@ -2446,6 +2548,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
             obj["useGuideGap"]      = e.useGuideGap;
             obj["autoFit"]          = e.autoFit;
             obj["shortcut"]         = e.shortcut.toString();
+            obj["designStyle"]      = e.designStyle;
             colArr.append(obj);
         }
         root["columnStyles"] = colArr;
@@ -2524,6 +2627,8 @@ void ParagraphStylesPanel::openDesignStyleSettings()
                 colCfg.setValue("useGuideGap",      obj["useGuideGap"].toBool());
                 colCfg.setValue("autoFit",          obj["autoFit"].toBool());
                 colCfg.setValue("shortcut",         obj["shortcut"].toString());
+                // Older export files have no designStyle: that reads as None.
+                colCfg.setValue("designStyle",      obj.value("designStyle").toString());
             }
             colCfg.endArray();
             colCfg.sync();
@@ -2584,12 +2689,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
     auto refreshColMgrList = [colMgrList]() {
         colMgrList->clear();
         for (int i = 0; i < s_columnConfigs.size(); ++i) {
-            const SuneerColumnConfigEntry& e = s_columnConfigs[i];
-            QString styles = e.styles.join(", ");
-            QString sc = e.shortcut.isEmpty() ? "No shortcut" : e.shortcut.toString();
-            QString label = QString("Config %1 | Styles: [%2] | Split: %3 | Cols: %4 | Key: %5")
-                .arg(i+1).arg(styles).arg(e.columnSplitStyle).arg(e.columnNumber).arg(sc);
-            QListWidgetItem* item = new QListWidgetItem(label);
+            QListWidgetItem* item = new QListWidgetItem(columnConfigLabel(i, s_columnConfigs[i]));
             item->setData(Qt::UserRole, i);
             colMgrList->addItem(item);
         }
@@ -2610,8 +2710,33 @@ void ParagraphStylesPanel::openDesignStyleSettings()
     colMgrBtns->addWidget(cmEdit);
     colMgrBtns->addWidget(cmClone);
     colMgrBtns->addWidget(cmDel);
+    QPushButton* cmLink  = new QPushButton("Link Config N \xe2\x86\x92 style-N", colTabW);
+    cmLink->setToolTip("For each config 1-8, link the Design Style named style-N (or \"Style N\", \"N\") if one exists.\n"
+                       "Configs without a matching style are left as they are.");
+    cmLink->setStyleSheet("QPushButton{padding:5px 10px;background:#16a085;color:white;border:none;border-radius:4px;}");
+    colMgrBtns->addWidget(cmLink);
     colMgrBtns->addStretch();
     colTabLay->addLayout(colMgrBtns);
+    connect(cmLink, &QPushButton::clicked, [this, refreshColMgrList, colTabW]() {
+        const QStringList names = designStyleNames();
+        QStringList linked, unmatched;
+        for (int i = 0; i < qMin(8, s_columnConfigs.size()); ++i) {
+            QString match;
+            for (const QString& n : names)
+                if (designNameMatchesSlot(n, i + 1)) { match = n; break; }
+            if (match.isEmpty()) { unmatched << QString::number(i + 1); continue; }
+            s_columnConfigs[i].designStyle = match;
+            linked << QString("Config %1 \xe2\x86\x92 %2").arg(i + 1).arg(match);
+        }
+        saveColumnConfigs();
+        refreshColMgrList();
+        refreshColTabList();
+        QString msg = linked.isEmpty() ? QString("No Design Style named style-1 .. style-8 found.")
+                                       : linked.join("\n");
+        if (!unmatched.isEmpty())
+            msg += QString("\n\nNo matching style for config %1 (left unchanged).").arg(unmatched.join(", "));
+        QMessageBox::information(colTabW, "Link Design Styles", msg);
+    });
 
     auto getDocInfo = [this](QStringList& allStyles, double& pageW, double& marginL,
                               double& marginR, int& guideCols, double& guideGap) {
@@ -2705,6 +2830,10 @@ void ParagraphStylesPanel::openDesignStyleSettings()
         sCfg.endArray();
         QGroupBox* grp = new QGroupBox("", scrollWidget);
         grp->setObjectName(QString::number(idx));
+        // Name this entry had when the dialog opened (empty for a new one), so
+        // Save can move column-config links along with a rename or clear them
+        // on a removal.
+        grp->setProperty("originalName", idx < count ? savedName : QString());
         QGridLayout* gl = new QGridLayout(grp);
 
         // Name + Remove button
@@ -2863,13 +2992,43 @@ void ParagraphStylesPanel::openDesignStyleSettings()
     mainLay->addWidget(scroll);
 
     QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, dlg);
-    connect(bb, &QDialogButtonBox::accepted, dlg, [this, dlg, scrollWidget]() {
+    connect(bb, &QDialogButtonBox::accepted, dlg, [this, dlg, scrollWidget, refreshColMgrList]() {
         QSettings cfg("Scribus", "SuneerDesignStyle");
         cfg.remove("styles");
         QList<QGroupBox*> allGroups = scrollWidget->findChildren<QGroupBox*>();
         QList<QGroupBox*> groups;
         for (auto* g : allGroups)
             if (!g->property("removed").toBool()) groups.append(g);
+
+        // Column configs link Design Styles by name: follow renames, drop
+        // links to removed entries.
+        {
+            QMap<QString, QString> renamed;   // old name -> new name ("" = removed)
+            for (auto* g : allGroups) {
+                const QString oldName = g->property("originalName").toString();
+                if (oldName.isEmpty())
+                    continue;
+                QLineEdit* nameEd = g->findChild<QLineEdit*>("styleName");
+                const QString newName = g->property("removed").toBool() ? QString()
+                                      : (nameEd ? nameEd->text() : oldName);
+                if (newName != oldName)
+                    renamed.insert(oldName, newName);
+            }
+            if (!renamed.isEmpty()) {
+                bool changed = false;
+                for (SuneerColumnConfigEntry& e : s_columnConfigs) {
+                    if (e.designStyle.isEmpty() || !renamed.contains(e.designStyle))
+                        continue;
+                    e.designStyle = renamed.value(e.designStyle);
+                    changed = true;
+                }
+                if (changed) {
+                    saveColumnConfigs();
+                    refreshColMgrList();
+                    refreshColTabList();
+                }
+            }
+        }
         cfg.beginWriteArray("styles");
         for (int i = 0; i < groups.size(); ++i) {
             cfg.setArrayIndex(i);
@@ -2945,6 +3104,8 @@ void ParagraphStylesPanel::refreshDesignIcons()
         btn->setToolTip(tooltip);
         btn->setStyleSheet("QPushButton { border: 2px solid #ddd; border-radius: 4px; }"
                            "QPushButton:hover { border-color: #3498db; }");
+        // Read the style at click time: the settings may change again before then.
+        connect(btn, &QPushButton::clicked, this, [this, i]() { applyDesignStyleByIndex(i, true); });
         btn->show();
         m_iconsGrid->addWidget(btn, i/2, i%2);
     }
@@ -2957,6 +3118,19 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
     PageItem_TextFrame* tf = selItem ? selItem->asTextFrame() : nullptr;
     if (!tf) { QMessageBox::warning(this, "Warning", "Select a text frame first!"); return; }
 
+    // Re-entry guard: applyColumnConfig() applies a linked Design Style, and a
+    // Design Style applies a column config. Whichever started, the other side
+    // must not start the loop again.
+    if (m_applyingDesignStyle)
+        return;
+    m_applyingDesignStyle = true;
+    // Standalone (icon click): one undo step of our own. From
+    // applyColumnConfig() the caller's transaction is already open.
+    UndoTransaction designTransaction;
+    if (!m_inColumnConfig && UndoManager::undoEnabled())
+        designTransaction = UndoManager::instance()->beginTransaction(tf->getUName(), tf->getUPixmap(),
+                                                                      Um::SetStyle, QString(), Um::IFont);
+
     // Apply paragraph styles
     int len = tf->itemText.length();
     int pos = 0;
@@ -2968,8 +3142,10 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
         const QString& sn = styles[paraIndex];
         if (!sn.isEmpty() && m_doc->paragraphStyles().contains(sn)) {
             const ParagraphStyle& ps = m_doc->paragraphStyles().get(sn);
-            for (int p = pos; p <= pEnd && p < len; ++p)
-                tf->itemText.applyStyle(p, ps);
+            // Recorded, so Ctrl+Z reverts the styles (the bare applyStyle()
+            // this used to call left no undo state).
+            if (pos < len)
+                suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ps);
             // Insert column break after this paragraph if style matches colBreak
             // Insert column break if style matches
             if (!colBreak.isEmpty() && pEnd < len) {
@@ -3070,4 +3246,7 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
     if (m_mainWindow) m_mainWindow->emitUpdateRequest(0);
     // Auto fit frame height
     if (m_mainWindow) m_mainWindow->suneerAutoFitHeight();
+    if (designTransaction)
+        designTransaction.commit();
+    m_applyingDesignStyle = false;
 }

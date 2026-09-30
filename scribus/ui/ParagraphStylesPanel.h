@@ -95,6 +95,10 @@ private:
 	//! Returns false if the user cancelled; on "Replace" the other owner is cleared.
 	bool resolveShortcutConflict(const QKeySequence& key, const QString& forStyle);
 	void rebuildStyleShortcuts();
+	//! \brief Apply Design Style number \a index from the SuneerDesignStyle
+	//! settings to the selected frame. \a withColumns false skips its own
+	//! "columns" config step (used when a column config is what applies it).
+	bool applyDesignStyleByIndex(int index, bool withColumns);
 	//! \brief Re-applies the search text and (if enabled) the template-styles-only
 	//! filter to the already-populated list. Call after any rebuild or after either
 	//! filter's state changes.
@@ -122,5 +126,7 @@ private:
 	QTimer* m_syncTimer = nullptr;
 	QString m_lastHighlightedStyle;
 	bool m_userInteracting = false; // true while pointer is pressed on the styles list
+	bool m_inColumnConfig = false;      // applyColumnConfig() running (owns the undo transaction)
+	bool m_applyingDesignStyle = false; // applyDesignStyle() running (breaks config<->design loops)
 };
 #endif
