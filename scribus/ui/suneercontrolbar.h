@@ -91,6 +91,7 @@ private slots:
 	void onImgCropApply();
 	void onImgCropResize();
 	void onDocChangedForCaption();
+	void refitCaptionFrames();
 	void onImgRemoveBackground();
 	void onImgDrawContour();
 	void onEmbedInSLA();
@@ -290,6 +291,9 @@ public:
 	double   m_lastImgX        {0.0};
 	double   m_lastImgY        {0.0};
 	QString  m_trackedItemName;
+	QHash<QString, QString> m_captionFitSignature;   // caption frame name -> text/style signature last fitted
+	bool     m_refittingCaptions {false};
+	ScribusDoc* m_captionFitDoc {nullptr};           // document the signatures belong to
 
 	QDoubleSpinBox* m_imgCropW            {nullptr};
 	double imgCropW() const { return m_imgCropW ? m_imgCropW->value() : 80.0; }

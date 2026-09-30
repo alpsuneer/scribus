@@ -15376,28 +15376,10 @@ bool ScribusDoc::sizeItem(double newW, double newH, PageItem *pi, bool fromMP, b
 
 					if (tf)
 					{
-						double low = 10.0;
-						double high = 5000.0;
-
-						for (int iter = 0; iter < 25; ++iter)
-						{
-							double mid = (low + high) / 2.0;
-
-							tf->setHeight(mid);
-
-							tf->updateClip();
-							tf->layout();
-
-							if (tf->frameOverflows())
-								low = mid + 1.0;
-							else
-								high = mid;
-						}
-
-						tf->setHeight(high + 4);
-
-						tf->updateClip();
-						tf->layout();
+						// Height from the ink: bottom gap == top gap
+						// (was: bisect to no-overflow + 4 pt, which left
+						// more air under the text than above it).
+						tf->suneerFitCaptionHeight(true);
 						tf->invalidateLayout();
 						tf->update();
 					}

@@ -182,6 +182,26 @@ public:
 	void setTextFrameHeight();
 	void autoFitFrameHeight();
 
+	// Suneer: caption frames. Ink bounds of the laid-out text (glyph outlines
+	// of the first and last line, so Malayalam signs above and below count),
+	// and a height fit that makes the gap under the last line's ink equal
+	// to the gap above the first line's ink. See suneerFitCaptionHeight().
+	struct SuneerInkMetrics
+	{
+		bool   valid { false };
+		bool   fromInk { false };      // false: no visible glyph, font metrics used
+		int    lines { 0 };
+		double firstBaseline { 0.0 };
+		double firstInkTop { 0.0 };    // frame-top -> top of first line's ink
+		double firstFontAscent { 0.0 };
+		double lastBaseline { 0.0 };
+		double lastInkBottom { 0.0 };  // frame-top -> bottom of last line's ink
+		double lastFontDescent { 0.0 };
+	};
+	SuneerInkMetrics suneerInkMetrics() const;
+	bool suneerFitCaptionHeight(bool withUndo = true);
+	static bool suneerIsCaptionFrame(const PageItem* item);
+
 	/**
 	 * @brief Fit the story inside this frame by adjusting typography alone.
 	 *

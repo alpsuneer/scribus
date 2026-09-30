@@ -6437,6 +6437,220 @@ void PageItem_TextFrame::autoFitFrameHeight()
 }
 
 // ---------------------------------------------------------------------------
+// Suneer: caption frame height
+//
+// A caption frame (name "caption_<image>") used to be either left at its
+// creation height or bisected to "no overflow + 4 pt". Both leave more air
+// under the last line than above the first: the overflow test works with the
+// font's descent, not with what is inked, and the fixed slack and the bottom
+// text distance stack on top of that. Here the frame is measured from the
+// glyph outlines instead, and the height is set so that
+//     gap(frame bottom -> last ink) == gap(frame top -> first ink).
+// The top gap is whatever the layout produced (text distance top plus the
+// first-line offset policy), so nothing above the text changes.
+
+bool PageItem_TextFrame::suneerIsCaptionFrame(const PageItem* item)
+{
+	return item && item->isTextFrame() && item->itemName().startsWith(QLatin1String("caption_"));
+}
+
+PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() const
+{
+	SuneerInkMetrics m;
+	const uint lineCount = textLayout.lines();
+	if (lineCount == 0)
+		return m;
+	m.lines = static_cast<int>(lineCount);
+
+	// Ink extent of one line, relative to the frame top. Glyphs are drawn at
+	// (line.y + line.ascent) = baseline, offset by the run's yoffset; the
+	// outline bbox is in font units scaled to the size and the vertical
+	// scaling. Marks (vowel signs, reph, chillu stacks) are separate glyphs
+	// in the cluster with their own bbox and offset, so they are covered.
+	auto lineInk = [](const LineBox* line, double& inkTop, double& inkBottom) -> bool
+	{
+		bool any = false;
+		const double baseline = line->y() + line->ascent();
+		for (const Box* b : line->boxes())
+		{
+			const GlyphBox* gb = dynamic_cast<const GlyphBox*>(b);
+			if (!gb || gb->type() == Box::T_Object)
+				continue;
+			const GlyphCluster run = gb->glyphRun();
+			if (run.isEmpty() || run.isControlGlyphs() || run.isSpace())
+				continue;
+			const CharStyle& cs = run.style();
+			const ScFace& font = cs.font();
+			const double size = cs.fontSize() / 10.0;
+			const double scaleV = run.scaleV();
+			for (const GlyphLayout& gl : run.glyphs())
+			{
+				if (gl.glyph >= ScFace::CONTROL_GLYPHS)
+					continue;
+				GlyphMetrics gm = font.glyphBBox(gl.glyph, size);
+				if (gm.ascent == 0.0 && gm.descent == 0.0)
+					continue;                    // blank outline (space-like)
+				const double y0 = baseline + gb->y() + run.yoffset + gl.yoffset;
+				const double top = y0 - gm.ascent * scaleV;
+				const double bottom = y0 + gm.descent * scaleV;
+				if (!any) { inkTop = top; inkBottom = bottom; any = true; }
+				else { inkTop = qMin(inkTop, top); inkBottom = qMax(inkBottom, bottom); }
+			}
+		}
+		return any;
+	};
+
+	const LineBox* first = textLayout.line(0);
+	const LineBox* last = textLayout.line(lineCount - 1);
+	if (!first || !last)
+		return m;
+	m.firstBaseline = first->y() + first->ascent();
+	m.lastBaseline = last->y() + last->ascent();
+	m.firstFontAscent = first->ascent();
+	m.lastFontDescent = -last->descent();      // box descent is negative
+
+	double ft = 0, fb = 0, lt = 0, lb = 0;
+	const bool firstOk = lineInk(first, ft, fb);
+	const bool lastOk = lineInk(last, lt, lb);
+	if (firstOk && lastOk)
+	{
+		m.fromInk = true;
+		m.firstInkTop = ft;
+		m.lastInkBottom = lb;
+	}
+	else
+	{
+		// Nothing inked (empty or spaces only): use the font's own box so an
+		// empty caption still gets a sensible, symmetric height.
+		m.fromInk = false;
+		m.firstInkTop = m.firstBaseline - m.firstFontAscent;
+		m.lastInkBottom = m.lastBaseline + m.lastFontDescent;
+	}
+	m.valid = true;
+	return m;
+}
+
+bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo)
+{
+	if (m_nextBox != nullptr || m_backBox != nullptr)
+		return false;
+
+	UndoTransaction undoTransaction;
+	if (withUndo && UndoManager::undoEnabled())
+		undoTransaction = undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize, QString(), Um::IResize);
+
+	const double oldH = m_height;
+	const double oldBottomDist = m_textDistanceMargins.bottom();
+
+	// 1. Lay the whole story out with room to spare, so every line exists
+	//    and the last one is not the one being clipped.
+	double low = 1.0, high = 20000.0;
+	while (low < high)
+	{
+		double mid = (low + high) / 2.0;
+		setHeight(mid);
+		updateClip();
+		invalid = true;
+		layout();
+		if (frameOverflows())
+			low = mid + 0.5;
+		else
+			high = mid;
+	}
+	setHeight(high + m_textDistanceMargins.top() + 20.0);
+	updateClip();
+	invalid = true;
+	layout();
+
+	// 2. Measure the ink.
+	SuneerInkMetrics m = suneerInkMetrics();
+	if (!m.valid || !m.fromInk)
+	{
+		// Nothing inked (empty, or only the placeholder space): there is no
+		// text to balance, so the frame keeps its height - or gets the 10 mm
+		// creation height back if it is smaller than one line, so an empty
+		// caption stays big enough to click into.
+		const double emptyH = qMax(oldH, 28.346);
+		setHeight(emptyH);
+		updateClip();
+		invalid = true;
+		layout();
+		const bool changedEmpty = qAbs(emptyH - oldH) > 0.01;
+		if (undoTransaction)
+		{
+			if (changedEmpty) undoTransaction.commit(); else undoTransaction.cancel();
+		}
+		if (changedEmpty)
+		{
+			update();
+			m_Doc->changed();
+		}
+		return false;
+	}
+
+	// 3. Bottom gap = top gap. The bottom text distance no longer takes
+	//    part: the gap is set by the frame edge itself.
+	const double topGap = m.firstInkTop;
+	double newH = m.lastInkBottom + topGap;
+	// The layout still needs the last line's font descent inside the frame
+	// or it reports an overflow; on a font whose descent exceeds the inked
+	// descent plus the gap this wins, by the least amount.
+	const double layoutMin = m.lastBaseline + m.lastFontDescent + 0.25;
+	const bool clampedByFont = layoutMin > newH;
+	if (clampedByFont)
+		newH = layoutMin;
+
+	m_textDistanceMargins.setBottom(0.0);
+	setHeight(newH);
+	updateClip();
+	invalid = true;
+	layout();
+	int guard = 0;
+	while (frameOverflows() && guard++ < 20)
+	{
+		newH += 0.25;
+		setHeight(newH);
+		updateClip();
+		invalid = true;
+		layout();
+	}
+
+	if (!qEnvironmentVariableIsEmpty("SUNEER_CAPTION_DEBUG"))
+	{
+		const double PT2MM = 25.4 / 72.0;
+		const SuneerInkMetrics f = suneerInkMetrics();
+		qDebug().noquote() << QString("[CAPTIONFIT] %1 lines=%2 ink=%3 | oldH=%4mm newH=%5mm | distTop=%6mm distBottom(old)=%7mm | firstAsc=%8mm lastDesc=%9mm | topGap=%10mm bottomGap=%11mm | firstBaseline=%12mm lastBaseline=%13mm | clampedByFont=%14 overflow=%15")
+			.arg(itemName()).arg(f.lines).arg(f.fromInk)
+			.arg(oldH * PT2MM, 0, 'f', 2).arg(m_height * PT2MM, 0, 'f', 2)
+			.arg(m_textDistanceMargins.top() * PT2MM, 0, 'f', 2).arg(oldBottomDist * PT2MM, 0, 'f', 2)
+			.arg(f.firstFontAscent * PT2MM, 0, 'f', 2).arg(f.lastFontDescent * PT2MM, 0, 'f', 2)
+			.arg(f.firstInkTop * PT2MM, 0, 'f', 2).arg((m_height - f.lastInkBottom) * PT2MM, 0, 'f', 2)
+			.arg(f.firstBaseline * PT2MM, 0, 'f', 2).arg(f.lastBaseline * PT2MM, 0, 'f', 2)
+			.arg(clampedByFont).arg(frameOverflows());
+	}
+
+	// Already fitted: say nothing. No undo step, no "document modified", no
+	// repaint - this runs for every caption whenever one might have changed.
+	const bool heightChanged = qAbs(m_height - oldH) > 0.01;
+	const bool distChanged = qAbs(oldBottomDist) > 0.01;
+	if (!heightChanged && !distChanged)
+	{
+		if (undoTransaction)
+			undoTransaction.cancel();
+		return true;
+	}
+	if (undoTransaction)
+		undoTransaction.commit();
+	// Repaint this frame only (its old and new box), not the whole canvas.
+	QRectF dirty = getVisualBoundingRect();
+	dirty.setHeight(qMax(dirty.height(), oldH + 2.0));
+	update();
+	m_Doc->regionsChanged()->update(dirty.adjusted(-2, -2, 2, 2));
+	m_Doc->changed();
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Auto Fit Text
 //
 // Keeps a story inside its own frame by fitting the typography, never the

@@ -1641,11 +1641,28 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 			m_captionTimer->setInterval(50);
 			connect(m_captionTimer, &QTimer::timeout,
 				this, &SuneerControlBar::onDocChangedForCaption);
+			// Same tick re-fits caption heights, for edits that reach the
+			// frame without a docChanged (scripter, style edits, undo).
+			connect(m_captionTimer, &QTimer::timeout,
+				this, &SuneerControlBar::refitCaptionFrames);
 		}
 		m_captionTimer->start();
 		// ✅ docChanged → caption auto update
 		connect(doc, &ScribusDoc::docChanged,
 			this, &SuneerControlBar::onDocChangedForCaption);
+		// Caption height follows its text: re-fit whenever a caption's text
+		// or style changed since it was last fitted (typing, style change,
+		// undo/redo, width sync).
+		// setDocument() runs on every selection change, not only when a
+		// document is opened: forget the signatures only for a new document,
+		// or every click would re-fit every caption on the page.
+		if (m_captionFitDoc != doc)
+		{
+			m_captionFitSignature.clear();
+			m_captionFitDoc = doc;
+		}
+		connect(doc, &ScribusDoc::docChanged,
+			this, &SuneerControlBar::refitCaptionFrames, Qt::UniqueConnection);
 	}
 }
 
@@ -3929,9 +3946,50 @@ void SuneerControlBar::updateCaptionFrame(PageItem* imgFrame)
     captFrame->setYPos(imgFrame->yPos() + imgFrame->height());
     captFrame->updateClip();
     captFrame->invalidateLayout();
+    // Height: bottom gap == top gap, measured on the ink.
+    if (PageItem_TextFrame* ctf = captFrame->asTextFrame())
+        ctf->suneerFitCaptionHeight(true);
     captFrame->update();
     m_doc->regionsChanged()->update(QRectF());
     m_doc->changed();
+}
+
+// Signature of what decides a caption's height: its text, the paragraph
+// style and the character size/line spacing of the first character, and
+// the width. Same signature -> nothing to do, so the fit itself (which
+// emits docChanged) never re-triggers.
+static QString suneerCaptionSignature(const PageItem_TextFrame* tf)
+{
+    QString sig = tf->itemText.plainText();
+    if (tf->itemText.length() > 0)
+    {
+        const ParagraphStyle& ps = tf->itemText.paragraphStyle(0);
+        const CharStyle& cs = tf->itemText.charStyle(0);
+        sig += QString("|%1|%2|%3|%4|%5|%6")
+            .arg(ps.parent()).arg(ps.lineSpacing()).arg(ps.lineSpacingMode())
+            .arg(cs.fontSize()).arg(cs.font().scName()).arg(cs.scaleV());
+    }
+    sig += QString("|w%1|t%2").arg(tf->width()).arg(tf->textToFrameDistTop());
+    return sig;
+}
+
+void SuneerControlBar::refitCaptionFrames()
+{
+    if (!m_doc || m_refittingCaptions) return;
+    m_refittingCaptions = true;
+    for (PageItem* pi : m_doc->DocItems)
+    {
+        if (!PageItem_TextFrame::suneerIsCaptionFrame(pi)) continue;
+        PageItem_TextFrame* tf = pi->asTextFrame();
+        if (!tf || tf->itemText.length() == 0) continue;
+        const QString sig = suneerCaptionSignature(tf);
+        if (m_captionFitSignature.value(pi->itemName()) == sig) continue;
+        m_captionFitSignature.insert(pi->itemName(), sig);
+        // No undo entry of its own: the height is derived from the text, and
+        // undoing the edit brings docChanged, which re-fits again.
+        tf->suneerFitCaptionHeight(false);
+    }
+    m_refittingCaptions = false;
 }
 
 void SuneerControlBar::onFillColorChanged()
