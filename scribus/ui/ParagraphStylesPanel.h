@@ -71,6 +71,12 @@ private slots:
 	void editStyle();
 	void newStyle();
 	void deleteStyle();
+	//! \brief "Assign Shortcut..." for the current row: the style's own key,
+	//! stored in ParagraphStyle::shortcut() (the .sla / Style Manager field).
+	void assignShortcut();
+	void showStylesContextMenu(const QPoint& pos);
+	void exportStyleShortcuts();
+	void importStyleShortcuts();
 	void toggleTemplateOnly(bool checked);
 	void openTemplateSourceSettings();
 	void cleanupImportedStyles();
@@ -81,6 +87,14 @@ private:
 	void applyChainFromStyle(const QString& startStyle);
 	void setupShortcuts();
 	void clearShortcuts();
+	//! \brief Write \a key into the named paragraph style's shortcut field and
+	//! refresh everything that shows or listens for it. Empty key clears.
+	void setStyleShortcut(const QString& styleName, const QKeySequence& key);
+	//! \brief Ask about anything else already holding \a key (another style,
+	//! a chain, a column config, or an action in the active shortcut set).
+	//! Returns false if the user cancelled; on "Replace" the other owner is cleared.
+	bool resolveShortcutConflict(const QKeySequence& key, const QString& forStyle);
+	void rebuildStyleShortcuts();
 	//! \brief Re-applies the search text and (if enabled) the template-styles-only
 	//! filter to the already-populated list. Call after any rebuild or after either
 	//! filter's state changes.
@@ -102,6 +116,8 @@ private:
 	
 	QList<QShortcut*> m_shortcuts;
 	QList<QShortcut*> m_columnShortcuts;
+	QList<QShortcut*> m_styleShortcuts; // per-style keys from ParagraphStyle::shortcut()
+	QPushButton* m_shortcutButton {nullptr};
 	QMap<QString, QString> m_nextStyles; // styleName → nextStyleName
 	QTimer* m_syncTimer = nullptr;
 	QString m_lastHighlightedStyle;

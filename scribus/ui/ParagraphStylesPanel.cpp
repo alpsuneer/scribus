@@ -51,6 +51,13 @@
 #include "commonstrings.h"
 #include "resourcecollection.h"
 #include "scribusstructs.h"
+#include "prefsmanager.h"
+#include "scraction.h"
+#include "ui/stylemanager.h"
+#include "styles/charstyle.h"
+#include <functional>
+#include <QMenu>
+#include <QApplication>
 
 // ============================================================
 // Template style source
@@ -141,6 +148,19 @@ static const QSet<QString>& templateStyleNames(ScribusDoc* doc, bool forceReload
 
 // Per-style shortcut storage (in-memory, saved to QSettings)
 static QMap<QString, QKeySequence> s_styleShortcuts;
+// The document whose per-style shortcuts (ParagraphStyle::shortcut()) are
+// live. Static because dynamicShortcuts() is consulted by the Keyboard
+// Shortcuts preferences page without a panel instance.
+static QPointer<ScribusDoc> s_shortcutDoc;
+
+// Per-style keys as the Style Manager stores them: "" or a portable
+// QKeySequence string on the style itself, saved with the .sla.
+static QKeySequence styleOwnShortcut(const ScribusDoc* doc, const QString& styleName)
+{
+	if (!doc || !doc->paragraphStyles().contains(styleName))
+		return QKeySequence();
+	return QKeySequence(doc->paragraphStyles().get(styleName).shortcut(), QKeySequence::PortableText);
+}
 
 static void loadShortcuts()
 {
@@ -577,13 +597,23 @@ public:
 		lay->addWidget(m_conflictLabel);
 		connect(m_keyEdit, &QKeySequenceEdit::keySequenceChanged, this, [this](const QKeySequence& ks) {
 			if (ks.isEmpty()) { m_conflictLabel->setText(""); return; }
-			// Check against existing style shortcuts
+			// Check against other chains and the styles' own keys
 			for (auto it = s_styleShortcuts.begin(); it != s_styleShortcuts.end(); ++it)
 				if (!it.value().isEmpty() && it.value() == ks)
 				{
-					m_conflictLabel->setText("Warning: Key already used by style: " + it.key());
+					m_conflictLabel->setText("Warning: Key already used by chain of style: " + it.key());
 					return;
 				}
+			if (s_shortcutDoc)
+			{
+				const StyleSet<ParagraphStyle>& st = s_shortcutDoc->paragraphStyles();
+				for (int i = 0; i < st.count(); ++i)
+					if (!st[i].shortcut().isEmpty() && QKeySequence(st[i].shortcut(), QKeySequence::PortableText) == ks)
+					{
+						m_conflictLabel->setText("Warning: Key is the shortcut of style: " + st[i].name());
+						return;
+					}
+			}
 			m_conflictLabel->setText("");
 		});
 		QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -658,35 +688,56 @@ public:
 	{
 		QStyledItemDelegate::paint(painter, option, index);
 		bool hasChain = index.data(Qt::UserRole + 1).toBool();
+		// The style's own key (UserRole + 2, from ParagraphStyle::shortcut()).
+		// Shown for every row; a chain key is shown next to the chain icon.
+		QString ownKey = index.data(Qt::UserRole + 2).toString();
+		if (!hasChain && ownKey.isEmpty())
+			return;
+
+		painter->save();
+		bool selected = (option.state & QStyle::State_Selected);
+		// Colors from the option's palette at paint time: the theme can
+		// change while we run, and cached colors would go stale.
+		QColor iconColor = option.palette.color(selected ? QPalette::HighlightedText : QPalette::Link);
+		painter->setPen(selected ? option.palette.color(QPalette::HighlightedText)
+		                         : option.palette.color(QPalette::Disabled, QPalette::Text));
+		QFont sf = painter->font();
+		sf.setPointSize(8);
+		painter->setFont(sf);
+
+		int rightEdge = option.rect.right() - IconRightMargin;
 		if (hasChain)
 		{
-			painter->save();
-			bool selected = (option.state & QStyle::State_Selected);
-			// Colors from the option's palette at paint time: the theme can
-			// change while we run, and cached colors would go stale.
-			QColor iconColor = option.palette.color(selected ? QPalette::HighlightedText : QPalette::Link);
-
-			// Draw shortcut text left of icon
-			QString styleName = index.data(Qt::UserRole).toString();
-			QKeySequence sc = s_styleShortcuts.value(styleName);
-			if (!sc.isEmpty())
-			{
-				painter->setPen(selected ? option.palette.color(QPalette::HighlightedText)
-				                         : option.palette.color(QPalette::Disabled, QPalette::Text));
-				QFont sf = painter->font();
-				sf.setPointSize(8);
-				painter->setFont(sf);
-				QRect scRect = option.rect.adjusted(0, 0, -24, 0);
-				painter->drawText(scRect, Qt::AlignRight | Qt::AlignVCenter, sc.toString());
-			}
-
-			// Draw chain-link icon, right-aligned and vertically centered
+			// Chain-link icon, right-aligned and vertically centered, with the
+			// chain key to its left.
 			const qreal dpr = painter->device() ? painter->device()->devicePixelRatioF() : 1.0;
 			QPoint iconPos(option.rect.right() - IconSize - IconRightMargin,
 			               option.rect.top() + (option.rect.height() - IconSize) / 2);
 			painter->drawPixmap(iconPos, chainLinkPixmap(iconColor, IconSize, dpr));
-			painter->restore();
+			rightEdge = iconPos.x() - 4;
+
+			QString styleName = index.data(Qt::UserRole).toString();
+			QKeySequence chainKey = s_styleShortcuts.value(styleName);
+			if (!chainKey.isEmpty())
+			{
+				QString text = chainKey.toString(QKeySequence::NativeText);
+				int w = painter->fontMetrics().horizontalAdvance(text);
+				QRect r(rightEdge - w, option.rect.top(), w, option.rect.height());
+				painter->drawText(r, Qt::AlignRight | Qt::AlignVCenter, text);
+				rightEdge -= w + 10;
+			}
 		}
+		if (!ownKey.isEmpty())
+		{
+			// With a chain key beside it, label this one so the two read apart.
+			QString text = QKeySequence(ownKey, QKeySequence::PortableText).toString(QKeySequence::NativeText);
+			if (hasChain && !s_styleShortcuts.value(index.data(Qt::UserRole).toString()).isEmpty())
+				text = QString::fromUtf8("\xe2\x8c\xa8 ") + text; // ⌨ style key, vs. chain key
+			int w = painter->fontMetrics().horizontalAdvance(text);
+			QRect r(rightEdge - w, option.rect.top(), w, option.rect.height());
+			painter->drawText(r, Qt::AlignRight | Qt::AlignVCenter, text);
+		}
+		painter->restore();
 	}
 };
 
@@ -812,11 +863,19 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	templateFilterLayout->addStretch();
 	QToolButton* templateSourceBtn = new QToolButton(this);
 	templateSourceBtn->setText("\xe2\x9a\x99"); // ⚙
-	templateSourceBtn->setToolTip("Configure template style source / clean up imported styles");
+	templateSourceBtn->setToolTip("Template style source, style shortcut import/export");
+	templateSourceBtn->setPopupMode(QToolButton::InstantPopup);
+	{
+		QMenu* gearMenu = new QMenu(templateSourceBtn);
+		gearMenu->addAction("Template style source...", this, &ParagraphStylesPanel::openTemplateSourceSettings);
+		gearMenu->addSeparator();
+		gearMenu->addAction("Export style shortcuts...", this, &ParagraphStylesPanel::exportStyleShortcuts);
+		gearMenu->addAction("Import style shortcuts...", this, &ParagraphStylesPanel::importStyleShortcuts);
+		templateSourceBtn->setMenu(gearMenu);
+	}
 	templateFilterLayout->addWidget(templateSourceBtn);
 	stylesLayout->addLayout(templateFilterLayout);
 	connect(m_templateOnlyCheck, &QCheckBox::toggled, this, &ParagraphStylesPanel::toggleTemplateOnly);
-	connect(templateSourceBtn, &QToolButton::clicked, this, &ParagraphStylesPanel::openTemplateSourceSettings);
 
 	m_stylesList = new QListWidget(this);
 	m_stylesList->setAlternatingRowColors(false);
@@ -827,6 +886,8 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 		"QListWidget::item:selected { background: palette(highlight); color: palette(highlighted-text); border: none; }"
 	);
 	stylesLayout->addWidget(m_stylesList);
+	m_stylesList->setContextMenuPolicy(Qt::CustomContextMenu);
+	connect(m_stylesList, &QListWidget::customContextMenuRequested, this, &ParagraphStylesPanel::showStylesContextMenu);
 
 	QLabel* infoLabel = new QLabel("Frame: Para1->Style, Para2->Next\nEdit: From cursor down", this);
 	infoLabel->setWordWrap(true);
@@ -836,7 +897,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	stylesLayout->addWidget(infoLabel);
 
 	QHBoxLayout* buttonLayout = new QHBoxLayout();
-	buttonLayout->setSpacing(6);
+	buttonLayout->setSpacing(4);
 
 	QPushButton* setNextButton = new QPushButton("Next", this);
 	setNextButton->setToolTip("Set Next Style Chain & Shortcut");
@@ -847,22 +908,30 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 		"QPushButton:pressed { background: #21618c; }"
 	);
 
+	// 32px circles (were 36): with the shortcut button added the row must
+	// still fit the dock at its usual width, or the panel scrolls sideways.
 	m_newButton = new QPushButton("+", this);
-	m_newButton->setFixedSize(36, 36);
+	m_newButton->setFixedSize(32, 32);
 	m_newButton->setEnabled(false);
 	m_newButton->setStyleSheet(
-		"QPushButton { background: #95a5a6; color: white; border: none; border-radius: 18px; font-size: 16pt; }"
+		"QPushButton { background: #95a5a6; color: white; border: none; border-radius: 16px; font-size: 14pt; }"
 	);
 
 	m_deleteButton = new QPushButton("-", this);
-	m_deleteButton->setFixedSize(36, 36);
+	m_deleteButton->setFixedSize(32, 32);
 	m_deleteButton->setEnabled(false);
 	m_deleteButton->setStyleSheet(m_newButton->styleSheet());
 
 	m_editButton = new QPushButton("\xe2\x9c\x8e", this);
-	m_editButton->setFixedSize(36, 36);
+	m_editButton->setFixedSize(32, 32);
 	m_editButton->setEnabled(false);
 	m_editButton->setStyleSheet(m_newButton->styleSheet());
+
+	m_shortcutButton = new QPushButton("\xe2\x8c\xa8", this); // ⌨
+	m_shortcutButton->setFixedSize(32, 32);
+	m_shortcutButton->setToolTip("Assign a keyboard shortcut to the selected style");
+	m_shortcutButton->setStyleSheet(m_newButton->styleSheet());
+	connect(m_shortcutButton, &QPushButton::clicked, this, &ParagraphStylesPanel::assignShortcut);
 
 	QPushButton* cleanupButton = new QPushButton("Clean Up", this);
 	cleanupButton->setToolTip(
@@ -882,6 +951,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	buttonLayout->addWidget(m_newButton);
 	buttonLayout->addWidget(m_deleteButton);
 	buttonLayout->addWidget(m_editButton);
+	buttonLayout->addWidget(m_shortcutButton);
 
 	stylesLayout->addLayout(buttonLayout);
 
@@ -1060,6 +1130,7 @@ void ParagraphStylesPanel::setDocument(ScribusDoc* doc)
 	if (m_doc && m_doc != doc)
 		disconnect(m_doc, nullptr, this, nullptr);
 	m_doc = doc;
+	s_shortcutDoc = doc;
 	if (m_doc)
 	{
 		connect(m_doc, &ScribusDoc::docChanged, this, &ParagraphStylesPanel::updateStylesList);
@@ -1149,6 +1220,10 @@ void ParagraphStylesPanel::updateStylesList()
 	// is still rebuilt right after the click completes.
 	if (m_userInteracting)
 		return;
+	// clear() drops the current row; the buttons below the list (Next, edit,
+	// shortcut) act on it, so put it back by name after the rebuild.
+	const QString previousCurrent = m_stylesList->currentItem()
+		? m_stylesList->currentItem()->data(Qt::UserRole).toString() : QString();
 	m_stylesList->clear();
 	if (!m_doc)
 	{
@@ -1181,6 +1256,9 @@ void ParagraphStylesPanel::updateStylesList()
 		QListWidgetItem* item = new QListWidgetItem(styleName);
 		item->setData(Qt::UserRole, styleName);
 		item->setData(Qt::UserRole + 1, hasChain);
+		item->setData(Qt::UserRole + 2, style.shortcut());
+		if (!style.shortcut().isEmpty())
+			item->setToolTip("Shortcut: " + QKeySequence(style.shortcut(), QKeySequence::PortableText).toString(QKeySequence::NativeText));
 		if (hasChain)
 		{
 			QFont f = item->font();
@@ -1191,6 +1269,8 @@ void ParagraphStylesPanel::updateStylesList()
 			item->setToolTip("Next style: " + chainList.join(" -> "));
 		}
 		m_stylesList->addItem(item);
+		if (styleName == previousCurrent)
+			m_stylesList->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
 	}
 	applyListFilters();
 }
@@ -1814,7 +1894,18 @@ QMap<QString, QKeySequence> ParagraphStylesPanel::dynamicShortcuts()
 	{
 		if (it.value().isEmpty())
 			continue;
-		out.insert(tr("paragraph style \"%1\"").arg(it.key()), it.value());
+		out.insert(tr("style chain \"%1\"").arg(it.key()), it.value());
+	}
+	if (s_shortcutDoc)
+	{
+		const StyleSet<ParagraphStyle>& styles = s_shortcutDoc->paragraphStyles();
+		for (int i = 0; i < styles.count(); ++i)
+		{
+			if (styles[i].shortcut().isEmpty())
+				continue;
+			out.insert(tr("paragraph style \"%1\"").arg(styles[i].name()),
+			           QKeySequence(styles[i].shortcut(), QKeySequence::PortableText));
+		}
 	}
 	for (int i = 0; i < s_columnConfigs.size(); ++i)
 	{
@@ -1890,6 +1981,370 @@ void ParagraphStylesPanel::rebuildShortcuts()
 
 	// Auto Fit shortcut — handled via action in canvasmode
 	rebuildColumnShortcuts();
+	rebuildStyleShortcuts();
+}
+
+void ParagraphStylesPanel::rebuildStyleShortcuts()
+{
+	// See rebuildColumnShortcuts(): never delete a QShortcut that may be mid-emit.
+	for (QShortcut* sc : m_styleShortcuts)
+	{
+		if (!sc)
+			continue;
+		sc->setEnabled(false);
+		sc->deleteLater();
+	}
+	m_styleShortcuts.clear();
+	if (!m_doc)
+		return;
+
+	// One QShortcut per style that carries a key in ParagraphStyle::shortcut().
+	// The Style Manager makes ScrActions for the same keys, but never attaches
+	// them to a widget, so they cannot fire and cannot make ours ambiguous.
+	QWidget* parent = m_mainWindow ? m_mainWindow : (parentWidget() ? parentWidget() : this);
+	const StyleSet<ParagraphStyle>& styles = m_doc->paragraphStyles();
+	for (int i = 0; i < styles.count(); ++i)
+	{
+		QKeySequence key(styles[i].shortcut(), QKeySequence::PortableText);
+		if (key.isEmpty())
+			continue;
+		const QString styleName = styles[i].name();
+		QShortcut* sc = new QShortcut(key, parent, nullptr, nullptr, Qt::ApplicationShortcut);
+		connect(sc, &QShortcut::activated, this, [this, styleName]() {
+			if (!m_doc || !m_doc->paragraphStyles().contains(styleName))
+				return;
+			// Edit mode: the paragraph at the cursor / all selected paragraphs.
+			// Frame selected: the whole frame. Both with undo, as the Style
+			// Manager's Apply does.
+			m_doc->itemSelection_SetNamedParagraphStyle(styleName);
+		});
+		m_styleShortcuts.append(sc);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-style shortcuts (item's own key, saved in the .sla)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	// "Assign Shortcut" dialog: press a key, Clear / OK / Cancel.
+	class StyleShortcutDialog : public QDialog
+	{
+	public:
+		StyleShortcutDialog(const QString& styleName, const QKeySequence& current, QWidget* parent)
+			: QDialog(parent)
+		{
+			setWindowTitle("Shortcut: " + styleName);
+			setMinimumWidth(320);
+			QVBoxLayout* lay = new QVBoxLayout(this);
+			QHBoxLayout* row = new QHBoxLayout();
+			row->addWidget(new QLabel("Press shortcut:", this));
+			m_keyEdit = new QKeySequenceEdit(current, this);
+			m_keyEdit->setMaximumSequenceLength(1);
+			row->addWidget(m_keyEdit, 1);
+			QPushButton* clearBtn = new QPushButton("Clear", this);
+			clearBtn->setFixedWidth(50);
+			connect(clearBtn, &QPushButton::clicked, this, [this]() { m_keyEdit->clear(); });
+			row->addWidget(clearBtn);
+			lay->addLayout(row);
+			QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+			connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+			connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+			lay->addWidget(bb);
+			m_keyEdit->setFocus();
+			// The key editor keeps focus for a second after a key, so an Enter
+			// pressed right after the shortcut would be recorded as the
+			// shortcut. Hand focus to OK as soon as a key is recorded, and
+			// never accept a bare Enter/Escape as the result.
+			QPushButton* okBtn = bb->button(QDialogButtonBox::Ok);
+			connect(m_keyEdit, &QKeySequenceEdit::editingFinished, this, [this, okBtn]() {
+				if (isBareConfirmKey(m_keyEdit->keySequence()))
+					m_keyEdit->setKeySequence(m_previous);
+				else
+					m_previous = m_keyEdit->keySequence();
+				okBtn->setFocus();
+			});
+			m_previous = current;
+		}
+		QKeySequence key() const
+		{
+			QKeySequence k = m_keyEdit->keySequence();
+			return isBareConfirmKey(k) ? m_previous : k;
+		}
+	private:
+		static bool isBareConfirmKey(const QKeySequence& k)
+		{
+			if (k.count() != 1)
+				return false;
+			const int key = k[0].key();
+			return k[0].keyboardModifiers() == Qt::NoModifier
+				&& (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Escape);
+		}
+		QKeySequenceEdit* m_keyEdit;
+		QKeySequence m_previous;
+	};
+
+	QString paraStyleShortcutsFilter() { return QString("Style shortcuts (*.json)"); }
+}
+
+void ParagraphStylesPanel::showStylesContextMenu(const QPoint& pos)
+{
+	QListWidgetItem* item = m_stylesList->itemAt(pos);
+	if (!item || item->data(Qt::UserRole).toString().isEmpty())
+		return;
+	m_stylesList->setCurrentItem(item);
+	QMenu menu(this);
+	menu.addAction("Assign Shortcut...", this, &ParagraphStylesPanel::assignShortcut);
+	menu.addAction("Next Style Chain...", this, &ParagraphStylesPanel::setNextStyle);
+	menu.exec(m_stylesList->viewport()->mapToGlobal(pos));
+}
+
+void ParagraphStylesPanel::assignShortcut()
+{
+	if (!m_doc)
+		return;
+	QListWidgetItem* item = m_stylesList->currentItem();
+	if (!item) { QMessageBox::warning(this, "Warning", "Select a style"); return; }
+	QString styleName = item->data(Qt::UserRole).toString();
+	if (styleName.isEmpty() || !m_doc->paragraphStyles().contains(styleName))
+		return;
+
+	StyleShortcutDialog dlg(styleName, styleOwnShortcut(m_doc, styleName), this);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+	QKeySequence key = dlg.key();
+	if (key == styleOwnShortcut(m_doc, styleName))
+		return;
+	if (!key.isEmpty() && !resolveShortcutConflict(key, styleName))
+		return;
+	setStyleShortcut(styleName, key);
+}
+
+bool ParagraphStylesPanel::resolveShortcutConflict(const QKeySequence& key, const QString& forStyle)
+{
+	// Collect everything holding this key: label for the user, and a clearer
+	// to run on "Replace".
+	QStringList owners;
+	QList<std::function<void()>> clearers;
+
+	const StyleSet<ParagraphStyle>& pstyles = m_doc->paragraphStyles();
+	for (int i = 0; i < pstyles.count(); ++i)
+	{
+		if (pstyles[i].name() == forStyle || pstyles[i].shortcut().isEmpty())
+			continue;
+		if (QKeySequence(pstyles[i].shortcut(), QKeySequence::PortableText) != key)
+			continue;
+		const QString other = pstyles[i].name();
+		owners << QString("paragraph style \"%1\"").arg(other);
+		clearers << [this, other]() { setStyleShortcut(other, QKeySequence()); };
+	}
+	const StyleSet<CharStyle>& cstyles = m_doc->charStyles();
+	for (int i = 0; i < cstyles.count(); ++i)
+	{
+		if (cstyles[i].shortcut().isEmpty())
+			continue;
+		if (QKeySequence(cstyles[i].shortcut(), QKeySequence::PortableText) != key)
+			continue;
+		const QString other = cstyles[i].name();
+		owners << QString("character style \"%1\" (Style Manager)").arg(other);
+		clearers << [this, other]() {
+			StyleSet<CharStyle> tmp;
+			tmp.redefine(m_doc->charStyles(), true);
+			if (tmp.contains(other))
+			{
+				tmp[tmp.find(other)].setShortcut(QString());
+				m_doc->redefineCharStyles(tmp, false);
+			}
+		};
+	}
+	for (auto it = s_styleShortcuts.constBegin(); it != s_styleShortcuts.constEnd(); ++it)
+	{
+		if (it.value().isEmpty() || it.value() != key)
+			continue;
+		const QString other = it.key();
+		owners << QString("Next Style Chain of \"%1\"").arg(other);
+		clearers << [other]() { s_styleShortcuts.remove(other); saveShortcuts(); };
+	}
+	for (int i = 0; i < s_columnConfigs.size(); ++i)
+	{
+		if (s_columnConfigs[i].shortcut.isEmpty() || s_columnConfigs[i].shortcut != key)
+			continue;
+		owners << QString("column config %1").arg(i + 1);
+		clearers << [i]() { if (i < s_columnConfigs.size()) { s_columnConfigs[i].shortcut = QKeySequence(); saveColumnConfigs(); } };
+	}
+	// Actions in the active keyboard shortcut set (e.g. Newspaper Default).
+	QMap<QString, Keys>& keyActions = PrefsManager::instance().appPrefs.keyShortcutPrefs.KeyActions;
+	bool actionConflict = false;
+	for (auto it = keyActions.constBegin(); it != keyActions.constEnd(); ++it)
+	{
+		if (it.value().keySequence.isEmpty() || key.matches(it.value().keySequence) != QKeySequence::ExactMatch)
+			continue;
+		actionConflict = true;
+		const QString actionName = it.key();
+		QString label = it.value().cleanMenuText.isEmpty() ? actionName : it.value().cleanMenuText;
+		if (!it.value().menuName.isEmpty())
+			label = it.value().menuName + " > " + label;
+		owners << QString("action \"%1\" in the current shortcut set").arg(label);
+		clearers << [this, actionName]() {
+			QMap<QString, Keys>& ka = PrefsManager::instance().appPrefs.keyShortcutPrefs.KeyActions;
+			if (ka.contains(actionName))
+				ka[actionName].keySequence = QKeySequence();
+			if (m_mainWindow && m_mainWindow->scrActions.contains(actionName) && m_mainWindow->scrActions[actionName])
+				m_mainWindow->scrActions[actionName]->setShortcut(QKeySequence());
+		};
+	}
+	if (owners.isEmpty())
+		return true;
+
+	QString text = QString("%1 is already used by:\n\n  %2\n\nReplace it? The other owner loses the key.")
+		.arg(key.toString(QKeySequence::NativeText), owners.join("\n  "));
+	if (actionConflict)
+		text += "\n\nNote: an action's key is cleared for this session only. A Default "
+		        "shortcut set is applied again at the next start; change the set in "
+		        "Preferences > Keyboard Shortcuts to make it permanent.";
+	QMessageBox box(QMessageBox::Warning, "Shortcut in use", text, QMessageBox::NoButton, this);
+	QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
+	box.addButton(QMessageBox::Cancel);
+	box.setDefaultButton(QMessageBox::Cancel);
+	box.exec();
+	if (box.clickedButton() != replaceBtn)
+		return false;
+	for (const auto& clear : clearers)
+		clear();
+	// The cleared owner's QShortcut must go now: left alive next to the new
+	// one, Qt sees an ambiguous key and fires neither.
+	rebuildShortcuts();
+	return true;
+}
+
+void ParagraphStylesPanel::setStyleShortcut(const QString& styleName, const QKeySequence& key)
+{
+	if (!m_doc)
+		return;
+	// Same write path as the chain: redefine the whole set with the one field
+	// changed. Style Manager reads the same field, so it shows the same key.
+	StyleSet<ParagraphStyle> tmpStyles;
+	tmpStyles.redefine(m_doc->paragraphStyles(), true);
+	if (!tmpStyles.contains(styleName))
+		return;
+	tmpStyles[tmpStyles.find(styleName)].setShortcut(key.isEmpty() ? QString() : key.toString(QKeySequence::PortableText));
+	m_doc->redefineStyles(tmpStyles, false);
+	m_doc->changed();
+	// The Style Manager keeps its own action list keyed at load; re-seat it
+	// on the doc so its Shortcut column matches. Its actions never fire (no
+	// widget), so this is display only.
+	if (m_mainWindow && m_mainWindow->styleMgr())
+		m_mainWindow->styleMgr()->setDoc(m_doc);
+	rebuildStyleShortcuts();
+	updateStylesList();
+}
+
+void ParagraphStylesPanel::exportStyleShortcuts()
+{
+	if (!m_doc)
+		return;
+	QJsonObject styles;
+	const StyleSet<ParagraphStyle>& pstyles = m_doc->paragraphStyles();
+	for (int i = 0; i < pstyles.count(); ++i)
+		if (!pstyles[i].shortcut().isEmpty())
+			styles.insert(pstyles[i].name(), pstyles[i].shortcut());
+	if (styles.isEmpty())
+	{
+		QMessageBox::information(this, "Export style shortcuts", "No paragraph style in this document has a shortcut.");
+		return;
+	}
+	QString fn = QFileDialog::getSaveFileName(this, "Export style shortcuts",
+		QDir::homePath() + "/style-shortcuts.json", paraStyleShortcutsFilter());
+	if (fn.isEmpty())
+		return;
+	if (!fn.endsWith(".json", Qt::CaseInsensitive))
+		fn += ".json";
+	QJsonObject root;
+	root.insert("format", "scribus-style-shortcuts");
+	root.insert("version", 1);
+	root.insert("paragraphStyles", styles);
+	QFile f(fn);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		QMessageBox::warning(this, "Export style shortcuts", "Could not write " + fn);
+		return;
+	}
+	f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+	f.close();
+	QMessageBox::information(this, "Export style shortcuts",
+		QString("%1 shortcut(s) written to\n%2").arg(styles.size()).arg(fn));
+}
+
+void ParagraphStylesPanel::importStyleShortcuts()
+{
+	if (!m_doc)
+		return;
+	QString fn = QFileDialog::getOpenFileName(this, "Import style shortcuts", QDir::homePath(), paraStyleShortcutsFilter());
+	if (fn.isEmpty())
+		return;
+	QFile f(fn);
+	if (!f.open(QIODevice::ReadOnly))
+	{
+		QMessageBox::warning(this, "Import style shortcuts", "Could not read " + fn);
+		return;
+	}
+	QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+	QJsonObject styles = root.value("paragraphStyles").toObject();
+	if (styles.isEmpty())
+	{
+		QMessageBox::warning(this, "Import style shortcuts", "No style shortcuts found in " + fn);
+		return;
+	}
+
+	// Apply what matches a style here; report the rest. Conflicts with keys
+	// already in the document are asked about one by one, so nothing is
+	// silently overwritten.
+	StyleSet<ParagraphStyle> tmpStyles;
+	tmpStyles.redefine(m_doc->paragraphStyles(), true);
+	QStringList applied, missing, skipped;
+	for (auto it = styles.constBegin(); it != styles.constEnd(); ++it)
+	{
+		const QString styleName = it.key();
+		QKeySequence key(it.value().toString(), QKeySequence::PortableText);
+		if (!tmpStyles.contains(styleName))
+		{
+			missing << styleName;
+			continue;
+		}
+		if (key.isEmpty())
+			continue;
+		if (key == styleOwnShortcut(m_doc, styleName))
+			continue;
+		if (!resolveShortcutConflict(key, styleName))
+		{
+			skipped << styleName;
+			continue;
+		}
+		// resolveShortcutConflict() may have cleared another style via
+		// setStyleShortcut(); pick the set up again so that is kept.
+		tmpStyles.redefine(m_doc->paragraphStyles(), true);
+		tmpStyles[tmpStyles.find(styleName)].setShortcut(key.toString(QKeySequence::PortableText));
+		m_doc->redefineStyles(tmpStyles, false);
+		applied << QString("%1 = %2").arg(styleName, key.toString(QKeySequence::NativeText));
+	}
+	if (!applied.isEmpty())
+	{
+		m_doc->changed();
+		if (m_mainWindow && m_mainWindow->styleMgr())
+			m_mainWindow->styleMgr()->setDoc(m_doc);
+	}
+	rebuildStyleShortcuts();
+	updateStylesList();
+
+	QString report = QString("Applied %1 shortcut(s).").arg(applied.size());
+	if (!applied.isEmpty())
+		report += "\n  " + applied.join("\n  ");
+	if (!missing.isEmpty())
+		report += QString("\n\nNot in this document (%1):\n  %2").arg(missing.size()).arg(missing.join("\n  "));
+	if (!skipped.isEmpty())
+		report += QString("\n\nCancelled (%1):\n  %2").arg(skipped.size()).arg(skipped.join("\n  "));
+	QMessageBox::information(this, "Import style shortcuts", report);
 }
 
 void ParagraphStylesPanel::openDesignStyleSettings()
