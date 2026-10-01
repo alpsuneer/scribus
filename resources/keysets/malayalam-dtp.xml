@@ -374,12 +374,12 @@
     <function name="unicodeZerowidthNonBreakingSpace" shortcut=""/>
     <function name="unicodeZerowidthSpace" shortcut=""/>
     <function name="viewEditInPreview" shortcut=""/>
-    <function name="viewFit100" shortcut="Ctrl+1"/>
+    <function name="viewFit100" shortcut=""/>
     <function name="viewFit200" shortcut=""/>
     <function name="viewFit400" shortcut=""/>
     <function name="viewFit50" shortcut=""/>
     <function name="viewFit75" shortcut=""/>
-    <function name="viewFitInWindow" shortcut="Ctrl+0"/>
+    <function name="viewFitInWindow" shortcut=""/>
     <function name="viewFitWidth" shortcut=""/>
     <function name="viewPreviewMode" shortcut="Ctrl+Alt+P"/>
     <function name="viewRulerMode" shortcut=""/>
