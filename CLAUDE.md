@@ -131,3 +131,19 @@ process rather than degrading.
 - Discuss before patching when a fix has design consequences for undo, file
   format, or the layout pipeline — several traps in NOTES.md came from a fix
   applied at the wrong layer.
+
+## Reports and change log (always)
+
+- Save every investigation/diagnosis result as a file in
+  `/home/s1/Desktop/claude/` named `result-YYYYMMDD-HHMM-<short-topic>.md`.
+  Include: the problem as the user described it, what was checked, the cause,
+  measurements, and what is still unknown.
+- Save every code change as `/home/s1/Desktop/claude/change-YYYYMMDD-HHMM-<short-topic>.md`,
+  with: what changed and why, the files touched, the commit hash if committed,
+  how to test, and how to undo. Save the diff next to it as
+  `change-YYYYMMDD-HHMM-<short-topic>.patch`.
+- Write the explanations in simple Malayalam; keep file names, code and
+  technical terms in English.
+- Create the folder if it doesn't exist (`chown s1:s1` what you create).
+  Never overwrite an older file; always make a new one.
+- At the end of each task, tell the user the file names you saved.
