@@ -65,7 +65,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools linguist-qt6 \
         qt6-svg-dev qt6-5compat-dev qtkeychain-qt6-dev \
         `# document / imaging libraries` \
-        libpodofo-dev libpoppler-dev libpoppler-cpp-dev \
+        `# libpoppler-private-dev is NOT optional: the PDF import plugin includes` \
+        `# poppler/ErrorCodes.h, PDFDoc.h, SplashOutputDev.h and ~27 other internal` \
+        `# poppler headers that libpoppler-dev does not ship.` \
+        libpodofo-dev libpoppler-dev libpoppler-cpp-dev libpoppler-private-dev \
         libharfbuzz-dev libicu-dev libhunspell-dev liblcms2-dev \
         libtiff-dev libjpeg62-turbo-dev libpng-dev libjxl-dev \
         libxml2-dev libcairo2-dev libcups2-dev libfreetype-dev libfontconfig-dev \
