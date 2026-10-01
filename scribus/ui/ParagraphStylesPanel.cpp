@@ -3265,10 +3265,6 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
                     captFrame->itemText.applyStyle(0, capStyle);
                 }
                 m_doc->DocItems.append(captFrame);
-                // Height from the ink (bottom gap == top gap); with only the
-                // placeholder space this is the font box, symmetric.
-                if (PageItem_TextFrame* ctf = captFrame->asTextFrame())
-                    ctf->suneerFitCaptionHeight(true);
                 // ✅ Weld caption to image (move together)
                 imgFrame->weldTo(captFrame);
                 // Caption update via signal (exif load after image set)

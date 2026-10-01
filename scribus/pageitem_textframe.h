@@ -200,7 +200,6 @@ public:
 	};
 	SuneerInkMetrics suneerInkMetrics() const;
 	bool suneerFitCaptionHeight(bool withUndo = true);
-	static bool suneerIsCaptionFrame(const PageItem* item);
 
 	/**
 	 * @brief Fit the story inside this frame by adjusting typography alone.

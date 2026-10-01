@@ -495,6 +495,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameHeightToText";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemFitCaptionFrame";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameToImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustImageToFrame";
@@ -1827,6 +1829,7 @@ void ActionManager::languageChange()
 	(*scrActions)["tableAdjustFrameToTable"]->setTexts(tr("Adjust Frame to Table"));
 	(*scrActions)["tableAdjustTableToFrame"]->setTexts(tr("Adjust Table to Frame"));
 	(*scrActions)["itemAdjustFrameHeightToText"]->setTexts( tr("Adjust Frame Height to Text"));
+	(*scrActions)["itemFitCaptionFrame"]->setTexts( tr("Fit Caption Frame"));
 	(*scrActions)["itemAdjustFrameToImage"]->setTexts( tr("Adjust Frame to Image"));
 	(*scrActions)["itemAdjustImageToFrame"]->setTexts( tr("Adjust Image to Frame"));
 	(*scrActions)["itemToggleInlineImage"]->setTexts( tr("Embed Image"));
@@ -2273,6 +2276,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsNewsPanel", QKeySequence());
 	defKeys.insert("suneerApplyChain", QKeySequence());
 	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
+	defKeys.insert("itemFitCaptionFrame", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_H));
 	defKeys.insert("suneerGetImage", QKeySequence(Qt::CTRL | Qt::Key_I));
 	defKeys.insert("suneerFocusFontCombo", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_F));
 	defKeys.insert("suneerEnlargeImageSize", QKeySequence());
@@ -2504,6 +2508,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemStyleSearch"
 		<< "itemUpdateImage"
 		<< "itemAdjustFrameHeightToText"
+		<< "itemFitCaptionFrame"
 		<< "itemAdjustFrameToImage" 
 		<< "itemAdjustImageToFrame" 
 		<< "itemToggleInlineImage" 

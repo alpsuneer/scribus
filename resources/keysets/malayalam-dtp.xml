@@ -145,6 +145,7 @@
     <function name="itemAITextSummarize" shortcut=""/>
     <function name="itemAITextTranslate" shortcut=""/>
     <function name="itemAdjustFrameHeightToText" shortcut=""/>
+    <function name="itemFitCaptionFrame" shortcut="Ctrl+Alt+H"/>
     <function name="itemAdjustFrameToImage" shortcut="Ctrl+Alt+I"/>
     <function name="itemAdjustImageToFrame" shortcut="Ctrl+Alt+F"/>
     <function name="itemAttachTextToPath" shortcut=""/>

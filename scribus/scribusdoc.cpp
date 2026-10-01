@@ -15374,12 +15374,11 @@ bool ScribusDoc::sizeItem(double newW, double newH, PageItem *pi, bool fromMP, b
 
 					PageItem_TextFrame* tf = pi->asTextFrame();
 
+					// Width and position follow the image; the caption's
+					// height is never changed here. It is fitted only on
+					// request (Item > Adjust > Fit Caption Frame).
 					if (tf)
 					{
-						// Height from the ink: bottom gap == top gap
-						// (was: bisect to no-overflow + 4 pt, which left
-						// more air under the text than above it).
-						tf->suneerFitCaptionHeight(true);
 						tf->invalidateLayout();
 						tf->update();
 					}

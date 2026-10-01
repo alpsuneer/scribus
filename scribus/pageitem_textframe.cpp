@@ -6439,20 +6439,16 @@ void PageItem_TextFrame::autoFitFrameHeight()
 // ---------------------------------------------------------------------------
 // Suneer: caption frame height
 //
-// A caption frame (name "caption_<image>") used to be either left at its
-// creation height or bisected to "no overflow + 4 pt". Both leave more air
-// under the last line than above the first: the overflow test works with the
-// font's descent, not with what is inked, and the fixed slack and the bottom
-// text distance stack on top of that. Here the frame is measured from the
-// glyph outlines instead, and the height is set so that
+// Run only on request (Item > Adjust > Fit Caption Frame), never
+// automatically: nothing resizes a caption while it is being typed.
+// A caption left at its creation height, or fitted to "no overflow", has more
+// air under the last line than above the first: the overflow test works with
+// the font's descent, not with what is inked, and the bottom text distance
+// stacks on top of that. Here the frame is measured from the glyph outlines
+// instead, and the height is set so that
 //     gap(frame bottom -> last ink) == gap(frame top -> first ink).
 // The top gap is whatever the layout produced (text distance top plus the
 // first-line offset policy), so nothing above the text changes.
-
-bool PageItem_TextFrame::suneerIsCaptionFrame(const PageItem* item)
-{
-	return item && item->isTextFrame() && item->itemName().startsWith(QLatin1String("caption_"));
-}
 
 PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() const
 {
@@ -6566,25 +6562,14 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo)
 	SuneerInkMetrics m = suneerInkMetrics();
 	if (!m.valid || !m.fromInk)
 	{
-		// Nothing inked (empty, or only the placeholder space): there is no
-		// text to balance, so the frame keeps its height - or gets the 10 mm
-		// creation height back if it is smaller than one line, so an empty
-		// caption stays big enough to click into.
-		const double emptyH = qMax(oldH, 28.346);
-		setHeight(emptyH);
+		// Nothing inked (empty, or only a placeholder space): there is no
+		// text to balance, so the frame is left exactly as it was.
+		setHeight(oldH);
 		updateClip();
 		invalid = true;
 		layout();
-		const bool changedEmpty = qAbs(emptyH - oldH) > 0.01;
 		if (undoTransaction)
-		{
-			if (changedEmpty) undoTransaction.commit(); else undoTransaction.cancel();
-		}
-		if (changedEmpty)
-		{
-			update();
-			m_Doc->changed();
-		}
+			undoTransaction.cancel();
 		return false;
 	}
 

@@ -389,6 +389,7 @@ public slots:
 	void ManageJava();
 	void editSelectedSymbolStart();
 	void suneerAutoFitHeight();
+	void suneerFitCaptionFrames();
 	void suneerAutoFitTextToggled(bool enabled);
 	void suneerFitImageToFrame(PageItem* item);
 	void suneerGetImage();

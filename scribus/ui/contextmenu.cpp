@@ -347,6 +347,11 @@ void ContextMenu::createMenuItems_Selection()
 			addAction(m_ScMW->scrActions["itemAdjustFrameHeightToText"]);
 		m_ScMW->scrActions["suneerAutoFitHeight"]->setEnabled(true);
 		addAction(m_ScMW->scrActions["suneerAutoFitHeight"]);
+		if (currItem->isTextFrame())
+		{
+			m_ScMW->scrActions["itemFitCaptionFrame"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["itemFitCaptionFrame"]);
+		}
 		if (selectedItemCount == 1 && currItem->isTextFrame())
 		{
 			m_ScMW->scrActions["suneerTextToTable"]->setEnabled(true);

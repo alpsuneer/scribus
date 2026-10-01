@@ -901,6 +901,7 @@ void ScribusMainWindow::initPalettes()
 	stylesDock->setToggleViewAction(scrActions["toolsParagraphStyles"]);
 	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
+	connect(scrActions["itemFitCaptionFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerFitCaptionFrames);
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
@@ -1370,6 +1371,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->createMenu("Adjust", tr("Adjust"), "Item");
 	scrMenuMgr->addMenuItemString("Adjust", "Item");
 	scrMenuMgr->addMenuItemString("itemAdjustFrameHeightToText", "Adjust");
+	scrMenuMgr->addMenuItemString("itemFitCaptionFrame", "Adjust");
 	scrMenuMgr->addMenuItemString("itemAdjustFrameToImage", "Adjust");
 	scrMenuMgr->addMenuItemString("itemAdjustImageToFrame", "Adjust");
 	scrMenuMgr->createMenu("ItemPathOps", tr("Shape && Paths"), "Item");
@@ -10034,6 +10036,51 @@ void ScribusMainWindow::suneerAutoFitHeight()
 
 	if (fitTransaction)
 		fitTransaction.commit();
+}
+
+// Item > Adjust > Fit Caption Frame. Manual only: sets the height of every
+// selected text frame so the space under the last line's ink equals the
+// space above the first line's ink. One undo step for the whole selection.
+void ScribusMainWindow::suneerFitCaptionFrames()
+{
+	if (!HaveDoc || !doc)
+		return;
+	const int count = doc->m_Selection->count();
+	if (count == 0)
+		return;
+
+	UndoTransaction fitTransaction;
+	if (UndoManager::undoEnabled())
+		fitTransaction = m_undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::Resize,
+		                                                tr("Fit caption frame"), Um::IResize);
+	int fitted = 0, skipped = 0;
+	for (int i = 0; i < count; ++i)
+	{
+		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem_TextFrame* tf = (item && item->isTextFrame()) ? item->asTextFrame() : nullptr;
+		// Empty frames, table cells and linked frames are left as they are.
+		if (!tf || tf->isTableItem || tf->itemText.length() == 0)
+		{
+			++skipped;
+			continue;
+		}
+		if (tf->suneerFitCaptionHeight(true))
+			++fitted;
+		else
+			++skipped;
+	}
+	if (fitTransaction)
+	{
+		if (fitted > 0)
+			fitTransaction.commit();
+		else
+			fitTransaction.cancel();
+	}
+	if (fitted > 0)
+		view->DrawNew();
+	setStatusBarInfoText(skipped > 0
+		? tr("Fit Caption Frame: %1 fitted, %2 left unchanged").arg(fitted).arg(skipped)
+		: tr("Fit Caption Frame: %1 fitted").arg(fitted));
 }
 
 void ScribusMainWindow::suneerAutoFitTextToggled(bool enabled)
