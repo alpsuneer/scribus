@@ -49,6 +49,13 @@ public:
 	void setMainWindow(ScribusMainWindow *);
 	ScribusView* view() const { return m_View;}
 	ScribusDoc* doc() const { return m_Doc;}
+	// Called by ScribusMainWindow::DoFileClose() right before it deletes the
+	// ScribusDoc this window was constructed with. WA_DeleteOnClose only
+	// schedules *this* widget for deletion via the event loop, so it can still
+	// be found in mdiArea->subWindowList() after the doc is freed; without
+	// this, the "is this file already open" scan in loadDoc() reads doc()
+	// through a dangling pointer.
+	void clearDoc() { m_Doc = nullptr; }
 	QMdiSubWindow* getSubWin() { return m_subWindow; }
 	void setSubWin(QMdiSubWindow *win) { m_subWindow = win; }
 

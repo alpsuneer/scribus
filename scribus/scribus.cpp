@@ -5025,6 +5025,14 @@ bool ScribusMainWindow::DoFileClose()
 	docCheckerPalette->buildErrorList(nullptr);
 	viewToolBar->setDoc(nullptr);
 	HaveDoc--;
+	// ActWin (== the ScribusWin whose closeEvent() called us, see scribuswin.cpp)
+	// holds its own m_Doc pointer to this same object, and can still be found in
+	// mdiArea->subWindowList() for a while after this: WA_DeleteOnClose only
+	// schedules that widget's destruction, it doesn't happen synchronously.
+	// Clear it before freeing doc so a reopen of this file during that window
+	// doesn't read the duplicate-open check through a dangling pointer.
+	if (ActWin)
+		ActWin->clearDoc();
 	delete doc;
 	doc = nullptr;
 	ActWin = nullptr;
