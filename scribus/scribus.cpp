@@ -321,6 +321,20 @@ bool previewDinUse;
 bool printDinUse;
 extern bool emergencyActivated;
 
+// Qt gives every QMdiSubWindow a system menu whose "Close" carries Ctrl+W.
+// Our File > Close has the same key, and two claimants make Qt fire neither
+// (ambiguous shortcut). The menu entry stays; only its key goes.
+static void suneerStripMdiCloseKey(QMdiSubWindow* sub)
+{
+	if (!sub || !sub->systemMenu())
+		return;
+	const QList<QAction*> acts = sub->systemMenu()->actions();
+	for (QAction* a : acts)
+		if (a->shortcut() == QKeySequence(QKeySequence::Close))
+			a->setShortcut(QKeySequence());
+}
+
+
 ScribusMainWindow::ScribusMainWindow() :
 	m_documentLogManager(DocumentLogManager::instance()),
 	m_prefsManager(PrefsManager::instance()),
@@ -2628,7 +2642,10 @@ ScribusDoc *ScribusMainWindow::doFileNew(double width, double height, double top
 	tempView->reformPages(true);
 	//>>
 	if (requiresGUI)
+	{
 		w->setSubWin(mdiArea->addSubWindow(w));
+		suneerStripMdiCloseKey(w->getSubWin());
+	}
 	//Independent finishing tasks after tempDoc setup
 	if (showView)
 	{
@@ -4135,6 +4152,7 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		ActWin = w;
 		doc->WinHan = w;
 		w->setSubWin(mdiArea->addSubWindow(w));
+		suneerStripMdiCloseKey(w->getSubWin());
 		w->setUpdatesEnabled(false);
 		view->updatesOn(false);
 		doc->SoftProofing = false;
@@ -4962,6 +4980,7 @@ bool ScribusMainWindow::slotFileClose()
 	windowsMenuAboutToShow();
 	return (tw != ActWin);
 }
+
 
 bool ScribusMainWindow::DoFileClose()
 {

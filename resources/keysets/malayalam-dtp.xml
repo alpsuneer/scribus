@@ -220,7 +220,7 @@
     <function name="specialToggleAllPalettes" shortcut="F12"/>
     <function name="specialUnicodeSequenceBegin" shortcut="Ctrl+Shift+U"/>
     <function name="stickyTools" shortcut=""/>
-    <function name="styleImageEffects" shortcut="Ctrl+E"/>
+    <function name="styleImageEffects" shortcut=""/>
     <function name="styleTabulators" shortcut=""/>
     <function name="suneerApplyChain" shortcut=""/>
     <function name="suneerAutoFitHeight" shortcut="Ctrl+Alt+C"/>

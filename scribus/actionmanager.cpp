@@ -2236,7 +2236,8 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("editDeselectAll", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A));
 	defKeys.insert("editSearchReplace", QKeySequence(Qt::CTRL | Qt::Key_F));
 	defKeys.insert("editStyles", QKeySequence(Qt::Key_F4));
-	defKeys.insert("styleImageEffects", QKeySequence(Qt::CTRL | Qt::Key_E));
+	// Ctrl+E belongs to alignCenter here (newspaper typing); upstream gives it to Image Effects.
+	defKeys.insert("styleImageEffects", QKeySequence());
 
 	//Item Menu
 	defKeys.insert("itemDuplicate", QKeySequence(Qt::CTRL | Qt::Key_D));
