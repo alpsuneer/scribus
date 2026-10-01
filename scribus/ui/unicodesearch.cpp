@@ -56,11 +56,17 @@ void UnicodeChooseButton::self_toggled(bool state)
 {
 	if (!m_searchDialog)
 	{
+		// changeOverrideCursor() only swaps the shape shown by whatever
+		// override is already on the stack; it does not pop one. Using it
+		// here left this WaitCursor on QApplication's override stack for
+		// good, so every widget's own cursor - including the frame-resize
+		// double arrow and the text I-beam - was masked by it for the rest
+		// of the session. restoreOverrideCursor() actually pops it.
 		QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 		m_searchDialog = new UnicodeSearch();
 		connect(m_searchDialog, SIGNAL(setVisibleState(bool)), this, SLOT(setChecked(bool)));
 		connect(m_searchDialog, SIGNAL(glyphSelected(QString)), this, SLOT(glyphSelected(QString)));
-		QApplication::changeOverrideCursor(Qt::ArrowCursor);
+		QApplication::restoreOverrideCursor();
 	}
 
 	if (state)
@@ -199,7 +205,11 @@ void UnicodeSearch::itemChosen(const QModelIndex & index)
 
 void UnicodeSearch::searchEdit_returnPressed()
 {
-	QApplication::changeOverrideCursor(QCursor(Qt::WaitCursor));
+	// A real set/restore pair of its own: changeOverrideCursor() here relied
+	// on the permanent leak above always keeping an override on the stack
+	// for it to reshape. Now that that leak is fixed, there is nothing to
+	// change most of the time, so this pushes and pops its own.
+	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 	QString s(searchEdit->text());
 	if (s.isEmpty())
 	{
@@ -215,7 +225,7 @@ void UnicodeSearch::searchEdit_returnPressed()
 	}
 	tableView->setFocus(Qt::OtherFocusReason);
 	tableView->selectRow(0);
-	QApplication::changeOverrideCursor(Qt::ArrowCursor);
+	QApplication::restoreOverrideCursor();
 }
 
 void UnicodeSearch::hideEvent(QHideEvent * e)
