@@ -4426,10 +4426,14 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 	else
 	{
 		pagePalette->setView(nullptr);
+		pagePalette->rebuild();
 	}
 
 	m_undoManager->switchStack(doc->documentFileName());
-	pagePalette->rebuild();
+	// No pagePalette->rebuild() here on the success path: newActWin() above
+	// already rebuilt the palette for this document, and each rebuild renders
+	// every page thumbnail (~1.4 s measured on a newspaper page). The current
+	// page marker is kept up to date by GotoPage(0) -> slotSetCurrentPage().
 	QApplication::restoreOverrideCursor();
 	doc->setModified(false);
 	foreach (NotesStyle* NS, doc->m_docNotesStylesList)

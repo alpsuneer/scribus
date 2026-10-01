@@ -2519,12 +2519,20 @@ QMap<int, QImage> ScribusView::PagesToPixmap(int maxGr, int Nr, PageToPixmapFlag
 	ScPage* act = m_doc->currentPage();
 	bool mMode = m_doc->masterPageMode();
 
+	// Thumbnails are drawn without gamut warnings. Upstream did that by
+	// flipping GamutCheck and calling enableCMS() twice, which reopens every
+	// ICC profile, rebuilds all transforms (the gamut-check ones alone cost
+	// ~550 ms on the newspaper CMYK profiles), recalculates colours and
+	// reloads every image - about 1.4 s per PagePalette::rebuild(), measured.
+	// The vector colour path only reads m_doc->Gamut at draw time
+	// (ScColorEngine), and images keep the pixmap they were loaded with, so
+	// clearing the flag is enough; the transforms are untouched.
 	bool cmsCorr = false;
+	bool oldGamut = m_doc->Gamut;
 	if ((m_doc->cmsSettings().CMSinUse) && (m_doc->cmsSettings().GamutCheck) && !flags.testFlag(Pixmap_NoCMSSettingsChange))
 	{
 		cmsCorr = true;
-		m_doc->cmsSettings().GamutCheck = false;
-		m_doc->enableCMS(true);
+		m_doc->Gamut = false;
 	}
 
 	// Optimize settings for rendering
@@ -2563,10 +2571,7 @@ QMap<int, QImage> ScribusView::PagesToPixmap(int maxGr, int Nr, PageToPixmapFlag
 
 	// Reset settings
 	if (cmsCorr)
-	{
-		m_doc->cmsSettings().GamutCheck = true;
-		m_doc->enableCMS(true);
-	}
+		m_doc->Gamut = oldGamut;
 	m_doc->drawAsPreview = oldDrawAsPreview;
 	m_doc->guidesPrefs().framesShown  = oldFramesShown;
 	m_doc->guidesPrefs().showControls = oldShowControls;
