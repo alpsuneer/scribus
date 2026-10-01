@@ -676,6 +676,12 @@ public slots:
 	/*! \brief One-time opt-in prompt to activate the Malayalam DTP shortcut set. */
 	void checkMalayalamDtpFirstRun();
 	void applyDefaultShortcutSet();
+	//! Suneer: log every key sequence claimed by more than one live shortcut
+	//! (menu actions, style/column/chain QShortcuts). Qt fires none of them
+	//! when a key is ambiguous. Returns the number of conflicting keys.
+	int suneerLogShortcutConflicts(const QString& when);
+	//! Name of the menu action that owns key, or empty.
+	QString suneerActionOwningShortcut(const QKeySequence& key) const;
 	//! After Save As: release the old file's network lock and take the new file's.
 	void moveDocumentLock(const QString& newFileName);
 	void docCheckToggle(bool visible);

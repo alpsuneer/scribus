@@ -2019,6 +2019,25 @@ QMap<QString, QKeySequence> ParagraphStylesPanel::dynamicShortcuts()
 	return out;
 }
 
+// True (and logs once per key/claimant) when a menu action already owns key.
+static bool suneerKeyTakenByAction(ScribusMainWindow* mw, const QKeySequence& key, const QString& claimant)
+{
+	if (!mw || key.isEmpty())
+		return false;
+	const QString owner = mw->suneerActionOwningShortcut(key);
+	if (owner.isEmpty())
+		return false;
+	static QSet<QString> reported;
+	const QString msg = QString("[SHORTCUT CONFLICT] %1: %2 not registered, the key belongs to action %3")
+		.arg(key.toString(QKeySequence::PortableText), claimant, owner);
+	if (!reported.contains(msg))
+	{
+		reported.insert(msg);
+		qWarning().noquote() << msg;
+	}
+	return true;
+}
+
 void ParagraphStylesPanel::rebuildColumnShortcuts()
 {
 	// A rebuild can be reached from inside a shortcut's own activated() handler (the slots
@@ -2040,12 +2059,19 @@ void ParagraphStylesPanel::rebuildColumnShortcuts()
 		const SuneerColumnConfigEntry& e = s_columnConfigs[i];
 		if (e.shortcut.isEmpty()) continue;
 		int idx = i;
+		// A key that a menu action already owns stays with the action: two
+		// claimants make Qt fire neither. Logged by the conflict check.
+		if (suneerKeyTakenByAction(m_mainWindow, e.shortcut, QString("Column Style config %1").arg(i + 1)))
+			continue;
 		QShortcut* sc = new QShortcut(e.shortcut, parent, nullptr, nullptr, Qt::ApplicationShortcut);
+		sc->setObjectName(QString("Column Style config %1").arg(i + 1));
 		connect(sc, &QShortcut::activated, this, [this, idx]() {
 			applyColumnConfig(idx);
 		});
 		m_columnShortcuts.append(sc);
 	}
+	if (m_mainWindow)
+		m_mainWindow->suneerLogShortcutConflicts(QStringLiteral("column shortcuts rebuilt"));
 }
 
 void ParagraphStylesPanel::editStyle() {}
@@ -2074,7 +2100,10 @@ void ParagraphStylesPanel::rebuildShortcuts()
 		if (it.value().isEmpty()) continue;
 		if (!m_doc || !m_doc->paragraphStyles().contains(it.key())) continue;
 		const QString styleName = it.key();
+		if (suneerKeyTakenByAction(m_mainWindow, it.value(), QString("Next Style Chain key of style '%1'").arg(styleName)))
+			continue;
 		QShortcut* sc = new QShortcut(it.value(), parent, nullptr, nullptr, Qt::ApplicationShortcut);
+		sc->setObjectName(QString("Next Style Chain key of style '%1'").arg(styleName));
 		connect(sc, &QShortcut::activated, this, [this, styleName]() {
 			applyChainFromStyle(styleName);
 		});
@@ -2111,7 +2140,12 @@ void ParagraphStylesPanel::rebuildStyleShortcuts()
 		if (key.isEmpty())
 			continue;
 		const QString styleName = styles[i].name();
+		// e.g. a template style carrying Ctrl+Alt+I, which the keyset gives to
+		// Adjust Frame to Image: the menu action keeps the key.
+		if (suneerKeyTakenByAction(m_mainWindow, key, QString("shortcut of paragraph style '%1'").arg(styleName)))
+			continue;
 		QShortcut* sc = new QShortcut(key, parent, nullptr, nullptr, Qt::ApplicationShortcut);
+		sc->setObjectName(QString("shortcut of paragraph style '%1'").arg(styleName));
 		connect(sc, &QShortcut::activated, this, [this, styleName]() {
 			if (!m_doc || !m_doc->paragraphStyles().contains(styleName))
 				return;
@@ -2122,6 +2156,8 @@ void ParagraphStylesPanel::rebuildStyleShortcuts()
 		});
 		m_styleShortcuts.append(sc);
 	}
+	if (m_mainWindow)
+		m_mainWindow->suneerLogShortcutConflicts(QStringLiteral("style shortcuts rebuilt"));
 }
 
 // ---------------------------------------------------------------------------

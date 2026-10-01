@@ -570,6 +570,8 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 
 	checkMalayalamDtpFirstRun();
 	applyDefaultShortcutSet();
+	// Once the event loop is up and every dock has made its shortcuts.
+	QTimer::singleShot(0, this, [this] { suneerLogShortcutConflicts(QStringLiteral("startup")); });
 	// Automatic update check: well after startup, asynchronous, at most once a
 	// day, and silent unless a newer signed build exists.
 	QTimer::singleShot(10000, this, [this] { UpdateCheckDialog::runStartupCheck(this); });
@@ -5558,6 +5560,127 @@ void ScribusMainWindow::applyShortcutsFromPrefs()
 {
 	m_prefsManager.applyLoadedShortCuts();
 	enforceClipboardShortcuts();
+}
+
+QString ScribusMainWindow::suneerActionOwningShortcut(const QKeySequence& key) const
+{
+	if (key.isEmpty())
+		return QString();
+	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
+	{
+		if (it.value() && it.value()->shortcut() == key)
+			return it.key();
+	}
+	return QString();
+}
+
+int ScribusMainWindow::suneerLogShortcutConflicts(const QString& when)
+{
+	// Only shortcuts that can actually fire in THIS window count. An action
+	// that is attached to no widget never fires (the Style Manager keeps one
+	// such "Apply" action per style key), and an action on a widget of
+	// another top-level window (Story Editor, script console) is scoped to
+	// that window, so neither can make a main-window key ambiguous.
+	auto livesInThisWindow = [this](const QAction* a) -> bool
+	{
+		const QList<QObject*> objs = a->associatedObjects();
+		for (const QObject* o : objs)
+		{
+			const QWidget* w = qobject_cast<const QWidget*>(o);
+			for (; w; w = w->parentWidget())
+			{
+				if (w == this)
+					return true;
+				if (w->isWindow() && !qobject_cast<const QMenu*>(w))
+					break;                      // some other top-level window
+			}
+		}
+		return false;
+	};
+
+	QMap<QString, QStringList> owners;       // key -> live claimants
+	QMap<QString, QStringList> everyone;     // key -> all claimants, for the debug dump
+	QSet<const QObject*> seenActions;
+	for (auto it = scrActions.constBegin(); it != scrActions.constEnd(); ++it)
+	{
+		if (!it.value())
+			continue;
+		seenActions.insert(it.value());
+		const QKeySequence ks = it.value()->shortcut();
+		if (ks.isEmpty())
+			continue;
+		const QString key = ks.toString(QKeySequence::PortableText);
+		const bool attached = !it.value()->associatedObjects().isEmpty();
+		everyone[key] << QString("action %1 (%2, %3)").arg(it.key(), attached ? "attached" : "NOT attached to any widget", it.value()->isEnabled() ? "enabled" : "disabled now");
+		if (attached)
+			owners[key] << QString("action %1").arg(it.key());
+	}
+	const QList<QAction*> otherActions = findChildren<QAction*>();
+	for (const QAction* a : otherActions)
+	{
+		if (seenActions.contains(a) || a->shortcut().isEmpty())
+			continue;
+		const QString key = a->shortcut().toString(QKeySequence::PortableText);
+		const QString label = QString("QAction '%1'").arg(a->objectName().isEmpty() ? a->text() : a->objectName());
+		const bool live = livesInThisWindow(a);
+		everyone[key] << label + (live ? " (in this window)" : " (other window or unattached - cannot collide)");
+		if (live)
+			owners[key] << label;
+	}
+	// Our own QShortcuts: paragraph style keys, Next Style Chain keys, Column
+	// Style config keys - and anything else created with new QShortcut.
+	const QList<QShortcut*> shortcuts = findChildren<QShortcut*>();
+	for (const QShortcut* sc : shortcuts)
+	{
+		if (sc->key().isEmpty())
+			continue;
+		QString label = sc->objectName();
+		if (label.isEmpty())
+			label = QString("QShortcut on %1").arg(sc->parent() ? sc->parent()->metaObject()->className() : "?");
+		const QString key = sc->key().toString(QKeySequence::PortableText);
+		const QWidget* pw = qobject_cast<const QWidget*>(sc->parent());
+		const bool live = sc->isEnabled() && (sc->context() == Qt::ApplicationShortcut || (pw && pw->window() == this));
+		everyone[key] << label + (live ? "" : " (disabled or other window)");
+		if (live)
+			owners[key] << label;
+	}
+
+	// SUNEER_SHORTCUT_DEBUG="Ctrl+Alt+F,Ctrl+Alt+I": print every claimant of
+	// these keys, live or not, each time the check runs.
+	const QString debugKeys = qEnvironmentVariable("SUNEER_SHORTCUT_DEBUG");
+	if (!debugKeys.isEmpty())
+	{
+		const QStringList keys = debugKeys.split(',', Qt::SkipEmptyParts);
+		for (const QString& k : keys)
+		{
+			const QString norm = QKeySequence(k.trimmed()).toString(QKeySequence::PortableText);
+			qWarning().noquote() << QString("[SHORTCUT DEBUG] %1 (%2): %3").arg(norm, when,
+				everyone.value(norm).isEmpty() ? QString("nobody") : everyone.value(norm).join(" | "));
+		}
+	}
+
+	QStringList report;
+	for (auto it = owners.constBegin(); it != owners.constEnd(); ++it)
+	{
+		if (it.value().count() > 1)
+			report << QString("[SHORTCUT CONFLICT] %1 is claimed by: %2").arg(it.key(), it.value().join(" | "));
+	}
+	// Same findings as last time: say nothing (this runs after every rebuild).
+	static QString lastReport = QStringLiteral("-");
+	const QString joined = report.join('\n');
+	if (joined != lastReport)
+	{
+		lastReport = joined;
+		if (report.isEmpty())
+			qWarning().noquote() << QString("[SHORTCUT CHECK] %1: no duplicate shortcuts").arg(when);
+		else
+		{
+			qWarning().noquote() << QString("[SHORTCUT CHECK] %1: %2 key(s) claimed more than once - Qt fires none of the claimants").arg(when).arg(report.count());
+			for (const QString& line : report)
+				qWarning().noquote() << line;
+		}
+	}
+	return report.count();
 }
 
 void ScribusMainWindow::applyDefaultShortcutSet()
