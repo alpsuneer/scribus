@@ -810,6 +810,8 @@ void ActionManager::initViewMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "showMouseCoordinates";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "viewShowImposePagesButton";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 
 	name = "viewToggleCM";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
@@ -842,6 +844,7 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewSnapToGuides"]->setToggleAction(true);
 	(*scrActions)["viewSnapToItems"]->setToggleAction(true);
 	(*scrActions)["showMouseCoordinates"]->setToggleAction(true);
+	(*scrActions)["viewShowImposePagesButton"]->setToggleAction(true);
 
 	(*scrActions)["viewPreviewMode"]->setChecked(false);
 	(*scrActions)["viewEditInPreview"]->setChecked(false);
@@ -857,6 +860,9 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewShowRulers"]->setChecked(true);
 	(*scrActions)["viewRulerMode"]->setChecked(true);
 	(*scrActions)["showMouseCoordinates"]->setChecked(true);
+	// Hidden by default; ScribusMainWindow re-syncs this from
+	// appPrefs.uiPrefs.showImposePagesButton once prefs are loaded.
+	(*scrActions)["viewShowImposePagesButton"]->setChecked(false);
 
 	connect( (*scrActions)["viewFitInWindow"], SIGNAL(triggeredData(double)), mainWindow, SLOT(slotZoom(double)) );
 	connect( (*scrActions)["viewFitWidth"], SIGNAL(triggeredData(double)), mainWindow, SLOT(slotZoom(double)) );
@@ -882,6 +888,7 @@ void ActionManager::initViewMenuActions()
 	connect( (*scrActions)["viewSnapToGuides"], SIGNAL(triggered()), mainWindow, SLOT(toggleSnapGuides()) );
 	connect( (*scrActions)["viewSnapToItems"], SIGNAL(triggered()), mainWindow, SLOT(toggleSnapElements()) );
 	connect( (*scrActions)["showMouseCoordinates"], SIGNAL(triggered()), mainWindow, SLOT(ToggleMouseTips()) );
+	connect( (*scrActions)["viewShowImposePagesButton"], SIGNAL(triggered()), mainWindow, SLOT(toggleImposePagesButton()) );
 //	connect( (*scrActions)["viewNewView"], SIGNAL(triggered()), mainWindow, SLOT(newView()) );
 
 }
@@ -1923,6 +1930,7 @@ void ActionManager::languageChange()
 	(*scrActions)["viewSnapToGuides"]->setTexts( tr("Sna&p to Guides"));
 	(*scrActions)["viewSnapToItems"]->setTexts( tr("Snap to Items"));
 	(*scrActions)["viewShowContextMenu"]->setTexts( tr("Show Context Menu"));
+	(*scrActions)["viewShowImposePagesButton"]->setTexts( tr("Show Impose Pages Button"));
 //	(*scrActions)["viewNewView"]->setTexts( tr("New View"));
 
 	//Tool menu
@@ -2689,7 +2697,8 @@ void ActionManager::createDefaultMenus()
 		<< "viewShowTextControls"
 		<< "viewShowRulers"
 		<< "viewRulerMode"
-		<< "showMouseCoordinates";
+		<< "showMouseCoordinates"
+		<< "viewShowImposePagesButton";
 	++itmenu;
 	itmenu->second
 		<< "tableInsertRows"

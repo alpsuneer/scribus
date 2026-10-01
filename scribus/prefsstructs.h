@@ -137,6 +137,7 @@ struct UIPrefs
 	bool showSplashOnStartup {true}; //! Whether to show the splashscreen or not
 	bool stickyTools {false}; //! Whether a user's tool section remains after use or the normal tool is reselected
 	bool grayscaleIcons {false}; //! Show icons in toolbars as grayscale
+	bool showImposePagesButton {false}; //! Show the Impose Pages button in the control bar
 	QString iconSet; //! Icon set name
 	WindowPrefs mainWinSettings;
 	QByteArray mainWinState;

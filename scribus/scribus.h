@@ -512,6 +512,8 @@ public slots:
 	void slotItemStyleSearch();
 	void ToggleTips();
 	void ToggleMouseTips();
+	//! Show/hide the Impose Pages button in the control bar, per View menu checkbox.
+	void toggleImposePagesButton();
 	/** \brief Erzeugt eine neue Seite */
 	void slotNewPageP(int wo, const QString& templ);
 	void slotNewPageM();

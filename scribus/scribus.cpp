@@ -882,6 +882,14 @@ void ScribusMainWindow::initPalettes()
 	m_suneerControlBar->setFloatable(true);
 	addToolBar(Qt::TopToolBarArea, m_suneerControlBar);
 	m_suneerControlBar->show();
+	// Impose Pages is hidden by default; only the preference (View menu
+	// checkbox) brings its button back onto the control bar.
+	{
+		bool showImpose = m_prefsManager.appPrefs.uiPrefs.showImposePagesButton;
+		scrActions["viewShowImposePagesButton"]->setChecked(showImpose);
+		if (scrActions.contains("extrasImposition"))
+			scrActions["extrasImposition"]->setVisible(showImpose);
+	}
 	// News Browser Panel
 	m_suneerNewsPanel = new SuneerNewsPanel(this);
 	m_suneerNewsPanel->setVisible(false);  // ADS tab-ൽ widget use ചെയ്യും
@@ -1615,6 +1623,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("ViewGrids", "View");
 	scrMenuMgr->addMenuItemString("viewShowGrid", "ViewGrids");
 	scrMenuMgr->addMenuItemString("viewShowGuides", "ViewGrids");
+	scrMenuMgr->addMenuItemString("SEPARATOR", "View");
+	scrMenuMgr->addMenuItemString("viewShowImposePagesButton", "View");
 
 	//CB If this is viewNewView imeplemented, it should be on the windows menu
 //	scrMenuMgr->addMenuItem(scrActions["viewNewView"], "View");
@@ -6652,6 +6662,14 @@ void ScribusMainWindow::ToggleTips()
 void ScribusMainWindow::ToggleMouseTips()
 {
 	m_prefsManager.appPrefs.displayPrefs.showMouseCoordinates = scrActions["showMouseCoordinates"]->isChecked();
+}
+
+void ScribusMainWindow::toggleImposePagesButton()
+{
+	bool visible = scrActions["viewShowImposePagesButton"]->isChecked();
+	m_prefsManager.appPrefs.uiPrefs.showImposePagesButton = visible;
+	if (scrActions.contains("extrasImposition"))
+		scrActions["extrasImposition"]->setVisible(visible);
 }
 
 void ScribusMainWindow::SaveText()

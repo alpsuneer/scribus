@@ -283,6 +283,7 @@ void PrefsManager::initDefaults()
 	appPrefs.uiPrefs.useTabs = false;
 	appPrefs.uiPrefs.stickyTools = false;
 	appPrefs.uiPrefs.grayscaleIcons = false;
+	appPrefs.uiPrefs.showImposePagesButton = false;
 	appPrefs.uiPrefs.iconSet = "1_7_0";
 	appPrefs.guidesPrefs.marginsShown = true;
 	appPrefs.guidesPrefs.framesShown = true;
@@ -1491,6 +1492,7 @@ bool PrefsManager::writePref(const QString& filePath)
 	dcUI.setAttribute("ShowLabelsOfInactiveTabs", static_cast<int>(appPrefs.uiPrefs.showLabelsOfInactiveTabs));
 	dcUI.setAttribute("UseDocumentTabs", static_cast<int>(appPrefs.uiPrefs.useTabs));
 	dcUI.setAttribute("StickyTools", static_cast<int>(appPrefs.uiPrefs.stickyTools));
+	dcUI.setAttribute("ShowImposePagesButton", static_cast<int>(appPrefs.uiPrefs.showImposePagesButton));
 	dcUI.setAttribute("Theme", appPrefs.uiPrefs.style);
 	dcUI.setAttribute("ThemePalette", appPrefs.uiPrefs.stylePalette);
 	dcUI.setAttribute("ScrollWheelJump", appPrefs.uiPrefs.wheelJump);
@@ -2233,6 +2235,7 @@ bool PrefsManager::readPref(const QString& filePath)
 			appPrefs.uiPrefs.showLabelsOfInactiveTabs = dc.attribute("ShowLabelsOfInactiveTabs").toInt();
 			appPrefs.uiPrefs.useTabs = static_cast<bool>(dc.attribute("UseDocumentTabs", "0").toInt());
 			appPrefs.uiPrefs.stickyTools = static_cast<bool>(dc.attribute("StickyTools", "0").toInt());
+			appPrefs.uiPrefs.showImposePagesButton = static_cast<bool>(dc.attribute("ShowImposePagesButton", "0").toInt());
 			appPrefs.uiPrefs.grayscaleIcons = static_cast<bool>(dc.attribute("UseGrayscaleIcons",nullptr).toInt());
 			appPrefs.uiPrefs.iconSet = dc.attribute("IconSet", "Scribus 1.7.0");
 			//Override importing prefs and default iconset for 1.7.0
