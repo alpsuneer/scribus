@@ -4242,6 +4242,18 @@ void PageItem::setImageScalingMode(bool freeScale, bool keepRatio)
 	ScaleType = freeScale;
 	AspectRatio = keepRatio;
 	adjustPictScale();
+	// adjustPictScale() has just changed the image scale and offset for the
+	// new mode. The state recorded above already carries the old values for
+	// undo, so bring the "old" markers up to date here. Left stale, the next
+	// checkChanges() on this item (a resize, Adjust Frame to Image) recorded
+	// a second, bogus scale change inside ITS undo step, and undoing that
+	// step put the image back at the free-scaling scale while the frame was
+	// in scale-to-frame mode: drawn wrong until something re-ran
+	// adjustPictScale().
+	oldLocalScX = m_imageXScale;
+	oldLocalScY = m_imageYScale;
+	oldLocalX = m_imageXOffset;
+	oldLocalY = m_imageYOffset;
 	update();
 }
 
@@ -4752,6 +4764,42 @@ void PageItem::setLayer(int newLayerID)
 	m_layerID = newLayerID;
 }
 
+// Suneer: caption auto-fit on a WIDTH change only.
+// Returns the caption text frame to re-fit when item's width has just
+// changed: item itself if it is a caption ("caption_<image>"), or the caption
+// that belongs to item if item is an image frame. Null when there is nothing
+// to do: no caption, an empty caption, the document is loading, an undo/redo
+// is restoring sizes (undo is disabled then), or a fit is already running
+// (the fit changes heights through setHeight(), which comes back here).
+static bool s_suneerCaptionFitRunning = false;
+static PageItem_TextFrame* suneerCaptionToRefit(PageItem* item)
+{
+	if (s_suneerCaptionFitRunning || !UndoManager::undoEnabled())
+		return nullptr;
+	ScribusDoc* doc = item->doc();
+	if (!doc || doc->isLoading())
+		return nullptr;
+	PageItem* caption = nullptr;
+	if (item->isTextFrame() && item->itemName().startsWith(QLatin1String("caption_")))
+		caption = item;
+	else if (item->isImageFrame())
+	{
+		const QString captName = QString("caption_%1").arg(item->itemName());
+		for (PageItem* pi : std::as_const(doc->DocItems))
+		{
+			if (pi->isTextFrame() && pi->itemName() == captName)
+			{
+				caption = pi;
+				break;
+			}
+		}
+	}
+	PageItem_TextFrame* tf = caption ? caption->asTextFrame() : nullptr;
+	if (!tf || tf->itemText.length() == 0)
+		return nullptr;                 // empty captions stay unchanged
+	return tf;
+}
+
 void PageItem::checkChanges(bool force)
 {
 	if (m_Doc->view() == nullptr)
@@ -4777,7 +4825,58 @@ void PageItem::checkChanges(bool force)
 	// has the item been resized
 	if (force || ((oldWidth != m_width || oldHeight != m_height) && shouldCheck()))
 	{
-		resizeUndoAction();
+		// This is where a finished resize is recorded, for every route: mouse
+		// release (shouldCheck() is false while the button is down), the
+		// Properties panel, sizeItem(), the column/design keys. If the WIDTH
+		// really changed and a caption is involved, the caption re-wraps to
+		// the new width and its height is re-fitted, in the same undo step as
+		// the resize itself. Moving, selecting, typing and a height-only
+		// resize never get here with a width change, so they never fit.
+		PageItem_TextFrame* suneerCaption = (qAbs(oldWidth - m_width) > 0.01) ? suneerCaptionToRefit(this) : nullptr;
+		if (suneerCaption)
+		{
+			s_suneerCaptionFitRunning = true;
+			UndoTransaction fitTransaction = undoManager->beginTransaction(getUName(), getUPixmap(), Um::Resize, QString(), Um::IResize);
+			resizeUndoAction();
+			// sizeItem() (Adjust Frame to Image, Properties, scripts) gets
+			// here from setWidthHeight(), BEFORE it has rebuilt this item's
+			// outline and weld points for the new size. Touching the welded
+			// caption in that state drags the image by its own height change
+			// instead of moving the caption. Bring this item up to date first;
+			// after a mouse resize it already is, and this is a no-op.
+			// The weld repositions the caption from the image here. That is
+			// never recorded for undo (undoing the image resize re-syncs the
+			// caption the same way), so it is not recorded now either.
+			if (qAbs(OldB2 - m_width) > 0.01 || qAbs(OldH2 - m_height) > 0.01)
+			{
+				UndoManager::instance()->setUndoEnabled(false);
+				updateClip();
+				UndoManager::instance()->setUndoEnabled(true);
+			}
+			if (suneerCaption != this)
+			{
+				// Image frame resized: the caption takes its width. The 50 ms
+				// caption sync may already have applied it during the drag;
+				// checkChanges() then records that change here, inside the
+				// same transaction.
+				// A welded caption has already been moved under the image by
+				// the weld (during the drag, or just above). Recording that
+				// move would make undo drag the welded image along with it,
+				// so only the caption's resize and fit are recorded.
+				suneerCaption->oldXpos = suneerCaption->xPos();
+				suneerCaption->oldYpos = suneerCaption->yPos();
+				if (qAbs(suneerCaption->width() - m_width) > 0.01)
+					suneerCaption->setWidth(m_width);
+				suneerCaption->checkChanges();
+				suneerCaption->updateClip();
+			}
+			suneerCaption->suneerFitCaptionHeight(true);
+			if (fitTransaction)
+				fitTransaction.commit();
+			s_suneerCaptionFitRunning = false;
+		}
+		else
+			resizeUndoAction();
 		spreadChanges = (textFlowMode() != TextFlowDisabled);
 	}
 	// has the item been rotated
@@ -11588,6 +11687,17 @@ void PageItem::moveWelded(double dX, double dY, int weld)
 			item->setXPos(xPos() - item->width());
 		item->ContourLine = item->PoLine.copy();
 		item->imageClip = item->PoLine.copy();
+	}
+	// The welded caption has just been given a new width (or height). Text is
+	// laid out inside the frame's outline, so rebuild the outline for the new
+	// size and re-break the lines; otherwise the caption keeps the old wrap
+	// (seen after undoing an image resize: width restored, text still
+	// wrapped to the narrow frame). updateClip(false): do not bounce the weld
+	// back to the item that is moving us.
+	if (item->isTextFrame())
+	{
+		item->updateClip(false);
+		item->invalidateLayout();
 	}
 	item->update();
 	item->moveWelded(dX, dY, this);
