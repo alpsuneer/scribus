@@ -193,6 +193,7 @@ set(SCRIBUS_SOURCES
 	scpreview.cpp
 	scprintengine.cpp
 	scprintengine_pdf.cpp
+	imagecaption.cpp
 	scprintengine_ps.cpp
 	scraction.cpp
 	scribus.cpp
