@@ -2413,6 +2413,13 @@ QImage ScribusView::MPageToPixmap(const QString& name, int maxGr, bool drawFrame
 	double cx = m_doc->minCanvasCoordinate.x();
 	double cy = m_doc->minCanvasCoordinate.y();
 
+	// This renders the thumbnail through the on-screen canvas by temporarily
+	// giving it the thumbnail's scale, origin and current page. Any paint of
+	// the canvas that Qt flushes while those are in place puts that thumbnail
+	// state on screen; block canvas paints until everything is restored.
+	bool canvasUpdates = m_canvas->updatesEnabled();
+	m_canvas->setUpdatesEnabled(false);
+
 	m_doc->minCanvasCoordinate = FPoint(0, 0);
 	ScPage* act = m_doc->currentPage();
 	bool mMode = m_doc->masterPageMode();
@@ -2462,6 +2469,7 @@ QImage ScribusView::MPageToPixmap(const QString& name, int maxGr, bool drawFrame
 	m_doc->setMasterPageMode(mMode);
 	m_doc->setCurrentPage(act);
 	m_doc->minCanvasCoordinate = FPoint(cx, cy);
+	m_canvas->setUpdatesEnabled(canvasUpdates);
 
 	return im;
 }
@@ -2495,6 +2503,15 @@ QMap<int, QImage> ScribusView::PagesToPixmap(int maxGr, int Nr, PageToPixmapFlag
 	double oldScale = m_canvas->scale();
 	double cx = m_doc->minCanvasCoordinate.x();
 	double cy = m_doc->minCanvasCoordinate.y();
+	// The thumbnails are drawn through the on-screen canvas at thumbnail scale
+	// with the origin moved to (0,0). enableCMS() below drives a progress bar
+	// whose setValue() repaints synchronously, and that flush paints the canvas
+	// on screen in this thumbnail state: the page shows up tiny in the corner
+	// and jumps back when the next normal paint lands (seen twice per document
+	// load, once per PagePalette::rebuild()). Block canvas paints until the
+	// scale and origin are restored; Qt schedules one normal repaint after.
+	bool canvasUpdates = m_canvas->updatesEnabled();
+	m_canvas->setUpdatesEnabled(false);
 	m_doc->minCanvasCoordinate = FPoint(0, 0);
 	bool oldFramesShown  = m_doc->guidesPrefs().framesShown;
 	bool oldShowControls = m_doc->guidesPrefs().showControls;
@@ -2562,6 +2579,7 @@ QMap<int, QImage> ScribusView::PagesToPixmap(int maxGr, int Nr, PageToPixmapFlag
 	m_doc->minCanvasCoordinate = FPoint(cx, cy);
 	if (!flags.testFlag(Pixmap_NoCanvasModeChange))
 		requestMode(oldAppMode);
+	m_canvas->setUpdatesEnabled(canvasUpdates);
 
 	return m_previews;
 }
