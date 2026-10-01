@@ -28,6 +28,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/aitextresultdialog.h"
 #include "ui/aitranslatedialog.h"
 #include "ui/ParagraphStylesPanel.h"
+#include "ui/scshortcutregistry.h"
 #include "ui/suneercontrolbar.h"
 #include "ui/suneer_news_panel.h"
 #include <QAction>
@@ -572,6 +573,9 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 	applyDefaultShortcutSet();
 	// Once the event loop is up and every dock has made its shortcuts.
 	QTimer::singleShot(0, this, [this] { suneerLogShortcutConflicts(QStringLiteral("startup")); });
+	// The same duplicates, shown once in a dialog (with "don't show again
+	// until something changes") instead of only in the log.
+	QTimer::singleShot(1500, this, [this] { ScShortcutRegistry::instance().maybeShowDuplicatesDialog(this, tr("at startup")); });
 	// Automatic update check: well after startup, asynchronous, at most once a
 	// day, and silent unless a newer signed build exists.
 	QTimer::singleShot(10000, this, [this] { UpdateCheckDialog::runStartupCheck(this); });

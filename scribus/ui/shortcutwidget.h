@@ -14,6 +14,8 @@ class QEvent;
 
 #include "ui_shortcutwidget.h"
 
+class ScShortcutConflictLabel;
+
 // class Keys;
 
 
@@ -27,6 +29,8 @@ public:
 	~ShortcutWidget();
 
 	void setShortcut(const QString &shortcut);
+	//! Red line under the key display; the owner (Style Manager) fills it.
+	ScShortcutConflictLabel* conflictLabel() const { return m_conflictLabel; }
 	void setAllowedModifiers(int allowed, int required);
 	static QString getKeyText(int KeyC);
 	void languageChange();
@@ -37,6 +41,7 @@ public slots:
 
 protected:
 	int m_keyCode { 0 };
+	ScShortcutConflictLabel* m_conflictLabel { nullptr };
 	QString m_part0;
 	QString m_part1;
 	QString m_part2;

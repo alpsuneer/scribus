@@ -79,6 +79,7 @@ protected:
 	void loadNamedSet(const QString& name);
 	void updateSetButtons();
 	int keyCode { 0 };
+	class ScShortcutConflictLabel* m_conflictLabel { nullptr };
 
 	void insertActions();
 	void importKeySet(const QString&);

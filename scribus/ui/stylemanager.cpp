@@ -9,6 +9,7 @@ for which a new license (GPL+exception) is in place.
 #include <QEvent>
 #include <QMenu>
 #include <QToolTip>
+#include <QTreeWidgetItemIterator>
 #include <QMessageBox>
 
 #include "commonstrings.h"
@@ -20,6 +21,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusview.h"
 #include "selection.h"
 #include "shortcutwidget.h"
+#include "ui/scshortcutregistry.h"
 #include "smcellstyle.h"
 #include "smlinestyle.h"
 #include "smreplacedia.h"
@@ -1328,14 +1330,104 @@ void StyleManager::slotShortcutChanged(const QString& shortcut)
 	if (!sitem)
 		return;
 
-	if (!shortcut.isNull() && shortcutExists(shortcut))
+	const QString styleName = sitem->text(NAME_COL);
+	const bool isChar = (dynamic_cast<SMCharacterStyle*>(m_item) != nullptr);
+	const QString ownerId = QString(isChar ? "cstyle:" : "pstyle:") + styleName;
+	if (!shortcut.isNull() && !shortcut.isEmpty())
 	{
-		ScMessageBox::information(this, CommonStrings::trWarning,
-		                         tr("This key sequence is already in use"));
-		if (m_shortcutWidget)
-			m_shortcutWidget->setShortcut(m_item->shortcut(sitem->text(NAME_COL)));
-		return;
+		const QKeySequence key(shortcut, QKeySequence::PortableText);
+		// Everything that holds this key: menu actions, the other styles of
+		// this document, Next Style Chains, Column Styles, Design Styles,
+		// our own QShortcuts, desktop / fcitx5 grabs.
+		QList<ScShortcutRegistry::Owner> owners = ScShortcutRegistry::instance().ownersOf(key, ownerId);
+		// Styles edited in this dialog but not applied yet live in the items'
+		// temporary sets; the registry sees the document, so add those here.
+		for (StyleItem* si : std::as_const(m_items))
+		{
+			auto* ps = dynamic_cast<SMParagraphStyle*>(si);
+			auto* cs = dynamic_cast<SMCharacterStyle*>(si);
+			if (ps && ps->tmpStyles())
+			{
+				const StyleSet<ParagraphStyle>& set = *ps->tmpStyles();
+				for (int i = 0; i < set.count(); ++i)
+				{
+					const QString id = "pstyle:" + set[i].name();
+					if (id == ownerId || set[i].shortcut().isEmpty() || QKeySequence(set[i].shortcut(), QKeySequence::PortableText) != key)
+						continue;
+					bool known = false;
+					for (const auto& o : owners) known = known || o.id == id;
+					if (known) continue;
+					ScShortcutRegistry::Owner o; o.kind = tr("Paragraph style"); o.name = set[i].name(); o.location = tr("Style Manager, not applied yet"); o.id = id; o.key = key;
+					owners << o;
+				}
+			}
+			if (cs && cs->tmpStyles())
+			{
+				const StyleSet<CharStyle>& set = *cs->tmpStyles();
+				for (int i = 0; i < set.count(); ++i)
+				{
+					const QString id = "cstyle:" + set[i].name();
+					if (id == ownerId || set[i].shortcut().isEmpty() || QKeySequence(set[i].shortcut(), QKeySequence::PortableText) != key)
+						continue;
+					bool known = false;
+					for (const auto& o : owners) known = known || o.id == id;
+					if (known) continue;
+					ScShortcutRegistry::Owner o; o.kind = tr("Character style"); o.name = set[i].name(); o.location = tr("Style Manager, not applied yet"); o.id = id; o.key = key;
+					owners << o;
+				}
+			}
+		}
+		if (m_shortcutWidget && m_shortcutWidget->conflictLabel())
+		{
+			ScShortcutConflictLabel* lbl = m_shortcutWidget->conflictLabel();
+			if (owners.isEmpty()) { lbl->clear(); lbl->hide(); }
+			else { lbl->setText(ScShortcutRegistry::conflictText(key, owners)); lbl->show(); }
+		}
+		if (!owners.isEmpty())
+		{
+			const ScShortcutRegistry::Resolution r = ScShortcutRegistry::instance().askOnConflict(this, key, owners);
+			if (r != ScShortcutRegistry::Replace)
+			{
+				if (m_shortcutWidget)
+					m_shortcutWidget->setShortcut(m_item->shortcut(styleName));
+				if (r == ScShortcutRegistry::ChooseAnother && m_shortcutWidget)
+					m_shortcutWidget->setKeyText();
+				return;
+			}
+			// Replace: the registry cleared the document-side owners. The copies
+			// this dialog holds (applied on OK) and its tree must follow, or the
+			// old key would be written back on Apply.
+			for (const ScShortcutRegistry::Owner& o : owners)
+			{
+				if (!o.id.startsWith("pstyle:") && !o.id.startsWith("cstyle:"))
+					continue;
+				const bool otherIsChar = o.id.startsWith("cstyle:");
+				const QString otherName = o.id.mid(7);
+				for (StyleItem* si : std::as_const(m_items))
+				{
+					if (auto* ps = dynamic_cast<SMParagraphStyle*>(si); ps && !otherIsChar && ps->tmpStyles() && ps->tmpStyles()->contains(otherName))
+						(*ps->tmpStyles())[ps->tmpStyles()->find(otherName)].setShortcut(QString());
+					if (auto* cs = dynamic_cast<SMCharacterStyle*>(si); cs && otherIsChar && cs->tmpStyles() && cs->tmpStyles()->contains(otherName))
+						(*cs->tmpStyles())[cs->tmpStyles()->find(otherName)].setShortcut(QString());
+				}
+				QTreeWidgetItemIterator it(styleView);
+				while (*it)
+				{
+					auto* other = dynamic_cast<StyleViewItem*>(*it);
+					if (other && other->text(NAME_COL) == otherName)
+					{
+						const QString k = other->rootName() + SEPARATOR + otherName;
+						if (m_styleActions.contains(k))
+							m_styleActions[k]->setShortcut(QKeySequence());
+						other->setText(SHORTCUT_COL, QString());
+					}
+					++it;
+				}
+			}
+		}
 	}
+	else if (m_shortcutWidget && m_shortcutWidget->conflictLabel())
+		m_shortcutWidget->conflictLabel()->hide();
 
 	sitem->setText(SHORTCUT_COL, shortcut.isNull() ? "" : shortcut);
 	QString key = sitem->rootName() + SEPARATOR + sitem->text(NAME_COL);

@@ -35,6 +35,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribuscore.h"
 #include "scribus.h"
 #include "ui/ParagraphStylesPanel.h"
+#include "ui/scshortcutregistry.h"
 #include "ui/preferences/prefs_keyboardshortcuts.h"
 #include "ui/scmessagebox.h"
 #include "util.h"
@@ -45,6 +46,9 @@ Prefs_KeyboardShortcuts::Prefs_KeyboardShortcuts(QWidget* parent, ScribusDoc* /*
 {
 	setupUi(this);
 	languageChange();
+	// Shows, in red under the key display, who already holds the key just pressed.
+	m_conflictLabel = new ScShortcutConflictLabel(this);
+	ScShortcutRegistry::insertBelow(keyDisplay, m_conflictLabel);
 
 	m_caption = tr("Keyboard Shortcuts");
 	m_icon = "pref-keyboard-shortcuts";
@@ -817,45 +821,75 @@ void Prefs_KeyboardShortcuts::keyPressEvent(QKeyEvent *k)
 				QString actionName = lviToActionMap[selectedLVI];
 				const QKeySequence newKeySequence(keyCode);
 				const QString oldText = keyMap[actionName].keySequence.toString(QKeySequence::NativeText);
-				// Shortcuts owned by the paragraph-styles panel are not in keyMap, so they
-				// cannot be reassigned from here — refuse rather than create a duplicate.
-				const QString dynOwner = dynamicShortcutOwner(keyCode);
-				if (!dynOwner.isEmpty())
+				// One check for everything that may hold the key: the other
+				// actions as edited on this page (keyMap, not yet saved), and
+				// every style / chain / column / design / desktop owner known to
+				// the central registry.
+				QList<ScShortcutRegistry::Owner> owners;
+				for (auto it = keyMap.begin(); it != keyMap.end(); ++it)
 				{
-					ScMessageBox::information(this, CommonStrings::trWarning,
-						tr("The %1 key sequence is already in use by %2.\n"
-						   "Change or remove it in the Paragraph Styles panel first.")
-						   .arg(getTrKeyText(keyCode), dynOwner));
-					selectedLVI->setText(1, oldText);
-					keyDisplay->setText(oldText);
+					if (it.key() == actionName || it.value().keySequence.isEmpty())
+						continue;
+					if (newKeySequence.matches(it.value().keySequence) != QKeySequence::ExactMatch)
+						continue;
+					ScShortcutRegistry::Owner o;
+					o.kind = tr("Menu action");
+					QString menu = it.value().menuName;
+					for (int mi = 0; menu.isEmpty() && defMenus && mi < defMenus->count(); ++mi)
+						if (defMenus->at(mi).second.contains(it.key()))
+							menu = defMenus->at(mi).first;
+					o.name = (menu.isEmpty() ? QString() : menu + QStringLiteral(" \u2192 ")) + it.value().cleanMenuText;
+					o.location = tr("Keyboard Shortcuts");
+					o.id = "action:" + it.key();
+					o.key = it.value().keySequence;
+					owners << o;
 				}
-				else if (checkKey(keyCode, actionName))
+				const QList<ScShortcutRegistry::Owner> others = ScShortcutRegistry::instance().ownersOf(newKeySequence, "action:" + actionName);
+				for (const ScShortcutRegistry::Owner& o : others)
+					if (!o.id.startsWith("action:"))
+						owners << o;
+				if (m_conflictLabel)
 				{
-					// Offer to move the shortcut rather than refusing outright. Leaving both
-					// bindings in place would make Qt fire neither ("Ambiguous shortcut
-					// overload"), so a duplicate is never an acceptable outcome here.
-					QMessageBox::StandardButton reply = ScMessageBox::question(this, tr("Shortcut Conflict"),
-						tr("The %1 key sequence is already used by \"%2\".\nReassign it to \"%3\"?")
-						   .arg(getTrKeyText(keyCode), getAction(keyCode, actionName), keyMap[actionName].cleanMenuText),
-						QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-					if (reply == QMessageBox::Yes)
+					if (owners.isEmpty()) { m_conflictLabel->clear(); m_conflictLabel->hide(); }
+					else { m_conflictLabel->setText(ScShortcutRegistry::conflictText(newKeySequence, owners)); m_conflictLabel->show(); }
+				}
+				bool apply = owners.isEmpty();
+				bool chooseAnother = false;
+				if (!owners.isEmpty())
+				{
+					switch (ScShortcutRegistry::instance().askOnConflict(this, newKeySequence, owners))
 					{
-						clearConflictingShortcuts(newKeySequence, actionName);
-						selectedLVI->setText(1, newKeySequence.toString(QKeySequence::NativeText));
-						keyMap[actionName].keySequence = newKeySequence;
-						userDef->setChecked(true);
-					}
-					else
-					{
-						selectedLVI->setText(1, oldText);
-						keyDisplay->setText(oldText);
+						case ScShortcutRegistry::Replace:
+							// The registry cleared the style/chain/column owners; the
+							// other actions on this page are cleared here, in keyMap and
+							// in the list, so the old owner shows an empty key.
+							clearConflictingShortcuts(newKeySequence, actionName);
+							apply = true;
+							break;
+						case ScShortcutRegistry::ChooseAnother:
+							chooseAnother = true;
+							break;
+						case ScShortcutRegistry::Cancel:
+							break;
 					}
 				}
-				else
+				if (apply)
 				{
 					selectedLVI->setText(1, newKeySequence.toString(QKeySequence::NativeText));
 					keyMap[actionName].keySequence = newKeySequence;
 					userDef->setChecked(true);
+				}
+				else
+				{
+					selectedLVI->setText(1, oldText);
+					keyDisplay->setText(oldText);
+				}
+				if (chooseAnother)
+				{
+					// Stay in "set key" mode so the next key pressed is taken.
+					keyCode = 0;
+					grabKeyboard();
+					return;
 				}
 			}
 			setKeyButton->setChecked(false);

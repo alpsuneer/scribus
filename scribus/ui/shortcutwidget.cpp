@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include <QKeyEvent>
 
 #include "shortcutwidget.h"
+#include "ui/scshortcutregistry.h"
 
 
 ShortcutWidget::ShortcutWidget(QWidget *parent)

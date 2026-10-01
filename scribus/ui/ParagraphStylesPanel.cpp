@@ -54,6 +54,7 @@
 #include "prefsmanager.h"
 #include "scraction.h"
 #include "ui/stylemanager.h"
+#include "ui/scshortcutregistry.h"
 #include "styles/charstyle.h"
 #include <functional>
 #include <QRegularExpression>
@@ -286,6 +287,137 @@ static void saveColumnConfigs()
 	cfg.endArray();
 }
 
+// ============================================================
+// Central shortcut registry: everything this panel owns keys for, so the
+// Keyboard Shortcuts page, the Style Manager and our own dialogs all see the
+// same list and can clear an owner on "Replace".
+static void clearDocParagraphStyleShortcut(const QString& styleName)
+{
+	ScribusDoc* doc = s_shortcutDoc;
+	if (!doc || !doc->paragraphStyles().contains(styleName))
+		return;
+	StyleSet<ParagraphStyle> tmp;
+	tmp.redefine(doc->paragraphStyles(), true);
+	tmp[tmp.find(styleName)].setShortcut(QString());
+	doc->redefineStyles(tmp, false);
+	doc->changed();
+}
+
+static void clearDocCharStyleShortcut(const QString& styleName)
+{
+	ScribusDoc* doc = s_shortcutDoc;
+	if (!doc || !doc->charStyles().contains(styleName))
+		return;
+	StyleSet<CharStyle> tmp;
+	tmp.redefine(doc->charStyles(), true);
+	tmp[tmp.find(styleName)].setShortcut(QString());
+	doc->redefineCharStyles(tmp, false);
+	doc->changed();
+}
+
+static QString shortcutOwnerId(const QString& kind, const QString& name) { return kind + ":" + name; }
+
+static void registerShortcutProviders()
+{
+	using Owner = ScShortcutRegistry::Owner;
+	ScShortcutRegistry& reg = ScShortcutRegistry::instance();
+	reg.addProvider("paragraphStyles", []() {
+		QList<Owner> out;
+		if (!s_shortcutDoc)
+			return out;
+		const StyleSet<ParagraphStyle>& styles = s_shortcutDoc->paragraphStyles();
+		for (int i = 0; i < styles.count(); ++i)
+		{
+			if (styles[i].shortcut().isEmpty())
+				continue;
+			Owner o;
+			o.kind = QObject::tr("Paragraph style"); o.name = styles[i].name(); o.location = QObject::tr("this document");
+			o.id = shortcutOwnerId("pstyle", o.name);
+			o.key = QKeySequence(styles[i].shortcut(), QKeySequence::PortableText);
+			const QString n = o.name;
+			o.clear = [n]() { clearDocParagraphStyleShortcut(n); };
+			out << o;
+		}
+		return out;
+	});
+	reg.addProvider("characterStyles", []() {
+		QList<Owner> out;
+		if (!s_shortcutDoc)
+			return out;
+		const StyleSet<CharStyle>& styles = s_shortcutDoc->charStyles();
+		for (int i = 0; i < styles.count(); ++i)
+		{
+			if (styles[i].shortcut().isEmpty())
+				continue;
+			Owner o;
+			o.kind = QObject::tr("Character style"); o.name = styles[i].name(); o.location = QObject::tr("this document");
+			o.id = shortcutOwnerId("cstyle", o.name);
+			o.key = QKeySequence(styles[i].shortcut(), QKeySequence::PortableText);
+			const QString n = o.name;
+			o.clear = [n]() { clearDocCharStyleShortcut(n); };
+			out << o;
+		}
+		return out;
+	});
+	reg.addProvider("nextStyleChains", []() {
+		QList<Owner> out;
+		for (auto it = s_styleShortcuts.constBegin(); it != s_styleShortcuts.constEnd(); ++it)
+		{
+			if (it.value().isEmpty())
+				continue;
+			Owner o;
+			o.kind = QObject::tr("Next Style Chain"); o.name = it.key(); o.location = QObject::tr("Paragraph Styles panel");
+			o.id = shortcutOwnerId("chain", it.key());
+			o.key = it.value();
+			const QString n = it.key();
+			o.clear = [n]() { s_styleShortcuts.remove(n); saveShortcuts(); };
+			out << o;
+		}
+		return out;
+	});
+	reg.addProvider("columnStyles", []() {
+		QList<Owner> out;
+		for (int i = 0; i < s_columnConfigs.size(); ++i)
+		{
+			if (s_columnConfigs[i].shortcut.isEmpty())
+				continue;
+			Owner o;
+			o.kind = QObject::tr("Column Style"); o.name = QObject::tr("Config %1").arg(i + 1); o.location = QObject::tr("Paragraph Styles panel");
+			o.id = shortcutOwnerId("column", QString::number(i));
+			o.key = s_columnConfigs[i].shortcut;
+			o.clear = [i]() { if (i < s_columnConfigs.size()) { s_columnConfigs[i].shortcut = QKeySequence(); saveColumnConfigs(); } };
+			out << o;
+		}
+		return out;
+	});
+	reg.addProvider("designStyles", []() {
+		QList<Owner> out;
+		QSettings dsCfg("Scribus", "SuneerDesignStyle");
+		const int count = dsCfg.beginReadArray("styles");
+		for (int i = 0; i < count; ++i)
+		{
+			dsCfg.setArrayIndex(i);
+			const QString sc = dsCfg.value("shortcut").toString();
+			if (sc.isEmpty())
+				continue;
+			Owner o;
+			o.kind = QObject::tr("Design Style"); o.name = dsCfg.value("tooltip", QString("Style %1").arg(i + 1)).toString(); o.location = QObject::tr("Design Style tab");
+			o.id = shortcutOwnerId("design", QString::number(i));
+			o.key = QKeySequence(sc, QKeySequence::PortableText);
+			if (o.key.isEmpty())
+				continue;
+			o.clear = [i]() {
+				QSettings c("Scribus", "SuneerDesignStyle");
+				const int n = c.beginReadArray("styles"); c.endArray();
+				c.beginWriteArray("styles", n); c.setArrayIndex(i); c.setValue("shortcut", QString()); c.endArray();
+			};
+			out << o;
+		}
+		dsCfg.endArray();
+		return out;
+	});
+}
+
 class SuneerColumnConfigDialog : public QDialog
 {
 public:
@@ -343,11 +475,17 @@ public:
 		leftLay->addSpacing(10);
 		leftLay->addWidget(new QLabel("<b>Set Short Key</b>"));
 		QHBoxLayout* scRow = new QHBoxLayout();
-		QPushButton* setKeyBtn = new QPushButton("Set Key", this);
+		QPushButton* setKeyBtn = new QPushButton("Clear", this);
 		m_keyEdit = new QKeySequenceEdit(entry.shortcut, this);
+		m_keyEdit->setMaximumSequenceLength(1);
 		scRow->addWidget(setKeyBtn);
 		scRow->addWidget(m_keyEdit, 1);
 		leftLay->addLayout(scRow);
+		m_conflict = new ScShortcutConflictLabel(this);
+		leftLay->addWidget(m_conflict);
+		connect(m_keyEdit, &QKeySequenceEdit::keySequenceChanged, this, [this](const QKeySequence& ks) {
+			m_conflict->setKey(ks, m_ownerId);
+		});
 		leftLay->addStretch();
 		mainLay->addLayout(leftLay, 1);
 
@@ -412,9 +550,27 @@ public:
 			QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
 		outerLay->addWidget(bb);
 
-		connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+		connect(bb, &QDialogButtonBox::accepted, this, [this]() {
+			const QKeySequence k = m_keyEdit->keySequence();
+			m_conflict->setKey(k, m_ownerId);
+			if (!m_conflict->hasConflict()) { accept(); return; }
+			switch (ScShortcutRegistry::instance().askOnConflict(this, k, m_conflict->owners()))
+			{
+				case ScShortcutRegistry::Replace: accept(); break;
+				case ScShortcutRegistry::ChooseAnother: m_conflict->setKey(k, m_ownerId); m_keyEdit->setFocus(); break;
+				case ScShortcutRegistry::Cancel: reject(); break;
+			}
+		});
 		connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
-		Q_UNUSED(setKeyBtn);
+		connect(setKeyBtn, &QPushButton::clicked, this, [this]() { m_keyEdit->clear(); m_keyEdit->setFocus(); });
+		m_conflict->setKey(entry.shortcut, m_ownerId);
+	}
+
+	//! The config being edited ("column:<index>"), so its own key is not a conflict.
+	void setOwnerIndex(int index)
+	{
+		m_ownerId = index < 0 ? QString() : shortcutOwnerId("column", QString::number(index));
+		m_conflict->setKey(m_keyEdit->keySequence(), m_ownerId);
 	}
 
 	SuneerColumnConfigEntry result() const
@@ -474,6 +630,8 @@ private:
 	QDoubleSpinBox* m_columnWidth;
 	QKeySequenceEdit* m_keyEdit;
 	QCheckBox* m_autoFitCheck;
+	ScShortcutConflictLabel* m_conflict {nullptr};
+	QString m_ownerId;
 };
 
 
@@ -568,6 +726,7 @@ private:
 		if (!item) return;
 		int idx = item->data(Qt::UserRole).toInt();
 		SuneerColumnConfigDialog dlg(m_allStyles, s_columnConfigs[idx], m_pageWidthMm, m_marginLeftMm, m_marginRightMm, m_guideCols, m_guideGap, this);
+		dlg.setOwnerIndex(idx);
 		if (dlg.exec() != QDialog::Accepted) return;
 		s_columnConfigs[idx] = dlg.result();
 		saveColumnConfigs();
@@ -618,6 +777,7 @@ public:
 	{
 		setWindowTitle("Next Style Chain: " + rootStyle);
 		setMinimumWidth(360);
+		m_ownerId = shortcutOwnerId("chain", rootStyle);
 		QVBoxLayout* lay = new QVBoxLayout(this);
 
 		// Shortcut field
@@ -658,32 +818,24 @@ public:
 		row->addWidget(delBtn);
 		lay->addLayout(row);
 
-		m_conflictLabel = new QLabel("", this);
-		m_conflictLabel->setStyleSheet("color: red; font-size: 9pt;");
+		m_conflictLabel = new ScShortcutConflictLabel(this);
 		lay->addWidget(m_conflictLabel);
 		connect(m_keyEdit, &QKeySequenceEdit::keySequenceChanged, this, [this](const QKeySequence& ks) {
-			if (ks.isEmpty()) { m_conflictLabel->setText(""); return; }
-			// Check against other chains and the styles' own keys
-			for (auto it = s_styleShortcuts.begin(); it != s_styleShortcuts.end(); ++it)
-				if (!it.value().isEmpty() && it.value() == ks)
-				{
-					m_conflictLabel->setText("Warning: Key already used by chain of style: " + it.key());
-					return;
-				}
-			if (s_shortcutDoc)
-			{
-				const StyleSet<ParagraphStyle>& st = s_shortcutDoc->paragraphStyles();
-				for (int i = 0; i < st.count(); ++i)
-					if (!st[i].shortcut().isEmpty() && QKeySequence(st[i].shortcut(), QKeySequence::PortableText) == ks)
-					{
-						m_conflictLabel->setText("Warning: Key is the shortcut of style: " + st[i].name());
-						return;
-					}
-			}
-			m_conflictLabel->setText("");
+			m_conflictLabel->setKey(ks, m_ownerId);
 		});
+		m_conflictLabel->setKey(currentShortcut, m_ownerId);
 		QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-		connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+		connect(bb, &QDialogButtonBox::accepted, this, [this]() {
+			const QKeySequence k = m_keyEdit->keySequence();
+			m_conflictLabel->setKey(k, m_ownerId);
+			if (!m_conflictLabel->hasConflict()) { accept(); return; }
+			switch (ScShortcutRegistry::instance().askOnConflict(this, k, m_conflictLabel->owners()))
+			{
+				case ScShortcutRegistry::Replace: accept(); break;
+				case ScShortcutRegistry::ChooseAnother: m_conflictLabel->setKey(k, m_ownerId); m_keyEdit->setFocus(); break;
+				case ScShortcutRegistry::Cancel: reject(); break;
+			}
+		});
 		connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
 		lay->addWidget(bb);
 	}
@@ -702,7 +854,8 @@ private:
 	QListWidget*      m_list;
 	QComboBox*        m_combo;
 	QKeySequenceEdit* m_keyEdit;
-	QLabel* m_conflictLabel;
+	ScShortcutConflictLabel* m_conflictLabel;
+	QString m_ownerId;
 };
 
 // Custom delegate to draw chain-link icon + shortcut on right side
@@ -816,6 +969,15 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	setObjectName("ParagraphStylesPanel");
 	setFeatures(QDockWidget::NoDockWidgetFeatures);
 	loadShortcuts();
+	registerShortcutProviders();
+	// Another place (Keyboard Shortcuts, Style Manager, a dialog here) cleared
+	// or moved a key: rebuild our QShortcuts and show the old owner as empty.
+	connect(&ScShortcutRegistry::instance(), &ScShortcutRegistry::changed, this, [this]() {
+		loadColumnConfigs();
+		rebuildShortcuts();
+		updateStylesList();
+		refreshColTabList();
+	});
 
 	// Auto-load Column Styles
 	{
@@ -1197,6 +1359,8 @@ void ParagraphStylesPanel::setDocument(ScribusDoc* doc)
 		disconnect(m_doc, nullptr, this, nullptr);
 	m_doc = doc;
 	s_shortcutDoc = doc;
+	if (doc && m_mainWindow)
+		QTimer::singleShot(0, this, [this]() { ScShortcutRegistry::instance().maybeShowDuplicatesDialog(m_mainWindow, tr("document opened")); });
 	if (m_doc)
 	{
 		connect(m_doc, &ScribusDoc::docChanged, this, &ParagraphStylesPanel::updateStylesList);
@@ -1770,6 +1934,7 @@ void ParagraphStylesPanel::colTabEdit()
         if (pg) { guideCols = pg->guides.verticalAutoCount(); guideGap = pg->guides.verticalAutoGap()*PT2MM; }
     }
     SuneerColumnConfigDialog dlg(allStyles, s_columnConfigs[idx], pageW, marginL, marginR, guideCols, guideGap, this);
+    dlg.setOwnerIndex(idx);
     if (dlg.exec() != QDialog::Accepted) return;
     s_columnConfigs[idx] = dlg.result();
     saveColumnConfigs();
@@ -2065,6 +2230,7 @@ void ParagraphStylesPanel::rebuildColumnShortcuts()
 			continue;
 		QShortcut* sc = new QShortcut(e.shortcut, parent, nullptr, nullptr, Qt::ApplicationShortcut);
 		sc->setObjectName(QString("Column Style config %1").arg(i + 1));
+		ScShortcutRegistry::instance().registerShortcut(sc, "Paragraph Styles panel", sc->objectName(), shortcutOwnerId("column", QString::number(i)));
 		connect(sc, &QShortcut::activated, this, [this, idx]() {
 			applyColumnConfig(idx);
 		});
@@ -2104,6 +2270,7 @@ void ParagraphStylesPanel::rebuildShortcuts()
 			continue;
 		QShortcut* sc = new QShortcut(it.value(), parent, nullptr, nullptr, Qt::ApplicationShortcut);
 		sc->setObjectName(QString("Next Style Chain key of style '%1'").arg(styleName));
+		ScShortcutRegistry::instance().registerShortcut(sc, "Paragraph Styles panel", sc->objectName(), shortcutOwnerId("chain", styleName));
 		connect(sc, &QShortcut::activated, this, [this, styleName]() {
 			applyChainFromStyle(styleName);
 		});
@@ -2146,6 +2313,7 @@ void ParagraphStylesPanel::rebuildStyleShortcuts()
 			continue;
 		QShortcut* sc = new QShortcut(key, parent, nullptr, nullptr, Qt::ApplicationShortcut);
 		sc->setObjectName(QString("shortcut of paragraph style '%1'").arg(styleName));
+		ScShortcutRegistry::instance().registerShortcut(sc, "Paragraph Styles panel", sc->objectName(), shortcutOwnerId("pstyle", styleName));
 		connect(sc, &QShortcut::activated, this, [this, styleName]() {
 			if (!m_doc || !m_doc->paragraphStyles().contains(styleName))
 				return;
@@ -2175,6 +2343,7 @@ namespace
 		{
 			setWindowTitle("Shortcut: " + styleName);
 			setMinimumWidth(320);
+			m_ownerId = shortcutOwnerId("pstyle", styleName);
 			QVBoxLayout* lay = new QVBoxLayout(this);
 			QHBoxLayout* row = new QHBoxLayout();
 			row->addWidget(new QLabel("Press shortcut:", this));
@@ -2186,8 +2355,24 @@ namespace
 			connect(clearBtn, &QPushButton::clicked, this, [this]() { m_keyEdit->clear(); });
 			row->addWidget(clearBtn);
 			lay->addLayout(row);
+			m_conflict = new ScShortcutConflictLabel(this);
+			lay->addWidget(m_conflict);
+			connect(m_keyEdit, &QKeySequenceEdit::keySequenceChanged, this, [this](const QKeySequence& ks) {
+				m_conflict->setKey(isBareConfirmKey(ks) ? m_previous : ks, m_ownerId);
+			});
+			m_conflict->setKey(current, m_ownerId);
 			QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-			connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+			connect(bb, &QDialogButtonBox::accepted, this, [this]() {
+				const QKeySequence k = key();
+				m_conflict->setKey(k, m_ownerId);
+				if (!m_conflict->hasConflict()) { accept(); return; }
+				switch (ScShortcutRegistry::instance().askOnConflict(this, k, m_conflict->owners()))
+				{
+					case ScShortcutRegistry::Replace: accept(); break;
+					case ScShortcutRegistry::ChooseAnother: m_conflict->setKey(k, m_ownerId); m_keyEdit->setFocus(); break;
+					case ScShortcutRegistry::Cancel: reject(); break;
+				}
+			});
 			connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
 			lay->addWidget(bb);
 			m_keyEdit->setFocus();
@@ -2221,6 +2406,8 @@ namespace
 		}
 		QKeySequenceEdit* m_keyEdit;
 		QKeySequence m_previous;
+		QString m_ownerId;
+		ScShortcutConflictLabel* m_conflict {nullptr};
 	};
 
 	QString paraStyleShortcutsFilter() { return QString("Style shortcuts (*.json)"); }
@@ -2254,106 +2441,19 @@ void ParagraphStylesPanel::assignShortcut()
 	QKeySequence key = dlg.key();
 	if (key == styleOwnShortcut(m_doc, styleName))
 		return;
-	if (!key.isEmpty() && !resolveShortcutConflict(key, styleName))
-		return;
+	// A conflict was already resolved inside the dialog (Replace ran the old
+	// owner's clear, Choose-another kept the dialog open, Cancel rejected).
 	setStyleShortcut(styleName, key);
 }
 
 bool ParagraphStylesPanel::resolveShortcutConflict(const QKeySequence& key, const QString& forStyle)
 {
-	// Collect everything holding this key: label for the user, and a clearer
-	// to run on "Replace".
-	QStringList owners;
-	QList<std::function<void()>> clearers;
-
-	const StyleSet<ParagraphStyle>& pstyles = m_doc->paragraphStyles();
-	for (int i = 0; i < pstyles.count(); ++i)
-	{
-		if (pstyles[i].name() == forStyle || pstyles[i].shortcut().isEmpty())
-			continue;
-		if (QKeySequence(pstyles[i].shortcut(), QKeySequence::PortableText) != key)
-			continue;
-		const QString other = pstyles[i].name();
-		owners << QString("paragraph style \"%1\"").arg(other);
-		clearers << [this, other]() { setStyleShortcut(other, QKeySequence()); };
-	}
-	const StyleSet<CharStyle>& cstyles = m_doc->charStyles();
-	for (int i = 0; i < cstyles.count(); ++i)
-	{
-		if (cstyles[i].shortcut().isEmpty())
-			continue;
-		if (QKeySequence(cstyles[i].shortcut(), QKeySequence::PortableText) != key)
-			continue;
-		const QString other = cstyles[i].name();
-		owners << QString("character style \"%1\" (Style Manager)").arg(other);
-		clearers << [this, other]() {
-			StyleSet<CharStyle> tmp;
-			tmp.redefine(m_doc->charStyles(), true);
-			if (tmp.contains(other))
-			{
-				tmp[tmp.find(other)].setShortcut(QString());
-				m_doc->redefineCharStyles(tmp, false);
-			}
-		};
-	}
-	for (auto it = s_styleShortcuts.constBegin(); it != s_styleShortcuts.constEnd(); ++it)
-	{
-		if (it.value().isEmpty() || it.value() != key)
-			continue;
-		const QString other = it.key();
-		owners << QString("Next Style Chain of \"%1\"").arg(other);
-		clearers << [other]() { s_styleShortcuts.remove(other); saveShortcuts(); };
-	}
-	for (int i = 0; i < s_columnConfigs.size(); ++i)
-	{
-		if (s_columnConfigs[i].shortcut.isEmpty() || s_columnConfigs[i].shortcut != key)
-			continue;
-		owners << QString("column config %1").arg(i + 1);
-		clearers << [i]() { if (i < s_columnConfigs.size()) { s_columnConfigs[i].shortcut = QKeySequence(); saveColumnConfigs(); } };
-	}
-	// Actions in the active keyboard shortcut set (e.g. Newspaper Default).
-	QMap<QString, Keys>& keyActions = PrefsManager::instance().appPrefs.keyShortcutPrefs.KeyActions;
-	bool actionConflict = false;
-	for (auto it = keyActions.constBegin(); it != keyActions.constEnd(); ++it)
-	{
-		if (it.value().keySequence.isEmpty() || key.matches(it.value().keySequence) != QKeySequence::ExactMatch)
-			continue;
-		actionConflict = true;
-		const QString actionName = it.key();
-		QString label = it.value().cleanMenuText.isEmpty() ? actionName : it.value().cleanMenuText;
-		if (!it.value().menuName.isEmpty())
-			label = it.value().menuName + " > " + label;
-		owners << QString("action \"%1\" in the current shortcut set").arg(label);
-		clearers << [this, actionName]() {
-			QMap<QString, Keys>& ka = PrefsManager::instance().appPrefs.keyShortcutPrefs.KeyActions;
-			if (ka.contains(actionName))
-				ka[actionName].keySequence = QKeySequence();
-			if (m_mainWindow && m_mainWindow->scrActions.contains(actionName) && m_mainWindow->scrActions[actionName])
-				m_mainWindow->scrActions[actionName]->setShortcut(QKeySequence());
-		};
-	}
+	// Kept for callers outside the dialogs: same question, same registry.
+	ScShortcutRegistry& reg = ScShortcutRegistry::instance();
+	const QList<ScShortcutRegistry::Owner> owners = reg.ownersOf(key, shortcutOwnerId("pstyle", forStyle));
 	if (owners.isEmpty())
 		return true;
-
-	QString text = QString("%1 is already used by:\n\n  %2\n\nReplace it? The other owner loses the key.")
-		.arg(key.toString(QKeySequence::NativeText), owners.join("\n  "));
-	if (actionConflict)
-		text += "\n\nNote: an action's key is cleared for this session only. A Default "
-		        "shortcut set is applied again at the next start; change the set in "
-		        "Preferences > Keyboard Shortcuts to make it permanent.";
-	QMessageBox box(QMessageBox::Warning, "Shortcut in use", text, QMessageBox::NoButton, this);
-	QPushButton* replaceBtn = box.addButton("Replace", QMessageBox::AcceptRole);
-	box.addButton(QMessageBox::Cancel);
-	box.setDefaultButton(QMessageBox::Cancel);
-	box.exec();
-	if (box.clickedButton() != replaceBtn)
-		return false;
-	for (const auto& clear : clearers)
-		clear();
-	// The cleared owner's QShortcut must go now: left alive next to the new
-	// one, Qt sees an ambiguous key and fires neither.
-	rebuildShortcuts();
-	return true;
+	return reg.askOnConflict(this, key, owners) == ScShortcutRegistry::Replace;
 }
 
 void ParagraphStylesPanel::setStyleShortcut(const QString& styleName, const QKeySequence& key)
@@ -2808,6 +2908,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
         QStringList allStyles; double pageW=0,marginL=0,marginR=0,guideGap=0; int guideCols=0;
         getDocInfo(allStyles, pageW, marginL, marginR, guideCols, guideGap);
         SuneerColumnConfigDialog dlg2(allStyles, s_columnConfigs[idx], pageW, marginL, marginR, guideCols, guideGap, colTabW);
+        dlg2.setOwnerIndex(idx);
         if (dlg2.exec() != QDialog::Accepted) return;
         s_columnConfigs[idx] = dlg2.result();
         saveColumnConfigs(); refreshColTabList(); refreshColMgrList();
