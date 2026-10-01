@@ -290,7 +290,13 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 	currItem->setLineColor(CommonStrings::None);
 	currItem->setFillColor(CommonStrings::None);
 
-	// Text wrap — only if m_autoWrap is set (Ctrl+i)
+	// Text wrap: Ctrl+I (m_autoWrap) places a NEW frame and sets bounding-box
+	// wrap with a 3 mm gap. Every other way into this mode - double-click on
+	// an empty frame, File > Import > Get Image, replacing an image - loads
+	// into a frame that already exists, so the wrap mode, wrap distances and
+	// contour the frame already has (from a Design Style, or set by hand)
+	// are left exactly as they are. This used to force TextFlowDisabled here,
+	// which is how a Design Style image frame lost its wrap on double-click.
 	if (m_autoWrap) {
 		const double MM2PT = 2.8346;
 		const double gap = 3.0 * MM2PT;
@@ -299,9 +305,12 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 		currItem->setTextToFrameDistRight(gap);
 		currItem->setTextToFrameDistTop(gap);
 		currItem->setTextToFrameDistBottom(gap);
-	} else {
-		currItem->setTextFlowMode(PageItem::TextFlowDisabled);
 	}
+	// The loaded image can change the frame's clip (image-clipping wrap) and
+	// the frame may have been resized to it: re-lay-out the text frames that
+	// wrap around this one now, not on the next click elsewhere.
+	if (currItem->textFlowMode() != PageItem::TextFlowDisabled)
+		currItem->checkTextFlowInteractions(true);
 	m_ScMW->repaint();
 	qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 	m_view->DrawNew();
