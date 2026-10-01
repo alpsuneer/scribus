@@ -152,6 +152,16 @@ public:
 		InformAndSwitch,   //!< stock: tell the user, then switch (File > Open)
 		AskGoToOrCancel    //!< offer "Go to it" or "Cancel" (double-click handoff)
 	};
+	//! Whether loadDoc() takes the network lock on the file it reads. Decided
+	//! by HOW the file is opened, never by which folder it lives in: File > Open
+	//! of a template locks it (one editor at a time); New from Template reads
+	//! it and never locks, because the new document is untitled and gets its
+	//! own lock on first Save As, on the new path.
+	enum class LockMode
+	{
+		LockFile,          //!< normal editing: take the lock, bind it to the document
+		NoLock             //!< read the file as a template: no lock, no binding
+	};
 
 	int initScMW(bool primaryMainWindow);
 	/*! Queue paths handed over by another launch. NEVER opens them inline: a
@@ -440,6 +450,10 @@ public slots:
 	bool slotFileOpen();
 	bool loadDoc(const QString& );
 	bool loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen);
+	bool loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen, LockMode lockMode);
+	//! Every folder Scribus takes templates from: the stock template dir, the
+	//! Preferences > Paths template dir, and the Paragraph Styles template source.
+	static QStringList templateSearchPaths();
 	/**
 	 * @brief Do post loading functions
 	 */

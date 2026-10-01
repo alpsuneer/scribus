@@ -585,6 +585,14 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 
 	checkMalayalamDtpFirstRun();
 	applyDefaultShortcutSet();
+	// Locks this user left behind on template files (older builds locked a
+	// template while a document made from it was open; a crash kept the lock).
+	// Only our own locks whose process is gone; anyone else's stays.
+	{
+		const QStringList removed = DocumentLock::removeOwnDeadLocksIn(templateSearchPaths(), 1);
+		for (const QString& l : removed)
+			qWarning().noquote() << "[DocumentLock] removed leftover lock" << l;
+	}
 	// Once the event loop is up and every dock has made its shortcuts.
 	QTimer::singleShot(0, this, [this] { suneerLogShortcutConflicts(QStringLiteral("startup")); });
 	// The same duplicates, shown once in a dialog (with "don't show again
@@ -2441,7 +2449,8 @@ void ScribusMainWindow::startUpDialog()
 		else if (dia->tabSelected() == NewDocDialog::NewFromTemplateTab)
 		{
 			QString fileName = QDir::cleanPath(dia->selectedFile());
-			if (!fileName.isEmpty() && loadDoc(fileName))
+			// A template is read, not opened for editing: no lock on it (see LockMode).
+			if (!fileName.isEmpty() && loadDoc(fileName, AlreadyOpenAction::InformAndSwitch, LockMode::NoLock))
 			{
 				doc->hasName = false;
 				UndoManager::instance()->renameStack(dia->nftGui->currentDocumentTemplate->name);
@@ -2683,7 +2692,8 @@ void ScribusMainWindow::newFileFromTemplate()
 	{
 		QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 		nfttemplate* currentTemplate = nftdia->currentTemplate();
-		if (loadDoc(QDir::cleanPath(currentTemplate->file)))
+		// A template is read, not opened for editing: no lock on it (see LockMode).
+		if (loadDoc(QDir::cleanPath(currentTemplate->file), AlreadyOpenAction::InformAndSwitch, LockMode::NoLock))
 		{
 			doc->hasName = false;
 			UndoManager::instance()->renameStack(currentTemplate->name);
@@ -3934,6 +3944,29 @@ bool ScribusMainWindow::loadDoc(const QString& fileName)
 
 bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen)
 {
+	return loadDoc(fileName, onAlreadyOpen, LockMode::LockFile);
+}
+
+QStringList ScribusMainWindow::templateSearchPaths()
+{
+	QStringList dirs;
+	dirs << ScPaths::instance().templateDir();
+	dirs << ScPaths::userTemplateDir(false);
+	dirs << ParagraphStylesPanel::templateSourceDir();
+	QStringList out;
+	for (const QString& d : dirs)
+	{
+		if (d.isEmpty())
+			continue;
+		const QString abs = QDir(d).absolutePath();
+		if (!out.contains(abs) && QDir(abs).exists())
+			out << abs;
+	}
+	return out;
+}
+
+bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlreadyOpen, LockMode lockMode)
+{
 #ifdef DEBUG_LOAD_TIMES
 	QTime t;
 	struct tms tms1, tms2;
@@ -4025,6 +4058,10 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 	// Reached only when the document is NOT already open in this instance, so a
 	// document open here can never present as "in use by someone else".
 	bool openReadOnlyDueToLock = false;
+	// NoLock (New from Template): the file is only read. Nothing is created
+	// beside it, so a template on the server share is never "in use" for the
+	// other PCs, and nothing is left behind if this session dies.
+	if (lockMode == LockMode::LockFile)
 	{
 		DocumentLock::Info holder;
 		if (!DocumentLock::acquire(filename, &holder))
@@ -4486,12 +4523,12 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		doc->setOpenedReadOnly(openReadOnlyDueToLock);
 		// Close releases the lock this document was opened with, even if its
 		// name changes (an imported file becomes "name(converted)").
-		if (!openReadOnlyDueToLock)
+		if (!openReadOnlyDueToLock && lockMode == LockMode::LockFile)
 			DocumentLock::bindDocument(doc, filename);
 	}
 	// The load failed, so hold no lock: another machine must not be blocked by a
 	// document that never opened here.
-	if (!ret && !openReadOnlyDueToLock)
+	if (!ret && !openReadOnlyDueToLock && lockMode == LockMode::LockFile)
 		DocumentLock::release(filename);
 #ifdef DEBUG_LOAD_TIMES
 	times(&tms2);

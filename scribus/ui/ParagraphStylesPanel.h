@@ -38,6 +38,8 @@ public:
 	// preferences page checks against. Expose them so that page can still detect conflicts.
 	// Returns a human-readable owner label -> key sequence map; empty sequences are omitted.
 	static QMap<QString, QKeySequence> dynamicShortcuts();
+	//! The folder the Styles tab imports template styles from (Settings > Template source).
+	static QString templateSourceDir();
 
 	//! \brief Append a tab after the built-in Styles and Design Style tabs.
 	//! Used for the News Browser, which is optional and owned elsewhere: the

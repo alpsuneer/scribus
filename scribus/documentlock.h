@@ -66,6 +66,13 @@ public:
 
 	//! Read a lock without taking it. Info::valid is false when absent/unreadable.
 	static Info read(const QString& documentPath);
+	//! Same, given the lock file itself.
+	static Info readLockFile(const QString& lockPath);
+	/*! Startup sweep: delete the locks in \a dirs (and \a subdirDepth levels of
+	    subfolders) that THIS user on THIS host wrote and whose process is no
+	    longer running. Locks of other users or hosts, and of live processes,
+	    are left alone. \returns the lock files removed. */
+	static QStringList removeOwnDeadLocksIn(const QStringList& dirs, int subdirDepth = 1);
 
 	/*! Delete the lock, but only when this process actually owns it.
 	    Ownership comes from the locks this process created (registerHeld()),
@@ -75,7 +82,8 @@ public:
 
 	/*! Delete a lock file, retrying briefly: over SMB a delete can fail while
 	    another PC has the file open for a moment (e.g. reading who holds it).
-	    eturns true once the file is gone; logs a warning if it is not. */
+	    
+eturns true once the file is gone; logs a warning if it is not. */
 	static bool removeLockFile(const QString& lockPath);
 
 	//! This process's own lock, for a document it no longer has open.

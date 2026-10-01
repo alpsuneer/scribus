@@ -84,6 +84,8 @@ static QString templateSourcePath()
 	return cfg.value("path", defaultTemplateSourcePath()).toString();
 }
 
+QString ParagraphStylesPanel::templateSourceDir() { return templateSourcePath(); }
+
 static void setTemplateSourcePath(const QString& path)
 {
 	QSettings cfg("Scribus", "ParagraphStylesTemplateSource");

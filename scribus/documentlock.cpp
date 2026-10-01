@@ -134,8 +134,48 @@ bool DocumentLock::acquire(const QString& documentPath, Info* existing)
 
 DocumentLock::Info DocumentLock::read(const QString& documentPath)
 {
+	return readLockFile(lockPathFor(documentPath));
+}
+
+QStringList DocumentLock::removeOwnDeadLocksIn(const QStringList& dirs, int subdirDepth)
+{
+	QStringList removed;
+	QStringList todo = dirs;
+	QStringList seen;
+	for (int level = 0; level <= subdirDepth && !todo.isEmpty(); ++level)
+	{
+		QStringList next;
+		for (const QString& d : std::as_const(todo))
+		{
+			const QString abs = QDir(d).absolutePath();
+			if (abs.isEmpty() || seen.contains(abs) || !QDir(abs).exists())
+				continue;
+			seen << abs;
+			QDir dir(abs);
+			const QStringList locks = dir.entryList({ QStringLiteral(".*.lock") }, QDir::Files | QDir::Hidden);
+			for (const QString& name : locks)
+			{
+				const QString lockPath = dir.filePath(name);
+				if (isHeld(lockPath))
+					continue;                   // ours, this very process
+				const Info info = readLockFile(lockPath);
+				if (!isMineAndDead(info))
+					continue;                   // someone else's, or a live process of ours
+				if (QFile::remove(lockPath))
+					removed << lockPath;
+			}
+			const QStringList subs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+			for (const QString& sdir : subs)
+				next << dir.filePath(sdir);
+		}
+		todo = next;
+	}
+	return removed;
+}
+
+DocumentLock::Info DocumentLock::readLockFile(const QString& lockPath)
+{
 	Info info;
-	const QString lockPath = lockPathFor(documentPath);
 	QFileInfo lfi(lockPath);
 	if (!lfi.exists())
 		return info;
