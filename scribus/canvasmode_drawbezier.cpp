@@ -325,6 +325,8 @@ void BezierMode::mousePressEvent(QMouseEvent *m)
 		m_inItemCreation = true;
 	}
 	currItem = m_doc->m_Selection->itemAt(0);
+	if (!currItem)
+		return;
 	pm = currItem->getTransform();
 	npf = m_doc->ApplyGridF(mousePointDoc).transformPoint(pm, true);
 	currItem->PoLine.addPoint(npf);
@@ -356,7 +358,7 @@ void BezierMode::mouseReleaseEvent(QMouseEvent *m)
 	m_canvas->resetRenderMode();
 	m->accept();
 	m_canvas->setRenderModeUseBuffer(false);
-	if ((m_doc->appMode == modeDrawBezierLine) && (m->button() == Qt::LeftButton))
+	if ((m_doc->appMode == modeDrawBezierLine) && (m->button() == Qt::LeftButton) && (m_doc->m_Selection->itemAt(0) != nullptr))
 	{
 		m_canvas->setRenderModeUseBuffer(true);
 		currItem = m_doc->m_Selection->itemAt(0);
