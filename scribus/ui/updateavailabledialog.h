@@ -36,6 +36,9 @@ public:
 	UpdateAvailableDialog(const ScUpdateInfo& info, const QString& apiKey, QWidget* parent = nullptr);
 	~UpdateAvailableDialog() override;
 
+	//! Begin the download at once, as if "Update Now" had been clicked.
+	void startUpdate();
+
 public slots:
 	void reject() override;
 

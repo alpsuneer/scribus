@@ -32,7 +32,7 @@ UpdateAvailableDialog::UpdateAvailableDialog(const ScUpdateInfo& info, const QSt
 	auto* layout = new QVBoxLayout(this);
 
 	auto* headline = new QLabel(tr("<b>Version %1 is available</b> (you have %2)")
-		.arg(m_info.version, ScribusAPI::getVersion()), this);
+		.arg(m_info.version, ScUpdateClient::localVersion()), this);
 	layout->addWidget(headline);
 
 	auto* changelog = new QTextBrowser(this);
@@ -82,6 +82,11 @@ void UpdateAvailableDialog::closeEvent(QCloseEvent* event)
 		return;
 	}
 	QDialog::closeEvent(event);
+}
+
+void UpdateAvailableDialog::startUpdate()
+{
+	updateNowClicked();
 }
 
 void UpdateAvailableDialog::updateNowClicked()

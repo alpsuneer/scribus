@@ -1,0 +1,15 @@
+# Scribus built-in updater (Help > Check for Updates...).
+# Installed as /etc/scribus/update.conf by the .deb and by `cmake --install`.
+#
+# url      Base URL of the update server. Scribus fetches <url>/latest.json and
+#          downloads the .deb that manifest names; the download must be on the
+#          same scheme, host and port as this URL. Set at build time from
+#          SCRIBUS_UPDATE_DEFAULT_URL; edit this line to move to another server.
+# api_key  Sent as "Authorization: Bearer" and "X-API-Key" when not empty.
+#          Leave empty for a plain LAN server. Integrity does not depend on it:
+#          only manifests signed with the release key are ever installed.
+#
+# A URL or key entered in Scribus' own Update Settings dialog takes precedence
+# over this file for that user.
+url=@SCRIBUS_UPDATE_DEFAULT_URL@
+api_key=

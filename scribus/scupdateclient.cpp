@@ -7,6 +7,8 @@ for which a new license (GPL+exception) is in place.
 #include "scupdateclient.h"
 
 #include "api/api_application.h"
+#include "scupdatekeystore.h"
+#include "scupdate_release_version.h"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -17,6 +19,8 @@ for which a new license (GPL+exception) is in place.
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSettings>
+#include <QTextStream>
 
 #include <array>
 
@@ -53,29 +57,45 @@ ScUpdateClient::~ScUpdateClient()
 
 int ScUpdateClient::compareVersions(const QString& a, const QString& b)
 {
-	static const QRegularExpression re(QStringLiteral("(\\d+)\\.(\\d+)\\.(\\d+)(?:\\.(\\d+))?"));
+	// major.minor.patch[.build][-date[-serial]]. Releases are
+	// "1.7.3-YYYYMMDD-N" (tools/release.sh); the date and serial decide
+	// between two builds of the same upstream version. Older packages used
+	// "-DDMMYY-N", which as a number is always below any YYYYMMDD.
+	static const QRegularExpression re(QStringLiteral("(\\d+)\\.(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:-(\\d+))?(?:-(\\d+))?"));
 
 	auto parse = [](const QString& v) {
-		std::array<int, 4> parts{ 0, 0, 0, 0 };
+		std::array<qlonglong, 6> parts{ 0, 0, 0, 0, 0, 0 };
 		QRegularExpressionMatch m = re.match(v);
 		if (!m.hasMatch())
 			return parts;
-		for (int i = 0; i < 4; ++i)
+		for (int i = 0; i < 6; ++i)
 		{
 			const QString cap = m.captured(i + 1);
-			parts[i] = cap.isEmpty() ? 0 : cap.toInt();
+			parts[i] = cap.isEmpty() ? 0 : cap.toLongLong();
 		}
 		return parts;
 	};
 
-	const std::array<int, 4> pa = parse(a);
-	const std::array<int, 4> pb = parse(b);
-	for (int i = 0; i < 4; ++i)
+	const std::array<qlonglong, 6> pa = parse(a);
+	const std::array<qlonglong, 6> pb = parse(b);
+	for (int i = 0; i < 6; ++i)
 	{
 		if (pa[i] != pb[i])
 			return pa[i] < pb[i] ? -1 : 1;
 	}
 	return 0;
+}
+
+QString ScUpdateClient::localVersion()
+{
+	// SCRIBUS_RELEASE_VERSION comes from the generated header and is "" for a
+	// developer build. fromLatin1, not QStringLiteral: the latter stores
+	// UTF-16, and the release script (and anyone with `strings`) must be able
+	// to find the version in the binary as plain bytes.
+	static const char releaseVersion[] = SCRIBUS_RELEASE_VERSION;
+	if (releaseVersion[0] != '\0')
+		return QString::fromLatin1(releaseVersion);
+	return ScribusAPI::getVersion();
 }
 
 QByteArray ScUpdateClient::manifestSigningMessage(const QString& version, const QString& url, const QString& sha256)
@@ -159,7 +179,55 @@ QByteArray ScUpdateClient::releasePublicKey()
 #endif
 }
 
-void ScUpdateClient::checkForUpdate(const QString& baseUrl, const QString& apiKey)
+QString ScUpdateClient::systemConfigPath()
+{
+	return QStringLiteral("/etc/scribus/update.conf");
+}
+
+ScUpdateSettings ScUpdateClient::effectiveSettings(bool readKeyStore)
+{
+	ScUpdateSettings result;
+	// 1. What this user entered in Update Settings.
+	QSettings settings(QStringLiteral("Faircode"), QStringLiteral("ScribusUpdater"));
+	const QString userUrl = settings.value(QStringLiteral("serverUrl")).toString().trimmed();
+	if (!userUrl.isEmpty())
+	{
+		result.url = userUrl;
+		result.apiKey = readKeyStore ? ScUpdateKeyStore::load() : QString();
+		result.source = QStringLiteral("settings");
+		return result;
+	}
+	// 2. The system-wide file (installed by the .deb / cmake --install).
+	QFile conf(systemConfigPath());
+	if (conf.open(QIODevice::ReadOnly | QIODevice::Text))
+	{
+		QTextStream in(&conf);
+		while (!in.atEnd())
+		{
+			const QString line = in.readLine().trimmed();
+			if (line.isEmpty() || line.startsWith('#'))
+				continue;
+			const int eq = line.indexOf('=');
+			if (eq <= 0)
+				continue;
+			const QString key = line.left(eq).trimmed();
+			const QString value = line.mid(eq + 1).trimmed();
+			if (key == QLatin1String("url"))
+				result.url = value;
+			else if (key == QLatin1String("api_key"))
+				result.apiKey = value;
+		}
+	}
+	while (result.url.endsWith('/'))
+		result.url.chop(1);
+	if (!result.url.isEmpty())
+		result.source = QStringLiteral("conf");
+	else
+		result.apiKey.clear();
+	return result;
+}
+
+void ScUpdateClient::checkForUpdate(const QString& baseUrl, const QString& apiKey, int timeoutMs)
 {
 	QString trimmedUrl = baseUrl;
 	while (trimmedUrl.endsWith('/'))
@@ -168,8 +236,15 @@ void ScUpdateClient::checkForUpdate(const QString& baseUrl, const QString& apiKe
 	m_checkUrl = QUrl(trimmedUrl + QStringLiteral("/latest.json"));
 	QNetworkRequest request(m_checkUrl);
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
-	request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
-	request.setRawHeader("X-API-Key", apiKey.toUtf8());
+	// An unreachable, off or hung server must end as a network error within
+	// timeoutMs (connection time included), never as a reply that hangs:
+	// the startup check relies on this.
+	request.setTransferTimeout(timeoutMs);
+	if (!apiKey.isEmpty())
+	{
+		request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
+		request.setRawHeader("X-API-Key", apiKey.toUtf8());
+	}
 
 	if (m_checkReply)
 	{
@@ -256,8 +331,8 @@ void ScUpdateClient::onCheckFinished()
 		return;
 	}
 
-	const QString localVersion = ScribusAPI::getVersion();
-	if (compareVersions(remoteVersion, localVersion) > 0)
+	m_lastInfo = info;
+	if (compareVersions(remoteVersion, localVersion()) > 0)
 		emit updateAvailable(info);
 	else
 		emit upToDate();
@@ -288,8 +363,11 @@ void ScUpdateClient::downloadUpdate(const ScUpdateInfo& info, const QString& api
 
 	QNetworkRequest request(url);
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
-	request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
-	request.setRawHeader("X-API-Key", apiKey.toUtf8());
+	if (!apiKey.isEmpty())
+	{
+		request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
+		request.setRawHeader("X-API-Key", apiKey.toUtf8());
+	}
 
 	m_downloadReply = m_networkManager->get(request);
 	connect(m_downloadReply, &QNetworkReply::readyRead, this, &ScUpdateClient::onDownloadReadyRead);

@@ -37,12 +37,17 @@ UpdateSettingsDialog::UpdateSettingsDialog(QWidget* parent)
 	auto* form = new QFormLayout();
 
 	m_urlEdit = new QLineEdit(this);
-	m_urlEdit->setPlaceholderText(QStringLiteral("https://example.com/scribus"));
+	const ScUpdateSettings confDefault = ScUpdateClient::effectiveSettings(false);
+	// Empty here means "use /etc/scribus/update.conf"; show what that is.
+	m_urlEdit->setPlaceholderText(confDefault.source == QLatin1String("conf")
+		? tr("%1 (from %2)").arg(confDefault.url, ScUpdateClient::systemConfigPath())
+		: QStringLiteral("https://example.com/scribus"));
 	form->addRow(tr("Update Server URL:"), m_urlEdit);
 
 	auto* keyRow = new QHBoxLayout();
 	m_keyEdit = new QLineEdit(this);
 	m_keyEdit->setEchoMode(QLineEdit::Password);
+	m_keyEdit->setPlaceholderText(tr("optional"));
 	keyRow->addWidget(m_keyEdit);
 	m_showKeyButton = new QToolButton(this);
 	m_showKeyButton->setText(tr("Show"));
@@ -106,11 +111,19 @@ void UpdateSettingsDialog::persistSettings()
 
 void UpdateSettingsDialog::checkClicked()
 {
-	const QString url = m_urlEdit->text().trimmed();
-	const QString key = currentApiKey();
-	if (url.isEmpty() || key.isEmpty())
+	QString url = m_urlEdit->text().trimmed();
+	QString key = currentApiKey();
+	if (url.isEmpty())
 	{
-		m_statusLabel->setText(tr("Enter both the server URL and the API key."));
+		// Fall back to the system-wide file, key included.
+		const ScUpdateSettings s = ScUpdateClient::effectiveSettings(false);
+		url = s.url;
+		if (key.isEmpty())
+			key = s.apiKey;
+	}
+	if (url.isEmpty())
+	{
+		m_statusLabel->setText(tr("Enter the server URL (there is none in %1).").arg(ScUpdateClient::systemConfigPath()));
 		return;
 	}
 

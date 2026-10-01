@@ -17,6 +17,18 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QFile;
 
+//! Where the updater gets its server URL and API key from, in this order:
+//! the user's own Update Settings (QSettings + key store), then
+//! /etc/scribus/update.conf. The key always comes from the same place as the
+//! URL, so a system-wide server never gets a user's key for another server.
+struct SCRIBUS_API ScUpdateSettings
+{
+	QString url;
+	QString apiKey;
+	//! "settings", "conf" or "" (nothing configured)
+	QString source;
+};
+
 struct SCRIBUS_API ScUpdateInfo
 {
 	QString version;
@@ -55,8 +67,13 @@ public:
 	explicit ScUpdateClient(QObject* parent = nullptr);
 	~ScUpdateClient() override;
 
-	//! Compares "major.minor.patch[.build]" version strings; <0, 0, >0 like QString::compare().
+	//! Compares "major.minor.patch[.build][-YYYYMMDD[-N]]" version strings; <0, 0, >0 like QString::compare().
+	//! A missing part counts as 0, so "1.7.3" is older than "1.7.3-20260930-1".
 	static int compareVersions(const QString& a, const QString& b);
+	//! The version this build reports to the updater: the release version
+	//! tools/release.sh compiled in (SCRIBUS_RELEASE_VERSION), or the plain
+	//! upstream version for a developer build.
+	static QString localVersion();
 
 	//! The exact bytes the release key signs for one manifest.
 	static QByteArray manifestSigningMessage(const QString& version, const QString& url, const QString& sha256);
@@ -68,9 +85,19 @@ public:
 	static QString fileSha256(const QString& path);
 	//! The compiled-in release public key (base64), empty when none was configured.
 	static QByteArray releasePublicKey();
+	//! Path of the system-wide updater configuration file.
+	static QString systemConfigPath();
+	//! The effective server URL and key (see ScUpdateSettings). readKeyStore=false
+	//! skips the OS key store (it can block); the conf file key is still read.
+	static ScUpdateSettings effectiveSettings(bool readKeyStore = true);
 
 
-	void checkForUpdate(const QString& baseUrl, const QString& apiKey);
+	//! An empty apiKey sends no authentication headers. timeoutMs bounds the
+	//! whole request, connection included; a server that is off ends in
+	//! networkError() within that time.
+	void checkForUpdate(const QString& baseUrl, const QString& apiKey, int timeoutMs = 15000);
+	//! The verified manifest of the last successful check, newer or not.
+	const ScUpdateInfo& lastCheckedInfo() const { return m_lastInfo; }
 	void downloadUpdate(const ScUpdateInfo& info, const QString& apiKey, const QString& destinationPath);
 	void cancelDownload();
 
@@ -98,6 +125,7 @@ private:
 	QString m_downloadPath;
 	QString m_expectedSha256;
 	QUrl m_checkUrl;
+	ScUpdateInfo m_lastInfo;
 	bool m_downloadCancelled {false};
 };
 

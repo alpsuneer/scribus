@@ -290,6 +290,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_printer.h"
 #include "ui/proofprintdialog.h"
 #include "proof_fit.h"
+#include "ui/updatecheckdialog.h"
 #include "ui/updatesettingsdialog.h"
 #include "ui/impositiondialog.h"
 #include "third_party/Qt-Advanced-Docking-System/src/DockAreaWidget.h"
@@ -569,6 +570,9 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 
 	checkMalayalamDtpFirstRun();
 	applyDefaultShortcutSet();
+	// Automatic update check: well after startup, asynchronous, at most once a
+	// day, and silent unless a newer signed build exists.
+	QTimer::singleShot(10000, this, [this] { UpdateCheckDialog::runStartupCheck(this); });
 
 	return retVal;
 }
@@ -6434,7 +6438,9 @@ void ScribusMainWindow::slotHelpActionSearch()
 
 void ScribusMainWindow::slotHelpCheckUpdates()
 {
-	UpdateSettingsDialog dia(this);
+	// Installed version, latest version, changelog, Update / Later. The server
+	// URL and API key live behind its Settings... button.
+	UpdateCheckDialog dia(this);
 	dia.exec();
 }
 

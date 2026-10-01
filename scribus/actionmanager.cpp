@@ -2034,7 +2034,7 @@ void ActionManager::languageChange()
 	(*scrActions)["helpOnlineDocs"]->setTexts( tr("Scribus Online Documentation"));
 	(*scrActions)["helpOnlineWiki"]->setTexts( tr("Scribus Wiki"));
 	(*scrActions)["helpOnlineTutorial1"]->setTexts( tr("Getting Started with Scribus"));
-	(*scrActions)["helpCheckUpdates"]->setTexts( tr("Check for Updates"));
+	(*scrActions)["helpCheckUpdates"]->setTexts( tr("Check for Updates..."));
 	(*scrActions)["helpChat"]->setTexts( tr("Chat with the Community"));
 
 	//GUI and specials
