@@ -40,6 +40,9 @@ for which a new license (GPL+exception) is in place.
 #include <QTextCodec>
 #include <QVBoxLayout>
 
+#include <limits>
+#include <tiffio.h>
+
 #include "customfdialog.h"
 
 #include "../plugins/formatidlist.h"
@@ -126,6 +129,53 @@ void FDialogPreview::updatePix()
 	setPixmap(pm);
 }
 
+// Above this many pixels the preview is not built. Building it means decoding
+// the whole image (the loaders have no reduced-size path for TIFF or PSD), and
+// a 1-bit plate TIFF of 40001 x 28801 pixels needs gigabytes and many seconds
+// for one click in the file list.
+static const qint64 MaxPreviewPixels = 100000000;   // 100 megapixel
+
+// Width and height from the file header alone, nothing decoded. An invalid
+// QSize when the format has no cheap way to tell; the preview is then built as
+// before.
+static QSize imageSizeFromHeader(const QString& name, const QString& ext)
+{
+	if (ext == "tif" || ext == "tiff")
+	{
+		QSize size;
+		// Qt has no TIFF reader on this system, libtiff does.
+		TIFF* tif = TIFFOpen(name.toLocal8Bit().constData(), "r");
+		if (tif)
+		{
+			uint32_t w = 0, h = 0;
+			TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &w);
+			TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &h);
+			TIFFClose(tif);
+			if (w > 0 && h > 0 && w <= uint32_t(std::numeric_limits<int>::max()) && h <= uint32_t(std::numeric_limits<int>::max()))
+				size = QSize(int(w), int(h));
+		}
+		return size;
+	}
+	if (ext == "psd" || ext == "psb")
+	{
+		// "8BPS", version, 6 reserved, channels, then height and width, big-endian.
+		QFile f(name);
+		if (!f.open(QIODevice::ReadOnly))
+			return QSize();
+		const QByteArray head = f.read(26);
+		if (head.size() < 26 || !head.startsWith("8BPS"))
+			return QSize();
+		const auto be32 = [&head](int at) {
+			return (quint32(uchar(head[at])) << 24) | (quint32(uchar(head[at + 1])) << 16) | (quint32(uchar(head[at + 2])) << 8) | quint32(uchar(head[at + 3]));
+		};
+		const quint32 h = be32(14), w = be32(18);
+		if (w == 0 || h == 0 || w > quint32(std::numeric_limits<int>::max()) || h > quint32(std::numeric_limits<int>::max()))
+			return QSize();
+		return QSize(int(w), int(h));
+	}
+	return QImageReader(name).size();
+}
+
 void FDialogPreview::genPreview(const QString& name)
 {
 	if (name.isEmpty())
@@ -150,6 +200,25 @@ void FDialogPreview::genPreview(const QString& name)
 		ext = getImageType(name);
 	if (formats.contains(ext.toUtf8()))
 	{
+		const QSize headerSize = imageSizeFromHeader(name, ext);
+		if (headerSize.isValid() && qint64(headerSize.width()) * qint64(headerSize.height()) > MaxPreviewPixels)
+		{
+			// Say what the file is instead of decoding it.
+			QString tmp, tmp2;
+			QPainter p;
+			QBrush b(QColor(205, 205, 205), IconManager::instance().loadPixmap("testfill"));
+			pm = pixmap();
+			p.begin(&pm);
+			p.fillRect(0, 0, w, h - 44, b);
+			p.fillRect(0, h - 44, w, 44, QColor(255, 255, 255));
+			p.drawText(QRect(0, 0, w, h - 44), Qt::AlignCenter | Qt::TextWordWrap, tr("Too large to preview"));
+			p.drawText(2, h - 29, tr("Size:") + " " + tmp.setNum(headerSize.width()) + " x " + tmp2.setNum(headerSize.height()));
+			p.drawText(2, h - 17, tr("%1 megapixel").arg(qRound(double(headerSize.width()) * headerSize.height() / 1000000.0)));
+			p.end();
+			setPixmap(pm);
+			update();
+			return;
+		}
 		ScImage im;
 		//No doc to send data anyway, so no doc to get into scimage.
 		CMSettings cms(nullptr, "", Intent_Perceptual);

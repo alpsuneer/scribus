@@ -789,7 +789,15 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   the document's colour management is switched on when the export starts, not when the dialog opens,
   and stays on afterwards.
 
-### 36. Authors
+### 36. Very large images no longer crash Get Image; preview limit
+- Clicking a huge plate TIFF (for example 40001 x 28801 pixels, 1-bit, 1270 dpi) in the Get Image /
+  Ctrl+I dialog used to crash Scribus. It no longer does: an image that needs more than 2 GB of memory
+  is refused at once and the frame stays empty, instead of crashing.
+- The preview in the file dialog is not built for images above **100 megapixel**. The dialog shows
+  "Too large to preview" with the size in pixels and megapixels. Smaller images preview as before.
+  (The size is read from the file header for TIFF, PSD, JPEG, PNG and the other formats Qt reads.)
+
+### 37. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

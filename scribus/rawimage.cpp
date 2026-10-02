@@ -6,6 +6,8 @@ for which a new license (GPL+exception) is in place.
 */
 #include "rawimage.h"
 
+#include <limits>
+
 RawImage::RawImage( int width, int height, int channels )
 {
 	create(width, height, channels);
@@ -18,18 +20,33 @@ RawImage::~RawImage()
 
 bool RawImage::create( int width, int height, int channels )
 {
+	// In 64 bits: width * height * channels of a plate TIFF (40001 x 28801 x 4)
+	// does not fit an int, and wrapped to a small positive number here — the
+	// buffer was then 299 MB for a 4.3 GB image and the loader wrote far
+	// outside it. Every offset into the buffer is an int, so anything above
+	// INT_MAX bytes is refused rather than half-supported.
+	// An empty image (a zero in any of the three) stays allowed, as before:
+	// loaders create those for empty layers and masks.
+	const qint64 finalSize = qint64(width) * qint64(height) * qint64(channels);
+	if (width < 0 || height < 0 || channels < 0 || finalSize > std::numeric_limits<int>::max())
+	{
+		m_width = 0;
+		m_height = 0;
+		m_channels = 0;
+		resize(0);
+		return false;
+	}
 	m_width = width;
 	m_height = height;
 	m_channels = channels;
-	int finalSize = width * height * channels;
 	resize(finalSize);
 	return (size() == finalSize);
 }
 
 uchar *RawImage::scanLine(int row)
 {
-	if (row < m_height)
-		return (uchar*)(data() + (row * m_channels * m_width));
+	if (row >= 0 && row < m_height)
+		return (uchar*)(data() + (qsizetype(row) * m_channels * m_width));
 	return (uchar*)data();
 }
 

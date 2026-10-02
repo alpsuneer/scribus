@@ -4,6 +4,7 @@ to the COPYING file provided with the program. Following this notice may exist
 a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
+#include <limits>
 #include <QFile>
 #include <QFileInfo>
 #include <QObject>
@@ -702,7 +703,7 @@ bool ScImgDataLoader_TIFF::loadPicture(const QString& fn, int page, int res, boo
 		return false;
 
 	bool isCMYK = false;
-	unsigned int widtht, heightt, size;
+	unsigned int widtht = 0, heightt = 0, size = 0;
 	char* description = nullptr;
 	char* copyright = nullptr;
 	char* datetime = nullptr;
@@ -719,6 +720,13 @@ bool ScImgDataLoader_TIFF::loadPicture(const QString& fn, int page, int res, boo
 	TIFFGetField(tif, TIFFTAG_XRESOLUTION, &xres);
 	TIFFGetField(tif, TIFFTAG_YRESOLUTION, &yres);
 	TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT , &resolutionUnit);
+	// The pixel count sizes the decode buffers below and is an unsigned int:
+	// refuse an image whose count does not fit instead of letting it wrap.
+	if (quint64(widtht) * quint64(heightt) > std::numeric_limits<unsigned int>::max())
+	{
+		TIFFClose(tif);
+		return false;
+	}
 	size = widtht * heightt;
 	TIFFGetField(tif, TIFFTAG_PHOTOMETRIC, &m_photometric);
 	TIFFGetField(tif, TIFFTAG_PLANARCONFIG, &planar);

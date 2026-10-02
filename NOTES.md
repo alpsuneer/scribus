@@ -1728,6 +1728,36 @@ Traps:
   `NetPathGuard` — see "Dead network folder" below.
 
 
+## Huge images: 32-bit size overflow in RawImage, preview limit (2026-10-02)
+
+Crash logs `crash-20260915-12*.log`: clicking a 40001 x 28801 1-bit plate TIFF in the Get Image dialog.
+`RawImage::create()` computed `width * height * channels` in an int: 4,608,275,204 wrapped to
++313,307,908, so `create()` "succeeded" with a 299 MB buffer and
+`ScImgDataLoader_TIFF::getImageData_RGBA` (scimgdataloader_tiff.cpp:380) memcpy'd 4.3 GB of rows into
+and around it. Upstream bug, not fork code.
+
+- **Fix:** `RawImage::create()` works in qint64 and refuses anything above INT_MAX bytes (every offset
+  into the buffer is an int); `scanLine()` uses qsizetype; the TIFF loader refuses a pixel count that
+  does not fit its `unsigned int size`. **Zero-sized images stay allowed** — loaders create those for
+  empty layers and masks; refusing them was a regression risk caught before it shipped.
+- **Only some sizes crashed.** With 4 channels, 1.074–1.611 gigapixel wraps to a small positive size
+  (crash); 0.537–1.074 wraps negative (`create()` already failed cleanly — the 37795 x 27213 plates).
+  "It loads the other plates fine" therefore proved nothing.
+- **Preview limit:** `FDialogPreview::genPreview` decodes the WHOLE image for a thumbnail (no reduced
+  path for TIFF/PSD). `imageSizeFromHeader()` reads the dimensions first (libtiff for TIFF — Qt has no
+  TIFF plugin here, so `QImageReader::size()` returns -1 — the 26-byte header for PSD, QImageReader
+  otherwise); above `MaxPreviewPixels` (100 megapixel) it draws "Too large to preview" instead.
+- **Naming anonymous backtrace frames without the binary:** no saved build matched the September
+  binary, but the DISTANCES between consecutive frames inside one unchanged .cpp are identical in any
+  build with the same flags. Searching the current build's disassembly for call-return addresses with
+  those exact distances (0x63cb, 0x1682) gave one match. Then the reproduction's libc offset
+  (+0x162e47) and fault-address low bits (...ecf00) matched the logs.
+- 16-bit PSD still shows a blank preview: the PSD loader rejects `depth != 8` (scimgdataloader_psd.cpp).
+  Not part of this change.
+- Harness: `~/scribus-crashlogs/tiffcrash/` (`t2.py` loader, `t3.py` Get Image preview). Run with
+  `SCRIBUS_NO_CRASH_HANDLER=1` so a test crash writes no log into the operator's folder.
+
+
 ## PDF export presets and Default (2026-10-02)
 
 Code: `scribus/pdfpresets.{h,cpp}` (store, JSON, Default), `ui/pdfexportdialog.*` (preset row, apply,
