@@ -26,6 +26,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QMouseEvent>
 #include <QPaintEvent>
+#include <QPointer>
 #include <QTimer>
 #include <QWidget>
 #include "scribusapi.h"
@@ -50,7 +51,10 @@ private:
 	int m_time { 0 };
 	int m_finalTime { 0 };
 	QTimer m_timer;
-	ScribusDoc* m_doc { nullptr };
+	// Self-nulling: the view (and this clock) outlive the document for a
+	// moment during File > Close, and the 1 s timer kept firing on the freed
+	// document (ASan heap-use-after-free, 2026-10-02).
+	QPointer<ScribusDoc> m_doc;
 
 public slots:
 	void resetTime();

@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #define SMNESTEDSTYLESWIDGET_H
 
 #include <QList>
+#include <QPointer>
 #include <QWidget>
 
 #include "styles/paragraphstyle.h"
@@ -62,7 +63,7 @@ private:
 	/// Marks the style as carrying its own rules and tells the style manager.
 	void touched();
 
-	ScribusDoc* m_Doc { nullptr };
+	QPointer<ScribusDoc> m_Doc;   // self-nulling, see smpshadewidget.h
 	QTableWidget* m_table { nullptr };
 	QPushButton* m_addButton { nullptr };
 	QPushButton* m_deleteButton { nullptr };

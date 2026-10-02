@@ -31,6 +31,10 @@ public:
 	void changeEvent(QEvent* event) override;
 	
 	void setDocument(ScribusDoc* doc);
+	//! The document is being closed: forget it, empty the list, disable the buttons.
+	void unsetDocument() { setDocument(nullptr); }
+	//! Enable the buttons and Design Style icons only while a document is open.
+	void updateEnabledState();
 	void setMainWindow(ScribusMainWindow* mw);
 
 	// Shortcuts owned by this panel (paragraph-style chains and column configs) are plain
@@ -124,6 +128,8 @@ private:
 	QList<QShortcut*> m_columnShortcuts;
 	QList<QShortcut*> m_styleShortcuts; // per-style keys from ParagraphStyle::shortcut()
 	QPushButton* m_shortcutButton {nullptr};
+	QPushButton* m_nextButton {nullptr};
+	QPushButton* m_cleanupButton {nullptr};
 	QMap<QString, QString> m_nextStyles; // styleName → nextStyleName
 	QTimer* m_syncTimer = nullptr;
 	QString m_lastHighlightedStyle;

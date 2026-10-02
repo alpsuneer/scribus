@@ -1594,7 +1594,27 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 void SuneerControlBar::setDocument(ScribusDoc* doc)
 {
 	m_doc = doc;
+	if (m_doc && m_doc != doc)
+		disconnect(m_doc, nullptr, this, nullptr);
 	// Load Scribus fonts into combo
+	// The Paragraph Shading popup's SMPShadeWidget keeps its own document
+	// pointer (and an UpdateRequest connection). It follows every change,
+	// nullptr included, so it can never refresh from a closed document.
+	if (m_shadeWidget)
+		m_shadeWidget->setDoc(doc);
+	if (!doc)
+	{
+		// Document closed: stop polling it, drop every cached frame, show no
+		// item controls. The colour buttons keep their last doc pointer only
+		// until the next setDocument(doc); they are not used without a doc.
+		if (m_captionTimer)
+			m_captionTimer->stop();
+		m_fontPreviewFrames.clear();
+		showTextWidgets(false);
+		showImageWidgets(false);
+		showTextWrapWidgets(false);
+		return;
+	}
 	m_fontCombo->blockSignals(true);
 	m_fontCombo->clear();
 	QStringList fonts = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.keys();

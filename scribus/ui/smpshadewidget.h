@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #define SMPSHADEWIDGET_H
 
 #include <QList>
+#include <QPointer>
 #include <QWidget>
 
 #include "styles/paragraphstyle.h"
@@ -62,7 +63,10 @@ protected:
 private:
 	void fillColorCombo();
 
-	ScribusDoc* m_Doc { nullptr };
+	// Self-nulling: the document may be closed while this widget lives on
+	// (the control bar's shading popup keeps one). A raw pointer here was
+	// the Paste crash of 2026-10-01 (freed PageColors read on UpdateRequest).
+	QPointer<ScribusDoc> m_Doc;
 	QList<QLabel*> m_labels;
 
 private slots:

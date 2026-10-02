@@ -1,5 +1,6 @@
 #ifndef SUNEER_NEWS_PANEL_H
 #define SUNEER_NEWS_PANEL_H
+#include <QPointer>
 #include <QDockWidget>
 #include "scraction.h"
 #include <QListWidget>
@@ -50,7 +51,7 @@ private slots:
 
 private:
     ScribusMainWindow* m_mw {nullptr};
-    ScribusDoc*        m_doc {nullptr};
+    QPointer<ScribusDoc> m_doc;   // nulls itself when the document is deleted
     QNetworkAccessManager* m_nam {nullptr};
 
     QComboBox*   m_editionCombo  {nullptr};

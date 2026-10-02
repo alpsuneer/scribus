@@ -13,6 +13,8 @@ for which a new license (GPL+exception) is in place.
 
 #include "commonstrings.h"
 #include "scribus.h"
+#include "scribuscore.h"
+#include "scribus.h"
 #include "scribusdoc.h"
 #include "ui/smcheckbox.h"
 #include "ui/smcolorcombo.h"
@@ -152,15 +154,19 @@ void SMPShadeWidget::unitChange(int unitIndex)
 
 void SMPShadeWidget::setDoc(ScribusDoc* doc)
 {
-	if (m_Doc)
-		disconnect(m_Doc->scMW(), SIGNAL(UpdateRequest(int)), this, SLOT(handleUpdateRequest(int)));
+	// Connect through the main window, never through m_Doc->scMW(): the old
+	// document may already be gone when the new one (or nullptr) arrives.
+	ScribusMainWindow* mw = ScCore ? ScCore->primaryMainWindow() : nullptr;
+	if (mw)
+		disconnect(mw, SIGNAL(UpdateRequest(int)), this, SLOT(handleUpdateRequest(int)));
 
 	m_Doc = doc;
 
 	if (m_Doc)
 	{
 		fillColorCombo();
-		connect(m_Doc->scMW(), SIGNAL(UpdateRequest(int)), this, SLOT(handleUpdateRequest(int)));
+		if (mw)
+			connect(mw, SIGNAL(UpdateRequest(int)), this, SLOT(handleUpdateRequest(int)));
 	}
 }
 

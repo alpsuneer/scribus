@@ -1130,6 +1130,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	buttonLayout->setSpacing(4);
 
 	QPushButton* setNextButton = new QPushButton("Next", this);
+	m_nextButton = setNextButton;
 	setNextButton->setToolTip("Set Next Style Chain & Shortcut");
 	setNextButton->setStyleSheet(
 		"QPushButton { padding: 8px 16px; background: #3498db; color: white;"
@@ -1164,6 +1165,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	connect(m_shortcutButton, &QPushButton::clicked, this, &ParagraphStylesPanel::assignShortcut);
 
 	QPushButton* cleanupButton = new QPushButton("Clean Up", this);
+	m_cleanupButton = cleanupButton;
 	cleanupButton->setToolTip(
 		"Remove imported paragraph styles that aren't applied to any text in this document.\n"
 		"Template styles and styles currently in use are never removed.");
@@ -1272,6 +1274,8 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	m_stylesList->viewport()->installEventFilter(this);
 	// Needed for the hand-cursor hover feedback over the chain-link icon.
 	m_stylesList->viewport()->setMouseTracking(true);
+	// No document yet: everything that needs one starts disabled.
+	updateEnabledState();
 }
 
 bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
@@ -1357,10 +1361,20 @@ bool ParagraphStylesPanel::eventFilter(QObject* obj, QEvent* event)
 
 void ParagraphStylesPanel::setDocument(ScribusDoc* doc)
 {
+	// Called with the new document on open and on every switch between open
+	// documents, and with nullptr from DoFileClose() before the document is
+	// deleted. Nothing in this panel may keep a pointer into a closed
+	// document: the list, the current-style memory and the per-style
+	// QShortcuts are all rebuilt from m_doc, which is null from here on.
 	if (m_doc && m_doc != doc)
 		disconnect(m_doc, nullptr, this, nullptr);
 	m_doc = doc;
 	s_shortcutDoc = doc;
+	if (!doc)
+	{
+		m_lastHighlightedStyle.clear();
+		m_nextStyles.clear();
+	}
 	if (doc && m_mainWindow)
 		QTimer::singleShot(0, this, [this]() { ScShortcutRegistry::instance().maybeShowDuplicatesDialog(m_mainWindow, tr("document opened")); });
 	if (m_doc)
@@ -1380,6 +1394,27 @@ void ParagraphStylesPanel::setDocument(ScribusDoc* doc)
 	}
 	updateStylesList();
 	rebuildShortcuts();
+	updateEnabledState();
+}
+
+void ParagraphStylesPanel::updateEnabledState()
+{
+	const bool haveDoc = !m_doc.isNull();
+	for (QPushButton* b : { m_shortcutButton, m_nextButton, m_cleanupButton })
+		if (b) b->setEnabled(haveDoc);
+	// +, - and the edit button are placeholders (their slots are empty); they
+	// are only ever switched off here, never on.
+	if (!haveDoc)
+		for (QPushButton* b : { m_newButton, m_deleteButton, m_editButton })
+			if (b) b->setEnabled(false);
+	if (m_iconsGrid)
+	{
+		for (int i = 0; i < m_iconsGrid->count(); ++i)
+			if (QWidget* w = m_iconsGrid->itemAt(i)->widget())
+				w->setEnabled(haveDoc);
+	}
+	if (m_stylesList)
+		m_stylesList->setEnabled(haveDoc);
 }
 
 void ParagraphStylesPanel::syncCurrentStyle()
@@ -1882,6 +1917,8 @@ bool ParagraphStylesPanel::hasExtraTab(QWidget* page) const
 
 void ParagraphStylesPanel::applyChainCurrentStyle()
 {
+	if (!m_doc)
+		return;
 	QListWidgetItem* item = m_stylesList->currentItem();
 	if (!item) return;
 	QString styleName = item->data(Qt::UserRole).toString();
@@ -2135,6 +2172,8 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 
 bool ParagraphStylesPanel::applyDesignStyleByIndex(int index, bool withColumns)
 {
+	if (!m_doc)
+		return false;
 	QSettings dsCfg("Scribus", "SuneerDesignStyle");
 	const int count = dsCfg.beginReadArray("styles");
 	if (index < 0 || index >= count)
@@ -3248,6 +3287,7 @@ void ParagraphStylesPanel::refreshDesignIcons()
         btn->show();
         m_iconsGrid->addWidget(btn, i/2, i%2);
     }
+	updateEnabledState();
 }
 
 void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX, double savedImgOffY, double savedImgW, double savedImgH)

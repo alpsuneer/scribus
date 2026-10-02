@@ -3080,6 +3080,13 @@ void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 	nsEditor->setDoc(doc);
 	symbolPalette->setDoc(doc);
 	inlinePalette->setDoc(doc);
+	// Switching between open documents: our widgets follow the active one.
+	if (paragraphStylesPanelTabs)
+		paragraphStylesPanelTabs->setDocument(doc);
+	if (m_suneerControlBar)
+		m_suneerControlBar->setDocument(doc);
+	if (m_suneerNewsPanel)
+		m_suneerNewsPanel->setDocument(doc);
 	modeToolBar->setDoc(doc);
 	viewToolBar->setDoc(doc);
 	// Give plugins a chance to react on changing the current document
@@ -5048,6 +5055,13 @@ bool ScribusMainWindow::DoFileClose()
 	contentPalette->unsetDoc();
 	inlinePalette->unsetDoc();
 	symbolPalette->unsetDoc();
+	// Our own widgets forget the document now, before it is deleted below.
+	if (paragraphStylesPanelTabs)
+		paragraphStylesPanelTabs->unsetDocument();
+	if (m_suneerControlBar)
+		m_suneerControlBar->setDocument(nullptr);
+	if (m_suneerNewsPanel)
+		m_suneerNewsPanel->setDocument(nullptr);
 	pagePalette->setView(nullptr);
 	pagePalette->rebuild();
 	if (doc->appMode == modeEditClip)

@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #define SMPRULEWIDGET_H
 
 #include <QList>
+#include <QPointer>
 #include <QWidget>
 
 #include "styles/paragraphstyle.h"
@@ -84,7 +85,10 @@ private:
 	void showSide(SMRuleControls& rule, const ParagraphStyle* pstyle, const ParagraphStyle* parent, bool hasParent, double unitRatio, bool isAbove);
 	void fillColorCombos();
 
-	ScribusDoc* m_Doc { nullptr };
+	// Self-nulling: the document may be closed while this widget lives on
+	// (the control bar's shading popup keeps one). A raw pointer here was
+	// the Paste crash of 2026-10-01 (freed PageColors read on UpdateRequest).
+	QPointer<ScribusDoc> m_Doc;
 	QComboBox* m_sideCombo { nullptr };
 	QStackedWidget* m_stack { nullptr };
 
