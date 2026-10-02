@@ -200,7 +200,7 @@ wrapper's name.
 On this host `docker run` resolves DNS normally but **`docker build` does not** —
 every apt step dies with `Temporary failure resolving 'deb.debian.org'`. The
 host runs an active IPsec/strongSwan daemon, and BuildKit's build containers
-cannot reach the LAN resolver (192.168.29.1) the way `docker run` containers can.
+cannot reach the LAN resolver (`<LAN_DNS_RESOLVER>`) the way `docker run` containers can.
 
 The trap is the error message: apt treats the failed refresh as a warning
 ("Some index files failed to download … old ones used instead"), continues with
