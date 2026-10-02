@@ -217,7 +217,15 @@ void ActionManager::initFileMenuActions()
 	//The rest are plugins
 	
 	
-	(*scrActions)["fileClose"]->setShortcutContext(Qt::WidgetShortcut);
+	// Upstream makes this a WidgetShortcut: the action is attached only to the
+	// File menu, so its Ctrl+W never fires from the keyboard and never
+	// collides with the Ctrl+W Qt puts on every QMdiSubWindow's system-menu
+	// Close - upstream relied on THAT action to close the document. We strip
+	// the MDI action's key (suneerStripMdiCloseKey), so this one has to do
+	// the job: a WindowShortcut fires wherever the focus is inside the main
+	// window (canvas, text edit, a dock), and closeActiveSubWindow() closes
+	// only the active document.
+	(*scrActions)["fileClose"]->setShortcutContext(Qt::WindowShortcut);
 }
 
 void ActionManager::initEditMenuActions()
