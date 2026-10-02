@@ -377,6 +377,8 @@ public slots:
 	void setStatusBarTextSelectedItemInfo();
 	void setTempStatusBarText(const QString &text);
 	void setStatusBarInfoText(const QString& newText);
+	//! One status-bar note for the network folders NetPathGuard gave up on since the last call.
+	void showNetworkPathNotes();
 	bool DoFileClose();
 	void windowsMenuAboutToShow();
 	//! \brief Handle the Extras menu for its items availability.

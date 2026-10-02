@@ -38,13 +38,18 @@ for which a new license (GPL+exception) is in place.
 #include "iconmanager.h"
 #include "langmgr.h"
 #include "localemgr.h"
+#include "netpathguard.h"
 #include "pluginmanager.h"
+#include "prefscontext.h"
+#include "prefsfile.h"
 #include "prefsmanager.h"
+#include "prefstable.h"
 #include "scimagecachemanager.h"
 #include "scpaths.h"
 #include "scribus.h"
 #include "scribusapp.h"
 #include "textframespellchecker.h"
+#include "ui/ParagraphStylesPanel.h"
 #include "ui/splash.h"
 #include "ui/factories/scribusproxystyle.h"
 #include "undomanager.h"
@@ -118,6 +123,7 @@ int ScribusCore::startGUI(bool showSplash, bool showFontInfo, bool showProfileIn
 	scribus->setupMainWindow();
 
 	QStringList recoverFiles = scribus->findRecoverableFile();
+	scribus->showNetworkPathNotes();
 	int subsRet = scribus->ShowSubs();
 	if (subsRet == 0)
 	{
@@ -162,6 +168,9 @@ int ScribusCore::initScribusCore(bool showSplash, bool showFontInfo, bool showPr
 	initSplash(showSplash);
 	LocaleManager::instance();
 	m_prefsManager.setup();
+	// Start asking the folders the font scan and the file dialogs will use,
+	// so a dead network share is known before anything in this thread stats it.
+	precheckNetworkPaths(false);
 	//CB #4428 Get fonts before prefs are set to default
 	bool haveFonts = false;
 	haveFonts = ScCore->initFonts(showFontInfo);
@@ -178,6 +187,7 @@ int ScribusCore::initScribusCore(bool showSplash, bool showFontInfo, bool showPr
 	m_prefsManager.initDefaultActionKeys();
 	setSplashStatus( tr("Reading Preferences") );
 	m_prefsManager.readPrefs();
+	precheckNetworkPaths(true);
 	// After readPrefs, since it is the saved default font that has to be
 	// checked, and fonts are already scanned by initFonts() above.
 	m_prefsManager.applyMalayalamDefaultFontMigration();
@@ -341,6 +351,42 @@ bool ScribusCore::isWinGUI() const
 #endif
 }
 
+// Every folder named in the preferences that startup is going to look at. They
+// are checked in helper threads (NetPathGuard) and nothing waits here: by the
+// time a folder is actually used its answer is usually in, and a share whose
+// server is gone has cost startup at most one timeout instead of a hang.
+void ScribusCore::precheckNetworkPaths(bool prefsRead)
+{
+	QStringList paths;
+	if (!prefsRead)
+	{
+		// prefs172.xml is loaded by PrefsManager::setup(), before the rc file.
+		if (m_prefsManager.prefsFile)
+		{
+			PrefsContext* fontCtx = m_prefsManager.prefsFile->getContext("Fonts");
+			PrefsTable* extraDirs = fontCtx ? fontCtx->getTable("ExtraFontDirs") : nullptr;
+			for (int i = 0; extraDirs && i < extraDirs->getRowCount(); ++i)
+				paths << extraDirs->get(i, 0);
+			// Folders the file dialogs last used (Ctrl+I, Open, Place, ...).
+			PrefsContext* dirsCtx = m_prefsManager.prefsFile->getContext("dirs");
+			if (dirsCtx)
+				paths << dirsCtx->values.values();
+		}
+	}
+	else
+	{
+		const ApplicationPrefs& prefs = m_prefsManager.appPrefs;
+		paths << prefs.pathPrefs.documents << prefs.pathPrefs.colorProfiles
+		      << prefs.pathPrefs.scripts << prefs.pathPrefs.documentTemplates
+		      << prefs.docSetupPrefs.AutoSaveDir
+		      << ParagraphStylesPanel::templateSourceDir();
+		paths << prefs.uiPrefs.RecentDocs;
+		paths << prefs.scrapbookPrefs.RecentScrapbooks;
+	}
+	paths.removeAll(QString());
+	NetPathGuard::precheck(paths);
+}
+
 //Returns false when there are no fonts
 bool ScribusCore::initFonts(bool showFontInfo)
 {
@@ -367,7 +413,9 @@ void ScribusCore::getCMSProfiles(bool showInfo)
 	LabProfiles.clear();
 
 	QStringList profDirs = ScPaths::systemProfilesDirs();
-	profDirs.prepend( m_prefsManager.appPrefs.pathPrefs.colorProfiles );
+	// The user's own profile folder may be on the office share.
+	if (NetPathGuard::reachable(m_prefsManager.appPrefs.pathPrefs.colorProfiles))
+		profDirs.prepend( m_prefsManager.appPrefs.pathPrefs.colorProfiles );
 	profDirs.prepend( ScPaths::instance().shareDir() + "profiles/");
 	for (int i = 0; i < profDirs.count(); i++)
 	{

@@ -34,6 +34,11 @@ class SCRIBUS_API ScFileWidget : public QFileDialog
 	Q_OBJECT
 public:
 	ScFileWidget(QWidget * parent, fwContextFlags contextFlags = contextNone);
+	~ScFileWidget();
+
+	/*! \a dir when it answers, otherwise a local folder to open in instead.
+	    The dialog must never be pointed at a share whose server is away. */
+	static QString safeStartDirectory(const QString& dir);
 
 	QString selectedFile();
 	void forceDoubleClickActivation(bool force);
@@ -46,6 +51,13 @@ public slots:
 	void gotoHomeDirectory();
 
 private:
+	/*! Runs before the QFileDialog base is built: Qt restores its sidebar,
+	    history and last folder from QtProject.conf inside that constructor and
+	    stats each one in the GUI thread. Entries on a dead share are taken out
+	    of the settings first and put back when the widget is destroyed. */
+	static QWidget* hideUnreachablePlaces(QWidget* parent);
+	static void restoreHiddenPlaces();
+
 	bool m_forceDoubleClickActivation { false };
 };
 

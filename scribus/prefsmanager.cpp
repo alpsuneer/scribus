@@ -50,6 +50,7 @@ for which a new license (GPL+exception) is in place.
 #include "sccolorengine.h"
 #include "scdomelement.h"
 #include "scfonts.h"
+#include "netpathguard.h"
 #include "scpaths.h"
 #include "scribusapp.h"
 #include "scribuscore.h"
@@ -1216,6 +1217,15 @@ void PrefsManager::setLatexEditorExecutable(const QString& executableName)
 
 const QString& PrefsManager::documentDir() const
 {
+	// The documents folder is the start folder of most dialogs and the working
+	// directory after a document is closed. While it sits on a share that is not
+	// answering, hand out the local documents folder instead; the preference
+	// itself is not changed and is written back as it was.
+	if (!appPrefs.pathPrefs.documents.isEmpty() && NetPathGuard::isSkipped(appPrefs.pathPrefs.documents))
+	{
+		static const QString localDocuments = ScPaths::userDocumentDir();
+		return localDocuments;
+	}
 	return appPrefs.pathPrefs.documents;
 }
 
@@ -2574,9 +2584,11 @@ bool PrefsManager::readPref(const QString& filePath)
 				QDomElement scrpElem = scrp.toElement();
 				if (scrpElem.tagName() == "Recent")
 				{
+					// Not looked at here: a scrapbook on a share whose server
+					// is away would hang the stat. ScribusMainWindow::initScrapbook()
+					// drops the ones that are really gone.
 					QString nam = scrpElem.attribute("Name");
-					QFileInfo fd(nam);
-					if (fd.exists())
+					if (!nam.isEmpty())
 						appPrefs.scrapbookPrefs.RecentScrapbooks.append(nam);
 				}
 				scrp = scrp.nextSibling();

@@ -193,6 +193,7 @@ if(HAVE_OSG)
 		autoarrangeengine.cpp
 	singleinstance.cpp
 	documentlock.cpp
+	netpathguard.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		canvasmode_shapecrop.cpp
@@ -283,6 +284,7 @@ else()
 		autoarrangeengine.cpp
 	singleinstance.cpp
 	documentlock.cpp
+	netpathguard.cpp
 		canvasmode_suneercontour.cpp
 		canvasmode_suneercrop.cpp
 		canvasmode_shapecrop.cpp

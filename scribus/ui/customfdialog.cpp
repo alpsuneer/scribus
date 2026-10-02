@@ -48,6 +48,7 @@ for which a new license (GPL+exception) is in place.
 #include "fileloader.h"
 #include "iconmanager.h"
 #include "loadsaveplugin.h"
+#include "netpathguard.h"
 #include "prefscontext.h"
 #include "prefsfile.h"
 #include "prefsmanager.h"
@@ -297,7 +298,7 @@ CustomFDialog::CustomFDialog(QWidget *parent, const QString &wDir, const QString
 	fileDialog->setIconProvider(new ImIconProvider());
 	fileDialog->setNameFilter(filter);
 	fileDialog->selectNameFilter(filter);
-	fileDialog->setDirectory(wDir);
+	fileDialog->setDirectory(ScFileWidget::safeStartDirectory(wDir));
 	hboxLayout->addWidget(fileDialog);
 	vboxLayout1 = new QVBoxLayout;
 	vboxLayout1->setSpacing(6);
@@ -573,7 +574,7 @@ void CustomFDialog::togglePreview()
 void CustomFDialog::setSelection(const QString& fileName)
 {
 	fileDialog->selectFile( QFileInfo(fileName).fileName() );
-	if (m_previewIsShown)
+	if (m_previewIsShown && NetPathGuard::reachable(fileName))
 		filePreview->genPreview(fileName);
 }
 

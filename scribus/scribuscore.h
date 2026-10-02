@@ -72,6 +72,7 @@ public:
 
 	void initSplash(bool showSplash);
 	bool initFonts(bool showFontInfo);
+	void precheckNetworkPaths(bool prefsRead);
 	void showSplash(bool);
 	bool splashShowing() const;
 	void closeSplash();

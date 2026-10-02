@@ -734,7 +734,17 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - **Preferences > Item Tools > "Always embed placed images"** (on by default): Get Image, Ctrl+I,
   double-click load, drag and drop, News Browser images and the control-bar image tools embed automatically.
 
-### 31. Authors
+### 31. Network drive not reachable — Scribus no longer hangs
+- If the office share (drive F) does not answer, Scribus starts anyway: each folder from the
+  preferences is asked in the background and given 2 seconds. A folder that does not answer is
+  skipped for this session and the status bar shows `Network folder not reachable: <path> skipped`.
+- Skipped, never forgotten: recent documents, scrapbooks and file-dialog bookmarks on the share stay
+  in the preferences and work again when the share is back.
+- File dialogs (Open, Get Image / Ctrl+I, Save As ...) open in the local Documents folder when their
+  usual folder is on the unreachable share, and leave the share out of the sidebar.
+- Autosave skips a round (with a status-bar note) instead of freezing when its folder is unreachable.
+
+### 32. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

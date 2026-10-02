@@ -173,6 +173,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusapp.h"
 #include "singleinstance.h"
 #include "documentlock.h"
+#include "netpathguard.h"
 #include "suneerimagelinks.h"
 #include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
@@ -614,8 +615,11 @@ void ScribusMainWindow::setupMainWindow()
 	uint max = qMin(m_prefsManager.appPrefs.uiPrefs.recentDocCount, m_prefsManager.appPrefs.uiPrefs.RecentDocs.count());
 	for (uint i = 0; i < max; ++i)
 	{
+		// A document on a share that is not answering stays in the list
+		// without being looked at; loadRecent() checks again when it is chosen.
+		const bool unreachable = !NetPathGuard::reachable(m_prefsManager.appPrefs.uiPrefs.RecentDocs.at(i));
 		QFileInfo fd(m_prefsManager.appPrefs.uiPrefs.RecentDocs.at(i));
-		if (fd.exists())
+		if (unreachable || fd.exists())
 		{
 			m_recentDocsList.append(m_prefsManager.appPrefs.uiPrefs.RecentDocs.at(i));
 			//#9845: ScCore->fileWatcher->addFile(appPrefs.uiPrefs.RecentDocs[m]);
@@ -1187,6 +1191,22 @@ void ScribusMainWindow::initPalettes()
 }
 
 
+// Scrapbooks the preferences list but whose folder did not answer at startup.
+// Kept here, not in the class, so the main window's layout (which the plugins
+// are compiled against) does not change.
+static QStringList s_skippedScrapbooks;
+
+void ScribusMainWindow::showNetworkPathNotes()
+{
+	const QStringList folders = NetPathGuard::takeNewlySkipped();
+	if (folders.isEmpty())
+		return;
+	QStringList native;
+	for (const QString& f : folders)
+		native << QDir::toNativeSeparators(f);
+	setStatusBarInfoText( tr("Network folder not reachable: %1 skipped").arg(native.join(", ")));
+}
+
 void ScribusMainWindow::initScrapbook()
 {
 	QString scrapbookFileO = QDir::toNativeSeparators(m_prefsManager.preferencesLocation()+"/scrap13.scs");
@@ -1207,7 +1227,18 @@ void ScribusMainWindow::initScrapbook()
 		scrapbookPalette->readContents(scrapbookFile);
 	scrapbookPalette->setScrapbookFileName(scrapbookFile);
 	ScCore->fileWatcher->addDir(scrapbookFile, true);
-	scrapbookPalette->setOpenScrapbooks(m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks);
+	// Scrapbooks on a share that is not answering are left closed for this
+	// session and written back to the preferences untouched on exit.
+	s_skippedScrapbooks.clear();
+	QStringList openableScrapbooks;
+	for (const QString& sb : std::as_const(m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks))
+	{
+		if (!NetPathGuard::reachable(sb))
+			s_skippedScrapbooks << sb;
+		else if (QFileInfo::exists(sb))
+			openableScrapbooks << sb;
+	}
+	scrapbookPalette->setOpenScrapbooks(openableScrapbooks);
 	QString systemScrapbook = QDir::toNativeSeparators(ScPaths::instance().shareDir() + "scrapbook/faircode-frames");
 	if (QFileInfo(systemScrapbook).isDir())
 		scrapbookPalette->openSystemScrapbook(systemScrapbook, "Faircode Frames");
@@ -2323,6 +2354,11 @@ void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 		scrapbookPalette->cleanUpTemp();
 	m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks.clear();
 	m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks = scrapbookPalette->getOpenScrapbooks();
+	for (const QString& sb : std::as_const(s_skippedScrapbooks))
+	{
+		if (!m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks.contains(sb))
+			m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks << sb;
+	}
 	if (!emergencyActivated)
 		m_prefsManager.savePrefs();
 	UndoManager::deleteInstance();
@@ -2352,7 +2388,9 @@ QStringList ScribusMainWindow::findRecoverableFile()
 	QSet<QString> foundFiles;
 	QDir::SortFlags sortflags = QDir::Name | QDir::Time;
 	QDir::Filters filterflags = QDir::Files | QDir::NoSymLinks | QDir::NoDot | QDir::NoDotDot;
-	if (!m_prefsManager.appPrefs.docSetupPrefs.AutoSaveDir.isEmpty())
+	const bool autoSaveDirOk = NetPathGuard::reachable(m_prefsManager.appPrefs.docSetupPrefs.AutoSaveDir);
+	const bool documentDirOk = NetPathGuard::reachable(m_prefsManager.documentDir());
+	if (!m_prefsManager.appPrefs.docSetupPrefs.AutoSaveDir.isEmpty() && autoSaveDirOk)
 	{
 		QDir dirAuto(m_prefsManager.appPrefs.docSetupPrefs.AutoSaveDir, "*_emergency_*.sla", sortflags, filterflags);
 		QFileInfoList aList = dirAuto.entryInfoList();
@@ -2369,15 +2407,18 @@ QStringList ScribusMainWindow::findRecoverableFile()
 				foundFiles.insert(aList2[i].absoluteFilePath());
 		}
 	}
-	QDir dirDoc(m_prefsManager.documentDir(), "*_emergency_*.sla", sortflags, filterflags);
-	QFileInfoList dList = dirDoc.entryInfoList();
-	for (int i = 0; i < dList.count(); i++)
-		foundFiles.insert(dList[i].absoluteFilePath());
+	if (documentDirOk)
+	{
+		QDir dirDoc(m_prefsManager.documentDir(), "*_emergency_*.sla", sortflags, filterflags);
+		QFileInfoList dList = dirDoc.entryInfoList();
+		for (int i = 0; i < dList.count(); i++)
+			foundFiles.insert(dList[i].absoluteFilePath());
 
-	QDir dirDoc2(m_prefsManager.documentDir(), "*_autosave_*.sla", sortflags, filterflags);
-	QFileInfoList dList2 = dirDoc2.entryInfoList();
-	for (int i = 0; i < dList2.count(); i++)
-		foundFiles.insert(dList2[i].absoluteFilePath());
+		QDir dirDoc2(m_prefsManager.documentDir(), "*_autosave_*.sla", sortflags, filterflags);
+		QFileInfoList dList2 = dirDoc2.entryInfoList();
+		for (int i = 0; i < dList2.count(); i++)
+			foundFiles.insert(dList2[i].absoluteFilePath());
+	}
 
 	QDir dirHome(QDir::toNativeSeparators(QDir::homePath()), "*_emergency_*.sla", sortflags, filterflags);
 	QFileInfoList hList = dirHome.entryInfoList();
@@ -3415,6 +3456,12 @@ void ScribusMainWindow::removeRecentFromWatcher(const QString& filename)
 
 void ScribusMainWindow::loadRecent(const QString& filename)
 {
+	if (!NetPathGuard::reachable(filename))
+	{
+		showNetworkPathNotes();
+		ScMessageBox::warning(this, CommonStrings::trWarning, tr("The network folder holding this document is not reachable:\n%1").arg(QDir::toNativeSeparators(filename)));
+		return;
+	}
 	QFileInfo fd(filename);
 	if (!fd.exists())
 		removeRecent(filename);
@@ -3975,7 +4022,8 @@ QStringList ScribusMainWindow::templateSearchPaths()
 		if (d.isEmpty())
 			continue;
 		const QString abs = QDir(d).absolutePath();
-		if (!out.contains(abs) && QDir(abs).exists())
+		// Asked before exists(): on a dead share exists() never returns.
+		if (!out.contains(abs) && NetPathGuard::reachable(abs) && QDir(abs).exists())
 			out << abs;
 	}
 	return out;
@@ -11814,6 +11862,11 @@ void ScribusMainWindow::emergencySave()
 		QDateTime dat = QDateTime::currentDateTime();
 		if ((!doc->prefsData().docSetupPrefs.AutoSaveLocation) && (!doc->prefsData().docSetupPrefs.AutoSaveDir.isEmpty()))
 			path = doc->prefsData().docSetupPrefs.AutoSaveDir;
+		// A crash must not end in a hang: if the folder is on a share that
+		// is not answering, the emergency copy goes to the home folder,
+		// which findRecoverableFile() also searches.
+		if (!NetPathGuard::reachable(path))
+			path = QDir::homePath();
 		QString fileName = QDir::cleanPath(path + "/" + base + QString("_emergency_%1.sla").arg(dat.toString("dd_MM_yyyy_hh_mm")));
 		std::cout << "Saving: " << fileName.toStdString() << std::endl;
 		FileLoader fl(fileName);

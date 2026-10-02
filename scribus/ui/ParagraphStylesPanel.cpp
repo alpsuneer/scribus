@@ -1,4 +1,5 @@
 #include "hyphenator.h"
+#include "netpathguard.h"
 #include <QScrollArea>
 #include "ui/faircodehelpviewer.h"
 #include <QToolButton>
@@ -95,6 +96,9 @@ static void setTemplateSourcePath(const QString& path)
 static QStringList collectTemplateSlaFiles(const QString& path)
 {
 	QStringList result;
+	// The template folder usually sits on the office share.
+	if (!NetPathGuard::reachable(path))
+		return result;
 	QFileInfo fi(path);
 	if (fi.isDir())
 	{
@@ -146,7 +150,9 @@ static const QSet<QString>& templateStyleNames(ScribusDoc* doc, bool forceReload
 	}
 	s_templateCache.names = names;
 	s_templateCache.sourcePath = path;
-	s_templateCache.loaded = true;
+	// Not cached while the template folder is being skipped, so the styles
+	// appear on the next rebuild once the share answers again.
+	s_templateCache.loaded = !NetPathGuard::isSkipped(path);
 	return s_templateCache.names;
 }
 

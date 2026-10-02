@@ -1724,5 +1724,53 @@ Traps:
 - The per-document "don't ask" flag is DOCUMENT attribute `SuneerLinkedImagesNoAsk`, written only
   when set. `CheckerPrefs::checkLinkedImages` defaults to true in the constructor because the older
   format loaders never set it.
-- A dead NFS mount (`/mnt/F`) hangs every file dialog (volume listing). Tests run in a private mount
-  namespace: `linktest/run.sh`.
+- A dead NFS mount (`/mnt/F`) used to hang every file dialog (volume listing) and startup. Fixed by
+  `NetPathGuard` — see "Dead network folder" below.
+
+
+## Dead network folder never hangs startup or the file dialog (uncommitted as of 2026-10-02)
+
+Code: `scribus/netpathguard.{h,cpp}`. A stat() on an NFS "hard" mount whose server is gone never
+returns and cannot be given a timeout, so the stat runs in a detached helper thread and the GUI
+thread waits at most 2 s (`NetPathGuard::reachable`). No answer -> the folder is "skipped": every
+path under it is refused at once, and `ScribusMainWindow::showNetworkPathNotes()` puts one note in
+the status bar. The stuck thread is the recovery detector: when the server returns, its stat()
+returns and the folder stops being skipped.
+
+Guarded: extra font dirs, user ICC dir, recent scrapbooks, recent documents, template dir + Template
+Style Source (lock sweep, New from Template, Paragraph Styles panel), autosave dir + documents dir
+(crash-recovery search, autosave timer, emergency save), and `ScFileWidget`/`CustomFDialog` (start
+folder, QtProject.conf sidebar/history/lastVisited, /media volumes).
+
+Traps:
+
+- **The splash text lies about where a hang is.** "Reading Scrapbook" is only the last
+  `setSplashStatus()` call; the real hang was 60 lines later, in the template-lock sweep
+  (`DocumentLock::removeOwnDeadLocksIn(templateSearchPaths())`), with Templates on the share.
+- **`reachable()` means "answered", not "exists".** Callers keep their own `exists()` test.
+- **Startup checks are started early and waited on late** (`ScribusCore::precheckNetworkPaths`), so the
+  2 s runs alongside font/plugin init. A new startup path should be added there, or it costs its
+  own 2 s.
+- **The dead folder is found by walking the path top-down in the helper thread**; the component it is
+  stuck on is the mount point or the symlink into it (`~/Desktop/F` -> `/mnt/F`). A symlink into an
+  already-skipped folder is skipped without a second wait.
+- **QFileDialog stats its saved places inside its own constructor** (QtProject.conf `shortcuts`,
+  `history`, `lastVisited`, plus a process-wide "last visited" and the cwd). `ScFileWidget` therefore
+  filters the settings BEFORE the base constructor runs (`hideUnreachablePlaces()` in the base
+  initialiser) and puts the hidden entries back on `destroyed`. Its destructor always leaves the
+  dialog on the home folder so the process-wide value is never a share.
+- **`QStorageInfo::mountedVolumes()` statfs()es every mount** — that was the "volume listing" hang.
+  /media mount points are now read from `/proc/self/mountinfo`.
+- **`PrefsManager::documentDir()` returns the local documents folder while the configured one is
+  skipped.** `appPrefs.pathPrefs.documents` itself is untouched and is saved back unchanged.
+- **Recent scrapbooks are no longer stat'ed in `readPrefs`**; `initScrapbook()` decides (reachable and
+  exists -> open; unreachable -> kept in prefs, not opened; gone -> dropped). The skipped list is a
+  file-static in scribus.cpp, NOT a member: adding a member to `ScribusMainWindow` changes the layout
+  the plugins are compiled against.
+- **Not covered:** a share that dies in mid-session while a document on it is open (Save, the
+  FileWatcher poll and linked-image reloads still block), fontconfig's own directories, and native
+  (non-`CustomFDialog`) `QFileDialog::get*` calls.
+- Test harness: `~/scribus-crashlogs/nfshang/run.sh <label> <hang|missing>`. `hangfs.py` is a FUSE
+  filesystem that answers FUSE_INIT and nothing else; it is mounted on `/mnt/F` **only inside
+  `unshare -m`**, never in the real namespace (it would freeze the desktop). Tested against that
+  fake, not against a real dead NFS server.

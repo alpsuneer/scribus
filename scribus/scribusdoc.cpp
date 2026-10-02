@@ -58,6 +58,7 @@ for which a new license (GPL+exception) is in place.
 #include "fpoint.h"
 #include "hyphenator.h"
 #include "notesstyles.h"
+#include "netpathguard.h"
 #include "numeration.h"
 #include "pageitem.h"
 #include "pageitemiterator.h"
@@ -17656,6 +17657,16 @@ void ScribusDoc::slotAutoSave()
 	QDateTime dat = QDateTime::currentDateTime();
 	if ((!m_docPrefsData.docSetupPrefs.AutoSaveLocation) && (!m_docPrefsData.docSetupPrefs.AutoSaveDir.isEmpty()))
 		path = m_docPrefsData.docSetupPrefs.AutoSaveDir;
+	// Autosave runs from a timer, unasked. Writing to a share whose server is
+	// away would freeze the window until the server comes back, so skip this
+	// round and say so; the timer tries again later.
+	if (!NetPathGuard::reachable(path))
+	{
+		scMW()->statusBar()->showMessage( tr("Autosave skipped: network folder not reachable: %1").arg(QDir::toNativeSeparators(path)), 10000);
+		if (m_docPrefsData.docSetupPrefs.AutoSave)
+			autoSaveTimer->start(m_docPrefsData.docSetupPrefs.AutoSaveTime);
+		return;
+	}
 	fileName = QDir::cleanPath(path + "/" + base + QString("_autosave_%1.sla").arg(dat.toString("dd_MM_yyyy_hh_mm")));
 	FileLoader fl(fileName);
 	if (fl.saveFile(fileName, this, nullptr))

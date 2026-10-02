@@ -43,6 +43,7 @@ for which a new license (GPL+exception) is in place.
 #include "fonts/scface_ttf.h"
 #include "fonts/scfontmetrics.h"
 
+#include "netpathguard.h"
 #include "prefsmanager.h"
 #include "prefsfile.h"
 #include "prefscontext.h"
@@ -1211,7 +1212,11 @@ void SCFonts::addUserPath(const QString& pf)
 	PrefsContext *pc = PrefsManager::instance().prefsFile->getContext("Fonts");
 	PrefsTable *extraDirs = pc->getTable("ExtraFontDirs");
 	for (int i = 0; i < extraDirs->getRowCount(); ++i)
-		addPath(extraDirs->get(i, 0));
+	{
+		// A font folder on a share whose server is away would hang the scan.
+		if (NetPathGuard::reachable(extraDirs->get(i, 0)))
+			addPath(extraDirs->get(i, 0));
+	}
 }
 
 void SCFonts::readFontCache(const QString& pf)

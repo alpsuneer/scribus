@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
  *   Riku Leino, tsoots@gmail.com                                          *
  ***************************************************************************/
 
+#include "netpathguard.h"
 #include "nftsettings.h"
 #include "prefsmanager.h"
 #include "scpaths.h"
@@ -23,12 +24,18 @@ void nftsettings::read()
 	nftrcreader reader(&templates, QDir::toNativeSeparators(ScPaths::applicationDataDir()));
 
 	addTemplates(reader, ScPaths::instance().templateDir());
-	addTemplates(reader, ScPaths::instance().userTemplateDir(true));
+	// userTemplateDir(true) would mkpath() a missing folder — on a share that
+	// is not answering that never returns.
+	const QString userTemplates = PrefsManager::instance().appPrefs.pathPrefs.documentTemplates;
+	if (userTemplates.isEmpty() || NetPathGuard::reachable(userTemplates))
+		addTemplates(reader, ScPaths::instance().userTemplateDir(true));
 }
 
 void nftsettings::addTemplates(nftrcreader& reader, const QString& dir) // dir will be searched for a sub folder called templates
 {
 	if (dir.isEmpty())
+		return;
+	if (!NetPathGuard::reachable(dir))
 		return;
 	// Add templates from the dir itself
 	QString tmplFile = findTemplateXml(dir);
