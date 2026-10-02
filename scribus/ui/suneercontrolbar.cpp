@@ -1594,10 +1594,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 void SuneerControlBar::setDocument(ScribusDoc* doc)
 {
-	m_doc = doc;
 	if (m_doc && m_doc != doc)
 		disconnect(m_doc, nullptr, this, nullptr);
-	// Load Scribus fonts into combo
+	m_doc = doc;
 	// The Paragraph Shading popup's SMPShadeWidget keeps its own document
 	// pointer (and an UpdateRequest connection). It follows every change,
 	// nullptr included, so it can never refresh from a closed document.
@@ -1616,6 +1615,7 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		showTextWrapWidgets(false);
 		return;
 	}
+	// Load Scribus fonts into combo
 	m_fontCombo->blockSignals(true);
 	m_fontCombo->clear();
 	QStringList fonts = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.keys();
