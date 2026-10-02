@@ -760,7 +760,36 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - The palette keeps its Reference and Mode between opens.
 - Narrow window: the button moves behind the bar's ">>" — click ">>" and the bar opens a second row with it.
 
-### 35. Authors
+### 35. PDF export presets and a Default that wins over the document
+- **File > Export > Save as PDF** now starts with a **Preset** box: choose a preset and every tab is
+  filled in at once. Buttons: Save As... (new name), Save (update the selected one), Delete (asks first),
+  Set as Default. `(modified)` appears next to the name when you change something afterwards.
+- **Use current settings as Default**: saves what is on screen and makes it the Default — into the
+  selected preset if it is one of yours, otherwise into a preset called "My Default".
+- **The Default wins.** Every time the dialog opens, for any document (new, old, from a template, from
+  another PC), it shows your Default preset, not the PDF settings stored in the .sla. Tick
+  **"Use this document's own saved settings instead"** for the rare case you want those.
+- Exporting with a preset does **not** change the PDF settings saved in the document. They change only
+  when you export with that box ticked (or when you use no preset at all).
+- A preset holds everything on all tabs — version, image compression/quality/downsampling, font
+  embedding, colour output and ICC profiles, PDF/X, marks and bleeds, viewer, security — plus "one file
+  per page" and "open after export". It does **not** hold the file name or the page range.
+  Per-font embed/subset lists are per document, so a preset keeps the embedding mode and
+  "subset or embed fully", not the lists.
+- Presets live in `~/.config/scribus/pdf-presets/` (one `.json` each; `default.txt` names the Default).
+  **Export... / Import...** copy them to and from a folder for another PC.
+- **Office presets**: tick "Office preset" on the ones to ship. `tools/release.sh` copies them into the
+  package (read-only, shown as "(office)"), passwords left out; if your Default is one of them it becomes
+  the office Default. An office user's own Default is in their own profile and an update never changes it.
+- **File > Export > Save as PDF (Default preset)** — **Ctrl+Alt+Shift+D**: exports at once with the
+  Default, asking only for the file name (all pages). **File > Export > Save as PDF with preset >**
+  lists every preset and does the same with the one you pick.
+- The old "News_Paper" and "Deshabhimani_Newspaper" entries are still there as "(built-in)".
+- A preset that needs colour management (ICC profiles, PDF/X) on a document that has it switched off:
+  the document's colour management is switched on when the export starts, not when the dialog opens,
+  and stays on afterwards.
+
+### 36. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

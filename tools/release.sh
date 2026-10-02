@@ -16,6 +16,9 @@
 # keyset (tools/update-newspaper-shortcuts.sh) and checked for conflicts
 # (tools/check-keyset-conflicts.py); a changed keyset is committed with the
 # release and summarised in the changelog. SCRIBUS_PROFILE overrides the profile.
+# The laptop's PDF export presets marked "Office preset" are copied the same way
+# (tools/update-office-pdf-presets.py) into resources/pdf-presets, passwords
+# left out, and committed with the release when they changed.
 #
 # Site settings are NOT in this repository (it is public). The config file is
 # a shell fragment, created interactively on the first real run:
@@ -251,6 +254,31 @@ $KEYSET_DETAIL" && echo "   keyset change committed: $(git rev-parse --short HEA
 	fi
 else
 	echo "   keyset unchanged since the committed one"
+fi
+
+# ------------------------------------------- 3b2. office PDF presets ---
+say "Office PDF presets"
+# The presets ticked "Office preset" in Save as PDF on this laptop become the
+# read-only presets the package ships; the laptop's Default, when it is one of
+# them, becomes the office Default. A user's own Default on an office PC is
+# kept: it lives in that user's profile, which the package never writes to.
+PRESET_SUMMARY=$(mktemp)
+tools/update-office-pdf-presets.py --profile "${SCRIBUS_PROFILE:-/home/s1/.config/scribus}" --dest resources/pdf-presets --summary "$PRESET_SUMMARY" | sed 's/^/   /' || die "office PDF presets not updated (see above)"
+PRESET_CHANGELOG=$(head -1 "$PRESET_SUMMARY")
+PRESET_DETAIL=$(tail -n +2 "$PRESET_SUMMARY")
+rm -f "$PRESET_SUMMARY"
+if [ -n "$(git -c core.fileMode=false status --porcelain -- resources/pdf-presets)" ]; then
+	if [ $DRY_RUN -eq 1 ]; then
+		echo "   office PDF presets changed; left uncommitted (dry run)"
+	else
+		git add -A resources/pdf-presets
+		git commit -q -m "suneer: pdf presets: office presets for $VERSION
+
+$PRESET_CHANGELOG
+$PRESET_DETAIL" && echo "   office PDF presets committed: $(git rev-parse --short HEAD)"
+	fi
+else
+	echo "   office PDF presets unchanged since the committed ones"
 fi
 
 # ------------------------------------------------- 3c. working tree clean ---

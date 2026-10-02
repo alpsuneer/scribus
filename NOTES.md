@@ -1728,6 +1728,46 @@ Traps:
   `NetPathGuard` — see "Dead network folder" below.
 
 
+## PDF export presets and Default (2026-10-02)
+
+Code: `scribus/pdfpresets.{h,cpp}` (store, JSON, Default), `ui/pdfexportdialog.*` (preset row, apply,
+"(modified)"), `ScribusMainWindow::doSaveAsPDF` + `suneerSaveAsPDFDefault/WithPreset` (direct export,
+submenu), `resources/pdf-presets/` + `tools/update-office-pdf-presets.py` + `tools/release.sh` step 3b2.
+
+- **`TabPDFOptions::restoreDefaults()` ignores its `Optionen` argument** and reads the tab's own
+  `Opts` reference — which in the export dialog IS `doc->pdfOptions()`. So applying a preset has to
+  write the preset into the document's options and then call `restoreDefaults()`. That is why
+  `doSaveAsPDF` keeps a copy (`DocPdfOptionsKeeper`) and puts it back on every return path; the whole
+  export code reads `doc->pdfOptions()` too.
+- **The document's own settings change only when `PDFExportDialog::keepsDocumentSettings()` is false**:
+  no preset was ever applied in that dialog, or "Use this document's own saved settings instead" is
+  ticked. Otherwise only `fileName` survives the export.
+- **`PDFOptionsIO` is not used**: it predates half the options (marks, viewer, outline list, doc
+  bleeds...). Presets are JSON written by `PdfPresets::toJson`; a new `PDFOptions` field must be added
+  to `toJson`/`fromJson` or it is silently not part of a preset.
+- **Font lists are rebuilt per document** (`applyPreset`): all fonts go to EmbedList (or SubsetList when
+  the preset says "subset"); the tab then moves the ones that cannot be embedded whole. The baseline for
+  "(modified)" is taken from the widgets AFTER applying, not from the file, because of that.
+- **"(modified)" is a 400 ms poll** comparing `PdfPresets::fingerprint()` of the widget state; no
+  per-widget wiring. `TabPDFOptions::presetOverridden()` is now ignored.
+- **CMS is switched on at export, not on apply** (`m_enableCmsOnExport`): the old built-in presets
+  called `m_doc->enableCMS(true)` on selection; with a Default applied on every open that would change
+  a document just by opening the dialog. `collectOptions()` uses `cmsAvailableForExport()`.
+- **The Default is a file** (`pdf-presets/default.txt`), not a prefs key: prefs are written on exit and a
+  crash would lose the choice.
+- **The direct-export preset name and the submenu actions are file-statics in scribus.cpp**, not
+  members (plugin ABI). `SaveAsPDF()` clears the static first: a direct export parked at the Preflight
+  Verifier and then abandoned must not hijack the next normal Save as PDF.
+- **Two QMenu objects exist for every submenu** (File > Export, Open Recent...): one is a stale twin
+  outside the menu bar. A test must walk `menuBar()`, not `findChildren<QMenu*>()`.
+- **PyQt aborts the process on an exception inside a slot** — a harness bug looks like a Scribus crash
+  (signal 6, crash log, emergency file). And a `QFileDialog::get*` static is a native GTK dialog here,
+  invisible to PyQt; Export/Import use `CustomFDialog` (also NetPathGuard-safe).
+- Office presets: `install(DIRECTORY ...)` so files added after configure are packaged; the copy script
+  blanks passwords because `resources/` is in a public repo.
+- Harness: `~/scribus-crashlogs/pdfpresettest/run.sh <label> <s1|s2|s3|s4>.py old.sla`.
+
+
 ## Align and Distribute button on the control bar (2026-10-02)
 
 `SuneerControlBar` is a QToolBar holding ONE container widget (all the rows) plus trailing actions.

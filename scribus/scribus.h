@@ -668,6 +668,14 @@ public slots:
 	void reallySaveAsEps();
 	void SaveAsPDF();
 	void doSaveAsPDF();
+	//! File > Export > Save as PDF (Default preset): asks only for the file name.
+	void suneerSaveAsPDFDefault();
+	//! File > Export > Save as PDF with preset > <name>
+	void suneerSaveAsPDFWithPreset(const QString& presetName);
+	//! Refills the "Save as PDF with preset" submenu from the presets on disk.
+	void suneerRebuildPdfPresetMenu();
+	//! Shared body of the three PDF export entries: linked-image check, preflight, then doSaveAsPDF().
+	void suneerSaveAsPDFChecked();
 	void setMainWindowActive();
 	void setItemEffects(int h);
 	void setStyleEffects(int s);

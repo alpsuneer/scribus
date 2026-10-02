@@ -155,6 +155,8 @@ void ActionManager::initFileMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "fileExportAsPDF";
 	scrActions->insert(name, new ScrAction("pref-pdf-export", "pref-pdf-export", "", defaultKey(name), mainWindow));
+	name = "fileExportAsPDFDefault";
+	scrActions->insert(name, new ScrAction("pref-pdf-export", "pref-pdf-export", "", defaultKey(name), mainWindow));
 	//Rest of File Menu
 //	name = "fileDocSetup";
 //	scrActions->insert(name, new ScrAction("document-properties", "document-properties", "", defaultKey(name), mainWindow));
@@ -214,6 +216,7 @@ void ActionManager::initFileMenuActions()
 	connect( (*scrActions)["fileExportText"], SIGNAL(triggered()), mainWindow, SLOT(SaveText()) );
 	connect( (*scrActions)["fileExportAsEPS"], SIGNAL(triggered()), mainWindow, SLOT(SaveAsEps()) );
 	connect( (*scrActions)["fileExportAsPDF"], SIGNAL(triggered()), mainWindow, SLOT(SaveAsPDF()) );
+	connect( (*scrActions)["fileExportAsPDFDefault"], SIGNAL(triggered()), mainWindow, SLOT(suneerSaveAsPDFDefault()) );
 	//The rest are plugins
 	
 	
@@ -1740,6 +1743,7 @@ void ActionManager::languageChange()
 	(*scrActions)["fileExportText"]->setTexts( tr("Save &Text..."));
 	(*scrActions)["fileExportAsEPS"]->setTexts( tr("Save as &EPS..."));
 	(*scrActions)["fileExportAsPDF"]->setTexts( tr("Save as P&DF..."));
+	(*scrActions)["fileExportAsPDFDefault"]->setTexts( tr("Save as PDF (Default preset)"));
 //	(*scrActions)["fileDocSetup"]->setTexts( tr("Document &Setup (old)..."));
 	(*scrActions)["fileDocSetup150"]->setTexts( tr("Document &Setup..."));
 //	(*scrActions)["filePreferences"]->setTexts( tr("P&references (old)..."));
@@ -2087,6 +2091,7 @@ void ActionManager::languageChange()
 	(*scrActions)["editUndoAction"]->setStatusTextAndShortcut( tr("Undo"));
 	(*scrActions)["fileClose"]->setStatusTextAndShortcut( tr("Close the current document"));
 	(*scrActions)["fileExportAsPDF"]->setStatusTextAndShortcut( tr("Export the document to PDF"));
+	(*scrActions)["fileExportAsPDFDefault"]->setStatusTextAndShortcut( tr("Export to PDF with the Default preset, asking only for the file name"));
 	(*scrActions)["fileNew"]->setStatusTextAndShortcut( tr("Create a new document"));
 	(*scrActions)["fileOpen"]->setStatusTextAndShortcut( tr("Open an existing document"));
 	(*scrActions)["filePrint"]->setStatusTextAndShortcut( tr("Print the document"));
@@ -2235,6 +2240,7 @@ void ActionManager::createDefaultShortcuts()
 	// compiled defaults; the palettes take F2/F3/F6/F8/F11/F12 around it.
 	defKeys.insert("fileProofPrint", QKeySequence(Qt::Key_F9));
 	defKeys.insert("fileExportAsPDF", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+	defKeys.insert("fileExportAsPDFDefault", QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_D));
 	defKeys.insert("fileQuit", QKeySequence(Qt::CTRL | Qt::Key_Q));
 	//Edit Menu
 	defKeys.insert("editUndoAction", QKeySequence::Undo);
@@ -2453,6 +2459,7 @@ void ActionManager::createDefaultMenus()
 		<< "fileExportText"
 		<< "fileExportAsEPS"
 		<< "fileExportAsPDF"
+		<< "fileExportAsPDFDefault"
 //		<< "fileDocSetup"
 		<< "fileDocSetup150"
 //		<< "filePreferences"

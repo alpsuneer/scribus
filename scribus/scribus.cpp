@@ -153,6 +153,7 @@ for which a new license (GPL+exception) is in place.
 #include "pagesize.h"
 #include "pdflib.h"
 #include "pdfoptions.h"
+#include "pdfpresets.h"
 #include "pluginmanager.h"
 #include "plugins/formatidlist.h"
 #include "prefscontext.h"
@@ -626,6 +627,7 @@ void ScribusMainWindow::setupMainWindow()
 		}
 	}
 	rebuildRecentFileMenu();
+	suneerRebuildPdfPresetMenu();
 	//For 1.3.5, we dump prefs first time around.
 	if (!m_prefsManager.firstTimeIgnoreOldPrefs())
 		m_prefsManager.readPrefsXML();
@@ -950,6 +952,12 @@ void ScribusMainWindow::initPalettes()
 	});
 	// HaveNewSel is a slot, not signal — handled directly in HaveNewSel()
 	connect(scrActions["suneerGetImage"], &QAction::triggered, this, &ScribusMainWindow::suneerGetImage);
+	// The two preset export entries are available exactly when Save as PDF is.
+	connect(scrActions["fileExportAsPDF"], &QAction::enabledChanged, this, [this](bool enabled) {
+		scrActions["fileExportAsPDFDefault"]->setEnabled(enabled);
+		scrMenuMgr->setMenuEnabled("FileExportPDFPreset", enabled);
+	});
+	scrActions["fileExportAsPDFDefault"]->setEnabled(scrActions["fileExportAsPDF"]->isEnabled());
 	scrActions["viewShowImageLinkBadges"]->setChecked(SuneerImageLinks::badgesShown());
 	connect(scrActions["suneerFocusFontCombo"], &QAction::triggered, this, [this]() { m_suneerControlBar->focusFontCombo(); });
 	connect(scrActions["suneerEnlargeImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeImageSize);
@@ -1306,6 +1314,9 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("fileExportText", "FileExport");
 	scrMenuMgr->addMenuItemString("fileExportAsEPS", "FileExport");
 	scrMenuMgr->addMenuItemString("fileExportAsPDF", "FileExport");
+	scrMenuMgr->addMenuItemString("fileExportAsPDFDefault", "FileExport");
+	scrMenuMgr->createMenu("FileExportPDFPreset", tr("Save as PDF with preset"), "FileExport", false, true);
+	scrMenuMgr->addMenuItemString("FileExportPDFPreset", "FileExport");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "File");
 	scrMenuMgr->addMenuItemString("fileDocSetup150", "File");
 	scrMenuMgr->addMenuItemString("filePreferences150", "File");
@@ -9380,10 +9391,77 @@ bool ScribusMainWindow::getPDFDriver(const QString &filename, const std::vector<
 	return ret;
 }
 
+// Preset for an export that skips the Save as PDF dialog; empty for the normal
+// dialog. A file-static, not a member, so the main window's layout (which the
+// plugins are compiled against) does not change.
+static QString s_pdfDirectPreset;
+static QMap<QString, QPointer<ScrAction> > s_pdfPresetActions;
+
+void ScribusMainWindow::suneerRebuildPdfPresetMenu()
+{
+	scrMenuMgr->clearMenuStrings("FileExportPDFPreset");
+	s_pdfPresetActions.clear();
+	const QString defaultPreset = PdfPresets::defaultName();
+	QStringList names = PdfPresets::allNames();
+	const QStringList builtIn = PDFExportDialog::builtInPresets();
+	for (const QString& name : builtIn)
+	{
+		if (!names.contains(name))
+			names << name;
+	}
+	int i = 0;
+	for (const QString& name : std::as_const(names))
+	{
+		// Keyed so the menu keeps this order.
+		const QString key = QString("pdfPreset%1").arg(i++, 3, 10, QChar('0'));
+		QString text = name;
+		text.replace("&", "&&");
+		if (name == defaultPreset)
+			text += "  [" + tr("Default") + "]";
+		s_pdfPresetActions.insert(key, new ScrAction(ScrAction::RecentFile, QString(), QString(), text, QKeySequence(), this, name));
+		connect(s_pdfPresetActions[key], SIGNAL(triggeredData(QString)), this, SLOT(suneerSaveAsPDFWithPreset(QString)));
+		scrMenuMgr->addMenuItemString(key, "FileExportPDFPreset");
+	}
+	scrMenuMgr->addMenuItemStringsToRememberedMenu("FileExportPDFPreset", s_pdfPresetActions);
+}
+
+void ScribusMainWindow::suneerSaveAsPDFDefault()
+{
+	if (!HaveDoc)
+		return;
+	const QString preset = PdfPresets::defaultName();
+	if (preset.isEmpty() || (!PdfPresets::exists(preset) && !PDFExportDialog::builtInPresets().contains(preset)))
+	{
+		ScMessageBox::information(this, tr("Save as PDF (Default preset)"),
+			tr("There is no Default preset yet.\nOpen File > Export > Save as PDF, choose your settings and press \"Use current settings as Default\"."));
+		return;
+	}
+	suneerSaveAsPDFWithPreset(preset);
+}
+
+void ScribusMainWindow::suneerSaveAsPDFWithPreset(const QString& presetName)
+{
+	if (!HaveDoc || presetName.isEmpty())
+		return;
+	s_pdfDirectPreset = presetName;
+	suneerSaveAsPDFChecked();
+}
+
 void ScribusMainWindow::SaveAsPDF()
 {
+	// A direct export that stopped at the Preflight Verifier and was then
+	// abandoned must not turn this, the normal dialog, into a direct export.
+	s_pdfDirectPreset.clear();
+	suneerSaveAsPDFChecked();
+}
+
+void ScribusMainWindow::suneerSaveAsPDFChecked()
+{
 	if (!suneerLinkedImagesCheck(tr("PDF export")))
+	{
+		s_pdfDirectPreset.clear();
 		return;
+	}
 	if (doc->checkerProfiles()[doc->curCheckProfile()].autoCheck)
 	{
 		if (scanDocument())
@@ -9396,7 +9474,10 @@ void ScribusMainWindow::SaveAsPDF()
 											QMessageBox::NoButton,	// GUI default
 											QMessageBox::Ignore);	// batch default
 				if (t == QMessageBox::Abort)
+				{
+					s_pdfDirectPreset.clear();
 					return;
+				}
 			}
 			else
 			{
@@ -9446,10 +9527,65 @@ void ScribusMainWindow::doSaveAsPDF()
 		}
 		doc->pdfOptions().SubsetList = tmpEm;
 	}
+	const QString directPreset = s_pdfDirectPreset;
+	s_pdfDirectPreset.clear();
+	// Exporting with a preset must leave the PDF settings saved in the document
+	// as they were: the export code below reads doc->pdfOptions(), so the
+	// preset's values go in for the export and the document's own come back
+	// when this function returns, by whichever path.
+	struct DocPdfOptionsKeeper
+	{
+		ScribusDoc* doc;
+		PDFOptions own;
+		bool restore { true };
+		bool keepFileName { false };
+		~DocPdfOptionsKeeper()
+		{
+			if (!restore)
+				return;
+			const QString usedFileName = doc->pdfOptions().fileName;
+			doc->pdfOptions() = own;
+			// The file name is not a setting; remembering the last one is a convenience.
+			if (keepFileName)
+				doc->pdfOptions().fileName = usedFileName;
+		}
+	} docPdfOptions { doc, doc->pdfOptions() };
+
 	MarginStruct optBleeds(doc->pdfOptions().bleeds);
 	PDFExportDialog dia(this, doc->documentFileName(), ReallyUsed, view, doc->pdfOptions(), ScCore->PDFXProfiles, m_prefsManager.appPrefs.fontPrefs.AvailFonts, ScCore->PrinterProfiles);
-	if (!dia.exec())
-		return;
+	if (directPreset.isEmpty())
+	{
+		const int dialogResult = dia.exec();
+		// Presets may have been added, deleted or made Default in the dialog.
+		suneerRebuildPdfPresetMenu();
+		if (!dialogResult)
+			return;
+	}
+	else
+	{
+		// Straight to the file name, then export with the preset.
+		QString fileName = dia.fileName();
+		PrefsContext* dirs = m_prefsManager.prefsFile->getContext("dirs");
+		const QString wdir = fileName.isEmpty() ? dirs->get("pdf", ScPaths::userDocumentDir()) : QFileInfo(fileName).absolutePath();
+		fileName = CFileDialog(wdir, tr("Save as PDF (%1)").arg(directPreset), tr("PDF Files (*.pdf);;All Files (*)"), fileName, fdHidePreviewCheckBox).first;
+		if (fileName.isEmpty())
+			return;
+		fileName = checkFileExtension(fileName, "pdf");
+		if (!overwrite(this, fileName))
+			return;
+		dirs->set("pdf", fileName.left(fileName.lastIndexOf("/")));
+		if (!dia.prepareDirectExport(directPreset, fileName))
+		{
+			ScMessageBox::warning(this, CommonStrings::trWarning, tr("The preset \"%1\" could not be read.").arg(directPreset));
+			return;
+		}
+	}
+	// No preset involved (or "Use this document's own saved settings instead"):
+	// as in stock Scribus, what was exported with becomes the document's own.
+	if (dia.keepsDocumentSettings())
+		docPdfOptions.keepFileName = true;
+	else
+		docPdfOptions.restore = false;
 
 	QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 	dia.updateDocOptions();
