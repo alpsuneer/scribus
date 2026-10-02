@@ -8347,6 +8347,14 @@ void PageItem::restoreShapeContour(UndoState *state, bool isUndo)
 		double newY = istate->getDouble("NEW_Y");
 
 		if (isUndo)
+		// The frame may still carry the "my file is a temp copy" flags of an
+		// embedded picture while fn is the user's own file. Those flags make
+		// ~PageItem delete Pfile, so never leave them on a file we did not create.
+		if (isTempFile && !QFileInfo(fn).fileName().startsWith("scribus_temp_"))
+		{
+			isInlineImage = false;
+			isTempFile = false;
+		}
 		{
 			if (isContour)
 				ContourLine = oldClip;
