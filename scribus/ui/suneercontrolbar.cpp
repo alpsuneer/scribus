@@ -3059,9 +3059,19 @@ void SuneerControlBar::onImgRemoveBackground()
 	QString stdErr = QString::fromLocal8Bit(proc.readAllStandardError());
 
 	if (proc.exitCode() == 0) {
+		// loadPict() deletes Pfile when the frame holds an embedded picture's
+		// temp copy - and Pfile is about to be our new output. Drop the flag
+		// first (the old temp copy stays behind for undo), embed again after.
+		const bool wasEmbedded = item->isImageInline();
+		if (wasEmbedded)
+			item->isTempFile = false;
 		item->Pfile = outputPath;
 		m_doc->loadPict(outputPath, item, false, true);
 		updateCaptionFrame(item);
+		if (wasEmbedded)
+			SuneerImageLinks::embedItem(m_doc, item);
+		else
+			SuneerImageLinks::embedPlaced(m_doc, item);
 		// Auto fit image to frame
 		if (item->OrigW > 0 && item->OrigH > 0) {
 			double scaleX = item->width()  / (double)item->OrigW;
@@ -3449,6 +3459,8 @@ void SuneerControlBar::onEmbedLink()
 		PageItem* item = m_doc->DocItems.at(i);
 		if (!item->isImageFrame() || !item->imageIsAvailable) continue;
 		if (item->Pfile.isEmpty()) continue;
+		// an embedded picture lives in the .sla; relinking it would un-embed it
+		if (item->isImageInline()) continue;
 		QFileInfo fi(item->Pfile);
 		QString newPath = docPath + "/" + fi.fileName();
 		if (item->Pfile != newPath) {
@@ -3606,9 +3618,18 @@ void SuneerControlBar::onImgCropResize()
              << "suffix:" << checkFi.suffix();
 
     if (saveOk) {
+        // see onImgRemoveBackground(): keep the embedded picture's old temp
+        // copy for undo, and embed the new one afterwards
+        const bool wasEmbedded = item->isImageInline();
+        if (wasEmbedded)
+            item->isTempFile = false;
         m_doc->loadPict(outputPath, item, false, true);
         // Ensure frame points to the new PNG file (not the original)
         item->Pfile = outputPath;
+        if (wasEmbedded)
+            SuneerImageLinks::embedItem(m_doc, item);
+        else
+            SuneerImageLinks::embedPlaced(m_doc, item);
         // Frame size = target
         item->setWidth(targetW * mmToPt);
         item->setHeight(targetH * mmToPt);
@@ -4281,8 +4302,16 @@ void SuneerControlBar::onImgEdgeFeather()
 	QApplication::restoreOverrideCursor();
 
 	if (proc.exitCode() == 0) {
+		// see onImgRemoveBackground()
+		const bool wasEmbedded = item->isImageInline();
+		if (wasEmbedded)
+			item->isTempFile = false;
 		item->Pfile = outputPath;
 		m_doc->loadPict(outputPath, item, false, true);
+		if (wasEmbedded)
+			SuneerImageLinks::embedItem(m_doc, item);
+		else
+			SuneerImageLinks::embedPlaced(m_doc, item);
 		item->update();
 		m_doc->changed();
 		QMessageBox::information(this, "Done", "Edge feather applied!\nSaved: " + outputPath);
@@ -4416,6 +4445,7 @@ void SuneerControlBar::onTextEdgeFeather()
 	imgItem->OwnPage = pg;
 	imgItem->Pfile = outputPath;
 	m_doc->loadPict(outputPath, imgItem, false, true);
+	SuneerImageLinks::embedPlaced(m_doc, imgItem);
 	if (imgItem->OrigW > 0 && imgItem->OrigH > 0) {
 		double scaleX = iw / (double)imgItem->OrigW;
 		double scaleY = ih / (double)imgItem->OrigH;
@@ -4445,7 +4475,6 @@ void SuneerControlBar::onTextFrameBox()
 	// edges as set — a partial revert is worse than several complete ones.
 	UndoTransaction borderTransaction;
 	if (UndoManager::undoEnabled())
-	SuneerImageLinks::embedPlaced(m_doc, imgItem);
 		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                             Um::ObjectFrame, QString(), Um::IBorder);
 
