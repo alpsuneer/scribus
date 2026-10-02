@@ -721,7 +721,12 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 ### 32. Linked images: badges, Embed All, check before output (പുതിയത്, 2026-10-02)
 
 - **Badges on the canvas** (screen only, never in PDF / print / image export / preview mode):
-  orange square = image is only LINKED, red square with a white cross = file MISSING.
+  orange **LINK** tab = image is only linked, red **MISSING** tab = file missing. White outline, so they
+  show on dark and light photos. Same size on screen at every zoom; a frame too narrow for the word
+  gets a plain orange square / red square with a white cross. Sits 8 px inside the top-left corner,
+  clear of the resize handles.
+  Size: Preferences > Item Tools > "Linked / missing image badge size" — Small (20 px) / Medium (24 px) /
+  Large (28 px, default). Applies at once, no restart.
   Toggle: View > Image Frames > Show Linked Image Badges (also in the page right-click menu). On by default.
 - **Extras > Embed All Images** (also page right-click menu, and the control bar's "Embed in SLA"):
   embeds every linked image, one Undo takes all back, reports how many and which files were missing.
@@ -734,7 +739,7 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - **Preferences > Item Tools > "Always embed placed images"** (on by default): Get Image, Ctrl+I,
   double-click load, drag and drop, News Browser images and the control-bar image tools embed automatically.
 
-### 31. Network drive not reachable — Scribus no longer hangs
+### 33. Network drive not reachable — Scribus no longer hangs
 - If the office share (drive F) does not answer, Scribus starts anyway: each folder from the
   preferences is asked in the background and given 2 seconds. A folder that does not answer is
   skipped for this session and the status bar shows `Network folder not reachable: <path> skipped`.
@@ -744,7 +749,7 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   usual folder is on the unreachable share, and leave the share out of the sidebar.
 - Autosave skips a round (with a status-bar note) instead of freezing when its folder is unreachable.
 
-### 32. Authors
+### 34. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

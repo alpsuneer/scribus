@@ -1728,7 +1728,28 @@ Traps:
   `NetPathGuard` — see "Dead network folder" below.
 
 
-## Dead network folder never hangs startup or the file dialog (uncommitted as of 2026-10-02)
+## Linked / missing image badges: fixed screen size, label, size preference (2026-10-02)
+
+`SuneerImageLinks::badgeImage()` paints the badge once per (status, size, with/without label) into a
+cached QImage; `PageItem::DrawObj_Decoration` draws it through a `1/zoom` scale, so one image pixel is
+one screen pixel. Size pref: prefs context `suneer_images`, key `badge_size` (0/1/2 = 20/24/28 px,
+default 2), combo in Preferences > Item Tools.
+
+- **The image must be `Format_ARGB32`, not premultiplied.** `ScPainter::drawImage(QImage*)` paints the
+  colour channels as RGB24 and uses the same buffer's alpha as a mask; premultiplied data darkens every
+  antialiased edge.
+- **`slotPrefsOrg` only repaints the canvas when the page shadow changed.** The badge size is not in
+  `ApplicationPrefs`, so the old value is read before the dialog and compared after; without that a new
+  size showed only at the next unrelated repaint.
+- **Status is live.** A frame whose file is deleted after loading still shows LINK until the document is
+  reopened (`statusOf` goes by the loaded state); recreate the file and a MISSING frame turns to LINK
+  on reopen. The test document has to be reopened from disk to get a MISSING badge.
+- The 8 px inset is tied to `drawSelectionHandle()` in util_gui.cpp (6 px squares centred on the frame
+  edge). Change one, check the other.
+- Harness: `~/scribus-crashlogs/badgetest/run.sh <label> <0|1|2|default>`, `measure.py` for pixel sizes.
+
+
+## Dead network folder never hangs startup or the file dialog (2026-10-02)
 
 Code: `scribus/netpathguard.{h,cpp}`. A stat() on an NFS "hard" mount whose server is gone never
 returns and cannot be given a timeout, so the stat runs in a detached helper thread and the GUI

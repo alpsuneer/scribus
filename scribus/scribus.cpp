@@ -8729,6 +8729,8 @@ void ScribusMainWindow::slotPrefsOrg()
 	QString oldMonitorProfile(ScCore->monitorProfile.productDescription());
 	slotSelect();
 	struct ApplicationPrefs oldPrefs(m_prefsManager.appPrefs);
+	// Not part of ApplicationPrefs (prefs context "suneer_images").
+	const int oldLinkBadgeSize = SuneerImageLinks::badgeSize();
 	PreferencesDialog prefsDialog(this, oldPrefs);
 	int prefsResult = prefsDialog.exec();
 	if (prefsResult != QDialog::Accepted)
@@ -8843,7 +8845,9 @@ void ScribusMainWindow::slotPrefsOrg()
 				scw_v->zoom((scw_v->scale() / oldPrefs.displayPrefs.displayScale) * m_prefsManager.displayScale());
 				zoomSpinBox->setMaximum(doc->opToolPrefs().magMax);
 			}
-			if (shadowChanged)
+			// The badges are part of the canvas picture, so a new size
+			// needs a repaint to show.
+			if (shadowChanged || oldLinkBadgeSize != SuneerImageLinks::badgeSize())
 				scw->view()->DrawNew();
 		}
 	}

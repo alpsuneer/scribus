@@ -7,6 +7,7 @@ for which a new license (GPL+exception) is in place.
 #ifndef SUNEERIMAGELINKS_H
 #define SUNEERIMAGELINKS_H
 
+#include <QImage>
 #include <QList>
 #include <QPointer>
 #include <QString>
@@ -69,6 +70,18 @@ namespace SuneerImageLinks
 	SCRIBUS_API void setBadgesShown(bool on);
 	SCRIBUS_API bool alwaysEmbed();
 	SCRIBUS_API void setAlwaysEmbed(bool on);
+
+	//! Canvas badge size, Preferences > Item Tools. Default Large.
+	enum BadgeSize { BadgeSmall = 0, BadgeMedium = 1, BadgeLarge = 2 };
+	SCRIBUS_API int badgeSize();
+	SCRIBUS_API void setBadgeSize(int size);
+	//! Badge height in screen pixels for the current size (20 / 24 / 28).
+	SCRIBUS_API int badgePixels();
+	/*! The badge as a picture, one image pixel per screen pixel: an orange
+	    "LINK" or red "MISSING" tab with a white outline. Without \a withLabel
+	    it is a square of the same height (red gets a white cross), for frames
+	    too narrow to hold the word. Null for any other status. */
+	SCRIBUS_API QImage badgeImage(Status status, bool withLabel);
 }
 
 #endif

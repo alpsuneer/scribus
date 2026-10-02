@@ -6,6 +6,12 @@ for which a new license (GPL+exception) is in place.
 */
 #include "suneerimagelinks.h"
 
+#include <QPen>
+#include <QPainter>
+#include <QImage>
+#include <QHash>
+#include <QFontMetrics>
+#include <QFont>
 #include <QFileInfo>
 #include <QObject>
 #include <QSet>
@@ -26,6 +32,9 @@ namespace
 	// -1 = not read from the prefs file yet
 	int s_badges = -1;
 	int s_alwaysEmbed = -1;
+	int s_badgeSize = -1;
+	// Drawn once per (status, size, label): the canvas asks on every repaint.
+	QHash<int, QImage> s_badgeCache;
 
 	PrefsContext* prefsContext()
 	{
@@ -221,3 +230,83 @@ bool SuneerImageLinks::badgesShown()            { return readPref(s_badges, "sho
 void SuneerImageLinks::setBadgesShown(bool on)  { writePref(s_badges, "show_link_badges", on); }
 bool SuneerImageLinks::alwaysEmbed()            { return readPref(s_alwaysEmbed, "always_embed"); }
 void SuneerImageLinks::setAlwaysEmbed(bool on)  { writePref(s_alwaysEmbed, "always_embed", on); }
+
+int SuneerImageLinks::badgeSize()
+{
+	if (s_badgeSize < 0)
+	{
+		PrefsContext* ctx = prefsContext();
+		if (!ctx)
+			return BadgeLarge; // prefs not up yet: the default, and do not cache it
+		s_badgeSize = qBound(int(BadgeSmall), ctx->getInt("badge_size", BadgeLarge), int(BadgeLarge));
+	}
+	return s_badgeSize;
+}
+
+void SuneerImageLinks::setBadgeSize(int size)
+{
+	s_badgeSize = qBound(int(BadgeSmall), size, int(BadgeLarge));
+	if (PrefsContext* ctx = prefsContext())
+		ctx->set("badge_size", s_badgeSize);
+}
+
+int SuneerImageLinks::badgePixels()
+{
+	switch (badgeSize())
+	{
+		case BadgeSmall:  return 20;
+		case BadgeMedium: return 24;
+		default:          return 28;
+	}
+}
+
+QImage SuneerImageLinks::badgeImage(Status status, bool withLabel)
+{
+	if (status != Linked && status != Missing)
+		return QImage();
+	const bool missing = (status == Missing);
+	const int h = badgePixels();
+	const int key = h * 4 + (missing ? 2 : 0) + (withLabel ? 1 : 0);
+	const auto cached = s_badgeCache.constFind(key);
+	if (cached != s_badgeCache.constEnd())
+		return cached.value();
+
+	// Not translated: the operator reads these two words as symbols.
+	const QString label = missing ? QStringLiteral("MISSING") : QStringLiteral("LINK");
+	QFont font(QStringLiteral("Sans"));
+	font.setBold(true);
+	font.setPixelSize(qRound(h * 0.52));
+	font.setLetterSpacing(QFont::AbsoluteSpacing, h / 28.0);
+	const QFontMetrics fm(font);
+	const int w = withLabel ? fm.horizontalAdvance(label) + qRound(h * 0.75) : h;
+
+	// ARGB32, not premultiplied: ScPainter::drawImage() uses the colour
+	// channels as they are and the alpha channel as a mask.
+	QImage img(w, h, QImage::Format_ARGB32);
+	img.fill(Qt::transparent);
+	QPainter painter(&img);
+	painter.setRenderHint(QPainter::Antialiasing, true);
+	painter.setRenderHint(QPainter::TextAntialiasing, true);
+	// White outline, so the badge stands off dark and light photos alike.
+	const qreal outline = qMax(1.5, h / 18.0);
+	const QRectF body(outline / 2.0, outline / 2.0, w - outline, h - outline);
+	painter.setPen(QPen(Qt::white, outline));
+	painter.setBrush(missing ? QColor(214, 30, 30) : QColor(255, 140, 0));
+	painter.drawRoundedRect(body, h * 0.18, h * 0.18);
+	if (withLabel)
+	{
+		painter.setFont(font);
+		painter.setPen(Qt::white);
+		painter.drawText(QRectF(0, 0, w, h), Qt::AlignCenter, label);
+	}
+	else if (missing)
+	{
+		// a white cross, so red and orange differ by shape too
+		painter.setPen(QPen(Qt::white, h * 0.12, Qt::SolidLine, Qt::RoundCap));
+		painter.drawLine(QPointF(w * 0.30, h * 0.30), QPointF(w * 0.70, h * 0.70));
+		painter.drawLine(QPointF(w * 0.70, h * 0.30), QPointF(w * 0.30, h * 0.70));
+	}
+	painter.end();
+	s_badgeCache.insert(key, img);
+	return img;
+}
