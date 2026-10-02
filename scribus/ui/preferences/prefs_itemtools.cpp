@@ -15,6 +15,10 @@ for which a new license (GPL+exception) is in place.
 #include "ui/linkbutton.h"
 #include "ui/preferences/prefs_itemtools.h"
 #include "units.h"
+#include "suneerimagelinks.h"
+#include "ui/scshortcutregistry.h"
+
+#include <QCheckBox>
 
 
 Prefs_ItemTools::Prefs_ItemTools(QWidget* parent, ScribusDoc* /*doc*/)
@@ -24,6 +28,12 @@ Prefs_ItemTools::Prefs_ItemTools(QWidget* parent, ScribusDoc* /*doc*/)
 
 	scrollArea->viewport()->setAutoFillBackground(false);
 	scrollArea->widget()->setAutoFillBackground(false);
+
+	// Application-wide (prefs context "suneer_images"), not per document.
+	m_alwaysEmbedImagesCheckBox = new QCheckBox(tr("Always embed placed images"), imageUseEmbeddedClippingPathCheckBox->parentWidget());
+	m_alwaysEmbedImagesCheckBox->setObjectName("alwaysEmbedImagesCheckBox");
+	m_alwaysEmbedImagesCheckBox->setToolTip(tr("Store every newly placed image inside the document instead of only linking to the file. Applies to Get Image, double-click loading, drag and drop and the News Browser."));
+	ScShortcutRegistry::insertBelow(imageUseEmbeddedClippingPathCheckBox, m_alwaysEmbedImagesCheckBox);
 	scrollArea_2->viewport()->setAutoFillBackground(false);
 	scrollArea_2->widget()->setAutoFillBackground(false);
 
@@ -154,6 +164,7 @@ void Prefs_ItemTools::restoreDefaults(struct ApplicationPrefs *prefsData)
 	imageFrameLineColorComboBox->initColorList(colorList, m_doc, prefsData->itemToolPrefs.imageStrokeColor);
 	imageFrameLineShadingSpinBox->setValue(prefsData->itemToolPrefs.imageStrokeColorShade );
 	imageUseEmbeddedClippingPathCheckBox->setChecked(prefsData->itemToolPrefs.imageUseEmbeddedPath);
+	m_alwaysEmbedImagesCheckBox->setChecked(SuneerImageLinks::alwaysEmbed());
 	switch (prefsData->itemToolPrefs.imageLowResType)
 	{
 		case 0:
@@ -281,6 +292,7 @@ void Prefs_ItemTools::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	//prefsData->itemToolPrefs.imageAspectRatio = imageKeepAspectRatioCheckBox->isChecked();
 	prefsData->itemToolPrefs.imageAspectRatio = scalingLockToolButton->isChecked();
 	prefsData->itemToolPrefs.imageUseEmbeddedPath = imageUseEmbeddedClippingPathCheckBox->isChecked();
+	SuneerImageLinks::setAlwaysEmbed(m_alwaysEmbedImagesCheckBox->isChecked());
 	int haRes = 0;
 	if (onscreenResolutionFullRadioButton->isChecked())
 		haRes = 0;

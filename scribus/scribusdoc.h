@@ -1380,6 +1380,9 @@ protected:
 	//! Opened while another machine held the lock file: Save is refused, Save As
 	//! to a different name is still allowed.
 	bool m_openedReadOnly { false };
+	//! "Don't ask again for this document" of the linked-images check before
+	//! Save / PDF / Print. Saved in the .sla (DOCUMENT SuneerLinkedImagesNoAsk).
+	bool m_suneerLinkedImagesNoAsk { false };
 	QUuid m_uuid;
 
 public: // Public attributes
@@ -2016,6 +2019,8 @@ public:
 	QString documentFileName() const;
 	bool openedReadOnly() const { return m_openedReadOnly; }
 	void setOpenedReadOnly(bool ro) { m_openedReadOnly = ro; }
+	bool suneerLinkedImagesNoAsk() const { return m_suneerLinkedImagesNoAsk; }
+	void setSuneerLinkedImagesNoAsk(bool on) { m_suneerLinkedImagesNoAsk = on; }
 	void setDocumentFileName(const QString& documentFileName);
 };
 

@@ -32,6 +32,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpage.h"
 #include "scribusdoc.h"
 #include "scribusstructs.h"
+#include "suneerimagelinks.h"
 #include "text/textlayoutpainter.h"
 #include "util_formats.h"
 
@@ -102,7 +103,23 @@ bool DocumentChecker::checkDocument(ScribusDoc *currDoc, const QString& checkerP
 
 	checkItems(currDoc, checkerSettings);
 
-	return (currDoc->hasPreflightErrors());
+	if (!currDoc->hasPreflightErrors())
+		return false;
+	// A linked image is listed in the Preflight Verifier, but on its own it
+	// does not interrupt Print / PDF export: the linked-images dialog has
+	// already asked about exactly that, and asking twice helps nobody.
+	if (!currDoc->pageErrors.isEmpty() || !currDoc->docLayerErrors.isEmpty())
+		return true;
+	auto onlyLinked = [](const QMap<PageItem*, errorCodes>& errors) {
+		for (auto it = errors.constBegin(); it != errors.constEnd(); ++it)
+		{
+			const errorCodes& codes = it.value();
+			if (codes.count() != 1 || !codes.contains(PreflightError::LinkedImage))
+				return false;
+		}
+		return true;
+	};
+	return !(onlyLinked(currDoc->docItemErrors) && onlyLinked(currDoc->masterItemErrors));
 }
 
 void DocumentChecker::checkPages(ScribusDoc *currDoc, const CheckerPrefs& checkerSettings)
@@ -287,6 +304,10 @@ void DocumentChecker::checkItems(ScribusDoc *currDoc, const CheckerPrefs& checke
 				{
 					itemError.insert(PreflightError::PartFilledImageFrame, 0);
 				}
+
+				// linked = the document only carries a path to the picture
+				if (checkerSettings.checkLinkedImages && SuneerImageLinks::statusOf(currItem) == SuneerImageLinks::Linked)
+					itemError.insert(PreflightError::LinkedImage, 0);
 
 				if ((!currItem->imageIsAvailable) && (checkerSettings.checkPictures))
 					itemError.insert(PreflightError::MissingImage, 0);
@@ -551,6 +572,10 @@ void DocumentChecker::checkItems(ScribusDoc *currDoc, const CheckerPrefs& checke
 				{
 					itemError.insert(PreflightError::PartFilledImageFrame, 0);
 				}
+
+				// linked = the document only carries a path to the picture
+				if (checkerSettings.checkLinkedImages && SuneerImageLinks::statusOf(currItem) == SuneerImageLinks::Linked)
+					itemError.insert(PreflightError::LinkedImage, 0);
 
 				if ((!currItem->imageIsAvailable) && (checkerSettings.checkPictures))
 					itemError.insert(PreflightError::MissingImage, 0);

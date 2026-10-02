@@ -697,10 +697,13 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 	addAction(m_ScMW->scrActions["editUndoAction"]);
 	addAction(m_ScMW->scrActions["editRedoAction"]);
 	addSeparator();
+	addAction(m_ScMW->scrActions["extrasEmbedAllImages"]);
+	addSeparator();
 	addAction(m_ScMW->scrActions["viewShowMargins"]);
 	addAction(m_ScMW->scrActions["viewShowFrames"]);
 	addAction(m_ScMW->scrActions["viewShowLayerMarkers"]);
 	addAction(m_ScMW->scrActions["viewShowImages"]);
+	addAction(m_ScMW->scrActions["viewShowImageLinkBadges"]);
 	addAction(m_ScMW->scrActions["viewShowGrid"]);
 	addAction(m_ScMW->scrActions["viewShowGuides"]);
 	addAction(m_ScMW->scrActions["viewShowColumnBorders"]);

@@ -1804,6 +1804,7 @@ bool PrefsManager::writePref(const QString& filePath)
 		dcVerifierProfile.setAttribute("CheckPictures", static_cast<int>(checkerProfile.checkPictures));
 		dcVerifierProfile.setAttribute("CheckResolution", static_cast<int>(checkerProfile.checkResolution));
 		dcVerifierProfile.setAttribute("CheckPartFilledImageFrames", static_cast<int>(checkerProfile.checkPartFilledImageFrames));
+		dcVerifierProfile.setAttribute("CheckLinkedImages", static_cast<int>(checkerProfile.checkLinkedImages));
 		dcVerifierProfile.setAttribute("CheckTransparency", static_cast<int>(checkerProfile.checkTransparency));
 		dcVerifierProfile.setAttribute("CheckAnnotations", static_cast<int>(checkerProfile.checkAnnotations));
 		dcVerifierProfile.setAttribute("CheckRasterPDF", static_cast<int>(checkerProfile.checkRasterPDF));
@@ -2676,6 +2677,7 @@ bool PrefsManager::readPref(const QString& filePath)
 			checkerSettings.checkPictures = static_cast<bool>(dc.attribute("CheckPictures", "1").toInt());
 			checkerSettings.checkResolution = static_cast<bool>(dc.attribute("CheckResolution", "1").toInt());
 			checkerSettings.checkPartFilledImageFrames = static_cast<bool>(dc.attribute("CheckPartFilledImageFrames", "0").toInt());
+			checkerSettings.checkLinkedImages = static_cast<bool>(dc.attribute("CheckLinkedImages", "1").toInt());
 			checkerSettings.checkTransparency = static_cast<bool>(dc.attribute("CheckTransparency", "1").toInt());
 			checkerSettings.minResolution = ScCLocale::toDoubleC(dc.attribute("MinimumResolution"), 144.0);
 			checkerSettings.maxResolution = ScCLocale::toDoubleC(dc.attribute("MaximumResolution"), 4800.0);
@@ -3144,6 +3146,7 @@ void PrefsManager::initDefaultCheckerPrefs(CheckerPrefsList& cp)
 	checkerSettings.checkPictures = true;
 	checkerSettings.checkResolution = true;
 	checkerSettings.checkPartFilledImageFrames = false;
+	checkerSettings.checkLinkedImages = true;
 	checkerSettings.checkTransparency = true;
 	checkerSettings.checkAnnotations = false;
 	checkerSettings.checkRasterPDF = true;

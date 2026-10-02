@@ -1700,3 +1700,29 @@ Gotchas worth keeping:
 **Still open:** PS-side form reuse for bullets (≈1.6% of a 5 MB proof — measured
 as not worth it so far), and the **paper-unknown fallback has still never been
 exercised** — detection has succeeded on every queue tried.
+
+
+## Linked / embedded images (uncommitted as of 2026-10-02, branch feature/ctp-output)
+
+Code: `scribus/suneerimagelinks.{h,cpp}` (one definition of linked / embedded / missing, embed with
+undo), `ui/suneerlinkedimagesdialog.*`, badge in `PageItem::DrawObj_Decoration`, check in
+`ScribusMainWindow::suneerLinkedImagesCheck`, preflight `PreflightError::LinkedImage`.
+
+Traps:
+
+- **"Embedded" = `isInlineImage` + `isTempFile`, and `Pfile` is then a temp copy** (`/tmp/scribus_temp_*`).
+  Anything that derives a path from `Pfile` (caption sidecars, `derivedImagePath`) now sees the temp
+  path. Ctrl+I therefore embeds only AFTER the 200 ms caption update in `canvasmode_imageimport.cpp`.
+- **`ScribusDoc::loadPict(reload=false)` deletes `Pfile` when `isTempFile` is set.** A tool that does
+  `item->Pfile = output; loadPict(output, ...)` on an embedded frame deletes its own output. Clear
+  `isTempFile` first, embed again after (Remove Background, Crop/Resize, Edge Feather do this now).
+- **`~PageItem` deletes `Pfile` when `isTempFile` is set.** `restoreGetImage` now clears the flags
+  when it relinks to a file that is not a `scribus_temp_` file, so undo cannot delete a user's picture.
+- **`loadPict` is NOT hooked centrally**: paste and the importers go through it with `isLoading()`
+  false, so a central hook would silently embed pasted frames. `embedPlaced()` is called at the user
+  placement sites instead; a new placement path must call it too.
+- The per-document "don't ask" flag is DOCUMENT attribute `SuneerLinkedImagesNoAsk`, written only
+  when set. `CheckerPrefs::checkLinkedImages` defaults to true in the constructor because the older
+  format loaders never set it.
+- A dead NFS mount (`/mnt/F`) hangs every file dialog (volume listing). Tests run in a private mount
+  namespace: `linktest/run.sh`.

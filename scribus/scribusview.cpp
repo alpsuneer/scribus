@@ -108,6 +108,7 @@ for which a new license (GPL+exception) is in place.
 #include "util.h"
 #include "util_formats.h"
 #include "util_math.h"
+#include "suneerimagelinks.h"
 
 using namespace std;
 
@@ -667,6 +668,7 @@ void ScribusView::contentsDropEvent(QDropEvent *e)
 				PageItem *item = m_doc->Items->at(z);
 				item->m_layerID = m_doc->activeLayer();
 				m_doc->loadPict(url.toLocalFile(), item);
+				SuneerImageLinks::embedPlaced(m_doc, item); // dropped image: embed when the preference says so
 				double iw = static_cast<double>(item->OrigW * 72.0 / item->pixm.imgInfo.xres);
 				double ih = static_cast<double>(item->OrigH * 72.0 / item->pixm.imgInfo.yres);
 				if (iw > ih)
@@ -849,6 +851,7 @@ void ScribusView::contentsDropEvent(QDropEvent *e)
 		PageItem *item = m_doc->Items->at(z);
 		item->m_layerID = m_doc->activeLayer();
 		m_doc->loadPict(url.toLocalFile(), item);
+		SuneerImageLinks::embedPlaced(m_doc, item); // dropped image: embed when the preference says so
 
 		double iw = static_cast<double>(item->OrigW * 72.0 / item->pixm.imgInfo.xres);
 		double ih = static_cast<double>(item->OrigH * 72.0 / item->pixm.imgInfo.yres);
@@ -888,7 +891,10 @@ void ScribusView::contentsDropEvent(QDropEvent *e)
 		if (item->itemType() == PageItem::ImageFrame)
 		{
 			if (fi.exists() && img)
+			{
 				m_doc->loadPict(url.toLocalFile(), item);
+				SuneerImageLinks::embedPlaced(m_doc, item); // dropped image: embed when the preference says so
+			}
 		}
 		else if (item->itemType() == PageItem::TextFrame)
 		{

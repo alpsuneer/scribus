@@ -32,6 +32,9 @@ struct CheckerPrefs
 {
 	CheckerPrefs() { 
 		memset(this, 0, sizeof(CheckerPrefs));
+		// on unless a profile says otherwise: the loaders of older file formats
+		// do not know this check and must not switch it off by omission
+		checkLinkedImages = true;
 	}
 
 	bool ignoreErrors;
@@ -58,6 +61,7 @@ struct CheckerPrefs
 	bool checkAppliedMasterDifferentSide;
 	bool checkEmptyTextFrames;
 	bool checkImageHasProgressiveEncoding;
+	bool checkLinkedImages; // image is only linked (path), not embedded in the document
 };
 
 using CheckerPrefsList = QMap<QString, CheckerPrefs>;

@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include "ui/faircodehelpviewer.h"
+#include "suneerimagelinks.h"
 #include <QInputDialog>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
@@ -836,6 +837,7 @@ void SuneerNewsPanel::downloadAndPlaceNews(const QJsonObject& news,
         if (imgFrame) {
             if (!localImg.isEmpty()) {
                 m_doc->loadPict(localImg, imgFrame, false, true);
+                SuneerImageLinks::embedPlaced(m_doc, imgFrame);
                 // Fit frame height to image aspect ratio
                 if (imgFrame->pixm.width() > 0 && imgFrame->pixm.height() > 0) {
                     double ratio = (double)imgFrame->pixm.height() / imgFrame->pixm.width();

@@ -2530,6 +2530,7 @@ namespace {
 
 void Scribus171Format::readDocAttributes(ScribusDoc* doc, const ScXmlStreamAttributes& attrs) const
 {
+	m_Doc->setSuneerLinkedImagesNoAsk(attrs.valueAsBool("SuneerLinkedImagesNoAsk", false));
 	//Remove uppercase in 1.8
 	if (attrs.hasAttribute("PAGESIZE"))
 	{
@@ -3122,6 +3123,7 @@ bool Scribus171Format::readCheckProfile(ScribusDoc* doc, const ScXmlStreamAttrib
 		checkerSettings.checkOverflow = attrs.valueAsBool("checkOverflow", true);
 		checkerSettings.checkPictures = attrs.valueAsBool("checkPictures", true);
 		checkerSettings.checkPartFilledImageFrames = attrs.valueAsBool("checkPartFilledImageFrames", false);
+		checkerSettings.checkLinkedImages = true;
 		checkerSettings.checkResolution = attrs.valueAsBool("checkResolution", true);
 		checkerSettings.checkTransparency = attrs.valueAsBool("checkTransparency", true);
 		checkerSettings.minResolution = attrs.valueAsDouble("minResolution", 72.0);
@@ -3147,6 +3149,8 @@ bool Scribus171Format::readCheckProfile(ScribusDoc* doc, const ScXmlStreamAttrib
 		checkerSettings.checkOverflow = attrs.valueAsBool("CheckOverflow", true);
 		checkerSettings.checkPictures = attrs.valueAsBool("CheckPictures", true);
 		checkerSettings.checkPartFilledImageFrames = attrs.valueAsBool("CheckPartFilledImageFrames", false);
+		// absent in documents saved before this check existed: on
+		checkerSettings.checkLinkedImages = attrs.valueAsBool("CheckLinkedImages", true);
 		checkerSettings.checkResolution = attrs.valueAsBool("CheckResolution", true);
 		checkerSettings.checkTransparency = attrs.valueAsBool("CheckTransparency", true);
 		checkerSettings.minResolution = attrs.valueAsDouble("MinimumResolution", 72.0);

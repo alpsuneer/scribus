@@ -37,6 +37,7 @@
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "suneerimagelinks.h"
 
 CanvasMode_ImageImport::CanvasMode_ImageImport(ScribusView *view) : CanvasMode(view), m_ScMW(view->m_ScMW)
 {
@@ -275,11 +276,19 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 	}
 	// Update caption frame with delay (after image fit)
 	{
-		PageItem* captItemRef = currItem;
+		// QPointers: the frame or the document can be gone 200 ms from now.
+		QPointer<PageItem> captItemRef(currItem);
+		QPointer<ScribusDoc> docRef(m_doc);
 		ScribusMainWindow* scmwRef = m_ScMW;
-		QTimer::singleShot(200, [captItemRef, scmwRef]() {
+		QTimer::singleShot(200, [captItemRef, docRef, scmwRef]() {
+			if (!captItemRef || !docRef)
+				return;
 			if (scmwRef && scmwRef->suneerControlBar())
 				scmwRef->suneerControlBar()->updateCaptionFrame(captItemRef);
+			// "Always embed placed images" (Ctrl+I, Get Image, double-click load).
+			// Only now: the caption reader above looks for sidecar files next to
+			// the ORIGINAL picture, and embedding points the frame at a temp copy.
+			SuneerImageLinks::embedPlaced(docRef, captItemRef);
 		});
 	}
 	// Call to showScaleAndOffset() is now very likely unnecessary

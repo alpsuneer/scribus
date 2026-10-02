@@ -1665,6 +1665,7 @@ protected: // Start protected functions
 	void restoreFillRule(SimpleState* state, bool isUndo);
 	void restoreFirstLineOffset(SimpleState *state, bool isUndo);
 	void restoreGetImage(UndoState *state, bool isUndo);
+	void restoreSuneerImageInline(SimpleState *state, bool isUndo);
 	void restoreGradPos(SimpleState *state,bool isUndo);
 	void restoreGradientCol1(SimpleState *state, bool isUndo);
 	void restoreGradientCol2(SimpleState *state, bool isUndo);

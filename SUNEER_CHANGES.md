@@ -718,6 +718,22 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - Settings › Save-ന് ശേഷം design icons click ചെയ്താൽ ഒന്നും ചെയ്യാത്തത്
   (restart വരെ) ശരിയാക്കി
 
+### 32. Linked images: badges, Embed All, check before output (പുതിയത്, 2026-10-02)
+
+- **Badges on the canvas** (screen only, never in PDF / print / image export / preview mode):
+  orange square = image is only LINKED, red square with a white cross = file MISSING.
+  Toggle: View > Image Frames > Show Linked Image Badges (also in the page right-click menu). On by default.
+- **Extras > Embed All Images** (also page right-click menu, and the control bar's "Embed in SLA"):
+  embeds every linked image, one Undo takes all back, reports how many and which files were missing.
+- **Before Save / Save As / Save as PDF / Print / Proof Print**: if any image is linked or missing, a list
+  (page, frame, file, status) with "Embed all and continue", "Continue anyway", "Cancel", and
+  "Don't ask again for this document" (stored in that .sla only; turn back on with
+  Extras > Warn About Linked Images in This Document).
+- **Preflight Verifier**: new problem "Linked (not embedded) image" (Preferences > Preflight Verifier >
+  "Check for linked (not embedded) images", on by default). On its own it does not interrupt print/export.
+- **Preferences > Item Tools > "Always embed placed images"** (on by default): Get Image, Ctrl+I,
+  double-click load, drag and drop, News Browser images and the control-bar image tools embed automatically.
+
 ### 31. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 

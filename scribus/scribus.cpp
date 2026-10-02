@@ -173,6 +173,8 @@ for which a new license (GPL+exception) is in place.
 #include "scribusapp.h"
 #include "singleinstance.h"
 #include "documentlock.h"
+#include "suneerimagelinks.h"
+#include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
 #include "scribusview.h"
@@ -944,6 +946,7 @@ void ScribusMainWindow::initPalettes()
 	});
 	// HaveNewSel is a slot, not signal — handled directly in HaveNewSel()
 	connect(scrActions["suneerGetImage"], &QAction::triggered, this, &ScribusMainWindow::suneerGetImage);
+	scrActions["viewShowImageLinkBadges"]->setChecked(SuneerImageLinks::badgesShown());
 	connect(scrActions["suneerFocusFontCombo"], &QAction::triggered, this, [this]() { m_suneerControlBar->focusFontCombo(); });
 	connect(scrActions["suneerEnlargeImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeImageSize);
 	connect(scrActions["suneerReduceImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceImageSize);
@@ -1639,6 +1642,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->createMenu("ViewImageFrames", tr("Image Frames"), "View");
 	scrMenuMgr->addMenuItemString("ViewImageFrames", "View");
 	scrMenuMgr->addMenuItemString("viewShowImages", "ViewImageFrames");
+	scrMenuMgr->addMenuItemString("viewShowImageLinkBadges", "ViewImageFrames");
 	scrMenuMgr->createMenu("ViewDocument", tr("Document"), "View");
 	scrMenuMgr->addMenuItemString("ViewDocument", "View");
 	scrMenuMgr->addMenuItemString("viewShowMargins", "ViewDocument");
@@ -1681,6 +1685,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("itemUpdateMarks", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
+	scrMenuMgr->addMenuItemString("extrasEmbedAllImages", "Extras");
+	scrMenuMgr->addMenuItemString("extrasWarnLinkedImages", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
@@ -3087,6 +3093,8 @@ void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 		m_suneerControlBar->setDocument(doc);
 	if (m_suneerNewsPanel)
 		m_suneerNewsPanel->setDocument(doc);
+	// per-document: "Don't ask again" of the linked-images check
+	scrActions["extrasWarnLinkedImages"]->setChecked(!doc->suneerLinkedImagesNoAsk());
 	modeToolBar->setDoc(doc);
 	viewToolBar->setDoc(doc);
 	// Give plugins a chance to react on changing the current document
@@ -3523,6 +3531,7 @@ void ScribusMainWindow::doPasteRecent(const QString& data)
 		PageItem *b = doc->Items->at(z);
 		b->m_layerID = doc->activeLayer();
 		doc->loadPict(data, b);
+		SuneerImageLinks::embedPlaced(doc, b);
 		b->setWidth(b->OrigW * 72.0 / static_cast<double>(b->pixm.imgInfo.xres));
 		b->setHeight(b->OrigH * 72.0 / static_cast<double>(b->pixm.imgInfo.yres));
 		b->OldB2 = b->width();
@@ -4873,6 +4882,88 @@ void ScribusMainWindow::slotFileRevert()
 	}
 }
 
+// True while slotFileSave() is running, so the Save As it falls through to
+// for an unnamed document does not show the linked-images dialog a second time.
+static bool s_suneerLinkCheckDone = false;
+
+bool ScribusMainWindow::suneerLinkedImagesCheck(const QString& action)
+{
+	if (!HaveDoc || !doc || doc->suneerLinkedImagesNoAsk())
+		return true;
+	// Never stop a script or a headless run on a modal dialog.
+	if (!ScCore->usingGUI() || scriptIsRunning())
+		return true;
+	const QList<SuneerImageLinks::Entry> entries = SuneerImageLinks::collect(doc, true);
+	if (entries.isEmpty())
+		return true;
+
+	SuneerLinkedImagesDialog dia(this, action, entries);
+	dia.exec();
+	if (dia.choice() == SuneerLinkedImagesDialog::Cancel)
+		return false;
+	if (dia.dontAskAgain())
+	{
+		doc->setSuneerLinkedImagesNoAsk(true);
+		scrActions["extrasWarnLinkedImages"]->setChecked(false);
+		doc->changed();
+	}
+	if (dia.choice() == SuneerLinkedImagesDialog::EmbedAndContinue)
+	{
+		QStringList failed;
+		const int embedded = SuneerImageLinks::embedAll(doc, &failed);
+		view->DrawNew();
+		QString msg = tr("Embedded %1 image(s).").arg(embedded);
+		if (!failed.isEmpty())
+			msg += " " + tr("%1 could not be embedded (missing file).").arg(failed.count());
+		setStatusBarInfoText(msg);
+	}
+	return true;
+}
+
+void ScribusMainWindow::suneerEmbedAllImages()
+{
+	if (!HaveDoc || !doc)
+		return;
+	const QList<SuneerImageLinks::Entry> all = SuneerImageLinks::collect(doc, false);
+	int already = 0;
+	for (const auto& e : all)
+		if (e.status == SuneerImageLinks::Embedded)
+			++already;
+	QStringList failed;
+	const int embedded = SuneerImageLinks::embedAll(doc, &failed);
+	view->DrawNew();
+
+	QString msg = tr("Embedded %1 image(s).").arg(embedded);
+	if (already > 0)
+		msg += "\n" + tr("%1 were already embedded.").arg(already);
+	if (!failed.isEmpty())
+		msg += "\n\n" + tr("%1 could not be embedded because the file is missing (page / frame: file):").arg(failed.count())
+		     + "\n" + failed.join("\n");
+	if (embedded > 0)
+		msg += "\n\n" + tr("One Undo takes all of them back. Save the document to write them into the file.");
+	setStatusBarInfoText(tr("Embedded %1 image(s), %2 failed.").arg(embedded).arg(failed.count()));
+	if (ScCore->usingGUI() && !scriptIsRunning())
+		ScMessageBox::information(this, tr("Embed All Images"), msg);
+}
+
+void ScribusMainWindow::suneerToggleImageLinkBadges()
+{
+	SuneerImageLinks::setBadgesShown(scrActions["viewShowImageLinkBadges"]->isChecked());
+	if (HaveDoc && view)
+		view->DrawNew();
+}
+
+void ScribusMainWindow::suneerToggleWarnLinkedImages()
+{
+	if (!HaveDoc || !doc)
+	{
+		scrActions["extrasWarnLinkedImages"]->setChecked(true);
+		return;
+	}
+	doc->setSuneerLinkedImagesNoAsk(!scrActions["extrasWarnLinkedImages"]->isChecked());
+	doc->changed();
+}
+
 bool ScribusMainWindow::slotFileSave()
 {
 	// Opened read-only because another machine holds the lock: never write over
@@ -4885,6 +4976,11 @@ bool ScribusMainWindow::slotFileSave()
 			   "changes under a different name."));
 		return false;
 	}
+	if (!suneerLinkedImagesCheck(tr("Save")))
+		return false;
+	// Save As is reached from here for an unnamed document: asked once, above
+	s_suneerLinkCheckDone = true;
+	struct ResetFlag { ~ResetFlag() { s_suneerLinkCheckDone = false; } } resetFlag;
 	bool ret = false;
 	if ((doc->hasName) && (!doc->isConverted))
 	{
@@ -4903,6 +4999,8 @@ bool ScribusMainWindow::slotFileSave()
 
 bool ScribusMainWindow::slotFileSaveAs()
 {
+	if (!s_suneerLinkCheckDone && !suneerLinkedImagesCheck(tr("Save As")))
+		return false;
 	bool ret = false;
 	QString fileName;
 	PrefsContext* docContext = m_prefsManager.prefsFile->getContext("docdirs", false);
@@ -5145,6 +5243,8 @@ bool ScribusMainWindow::DoFileClose()
 
 void ScribusMainWindow::slotFilePrint()
 {
+	if (!suneerLinkedImagesCheck(tr("Print")))
+		return;
 	if (doc->checkerProfiles()[doc->curCheckProfile()].autoCheck)
 	{
 		if (scanDocument())
@@ -5292,6 +5392,8 @@ void ScribusMainWindow::slotFileProofPrint()
 			tr("No printers are set up, so there is nothing to proof to."));
 		return;
 	}
+	if (!suneerLinkedImagesCheck(tr("Proof Print")))
+		return;
 
 	// F9 opens this: the paper a proof is scaled onto depends on what is
 	// actually loaded in the tray, which only the operator knows.
@@ -9228,6 +9330,8 @@ bool ScribusMainWindow::getPDFDriver(const QString &filename, const std::vector<
 
 void ScribusMainWindow::SaveAsPDF()
 {
+	if (!suneerLinkedImagesCheck(tr("PDF export")))
+		return;
 	if (doc->checkerProfiles()[doc->curCheckProfile()].autoCheck)
 	{
 		if (scanDocument())

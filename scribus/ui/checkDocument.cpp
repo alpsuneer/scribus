@@ -148,6 +148,7 @@ void CheckDocument::languageChange()
 	warnMap.insert(PV_LAYER_BLENDMODE,			qMakePair(tr("Blendmode used"),											tr("This layer uses blendmodes which relies on transparency, only an issue if using older printing profiles. You may safely ignore this when using modern printing methods, or exporting to PDF version greater than 1.4.")));
 	warnMap.insert(PV_LAYER_PRINTVIS_MISMATCH,	qMakePair(tr("Print/Visible mismatch"),									tr("This layer uses transparency, only an issue if using older printing profiles. You may safely ignore this when using modern printing methods, or exporting to PDF version greater than 1.4.")));
 	warnMap.insert(PV_IMAGE_HAS_PROGRESSIVE_ENCODING,		qMakePair(tr("Image has progressive encoding"),							tr("The image uses progressive encoding which is useful for websites however does not process well when sending PDFs to professional printers.")));
+	warnMap.insert(PV_LINKED_IMAGE,			qMakePair(tr("Linked (not embedded) image"),				tr("The document only holds the path to this picture. If the file is moved, renamed or the document is opened on another machine, the picture is lost. Use Extras > Embed All Images to store it inside the document.")));
 
 }
 
@@ -397,6 +398,11 @@ void CheckDocument::buildItem(QTreeWidgetItem * item, PreflightError errorType, 
 			item->setToolTip(COLUMN_PROBLEM, warnMap[PV_IMAGE_HAS_PROGRESSIVE_ENCODING].second);
 			item->setIcon(COLUMN_ITEM, onlyWarning);
 			itemError = true;
+			break;
+		case PreflightError::LinkedImage:
+			item->setText(COLUMN_PROBLEM, warnMap[PV_LINKED_IMAGE].first);
+			item->setToolTip(COLUMN_PROBLEM, warnMap[PV_LINKED_IMAGE].second);
+			item->setIcon(COLUMN_ITEM, onlyWarning);
 			break;
 		default:
 			break;

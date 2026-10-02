@@ -153,6 +153,8 @@ if(HAVE_OSG)
 		${SCRIBUS_SOURCES}
 		ui/ParagraphStylesPanel.cpp
 		ui/scshortcutregistry.cpp
+		ui/suneerlinkedimagesdialog.cpp
+		suneerimagelinks.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
@@ -241,6 +243,8 @@ else()
 		${SCRIBUS_SOURCES}
 		ui/ParagraphStylesPanel.cpp
 		ui/scshortcutregistry.cpp
+		ui/suneerlinkedimagesdialog.cpp
+		suneerimagelinks.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp

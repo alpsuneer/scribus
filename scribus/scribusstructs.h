@@ -572,7 +572,8 @@ enum class PreflightError
 	MarksChanged = 19,
 	AppliedMasterDifferentSide = 20,
 	EmptyTextFrame = 21,
-	ImageHasProgressiveEncoding = 22
+	ImageHasProgressiveEncoding = 22,
+	LinkedImage = 23
 };
 
 using errorCodes = QMap<PreflightError, int>;

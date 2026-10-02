@@ -67,6 +67,7 @@
 #include "colorcombo.h"
 #include <QToolButton>
 #include "util_printer.h"
+#include "suneerimagelinks.h"
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QComboBox>
@@ -3428,64 +3429,10 @@ void SuneerControlBar::languageChange()
 
 void SuneerControlBar::onEmbedInSLA()
 {
-	if (!m_doc) return;
-	// Every image frame in the document: page items, master page items, and the
-	// contents of groups on either. makeImageInline() copies the picture to a temp
-	// file and sets isInlineImage, which is what makes the .sla saver write the
-	// picture as Base64 ImageData instead of a PFILE path.
-	QList<PageItem*> frames;
-	for (int i = 0; i < m_doc->DocItems.count(); ++i)
-		frames.append(m_doc->DocItems.at(i));
-	for (int i = 0; i < m_doc->MasterItems.count(); ++i)
-		frames.append(m_doc->MasterItems.at(i));
-	const int topLevelCount = frames.count();
-	for (int i = 0; i < topLevelCount; ++i)
-	{
-		if (frames.at(i)->isGroup())
-			frames.append(frames.at(i)->getAllChildren());
-	}
-	int embedded = 0, skipped = 0, already = 0;
-	QStringList failed;
-	for (PageItem* item : std::as_const(frames))
-	{
-		if (!item->isImageFrame())
-			continue;
-		if (item->isImageInline())
-		{
-			++already;
-			continue;
-		}
-		if (!item->imageIsAvailable || item->Pfile.isEmpty())
-		{
-			++skipped;
-			continue;
-		}
-		const QString oldPath = item->Pfile;
-		if (ScCore->fileWatcher->isWatching(oldPath))
-			ScCore->fileWatcher->removeFile(oldPath);
-		item->makeImageInline();
-		if (item->isImageInline())
-		{
-			ScCore->fileWatcher->addFile(item->Pfile);
-			++embedded;
-		}
-		else
-		{
-			// makeImageInline() fails silently when the temp copy cannot be made
-			ScCore->fileWatcher->addFile(oldPath);
-			failed.append(QFileInfo(oldPath).fileName());
-		}
-	}
-	QString msg = tr("Embedded %1 images (%2 skipped — no image loaded).").arg(embedded).arg(skipped);
-	if (already > 0)
-		msg += tr("\n%1 already embedded.").arg(already);
-	if (!failed.isEmpty())
-		msg += tr("\nCould not embed: %1").arg(failed.join(", "));
-	if (embedded > 0)
-		msg += tr("\nSave the document to write them into the file.");
-	QMessageBox::information(this, tr("Embed in SLA"), msg);
-	if (embedded > 0)
-		m_doc->changed();
+	// Same code as Extras > Embed All Images: every linked image of the
+	// document (pages, master pages, groups, inline frames), one undo step.
+	if (m_doc && m_scmw)
+		m_scmw->suneerEmbedAllImages();
 }
 
 void SuneerControlBar::onEmbedLink()
@@ -4498,6 +4445,7 @@ void SuneerControlBar::onTextFrameBox()
 	// edges as set — a partial revert is worse than several complete ones.
 	UndoTransaction borderTransaction;
 	if (UndoManager::undoEnabled())
+	SuneerImageLinks::embedPlaced(m_doc, imgItem);
 		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                             Um::ObjectFrame, QString(), Um::IBorder);
 

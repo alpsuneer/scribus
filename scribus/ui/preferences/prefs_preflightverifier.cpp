@@ -8,11 +8,17 @@ for which a new license (GPL+exception) is in place.
 #include "prefsstructs.h"
 #include "ui/preferences/prefs_preflightverifier.h"
 #include "util.h"
+#include "ui/scshortcutregistry.h"
+
+#include <QCheckBox>
 
 Prefs_PreflightVerifier::Prefs_PreflightVerifier(QWidget* parent, ScribusDoc* /*doc*/)
 	: Prefs_Pane(parent)
 {
 	setupUi(this);
+	checkLinkedImagesCheckBox = new QCheckBox(tr("Check for linked (not embedded) images"), checkMissingImagesCheckBox->parentWidget());
+	checkLinkedImagesCheckBox->setObjectName("checkLinkedImagesCheckBox");
+	ScShortcutRegistry::insertBelow(checkMissingImagesCheckBox, checkLinkedImagesCheckBox);
 	languageChange();
 
 	m_caption = tr("Preflight Verifier");
@@ -29,6 +35,7 @@ Prefs_PreflightVerifier::Prefs_PreflightVerifier(QWidget* parent, ScribusDoc* /*
 	connect(checkTransparenciesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkMissingImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkPartFilledImageFramesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
+	connect(checkLinkedImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkImageResolutionCheckBox, SIGNAL(toggled(bool)), this, SLOT(putProfile()));
 	connect(checkPDFAnnotFieldsCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkPlacedPDFCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
@@ -73,6 +80,7 @@ void Prefs_PreflightVerifier::restoreDefaults(struct ApplicationPrefs *prefsData
 	checkTransparenciesCheckBox->setChecked(checkerProfile.checkTransparency);
 	checkMissingImagesCheckBox->setChecked(checkerProfile.checkPictures);
 	checkPartFilledImageFramesCheckBox->setChecked(checkerProfile.checkPartFilledImageFrames);
+	checkLinkedImagesCheckBox->setChecked(checkerProfile.checkLinkedImages);
 	checkImageResolutionCheckBox->setChecked(checkerProfile.checkResolution);
 	checkPDFAnnotFieldsCheckBox->setChecked(checkerProfile.checkAnnotations);
 	checkPlacedPDFCheckBox->setChecked(checkerProfile.checkRasterPDF);
@@ -113,6 +121,7 @@ void Prefs_PreflightVerifier::putProfile()
 	checkerProfile.checkOverflow = checkTextOverflowCheckBox->isChecked();
 	checkerProfile.checkPictures = checkMissingImagesCheckBox->isChecked();
 	checkerProfile.checkPartFilledImageFrames = checkPartFilledImageFramesCheckBox->isChecked();
+	checkerProfile.checkLinkedImages = checkLinkedImagesCheckBox->isChecked();
 	checkerProfile.checkResolution = checkImageResolutionCheckBox->isChecked();
 	checkerProfile.checkTransparency = checkTransparenciesCheckBox->isChecked();
 	checkerProfile.minResolution = minimumResolutionSpinBox->value();
@@ -151,6 +160,7 @@ void Prefs_PreflightVerifier::updateProfile(const QString& name)
 	disconnect(checkItemsNotOnAPageCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	disconnect(checkMissingImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	disconnect(checkPartFilledImageFramesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
+	disconnect(checkLinkedImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	disconnect(checkImageResolutionCheckBox, SIGNAL(toggled(bool)), this, SLOT(putProfile()));
 	disconnect(checkTransparenciesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	disconnect(minimumResolutionSpinBox, SIGNAL(valueChanged(int)), this, SLOT(putProfile()));
@@ -172,6 +182,7 @@ void Prefs_PreflightVerifier::updateProfile(const QString& name)
 	checkTransparenciesCheckBox->setChecked(checkerProfile.checkTransparency);
 	checkMissingImagesCheckBox->setChecked(checkerProfile.checkPictures);
 	checkPartFilledImageFramesCheckBox->setChecked(checkerProfile.checkPartFilledImageFrames);
+	checkLinkedImagesCheckBox->setChecked(checkerProfile.checkLinkedImages);
 	checkImageResolutionCheckBox->setChecked(checkerProfile.checkResolution);
 	minimumResolutionSpinBox->setValue( qRound(checkerProfile.minResolution) );
 	maximumResolutionSpinBox->setValue( qRound(checkerProfile.maxResolution) );
@@ -190,6 +201,7 @@ void Prefs_PreflightVerifier::updateProfile(const QString& name)
 	connect(checkItemsNotOnAPageCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkMissingImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkPartFilledImageFramesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
+	connect(checkLinkedImagesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(checkImageResolutionCheckBox, SIGNAL(toggled(bool)), this, SLOT(putProfile()));
 	connect(checkTransparenciesCheckBox, SIGNAL(clicked()), this, SLOT(putProfile()));
 	connect(minimumResolutionSpinBox, SIGNAL(valueChanged(int)), this, SLOT(putProfile()));
@@ -213,6 +225,7 @@ void Prefs_PreflightVerifier::addProf()
 	checkerSettings.checkOverflow = checkTextOverflowCheckBox->isChecked();
 	checkerSettings.checkPictures = checkMissingImagesCheckBox->isChecked();
 	checkerSettings.checkPartFilledImageFrames = checkPartFilledImageFramesCheckBox->isChecked();
+	checkerSettings.checkLinkedImages = checkLinkedImagesCheckBox->isChecked();
 	checkerSettings.checkResolution = checkImageResolutionCheckBox->isChecked();
 	checkerSettings.checkTransparency =  checkTransparenciesCheckBox->isChecked();
 	checkerSettings.minResolution = minimumResolutionSpinBox->value();

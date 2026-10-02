@@ -418,6 +418,9 @@ bool Scribus171Format::saveFile(const QString & fileName, const FileFormat & /* 
 		docu.writeAttribute("ShowControls", static_cast<int>(m_Doc->guidesPrefs().showControls));
 	}
 	docu.writeAttribute("ShowLayerMarkers", static_cast<int>(m_Doc->guidesPrefs().layerMarkersShown));
+	// Written only when set, so documents that never used it stay byte-identical.
+	if (m_Doc->suneerLinkedImagesNoAsk())
+		docu.writeAttribute("SuneerLinkedImagesNoAsk", 1);
 	docu.writeAttribute("ShowMargins", static_cast<int>(m_Doc->guidesPrefs().marginsShown));
 	docu.writeAttribute("ShowBaselineGrid", static_cast<int>(m_Doc->guidesPrefs().baselineGridShown));
 	docu.writeAttribute("ShowImages", static_cast<int>(m_Doc->guidesPrefs().showPic));
@@ -582,6 +585,7 @@ void Scribus171Format::writeCheckerProfiles(ScXmlStreamWriter & docu) const
 		docu.writeAttribute("CheckOverflow", static_cast<int>(itcp.value().checkOverflow));
 		docu.writeAttribute("CheckPictures", static_cast<int>(itcp.value().checkPictures));
 		docu.writeAttribute("CheckPartFilledImageFrames", static_cast<int>(itcp.value().checkPartFilledImageFrames));
+		docu.writeAttribute("CheckLinkedImages", static_cast<int>(itcp.value().checkLinkedImages));
 		docu.writeAttribute("CheckResolution", static_cast<int>(itcp.value().checkResolution));
 		docu.writeAttribute("CheckTransparency", static_cast<int>(itcp.value().checkTransparency));
 		docu.writeAttribute("MinimumResolution",itcp.value().minResolution);

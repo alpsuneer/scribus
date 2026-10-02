@@ -792,6 +792,8 @@ void ActionManager::initViewMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "viewShowImages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "viewShowImageLinkBadges";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "viewShowGrid";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "viewShowGuides";
@@ -840,6 +842,7 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewShowFrames"]->setToggleAction(true);
 	(*scrActions)["viewShowLayerMarkers"]->setToggleAction(true);
 	(*scrActions)["viewShowImages"]->setToggleAction(true);
+	(*scrActions)["viewShowImageLinkBadges"]->setToggleAction(true);
 	(*scrActions)["viewShowGrid"]->setToggleAction(true);
 	(*scrActions)["viewShowGuides"]->setToggleAction(true);
 	(*scrActions)["viewShowColumnBorders"]->setToggleAction(true);
@@ -863,6 +866,7 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewShowFrames"]->setChecked(true);
 	(*scrActions)["viewShowLayerMarkers"]->setChecked(false);
 	(*scrActions)["viewShowImages"]->setChecked(true);
+	(*scrActions)["viewShowImageLinkBadges"]->setChecked(true);
 	(*scrActions)["viewShowGuides"]->setChecked(true);
 	(*scrActions)["viewShowColumnBorders"]->setChecked(false);
 	(*scrActions)["viewShowRulers"]->setChecked(true);
@@ -884,6 +888,7 @@ void ActionManager::initViewMenuActions()
 	connect( (*scrActions)["viewShowFrames"], SIGNAL(triggered()), mainWindow, SLOT(toggleFrames()) );
 	connect( (*scrActions)["viewShowLayerMarkers"], SIGNAL(triggered()), mainWindow, SLOT(toggleLayerMarkers()) );
 	connect( (*scrActions)["viewShowImages"], SIGNAL(triggered()), mainWindow, SLOT(toggleImageVisibility()) );
+	connect( (*scrActions)["viewShowImageLinkBadges"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleImageLinkBadges()) );
 	connect( (*scrActions)["viewShowGrid"], SIGNAL(triggered()), mainWindow, SLOT(toggleGrid()) );
 	connect( (*scrActions)["viewShowGuides"], SIGNAL(triggered()), mainWindow, SLOT(toggleGuides()) );
 	connect( (*scrActions)["viewShowColumnBorders"], SIGNAL(triggered()), mainWindow, SLOT(toggleColumnBorders()) );
@@ -1166,6 +1171,14 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasImposition";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasEmbedAllImages";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasWarnLinkedImages";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	(*scrActions)["extrasWarnLinkedImages"]->setToggleAction(true);
+	(*scrActions)["extrasWarnLinkedImages"]->setChecked(true);
+	connect( (*scrActions)["extrasEmbedAllImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerEmbedAllImages()) );
+	connect( (*scrActions)["extrasWarnLinkedImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleWarnLinkedImages()) );
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
@@ -1926,6 +1939,7 @@ void ActionManager::languageChange()
 	(*scrActions)["viewShowFrames"]->setTexts( tr("Show &Frames"));
 	(*scrActions)["viewShowLayerMarkers"]->setTexts( tr("Show Layer Indicators"));
 	(*scrActions)["viewShowImages"]->setTexts( tr("Show &Images"));
+	(*scrActions)["viewShowImageLinkBadges"]->setTexts( tr("Show Linked Image Badges"));
 	(*scrActions)["viewShowGrid"]->setTexts( tr("Show &Grid"));
 	(*scrActions)["viewShowGuides"]->setTexts( tr("Show G&uides"));
 	(*scrActions)["viewShowColumnBorders"]->setTexts( tr("Show Text Frame Columns"));
@@ -2035,6 +2049,8 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasFixOverflowFrames"]->setTexts( tr("Fix Overflowing Frames"));
 	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
 	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
+	(*scrActions)["extrasEmbedAllImages"]->setTexts( tr("Embed All Images"));
+	(*scrActions)["extrasWarnLinkedImages"]->setTexts( tr("Warn About Linked Images in This Document"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2698,6 +2714,7 @@ void ActionManager::createDefaultMenus()
 		<< "viewShowFrames"
 		<< "viewShowLayerMarkers"
 		<< "viewShowImages"
+		<< "viewShowImageLinkBadges"
 		<< "viewShowGrid"
 		<< "viewShowGuides"
 		<< "viewShowColumnBorders"
@@ -2733,7 +2750,9 @@ void ActionManager::createDefaultMenus()
 		<< "extrasAutoflowToNewPages"
 		<< "extrasFixOverflowFrames"
 		<< "extrasFixOverflowFramesDoc"
-		<< "extrasImposition";
+		<< "extrasImposition"
+		<< "extrasEmbedAllImages"
+		<< "extrasWarnLinkedImages";
 	//Windows
 	++itmenu;
 	itmenu->second

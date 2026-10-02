@@ -403,6 +403,12 @@ public slots:
 	void suneerAutoFitTextToggled(bool enabled);
 	void suneerFitImageToFrame(PageItem* item);
 	void suneerGetImage();
+	//! Extras > Embed All Images (also the page context menu)
+	void suneerEmbedAllImages();
+	//! View > Image Frames > Show Linked Image Badges
+	void suneerToggleImageLinkBadges();
+	//! Extras > Warn About Linked Images in This Document
+	void suneerToggleWarnLinkedImages();
 	void suneerScaleImageUp();
 	void suneerScaleImageDown();
 	void suneerEnlargeImageSize();
@@ -704,6 +710,9 @@ public slots:
 	void docCheckToggle(bool visible);
 	//! \brief Scan a document for errors, return true on errors found
 	bool scanDocument();
+	//! Before Save / PDF export / Print / Proof Print: lists linked and missing
+	//! images and asks. False = the user cancelled, do not go on.
+	bool suneerLinkedImagesCheck(const QString& action);
 	void setUndoMode(bool isObjectSpecific);
 	//! \brief Apply a Lorem Ipsum to the each item in a selection
 	void insertSampleText();

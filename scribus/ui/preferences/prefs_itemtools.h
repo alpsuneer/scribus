@@ -41,6 +41,7 @@ class SCRIBUS_API Prefs_ItemTools : public Prefs_Pane, Ui::Prefs_ItemTools
 	protected:
 		ScribusDoc* m_doc { nullptr };
 		bool showFontPreview { false };
+		class QCheckBox* m_alwaysEmbedImagesCheckBox { nullptr };
 
 };
 

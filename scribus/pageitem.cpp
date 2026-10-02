@@ -26,6 +26,7 @@ for which a new license (GPL+exception) is in place.
 #include <utility>
 
 #include <QDebug>
+#include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QMessageBox>
@@ -74,6 +75,8 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "sctextstream.h"
+#include "filewatcher.h"
+#include "suneerimagelinks.h"
 #include "selection.h"
 #include "text/storytext.h"
 #include "ui/contentpalette.h"
@@ -2109,6 +2112,34 @@ void PageItem::DrawObj_Decoration(ScPainter *p)
 			double ofx = m_width - ofwh/2;
 			double ofy = m_height - ofwh*3;
 			p->drawSharpRect(ofx, ofy, ofwh, ofwh);
+		}
+		// Linked / missing image badge. Screen only: this function is never
+		// reached by the PDF, PostScript or print output, and drawAsPreview
+		// covers the preview mode and Export as Image.
+		if (isImageFrame() && !m_Doc->drawAsPreview && SuneerImageLinks::badgesShown())
+		{
+			const SuneerImageLinks::Status linkStatus = SuneerImageLinks::statusOf(this);
+			if (linkStatus == SuneerImageLinks::Linked || linkStatus == SuneerImageLinks::Missing)
+			{
+				// 12 screen pixels at any zoom, but never more than half the frame
+				double bs = 12.0 / qMax(p->zoomFactor(), 0.01);
+				bs = qMin(bs, qMin(m_width, m_height) / 2.0);
+				const double bo = bs * 0.15;
+				const bool missing = (linkStatus == SuneerImageLinks::Missing);
+				p->setPen(Qt::white, 0, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
+				p->setPenOpacity(1.0);
+				p->setBrush(missing ? QColor(214, 30, 30) : QColor(255, 140, 0));
+				p->setBrushOpacity(1.0);
+				p->setFillMode(ScPainter::Solid);
+				p->drawSharpRect(bo, bo, bs, bs);
+				if (missing)
+				{
+					// a white cross, so red and orange differ by shape too
+					p->setPen(Qt::white, bs * 0.14, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
+					p->drawLine(QPointF(bo + bs * 0.25, bo + bs * 0.25), QPointF(bo + bs * 0.75, bo + bs * 0.75));
+					p->drawLine(QPointF(bo + bs * 0.75, bo + bs * 0.25), QPointF(bo + bs * 0.25, bo + bs * 0.75));
+				}
+			}
 		}
 		if (no_fill && no_stroke && m_Doc->guidesPrefs().framesShown)
 		{
@@ -5293,6 +5324,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreTextFlowing(ss, isUndo);
 		else if (ss->contains("SCALE_MODE"))
 			restoreImageScaleMode(ss, isUndo);
+		else if (ss->contains("SUNEER_IMAGE_INLINE"))
+			restoreSuneerImageInline(ss, isUndo);
 		else if (ss->contains("IMAGE_SCALE"))
 			restoreImageScaleChange(ss, isUndo);
 		else if (ss->contains("IMAGE_OFFSET"))
@@ -8314,6 +8347,14 @@ void PageItem::restoreGetImage(UndoState *state, bool isUndo)
 	else
 	{
 		loadImage(fn, false);
+		// The frame may still carry the "my file is a temp copy" flags of an
+		// embedded picture while fn is the user's own file. Those flags make
+		// ~PageItem delete Pfile, so never leave them on a file we did not create.
+		if (isTempFile && !QFileInfo(fn).fileName().startsWith("scribus_temp_"))
+		{
+			isInlineImage = false;
+			isTempFile = false;
+		}
 		if (isUndo)
 		{
 			//restore old image settings
@@ -8347,14 +8388,6 @@ void PageItem::restoreShapeContour(UndoState *state, bool isUndo)
 		double newY = istate->getDouble("NEW_Y");
 
 		if (isUndo)
-		// The frame may still carry the "my file is a temp copy" flags of an
-		// embedded picture while fn is the user's own file. Those flags make
-		// ~PageItem delete Pfile, so never leave them on a file we did not create.
-		if (isTempFile && !QFileInfo(fn).fileName().startsWith("scribus_temp_"))
-		{
-			isInlineImage = false;
-			isTempFile = false;
-		}
 		{
 			if (isContour)
 				ContourLine = oldClip;
@@ -11606,6 +11639,45 @@ void PageItem::makeImageInline()
 	{
 		tempFile.setAutoRemove(true);
 	}
+}
+
+// Undo / redo of SuneerImageLinks::embedItem(). Undo relinks the frame to the
+// original file; the temp copy stays on disk so redo can take it back.
+void PageItem::restoreSuneerImageInline(SimpleState *state, bool isUndo)
+{
+	const QString oldPath = state->get("OLD_PATH");
+	const QString newPath = state->get("NEW_PATH");
+	FileWatcher* fw = ScCore->fileWatcher;
+	if (fw && fw->isWatching(Pfile))
+		fw->removeFile(Pfile);
+	if (isUndo)
+	{
+		Pfile = oldPath;
+		isInlineImage = false;
+		isTempFile = false;
+	}
+	else if (QFile::exists(newPath))
+	{
+		Pfile = newPath;
+		isInlineImage = true;
+		isTempFile = true;
+	}
+	else
+	{
+		// the temp copy is gone (frame got another picture meanwhile): copy again
+		Pfile = oldPath;
+		isInlineImage = false;
+		isTempFile = false;
+		makeImageInline();
+	}
+	if (fw)
+		fw->addFile(Pfile);
+	const bool fho = imageFlippedH();
+	const bool fvo = imageFlippedV();
+	loadImage(Pfile, true);
+	setImageFlippedH(fho);
+	setImageFlippedV(fvo);
+	update();
 }
 
 void PageItem::makeImageExternal(const QString& path)
