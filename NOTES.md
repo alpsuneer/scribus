@@ -1728,6 +1728,30 @@ Traps:
   `NetPathGuard` — see "Dead network folder" below.
 
 
+## Align and Distribute button on the control bar (2026-10-02)
+
+`SuneerControlBar` is a QToolBar holding ONE container widget (all the rows) plus trailing actions.
+The button is a trailing QAction after a stretching spacer widget, so it is pinned to the right edge
+and no `show*Widgets()` pass can hide it. Code: `onAlignDistributeClicked()`, `updateAlignDistributeButton()`,
+`placeAlignPaletteByButton()` in `ui/suneercontrolbar.cpp`.
+
+- **It is its own QAction, not `scrActions["toolsAlignDistribute"]`.** It has to be disabled with no
+  selection, and disabling the shared action would grey out the Windows-menu entry too.
+- **The Windows-menu action is not checkable** (ADS "show" mode: `setToggleViewAction` with a
+  non-checkable action only ever opens/raises). So "is it open" is read from the dock itself
+  (`isClosed()`, `isTabbed()`, `isCurrentTab()`), and the button follows `viewToggled` /
+  `visibilityChanged`, which also covers opening it from the menu or closing it with its own X.
+- **The palette does not exist when the control bar is constructed** (toolbars are built before the
+  docks), so the signal connection is made lazily in `updateAlignDistributeButton()`.
+- **The bar's ">>" is in Qt's expand mode, not menu mode**: clicking it grows the bar by a row instead
+  of popping up a menu, and the button shows in that row. With one very wide widget action in the bar
+  that is what QToolBarLayout does; there is no ">>" menu to add an entry to.
+- The floating palette is moved only when the button OPENS it (was closed), one event-loop turn after
+  `toggleView(true)`, because ADS restores the old floating geometry inside that call.
+- Harness: `~/scribus-crashlogs/aligntest/run.sh a` (selection types, toggle, floating, narrow) and
+  `AT_SCRIPT=t2.py run2.sh b` (menu sync, Reference retention, ">>").
+
+
 ## Linked / missing image badges: fixed screen size, label, size preference (2026-10-02)
 
 `SuneerImageLinks::badgeImage()` paints the badge once per (status, size, with/without label) into a

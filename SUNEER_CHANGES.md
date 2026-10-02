@@ -749,7 +749,16 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   usual folder is on the unreachable share, and leave the share out of the sidebar.
 - Autosave skips a round (with a status-bar note) instead of freezing when its folder is unreachable.
 
-### 34. Authors
+### 34. Align and Distribute button on the control bar
+- A button at the right end of the top control bar opens and closes the Align and Distribute palette
+  (the same one as Windows > Align and Distribute). It is in the same place for every selection:
+  image, text (frame selected or editing), line, shape, group, several items.
+- Pressed while the palette is showing. Greyed out (but still there) when nothing is selected.
+- A floating palette opens just under the button, not over the page. A docked one is shown / raised.
+- The palette keeps its Reference and Mode between opens.
+- Narrow window: the button moves behind the bar's ">>" — click ">>" and the bar opens a second row with it.
+
+### 35. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

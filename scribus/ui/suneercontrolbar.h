@@ -420,6 +420,20 @@ public:
 	QList<QWidget*> m_textWidgets;
 	QList<QWidget*> m_imageWidgets;
 	QList<QWidget*> m_textWrapWidgets;
+
+	// Align and Distribute toggle, pinned to the right end of the bar for
+	// every selection type. A toolbar action, not a row widget, so the
+	// show/hide passes never touch it and QToolBar moves it into the ">>"
+	// menu when the window is too narrow.
+	QAction* m_alignDistributeAction {nullptr};
+	bool     m_alignPaletteConnected {false};
+	//! The palette is open and in front (not closed, not behind another tab).
+	bool alignPaletteShowing() const;
+	//! Enabled only with a selection; checked while the palette is showing.
+	void updateAlignDistributeButton();
+	void onAlignDistributeClicked();
+	//! Put the floating palette under the button instead of over the page.
+	void placeAlignPaletteByButton();
 };
 
 #endif

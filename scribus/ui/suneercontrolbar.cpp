@@ -58,6 +58,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QDateTime>
+#include "ui/aligndistribute.h"
+#include <QScreen>
 #include <QMessageBox>
 #include <QApplication>
 #include <QDialog>
@@ -1591,6 +1593,90 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		addSeparator();
 		addAction(m_scmw->scrActions["extrasImposition"]);
 	}
+
+	// Align and Distribute: the last action, pushed to the right edge by a
+	// stretching spacer so it sits in the same place whatever the rows to
+	// its left are showing. Its own QAction rather than the Windows-menu
+	// action, because this one is disabled without a selection and the menu
+	// entry must not be.
+	QWidget* endSpacer = new QWidget(this);
+	endSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	endSpacer->setMinimumWidth(0);
+	addWidget(endSpacer);
+	m_alignDistributeAction = new QAction(IconManager::instance().loadIcon("panel-align-distribute"), tr("Align and Distribute"), this);
+	m_alignDistributeAction->setObjectName("controlBarAlignDistribute");
+	m_alignDistributeAction->setToolTip(tr("Align and Distribute"));
+	m_alignDistributeAction->setCheckable(true);
+	m_alignDistributeAction->setEnabled(false);
+	addAction(m_alignDistributeAction);
+	connect(m_alignDistributeAction, &QAction::triggered, this, [this] { onAlignDistributeClicked(); });
+}
+
+bool SuneerControlBar::alignPaletteShowing() const
+{
+	const AlignDistributePalette* pal = m_scmw ? m_scmw->alignDistributePalette : nullptr;
+	if (!pal || pal->isClosed())
+		return false;
+	return !pal->isTabbed() || pal->isCurrentTab();
+}
+
+void SuneerControlBar::updateAlignDistributeButton()
+{
+	if (!m_alignDistributeAction)
+		return;
+	// The palette is created after the toolbars, so hook it up on first use.
+	AlignDistributePalette* pal = m_scmw ? m_scmw->alignDistributePalette : nullptr;
+	if (pal && !m_alignPaletteConnected)
+	{
+		m_alignPaletteConnected = true;
+		connect(pal, &ads::CDockWidget::viewToggled, this, [this](bool) { updateAlignDistributeButton(); });
+		connect(pal, &ads::CDockWidget::visibilityChanged, this, [this](bool) { updateAlignDistributeButton(); });
+	}
+	m_alignDistributeAction->setEnabled(m_doc && !m_doc->m_Selection->isEmpty());
+	m_alignDistributeAction->setChecked(alignPaletteShowing());
+}
+
+void SuneerControlBar::onAlignDistributeClicked()
+{
+	AlignDistributePalette* pal = m_scmw ? m_scmw->alignDistributePalette : nullptr;
+	if (!pal)
+		return;
+	if (alignPaletteShowing())
+		pal->toggleView(false);
+	else
+	{
+		// Opens it, or brings it to the front when it is open behind
+		// another tab. The palette keeps its own Reference / Mode settings.
+		const bool wasClosed = pal->isClosed();
+		pal->toggleView(true);
+		if (wasClosed)
+			QTimer::singleShot(0, this, [this] { placeAlignPaletteByButton(); });
+	}
+	updateAlignDistributeButton();
+}
+
+void SuneerControlBar::placeAlignPaletteByButton()
+{
+	AlignDistributePalette* pal = m_scmw ? m_scmw->alignDistributePalette : nullptr;
+	if (!pal || !pal->isFloating())
+		return;   // docked: showing / raising it was all there is to do
+	QWidget* floating = pal->window();
+	if (!floating || floating == window())
+		return;
+	// Right edges aligned, just below the button (or below the bar's right
+	// end while the button is in the ">>" menu), kept on the screen.
+	QWidget* btn = widgetForAction(m_alignDistributeAction);
+	const QWidget* anchor = (btn && btn->isVisible()) ? btn : this;
+	const QPoint below = anchor->mapToGlobal(QPoint(anchor->width(), anchor->height()));
+	const QSize sz = floating->frameGeometry().size();
+	QPoint pos(below.x() - sz.width(), below.y() + 4);
+	if (const QScreen* scr = anchor->screen())
+	{
+		const QRect avail = scr->availableGeometry();
+		pos.setX(qBound(avail.left(), pos.x(), qMax(avail.left(), avail.right() - sz.width())));
+		pos.setY(qBound(avail.top(), pos.y(), qMax(avail.top(), avail.bottom() - sz.height())));
+	}
+	floating->move(pos);
 }
 
 void SuneerControlBar::setDocument(ScribusDoc* doc)
@@ -1614,6 +1700,7 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		showTextWidgets(false);
 		showImageWidgets(false);
 		showTextWrapWidgets(false);
+		updateAlignDistributeButton();
 		return;
 	}
 	// Load Scribus fonts into combo
@@ -1742,6 +1829,8 @@ void SuneerControlBar::updateFromSelection()
 {
 	// Set icons once
 
+	// Before any early return: it follows the selection, not the item type.
+	updateAlignDistributeButton();
 	if (!m_doc) return;
 	if (m_doc->m_Selection->isEmpty())
 	{
@@ -3381,6 +3470,8 @@ void SuneerControlBar::onParaStyleChanged(int) {}
 void SuneerControlBar::iconSetChange()
 {
 	IconManager& im = IconManager::instance();
+	if (m_alignDistributeAction)
+		m_alignDistributeAction->setIcon(im.loadIcon("panel-align-distribute"));
 	if (!im.loadIcon("fether").isNull())
 		m_featherBtn->setIcon(im.loadIcon("fether"));
 	else
@@ -3435,6 +3526,11 @@ void SuneerControlBar::iconSetChange()
 void SuneerControlBar::languageChange()
 {
 	setWindowTitle(tr("Control Bar"));
+	if (m_alignDistributeAction)
+	{
+		m_alignDistributeAction->setText(tr("Align and Distribute"));
+		m_alignDistributeAction->setToolTip(tr("Align and Distribute"));
+	}
 }
 
 void SuneerControlBar::onEmbedInSLA()
