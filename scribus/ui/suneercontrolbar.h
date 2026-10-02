@@ -64,6 +64,8 @@ public slots:
 private slots:
 	// Row 1
 	void onFontChanged(const QFont& font = QFont());
+	//! Status-bar note when a text attribute was applied frame-wide (frame selected, not editing).
+	void announceWholeFrameChange(const QString& what);
 	void onFontSizeChanged(double val);
 	void onAlignChanged(int align);
 	// Row 2

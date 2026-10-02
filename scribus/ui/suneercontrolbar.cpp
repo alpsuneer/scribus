@@ -2,6 +2,7 @@
 #include <functional>
 #include <QCompleter>
 #include <QAbstractItemView>
+#include <QStatusBar>
 #include <QTimer>
 #include "undomanager.h"
 #include "scribus.h"
@@ -2314,6 +2315,24 @@ namespace
 	}
 }
 
+// With a text frame selected but not in edit mode, a text attribute from this
+// bar applies to the WHOLE frame (that is the stock behaviour, kept). Say so in
+// the status bar, so a change that was meant for a selection is noticed.
+void SuneerControlBar::announceWholeFrameChange(const QString& what)
+{
+	if (!m_doc || !m_scmw || m_doc->m_Selection->isEmpty())
+		return;
+	if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		return;
+	const PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!item || !item->isTextFrame())
+		return;
+	// The temporary message area: the info label is rewritten by the next
+	// selection/doc-changed update and the note would vanish at once.
+	if (m_scmw->statusBar())
+		m_scmw->statusBar()->showMessage(tr("%1 changed for the whole frame (no text selected in edit mode)").arg(what), 6000);
+}
+
 void SuneerControlBar::onFontChanged(const QFont& font)
 {
 	if (m_updating || !m_doc) return;
@@ -2345,25 +2364,16 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 	}
 	m_doc->itemSelection_SetFont(fontName);
 	m_doc->changed();
-	// suneer: make the chosen font "sticky". itemSelection_SetFont above already
-	// applied the font as a character override to the currently selected text, but
-	// that is lost once the text is deleted. Also update each selected text frame's
-	// default paragraph style so newly typed text keeps this font instead of
-	// reverting to the paragraph style's original default. Runs for BOTH the
-	// has-selection and no-selection cases (the old code only did the latter).
-	if (!m_doc->m_Selection->isEmpty()) {
-		ScFace face = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts[fontName];
-		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
-		{
-			PageItem* item = m_doc->m_Selection->itemAt(i);
-			if (!item || !item->isTextFrame()) continue;
-			ParagraphStyle ps = item->itemText.defaultStyle();
-			ps.charStyle().setFont(face);
-			item->itemText.setDefaultStyle(ps);
-			item->invalid = true;
-		}
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	// The "sticky font" block that used to follow rewrote every selected frame's
+	// DEFAULT paragraph style with the new font, in edit mode as well. Every
+	// paragraph of the story whose style does not set a font of its own
+	// inherits that default, so in a split-heading frame the body text changed
+	// too - and that write had no undo state, so Ctrl+Z brought back the
+	// headline but not the body. It is gone: in edit mode only the selected
+	// characters change (itemSelection_ApplyCharStyle); with the frame
+	// selected, ApplyCharStyle itself already sets the default style and
+	// records it for undo.
+	announceWholeFrameChange(tr("Font"));
 
 	// Deliberately NOT handing focus back here. This used to call
 	// canvas->setFocus() unconditionally, and since an editable QComboBox emits
@@ -2444,22 +2454,9 @@ void SuneerControlBar::onFontSizeChanged(double val)
 	}
 	m_doc->itemSelection_SetFontSize(qRound(val * 10));
 	m_doc->changed();
-	// suneer: make the chosen size "sticky" — same rationale as onFontChanged.
-	// Font size is stored in 1/10 pt (25pt => 250). Update each selected text
-	// frame's default paragraph style so newly typed text keeps this size.
-	if (!m_doc->m_Selection->isEmpty()) {
-		int sizeTenths = qRound(val * 10);
-		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
-		{
-			PageItem* item = m_doc->m_Selection->itemAt(i);
-			if (!item || !item->isTextFrame()) continue;
-			ParagraphStyle ps = item->itemText.defaultStyle();
-			ps.charStyle().setFontSize(sizeTenths);
-			item->itemText.setDefaultStyle(ps);
-			item->invalid = true;
-		}
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	// The "sticky size" default-style rewrite is gone for the same reason as
+	// in onFontChanged(): it changed every inheriting paragraph of the story.
+	announceWholeFrameChange(tr("Font size"));
 }
 
 // In modeEditTable these go straight to the document, whose
