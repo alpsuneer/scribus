@@ -429,7 +429,7 @@ public:
 	bool     m_alignPaletteConnected {false};
 	//! The palette is open and in front (not closed, not behind another tab).
 	bool alignPaletteShowing() const;
-	//! Enabled only with a selection; checked while the palette is showing.
+	//! Visible only with a selection; checked while the palette is showing.
 	void updateAlignDistributeButton();
 	void onAlignDistributeClicked();
 	//! Put the floating palette under the button instead of over the page.

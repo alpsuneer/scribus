@@ -1597,7 +1597,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// Align and Distribute: the last action, pushed to the right edge by a
 	// stretching spacer so it sits in the same place whatever the rows to
 	// its left are showing. Its own QAction rather than the Windows-menu
-	// action, because this one is disabled without a selection and the menu
+	// action, because this one is hidden without a selection and the menu
 	// entry must not be.
 	QWidget* endSpacer = new QWidget(this);
 	endSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -1607,7 +1607,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_alignDistributeAction->setObjectName("controlBarAlignDistribute");
 	m_alignDistributeAction->setToolTip(tr("Align and Distribute"));
 	m_alignDistributeAction->setCheckable(true);
-	m_alignDistributeAction->setEnabled(false);
+	m_alignDistributeAction->setVisible(false);
 	addAction(m_alignDistributeAction);
 	connect(m_alignDistributeAction, &QAction::triggered, this, [this] { onAlignDistributeClicked(); });
 }
@@ -1632,7 +1632,9 @@ void SuneerControlBar::updateAlignDistributeButton()
 		connect(pal, &ads::CDockWidget::viewToggled, this, [this](bool) { updateAlignDistributeButton(); });
 		connect(pal, &ads::CDockWidget::visibilityChanged, this, [this](bool) { updateAlignDistributeButton(); });
 	}
-	m_alignDistributeAction->setEnabled(m_doc && !m_doc->m_Selection->isEmpty());
+	// Hidden, not greyed out, while nothing is selected: an empty control bar
+	// stays empty. Only the button goes; an open palette is left as it is.
+	m_alignDistributeAction->setVisible(m_doc && !m_doc->m_Selection->isEmpty());
 	m_alignDistributeAction->setChecked(alignPaletteShowing());
 }
 

@@ -1735,8 +1735,10 @@ The button is a trailing QAction after a stretching spacer widget, so it is pinn
 and no `show*Widgets()` pass can hide it. Code: `onAlignDistributeClicked()`, `updateAlignDistributeButton()`,
 `placeAlignPaletteByButton()` in `ui/suneercontrolbar.cpp`.
 
-- **It is its own QAction, not `scrActions["toolsAlignDistribute"]`.** It has to be disabled with no
-  selection, and disabling the shared action would grey out the Windows-menu entry too.
+- **It is its own QAction, not `scrActions["toolsAlignDistribute"]`.** It is hidden with no selection
+  (`QAction::setVisible`; first version disabled it, the operator preferred an empty bar), and hiding
+  or disabling the shared action would take the Windows-menu entry with it. The palette itself is
+  never touched when the selection empties.
 - **The Windows-menu action is not checkable** (ADS "show" mode: `setToggleViewAction` with a
   non-checkable action only ever opens/raises). So "is it open" is read from the dock itself
   (`isClosed()`, `isTabbed()`, `isCurrentTab()`), and the button follows `viewToggled` /
