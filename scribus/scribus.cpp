@@ -5785,6 +5785,19 @@ void ScribusMainWindow::applyDefaultShortcutSet()
 	if (!Prefs_KeyboardShortcuts::applyDefaultSet(m_prefsManager.appPrefs.keyShortcutPrefs.KeyActions))
 		return;
 	applyShortcutsFromPrefs();
+	// A newer shipped "dbi" than last time: already in effect if it is the
+	// Default (built from the file just now); otherwise say so once.
+	const QString note = Prefs_KeyboardShortcuts::noteShippedSetUpdate();
+	if (!note.isEmpty())
+	{
+		qWarning().noquote() << "[Shortcuts]" << note;
+		QTimer::singleShot(2500, this, [this, note] {
+			if (Prefs_KeyboardShortcuts::defaultIsShippedSet())
+				setStatusBarInfoText(note);
+			else
+				ScMessageBox::information(this, tr("Keyboard Shortcuts"), note);
+		});
+	}
 }
 
 void ScribusMainWindow::slotEditStyledCopy()
@@ -11486,24 +11499,11 @@ void ScribusMainWindow::checkMalayalamDtpFirstRun()
 		return;
 	}
 
-	QMessageBox box(this);
-	box.setWindowTitle(tr("Welcome to Scribus (Malayalam DTP Edition)"));
-	box.setIcon(QMessageBox::Information);
-	box.setText(tr("Default keyboard shortcuts are set to Photoshop-compatible for an easier workflow.\n\n"
-	               "You can change them anytime via:\n"
-	               "File → Preferences → Keyboard Shortcuts"));
-	QPushButton* keepBtn = box.addButton(tr("Keep Newspaper defaults"), QMessageBox::AcceptRole);
-	box.addButton(tr("Use standard Scribus defaults"), QMessageBox::RejectRole);
-	box.exec();
-	// The choice picks the Default set, which every later startup applies.
-	if (box.clickedButton() == keepBtn)
-	{
-		applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
-		Prefs_KeyboardShortcuts::setDefaultSetName(Prefs_KeyboardShortcuts::newspaperDefaultSetName());
-	}
-	else
-		Prefs_KeyboardShortcuts::setDefaultSetName(Prefs_KeyboardShortcuts::scribusDefaultSetName());
-
+	// A fresh profile on an office PC: the shipped set ("dbi") is the Default,
+	// no question asked. It can be changed any time in Preferences >
+	// Keyboard Shortcuts, where "Scribus Default" is still offered.
+	applyKeySetFromFile(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml");
+	Prefs_KeyboardShortcuts::setDefaultSetName(Prefs_KeyboardShortcuts::newspaperDefaultSetName());
 	settings.setValue(QStringLiteral("malayalamDtpFirstRun"), true);
 }
 

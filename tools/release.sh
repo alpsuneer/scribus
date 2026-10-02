@@ -12,6 +12,11 @@
 #   --config FILE  site settings (default: ~/scribus-keys/release.conf).
 #   --allow-dirty  only with --dry-run: skip the "everything committed" check.
 #
+# Before building, the laptop's "dbi" shortcut set is copied into the shipped
+# keyset (tools/update-newspaper-shortcuts.sh) and checked for conflicts
+# (tools/check-keyset-conflicts.py); a changed keyset is committed with the
+# release and summarised in the changelog. SCRIBUS_PROFILE overrides the profile.
+#
 # Site settings are NOT in this repository (it is public). The config file is
 # a shell fragment, created interactively on the first real run:
 #
@@ -185,23 +190,6 @@ fetch() { # $1 url  $2 output   (authenticates the way the client does: no key, 
 	fi
 }
 
-# ------------------------------------------------- 2. working tree clean ---
-say "Working tree"
-# core.fileMode=false: this tree carries hundreds of mode-only changes (files
-# that merely lost or gained the executable bit); they are not content.
-DIRTY=$(git -c core.fileMode=false status --porcelain --untracked-files=no)
-if [ -n "$DIRTY" ]; then
-	echo "$DIRTY" | head -20 | sed 's/^/   /'
-	[ "$(echo "$DIRTY" | wc -l)" -le 20 ] || echo "   ... ($(echo "$DIRTY" | wc -l) files)"
-	if [ $ALLOW_DIRTY -eq 1 ]; then
-		echo "   uncommitted changes present; continuing because of --dry-run --allow-dirty"
-	else
-		die "uncommitted changes. A release must be built from committed code, so the tag says exactly what shipped."
-	fi
-else
-	echo "   clean: $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
-fi
-
 # ------------------------------------------------------------ 3. version ---
 say "Version"
 UPSTREAM=$(python3 - <<'PY'
@@ -239,6 +227,49 @@ if [ -n "$INSTALLED" ]; then
 		|| echo "   NOTE: dpkg does not rank it above the installed $INSTALLED (dpkg -i would still install it)"
 fi
 
+# ------------------------------------------------ 3b. shortcut set "dbi" ---
+say "Shortcut set"
+# The laptop's current "dbi" set becomes the keyset the package ships. Stops
+# with a clear message when the set is missing, and before shipping a set with
+# keys that cannot work (duplicates inside the set, clashes with the Column
+# Style / Design Style / Next Style Chain keys).
+KEYSET_SUMMARY=$(mktemp)
+tools/update-newspaper-shortcuts.sh --version "$VERSION" --summary "$KEYSET_SUMMARY" | sed 's/^/   /' || die "shortcut set not updated (see above)"
+tools/check-keyset-conflicts.py resources/keysets/malayalam-dtp.xml --profile "${SCRIBUS_PROFILE:-/home/s1/.config/scribus}/.." | sed 's/^/   /' || die "the dbi shortcut set has conflicts; fix them in Preferences > Keyboard Shortcuts and release again"
+KEYSET_CHANGELOG=$(head -1 "$KEYSET_SUMMARY")
+KEYSET_DETAIL=$(tail -n +2 "$KEYSET_SUMMARY")
+rm -f "$KEYSET_SUMMARY"
+if ! git -c core.fileMode=false diff --quiet -- resources/keysets/malayalam-dtp.xml; then
+	if [ $DRY_RUN -eq 1 ]; then
+		echo "   keyset changed; left uncommitted (dry run)"
+	else
+		git add resources/keysets/malayalam-dtp.xml
+		git commit -q -m "suneer: keyset: dbi shortcut set for $VERSION
+
+$KEYSET_CHANGELOG
+$KEYSET_DETAIL" && echo "   keyset change committed: $(git rev-parse --short HEAD)"
+	fi
+else
+	echo "   keyset unchanged since the committed one"
+fi
+
+# ------------------------------------------------- 3c. working tree clean ---
+say "Working tree"
+# core.fileMode=false: this tree carries hundreds of mode-only changes (files
+# that merely lost or gained the executable bit); they are not content.
+DIRTY=$(git -c core.fileMode=false status --porcelain --untracked-files=no)
+if [ -n "$DIRTY" ]; then
+	echo "$DIRTY" | head -20 | sed 's/^/   /'
+	[ "$(echo "$DIRTY" | wc -l)" -le 20 ] || echo "   ... ($(echo "$DIRTY" | wc -l) files)"
+	if [ $ALLOW_DIRTY -eq 1 ]; then
+		echo "   uncommitted changes present; continuing because of --dry-run --allow-dirty"
+	else
+		die "uncommitted changes. A release must be built from committed code, so the tag says exactly what shipped."
+	fi
+else
+	echo "   clean: $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
+fi
+
 # ---------------------------------------------------------- 4. changelog ---
 say "Changelog"
 if [ -n "$CHANGELOG_TEXT" ]; then
@@ -249,6 +280,8 @@ else
 	CHANGELOG=$(git log --no-merges --pretty='- %s' -n 15 | sed 's/^- suneer: /- /')
 fi
 [ -n "$CHANGELOG" ] || CHANGELOG="- Maintenance build."
+case "$KEYSET_CHANGELOG" in *" 0 key(s) added, 0 removed, 0 changed") ;; *) CHANGELOG="$CHANGELOG
+- $KEYSET_CHANGELOG" ;; esac
 echo "$CHANGELOG" | sed 's/^/   /'
 
 # -------------------------------------------------------------- 5. build ---

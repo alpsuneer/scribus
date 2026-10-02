@@ -306,9 +306,46 @@ QString Prefs_KeyboardShortcuts::scribusDefaultSetName()
 	return QStringLiteral("Scribus Default");
 }
 
+static QString shippedKeySetFile()
+{
+	return ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml";
+}
+
+// <shortcutset name="dbi" version="1.7.3-20261001-3"> of the shipped file.
+static QPair<QString, QString> shippedSetNameAndVersion()
+{
+	static QPair<QString, QString> cached;
+	static bool loaded = false;
+	if (loaded)
+		return cached;
+	loaded = true;
+	cached = qMakePair(QStringLiteral("dbi"), QString());
+	QFile f(shippedKeySetFile());
+	if (!f.open(QIODevice::ReadOnly))
+		return cached;
+	QDomDocument doc("keymapentries");
+	if (!doc.setContent(&f))
+		return cached;
+	const QDomElement root = doc.documentElement();
+	if (root.tagName() == "shortcutset" && !root.attribute("name").trimmed().isEmpty())
+		cached.first = root.attribute("name").trimmed();
+	cached.second = root.attribute("version").trimmed();
+	return cached;
+}
+
 QString Prefs_KeyboardShortcuts::newspaperDefaultSetName()
 {
-	return QStringLiteral("Newspaper Default");
+	return shippedSetNameAndVersion().first;
+}
+
+bool Prefs_KeyboardShortcuts::isShippedSetName(const QString& name)
+{
+	return name == newspaperDefaultSetName() || name == QLatin1String("Newspaper Default");
+}
+
+QString Prefs_KeyboardShortcuts::shippedSetVersion()
+{
+	return shippedSetNameAndVersion().second;
 }
 
 QString Prefs_KeyboardShortcuts::userSetsDir()
@@ -377,9 +414,12 @@ static QMap<QString, QString> stockSets()
 
 static QMap<QString, QString> userSets()
 {
+	// A user set may carry the shipped set's name ("dbi" on the machine that
+	// edits it and feeds the release): it stays a user set and wins over the
+	// shipped copy, see buildSetKeys().
 	QMap<QString, QString> sets = scanSetDir(Prefs_KeyboardShortcuts::userSetsDir());
 	sets.remove(Prefs_KeyboardShortcuts::scribusDefaultSetName());
-	sets.remove(Prefs_KeyboardShortcuts::newspaperDefaultSetName());
+	sets.remove(QStringLiteral("Newspaper Default"));
 	const QMap<QString, QString> stock = stockSets();
 	for (auto it = stock.cbegin(); it != stock.cend(); ++it)
 		sets.remove(it.key());
@@ -411,24 +451,55 @@ static void readKeySetInto(const QString& fileName, QMap<QString, Keys>& keys, b
 
 bool Prefs_KeyboardShortcuts::buildSetKeys(const QString& name, QMap<QString, Keys>& keys)
 {
-	if (name == scribusDefaultSetName() || name == newspaperDefaultSetName())
+	// A user's own set of this name comes first: on the PC that maintains the
+	// shipped "dbi", the live user file is the source of truth.
+	QString file = userSets().value(name);
+	if (!file.isEmpty())
+	{
+		readKeySetInto(file, keys, true);
+		return true;
+	}
+	if (name == scribusDefaultSetName() || isShippedSetName(name))
 	{
 		// Built from the shortcuts compiled into this build, so the custom
-		// actions keep theirs; Newspaper adds its keyset on top.
+		// actions keep theirs; the shipped set adds its keyset on top.
 		const QMap<QString, QKeySequence>* defaults = ActionManager::defaultShortcuts();
 		for (auto it = keys.begin(); it != keys.end(); ++it)
 			it.value().keySequence = defaults->value(it.key());
-		if (name == newspaperDefaultSetName())
-			readKeySetInto(ScPaths::instance().shareDir() + "keysets/malayalam-dtp.xml", keys, false);
+		if (isShippedSetName(name))
+			readKeySetInto(shippedKeySetFile(), keys, false);
 		return true;
 	}
-	QString file = userSets().value(name);
-	if (file.isEmpty())
-		file = stockSets().value(name);
+	file = stockSets().value(name);
 	if (file.isEmpty())
 		return false;
 	readKeySetInto(file, keys, true);
 	return true;
+}
+
+bool Prefs_KeyboardShortcuts::defaultIsShippedSet()
+{
+	const QString name = defaultSetName();
+	return isShippedSetName(name) && !userSets().contains(name);
+}
+
+QString Prefs_KeyboardShortcuts::noteShippedSetUpdate()
+{
+	const QString version = shippedSetVersion();
+	if (version.isEmpty())
+		return QString();
+	PrefsContext* ctx = shortcutSetPrefs();
+	const QString seen = ctx->get("shipped_set_version", QString());
+	if (seen == version)
+		return QString();
+	ctx->set("shipped_set_version", version);
+	PrefsManager::instance().prefsFile->write();
+	if (seen.isEmpty() && defaultIsShippedSet())
+		return QString();                   // first start with a versioned set: nothing to announce
+	if (defaultIsShippedSet())
+		return tr("Keyboard shortcut set \"%1\" updated to the one shipped with %2.").arg(newspaperDefaultSetName(), version);
+	return tr("A newer \"%1\" keyboard shortcut set is shipped with %2. Your Default set \"%3\" was left as it is; "
+	          "choose \"%1\" in Preferences > Keyboard Shortcuts to use it.").arg(newspaperDefaultSetName(), version, defaultSetName());
 }
 
 bool Prefs_KeyboardShortcuts::applyDefaultSet(QMap<QString, Keys>& keys)

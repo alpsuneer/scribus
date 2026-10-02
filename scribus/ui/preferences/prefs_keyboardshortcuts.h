@@ -43,7 +43,21 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 		// keyset XML files in userSetsDir(). The default set's name is kept in
 		// prefs172.xml ("keyboard_shortcuts" / "default_set").
 		static QString scribusDefaultSetName();
+		/*! The set shipped with this build: resources/keysets/malayalam-dtp.xml,
+		    laid over the compiled-in defaults. Its name comes from the file's
+		    <shortcutset name="..."> ("dbi"); "Newspaper Default" stays an alias
+		    so older preferences keep working. */
 		static QString newspaperDefaultSetName();
+		//! True for the shipped set's name or its alias.
+		static bool isShippedSetName(const QString& name);
+		//! The shipped set's version attribute (the release it was packaged with), or empty.
+		static QString shippedSetVersion();
+		//! True when the Default set is the shipped one (and not a user set of the same name).
+		static bool defaultIsShippedSet();
+		/*! Startup: a newer shipped set than the one last seen. If the Default is
+		    the shipped set it is already in effect (built from the file each
+		    start); otherwise the user is told once. \returns a status-bar note, or empty. */
+		static QString noteShippedSetUpdate();
 		static QString userSetsDir();
 		static QString defaultSetName();
 		static void setDefaultSetName(const QString& name);

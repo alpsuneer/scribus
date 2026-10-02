@@ -1,77 +1,103 @@
 #!/bin/bash
-# update-newspaper-shortcuts.sh — make the current Default shortcut set the
-# built-in "Newspaper Default".
+# update-newspaper-shortcuts.sh — copy the laptop's "dbi" shortcut set into the
+# keyset the .deb ships (resources/keysets/malayalam-dtp.xml).
 #
-# "Newspaper Default" is this build's compiled-in shortcuts with
-# resources/keysets/malayalam-dtp.xml laid over them
-# (Prefs_KeyboardShortcuts::buildSetKeys). This script rewrites that file from
-# the set currently marked Default in Preferences › Keyboard Shortcuts, so a
-# full set here gives every action exactly the key the Default set has.
+# The shipped set is this build's compiled-in shortcuts with that file laid over
+# them (Prefs_KeyboardShortcuts::buildSetKeys). Its <shortcutset name="..."> is
+# the name shown in Preferences > Keyboard Shortcuts ("dbi"); "Newspaper
+# Default" is kept as an alias in the code. tools/release.sh runs this before
+# every build, so there is nothing to run by hand.
 #
 # Usage:
-#   tools/update-newspaper-shortcuts.sh            # rewrite the keyset only
-#   tools/update-newspaper-shortcuts.sh --deb      # ...then rebuild, install, build the .deb
+#   tools/update-newspaper-shortcuts.sh [--version V] [--summary FILE] [--check-only]
 #
-# Reads from the profile of the desktop user (default /home/s1); override with
-#   SCRIBUS_PROFILE=/path/to/.config/scribus
+#   --version V     written as version="V" into the keyset (the release it ships with)
+#   --summary FILE  also write the "changed since the committed keyset" summary there
+#   --check-only    do not write; only report what would change
+#
+# Source: the set marked Default in the desktop user's profile, when that is one
+# of the user's own sets; otherwise the user set literally named "dbi". Override
+# the profile with SCRIBUS_PROFILE=/path/to/.config/scribus. Exits 1 with a
+# clear message when no such set exists.
 set -euo pipefail
-
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PROFILE=${SCRIBUS_PROFILE:-/home/s1/.config/scribus}
 OUT="$REPO/resources/keysets/malayalam-dtp.xml"
-
-name=$(grep -o 'default_set" value="[^"]*"' "$PROFILE/prefs172.xml" | head -1 | cut -d'"' -f3) || true
-if [ -z "$name" ]; then
-	echo "No Default shortcut set is chosen in $PROFILE/prefs172.xml." >&2
-	echo "Pick one in Preferences › Keyboard Shortcuts › Set as Default first." >&2
-	exit 1
-fi
-
-# Find the user set whose <shortcutset name="..."> is the Default.
-src=""
-for f in "$PROFILE"/shortcut-sets/*.xml; do
-	[ -e "$f" ] || continue
-	if grep -q "<shortcutset name=\"$name\"" "$f"; then src=$f; break; fi
+VERSION=""; SUMMARY=""; CHECK_ONLY=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--version) shift; VERSION="${1:?}" ;;
+		--summary) shift; SUMMARY="${1:?}" ;;
+		--check-only) CHECK_ONLY=1 ;;
+		-h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		*) echo "unknown option: $1" >&2; exit 2 ;;
+	esac
+	shift
 done
-if [ -z "$src" ]; then
-	echo "The Default set \"$name\" is not one of your own sets in $PROFILE/shortcut-sets/." >&2
-	echo "(A built-in Default has nothing new to copy.)" >&2
-	exit 1
-fi
+die() { echo "update-newspaper-shortcuts: $*" >&2; exit 1; }
+
+[ -d "$PROFILE" ] || die "profile folder $PROFILE does not exist (set SCRIBUS_PROFILE)"
+name=$(grep -o 'default_set" value="[^"]*"' "$PROFILE/prefs172.xml" 2>/dev/null | head -1 | cut -d'"' -f3 || true)
+src=""
+pick() {   # $1 = set name -> prints the user file carrying it
+	for f in "$PROFILE"/shortcut-sets/*.xml; do
+		[ -e "$f" ] || continue
+		if grep -q "<shortcutset name=\"$1\"" "$f"; then echo "$f"; return 0; fi
+	done
+	return 1
+}
+if [ -n "$name" ]; then src=$(pick "$name" || true); fi
+if [ -z "$src" ]; then name="dbi"; src=$(pick dbi || true); fi
+[ -n "$src" ] || die "no \"dbi\" shortcut set found: $PROFILE/shortcut-sets/ has no file with <shortcutset name=\"dbi\"> (and the Default set \"${name:-none}\" is not a user set). Save the set in Preferences > Keyboard Shortcuts first."
+grep -q '<function ' "$src" || die "$src has no <function> entries"
+
+# --- compare with the keyset as committed (what the last release shipped) ---
+summary=$(python3 - "$src" "$OUT" "$REPO" <<'PY'
+import re, subprocess, sys
+src, out, repo = sys.argv[1:4]
+def entries(text):
+    return dict(re.findall(r'<function name="([^"]*)" shortcut="([^"]*)"', text))
+new = entries(open(src, encoding="utf-8").read())
+try:
+    old_text = subprocess.run(["git", "-C", repo, "show", "HEAD:resources/keysets/malayalam-dtp.xml"], capture_output=True, text=True, check=True).stdout
+except subprocess.CalledProcessError:
+    old_text = open(out, encoding="utf-8").read() if __import__("os").path.exists(out) else ""
+old = entries(old_text)
+added   = sorted(a for a in new if new[a] and not old.get(a))
+removed = sorted(a for a in old if old[a] and not new.get(a))
+changed = sorted(a for a in new if new[a] and old.get(a) and old[a] != new[a])
+lines = []
+for a in added:   lines.append("  + %s = %s" % (a, new[a]))
+for a in removed: lines.append("  - %s (was %s)" % (a, old[a]))
+for a in changed: lines.append("  ~ %s: %s -> %s" % (a, old[a], new[a]))
+head = "Shortcut set \"dbi\": %d key(s) added, %d removed, %d changed" % (len(added), len(removed), len(changed))
+print(head)
+print("\n".join(lines))
+PY
+)
+echo "$summary"
+if [ -n "$SUMMARY" ]; then echo "$summary" > "$SUMMARY"; fi
+[ $CHECK_ONLY -eq 0 ] || exit 0
 
 {
 	echo '<?xml version="1.0" encoding="UTF-8"?>'
 	echo '<!--'
-	echo '  "Newspaper Default" keyboard shortcut set.'
+	echo '  "dbi" keyboard shortcut set, shipped with every .deb.'
 	echo ''
-	echo "  Generated by tools/update-newspaper-shortcuts.sh from the user set \"$name\""
-	echo "  on $(date +%Y-%m-%d). Edit shortcuts in Scribus and re-run the script"
-	echo '  rather than editing this file by hand.'
+	echo "  Copied by tools/update-newspaper-shortcuts.sh (run by tools/release.sh) from"
+	echo "  the user set \"$name\" ($src) on $(date +%Y-%m-%d)${VERSION:+ for release $VERSION}."
+	echo '  Edit shortcuts in Scribus on that machine and release; do not edit this file.'
 	echo ''
 	echo '  Laid over the compiled-in defaults: every action listed here gets exactly'
 	echo '  this key (shortcut="" means none); actions added to Scribus later, and so'
 	echo '  missing here, keep their compiled-in default.'
 	echo '-->'
-	echo '<shortcutset name="Newspaper Default">'
+	echo '<!DOCTYPE keymapentries>'
+	if [ -n "$VERSION" ]; then echo "<shortcutset name=\"dbi\" version=\"$VERSION\">"; else echo '<shortcutset name="dbi">'; fi
 	grep '<function ' "$src"
 	echo '</shortcutset>'
 } > "$OUT.tmp"
 mv "$OUT.tmp" "$OUT"
-
 count=$(grep -c '<function ' "$OUT")
 keyed=$(grep '<function ' "$OUT" | grep -vc 'shortcut=""' || true)
-echo "Wrote $OUT from \"$name\" ($src): $count actions, $keyed with a key."
-
-if [ "${1:-}" = "--deb" ]; then
-	cd "$REPO"
-	cmake --build build -j"$(nproc)"
-	cmake --install build
-	version="1.7.3-$(date +%d%m%y)"
-	(cd build && cpack -G DEB \
-		-D CPACK_PACKAGE_VERSION="$version" \
-		-D CPACK_DEBIAN_PACKAGE_RELEASE=1 \
-		-D CPACK_DEBIAN_FILE_NAME=DEB-DEFAULT)
-	deb="$REPO/build/scribus_${version}-1_amd64.deb"
-	echo "Package: $deb"
-	dpkg -c "$deb" | grep 'keysets/malayalam-dtp.xml'
-fi
+echo "Wrote $OUT from \"$name\" ($src): $count actions, $keyed with a key${VERSION:+, version $VERSION}."
