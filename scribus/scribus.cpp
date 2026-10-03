@@ -183,6 +183,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusview.h"
 #include "scribuswin.h"
 #include "selection.h"
+#include "suneergroupedit.h"
 #include "serializer.h"
 #include "storyloader.h"
 #include "stylesearch.h"
@@ -4718,6 +4719,37 @@ void ScribusMainWindow::toogleInlineState()
 	if (doc->m_Selection->isEmpty())
 		return;
 	PageItem *currItem = doc->m_Selection->itemAt(0);
+	// Suneer: one group selected -> embed every linked image inside it (nested
+	// groups included). Embedding only: taking images back out asks for a file
+	// name per image, which stays a one-frame command.
+	if (PageItem* group = SuneerGroupEdit::soleGroup(doc))
+	{
+		int embedded = 0;
+		const QList<PageItem*> images = SuneerGroupEdit::imageChildren(group);
+		for (PageItem* image : images)
+		{
+			if (image->isImageInline())
+				continue;
+			if (ScCore->fileWatcher->isWatching(image->Pfile))
+				ScCore->fileWatcher->removeFile(image->Pfile);
+			image->makeImageInline();
+			ScCore->fileWatcher->addFile(image->Pfile);
+			bool fho = image->imageFlippedH();
+			bool fvo = image->imageFlippedV();
+			doc->loadPict(image->Pfile, image, true);
+			image->setImageFlippedH(fho);
+			image->setImageFlippedV(fvo);
+			++embedded;
+		}
+		scrActions["itemToggleInlineImage"]->setChecked(!images.isEmpty());
+		if (embedded > 0)
+		{
+			doc->changed();
+			view->DrawNew();
+		}
+		setStatusBarInfoText( tr("Embed Image: %1 of %2 images in the group embedded now").arg(embedded).arg(images.count()));
+		return;
+	}
 	if (currItem->itemType() != PageItem::ImageFrame)
 		return;
 	if (!currItem->imageIsAvailable)
@@ -10334,7 +10366,11 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 {
 	if (!HaveDoc || !doc)
 		return;
-	const int count = doc->m_Selection->count();
+	// One group selected: its text frames (nested groups included) are fitted,
+	// and the group's bounds follow them.
+	PageItem* group = SuneerGroupEdit::soleGroup(doc);
+	const QList<PageItem*> targets = group ? SuneerGroupEdit::textChildren(group) : doc->m_Selection->items();
+	const int count = targets.count();
 	if (count == 0)
 		return;
 
@@ -10342,10 +10378,11 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 	if (UndoManager::undoEnabled())
 		fitTransaction = m_undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::Resize,
 		                                                tr("Fit caption frame"), Um::IResize);
+	SuneerGroupEdit::markRefit(group, false);
 	int fitted = 0, skipped = 0;
 	for (int i = 0; i < count; ++i)
 	{
-		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem* item = targets.at(i);
 		PageItem_TextFrame* tf = (item && item->isTextFrame()) ? item->asTextFrame() : nullptr;
 		// Empty frames, table cells and linked frames are left as they are.
 		if (!tf || tf->isTableItem || tf->itemText.length() == 0)
@@ -10358,6 +10395,7 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 		else
 			++skipped;
 	}
+	SuneerGroupEdit::markRefit(group, fitted > 0);
 	if (fitTransaction)
 	{
 		if (fitted > 0)

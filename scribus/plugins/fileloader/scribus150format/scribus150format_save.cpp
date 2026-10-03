@@ -2827,15 +2827,17 @@ void Scribus150Format::SetItemProps(ScXmlStreamWriter& docu, PageItem* item, con
 			docu.writeAttribute("RightLine", 1);
 		if (item->BottomLine)
 			docu.writeAttribute("BottomLine", 1);
-		if (item->wrapOffsetTop() != 0.0)
-			docu.writeAttribute("WrapOffTop", item->wrapOffsetTop());
-		if (item->wrapOffsetBottom() != 0.0)
-			docu.writeAttribute("WrapOffBottom", item->wrapOffsetBottom());
-		if (item->wrapOffsetLeft() != 0.0)
-			docu.writeAttribute("WrapOffLeft", item->wrapOffsetLeft());
-		if (item->wrapOffsetRight() != 0.0)
-			docu.writeAttribute("WrapOffRight", item->wrapOffsetRight());
 	}
+	// Outside the block above on purpose: a group has a wrap distance too
+	// (text flows around the whole group), and it was lost on save.
+	if (item->wrapOffsetTop() != 0.0)
+		docu.writeAttribute("WrapOffTop", item->wrapOffsetTop());
+	if (item->wrapOffsetBottom() != 0.0)
+		docu.writeAttribute("WrapOffBottom", item->wrapOffsetBottom());
+	if (item->wrapOffsetLeft() != 0.0)
+		docu.writeAttribute("WrapOffLeft", item->wrapOffsetLeft());
+	if (item->wrapOffsetRight() != 0.0)
+		docu.writeAttribute("WrapOffRight", item->wrapOffsetRight());
 	//write weld parameter
 	if (item->isWelded())
 	{

@@ -73,6 +73,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusapp.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneergroupedit.h"
 #include "scribusview.h"
 #include "sctextstream.h"
 #include "filewatcher.h"
@@ -5183,6 +5184,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreSideBorders(ss, isUndo);
 		else if (ss->contains("SUNEER_WRAPOFFSETS"))
 			restoreWrapOffsets(ss, isUndo);
+		else if (ss->contains("SUNEER_GROUP_REFIT"))
+			SuneerGroupEdit::refitDeep(this);   // same in both directions, see suneergroupedit.h
 		else if (ss->contains("LINE_SHADE"))
 			restoreLineShade(ss, isUndo);
 		else if (ss->contains("DELETE_FRAMETEXT"))

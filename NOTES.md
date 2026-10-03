@@ -1944,3 +1944,45 @@ nested groups too) and returns the first child for the bar to display. Slots act
 - Not exercised: selecting one child inside a group (the scripter cannot select a child), a group made
   by the real Design Style (an image + text group stood in for it), shapes-only groups, the colour
   buttons in group mode, the IM path (nothing here touches typing).
+
+### Group control bar, second pass: every control has a defined target (2026-10-03)
+
+- **A flow mode or wrap gap set on a child inside a group does nothing.** Text layout
+  (`PageItem_TextFrame::availableRegion`) walks `doc->Items` only; children are not in it. So text
+  flow, wrap gap, flip, rotate 90 and W/H go to `wrapSel()` (= the document selection, the group);
+  everything else goes to `sel()` (the children). The per-control table is in
+  `/home/s1/Desktop/claude/result-*-group-control-bar-all-controls.md`.
+- **A group's wrap offsets were never saved.** `SetItemProps()` in all three format plugins
+  (150/170/171) wrote `WrapOff*` inside `if (!(item->isGroup() || item->isSymbol()))`. Moved out of
+  that block; the loaders already read the attributes for any item.
+- **`scribus/suneergroupedit.h`** (header-only, no CMake entry): `soleGroup()`, `imageChildren()`,
+  `textChildren()`, `refitDeep()`, `markRefit()`. Used by `ScribusDoc::itemSelection_AdjustFrametoImageSize`,
+  `_AdjustImagetoFrameSize`, `_AdjustFrameHeightToText` (when called with no custom selection and ONE
+  group is selected), `suneerFitCaptionFrames`, `toogleInlineState`, `AppModeHelper::enableActionsForSelection`
+  (overrides at the end of the function), the context menu and `ResizeImageDialog` / `ImageDpiField`.
+- **`resizeGroupToContents()` records no undo and never grows the outline** (it intersects the old
+  path with the new one, so a group that grew keeps the smaller clip and cuts the child off).
+  `refitDeep()` calls it and then `SetRectFrame()`; `markRefit()` records a `SUNEER_GROUP_REFIT`
+  marker on the group BEFORE and AFTER the children change, and `PageItem::restore` just re-runs
+  `refitDeep()` for it, so the bounds are right whichever way the transaction is replayed. Cost: a
+  group with a hand-edited clip shape gets a plain rectangle back after such a command.
+- **To Front / To Back undo** (`suneerUndoLevelMove` in scribusdoc.cpp): stock undo answers one with
+  the other, wrong for an item taken from the middle. The commands now store `SUNEER_OLD_LEVEL_n`
+  and undo re-inserts at that index (top-level items only; otherwise stock behaviour).
+- **`m_padAllPlusBtn` / `MinusBtn` / `ResetBtn` were connected twice** -> one click = two 0.5 mm slot
+  calls = two undo steps. Connected once now with 1.0 mm. (`m_textFeatherBtn` and `m_featherBtn` are
+  still connected twice - left alone.)
+- `refreshAfterGroupChange()` runs queued from `~SuneerGroupUndo` and puts back the text and caret
+  of a spin box that has focus: re-setting its value mid-typing reformats "2" to "2.00 pt".
+- `enterSoleGroupChild()`: Crop / Draw contour / Edit contour need a canvas mode on the document
+  selection, so for a one-image group they select the image inside the group first.
+- Embed Image has no undo in Scribus (single frame or group).
+- The line row (`m_lineWidgets`: caps, joins, arrows, dash, named style) is never shown by
+  `updateFromSelection()` for any selection; a line or a group of lines gets the image/shape rows.
+- Test: `GROUPTEST_PY=grouptest2.py GROUPTEST_TIMEOUT=560 ~/scribus-crashlogs/grouptest/run.sh` ->
+  `run2/results.md` (173 rows: 150 PASS, 0 FAIL, 11 DISABLED, 6 ENABLED, 4 N/A, 2 NOT RUN).
+- Not exercised: colour picker popups (the `changed` signal was emitted on the button instead),
+  paragraph shading popup, frame border menu, the dialogs behind Crop / RS / BG / contour / feather,
+  the right-click menu itself, real keyboard shortcuts (actions were triggered), named line styles
+  (none in the test document), shapes-only groups, a real Design Style group, the IM path, print.
+

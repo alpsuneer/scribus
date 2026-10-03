@@ -28,6 +28,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribuscore.h"
 #include "scribusdoc.h"
 #include "selection.h"
+#include "suneergroupedit.h"
 #include "ui/resizeimagedialog.h"
 #include "undomanager.h"
 #include "util.h"
@@ -45,6 +46,12 @@ void ResizeImageDialog::openForSelection(ScribusDoc* doc, QWidget* parent)
 	if (!doc || doc->m_Selection->isEmpty())
 		return;
 	PageItem* item = doc->m_Selection->itemAt(0);
+	// One group holding exactly one image (image + caption): that image.
+	if (const PageItem* group = SuneerGroupEdit::soleGroup(doc))
+	{
+		const QList<PageItem*> images = SuneerGroupEdit::imageChildren(group);
+		item = (images.count() == 1) ? images.first() : nullptr;
+	}
 	if (!item || !item->isImageFrame() || item->Pfile.isEmpty() || !item->imageIsAvailable)
 		return;
 
@@ -395,6 +402,12 @@ PageItem* ImageDpiField::currentImageItem(ScribusDoc** docOut) const
 	if (!doc || doc->m_Selection->count() != 1)
 		return nullptr;
 	PageItem* item = doc->m_Selection->itemAt(0);
+	// One group holding exactly one image (image + caption): that image.
+	if (const PageItem* group = SuneerGroupEdit::soleGroup(doc))
+	{
+		const QList<PageItem*> images = SuneerGroupEdit::imageChildren(group);
+		item = (images.count() == 1) ? images.first() : nullptr;
+	}
 	if (!item || !item->isImageFrame() || item->Pfile.isEmpty() || !item->imageIsAvailable)
 		return nullptr;
 	if (item->imageXScale() <= 0.0 || item->imageYScale() <= 0.0)

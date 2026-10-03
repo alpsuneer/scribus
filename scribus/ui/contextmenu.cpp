@@ -35,6 +35,7 @@
 #include "scraction.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "suneergroupedit.h"
 #include "scribusview.h"
 #include "spellcheckfunctions.h"
 #include "textframespellchecker.h"
@@ -439,6 +440,27 @@ void ContextMenu::createMenuItems_Selection()
 			}
 		}
 		
+		// Suneer: one group -> the image and text frame commands act on its children
+		if ((selectedItemCount == 1) && currItem->isGroup())
+		{
+			if (!SuneerGroupEdit::imageChildren(currItem).isEmpty())
+			{
+				for (const char* name : { "itemAdjustFrameToImage", "itemAdjustImageToFrame", "itemToggleInlineImage" })
+				{
+					m_ScMW->scrActions[name]->setEnabled(true);
+					addAction(m_ScMW->scrActions[name]);
+				}
+			}
+			if (!SuneerGroupEdit::textChildren(currItem).isEmpty())
+			{
+				for (const char* name : { "itemAdjustFrameHeightToText", "itemFitCaptionFrame" })
+				{
+					m_ScMW->scrActions[name]->setEnabled(true);
+					addAction(m_ScMW->scrActions[name]);
+				}
+			}
+		}
+
 		if ((selectedItemCount == 1) && currItem->isTextFrame())
 		{
 			if (currItem->itemText.isNotEmpty())

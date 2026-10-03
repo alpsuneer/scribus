@@ -464,6 +464,13 @@ public:
 	Selection* tsel() const { return m_groupActive ? m_groupSel : nullptr; }
 	//! Group mode: every child of the chosen kind. Otherwise the first selected item only.
 	QList<PageItem*> targetItems() const;
+	//! What flow mode, wrap distance, flip and rotation act on: always the document selection (the group itself).
+	Selection* wrapSel() const;
+	//! Group with ONE frame of the chosen kind: selects that frame, for tools that need a canvas mode.
+	void enterSoleGroupChild();
+	//! Re-reads the bar after a group change without disturbing a field being typed in.
+	void refreshAfterGroupChange();
+	QToolButton* m_imgResizeBtn {nullptr};
 };
 
 #endif

@@ -94,6 +94,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "suneergroupedit.h"
 #include "serializer.h"
 #include "tableborder.h"
 #include "textnote.h"
@@ -1901,6 +1902,40 @@ void ScribusDoc::undoRedoDone()
 	changedPagePreview();
 }
 
+// Suneer: undo of "to front" / "to back". Stock undo answers one with the
+// other, which only restores the stacking order when the item started at the
+// opposite end; an item taken from the middle came back at the wrong level.
+// The two commands now record where each top-level item was (SUNEER_OLD_LEVEL_n)
+// and undo puts it back there. Items inside a group, and states recorded
+// without the positions, fall back to the stock behaviour.
+static bool suneerUndoLevelMove(ScribusDoc* doc, SimpleState* ss)
+{
+	const auto *is = dynamic_cast<ScItemState<QList<QPointer<PageItem> > > *>(ss);
+	if (!is || !ss->contains("SUNEER_OLD_LEVEL_0"))
+		return false;
+	const QList<QPointer<PageItem> > listItem = is->getItem();
+	QMap<int, PageItem*> byLevel;   // ascending, so earlier inserts do not shift later ones
+	for (int i = 0; i < listItem.count(); ++i)
+	{
+		PageItem* item = listItem.at(i);
+		const QString key = QString("SUNEER_OLD_LEVEL_%1").arg(i);
+		if (!item || item->isGroupChild() || !ss->contains(key) || !doc->Items->contains(item))
+			return false;
+		byLevel.insert(ss->getInt(key), item);
+	}
+	for (PageItem* item : std::as_const(byLevel))
+		doc->Items->removeOne(item);
+	for (auto it = byLevel.constBegin(); it != byLevel.constEnd(); ++it)
+		doc->Items->insert(qBound(0, it.key(), int(doc->Items->count())), it.value());
+	doc->m_Selection->clear();
+	for (PageItem* item : std::as_const(byLevel))
+		doc->m_Selection->addItem(item);
+	doc->invalidateAll();
+	doc->regionsChanged()->update(QRectF());
+	doc->changed();
+	return true;
+}
+
 void ScribusDoc::restore(UndoState* state, bool isUndo)
 {
 	auto *ss = dynamic_cast<SimpleState*>(state);
@@ -2018,9 +2053,15 @@ void ScribusDoc::restore(UndoState* state, bool isUndo)
 	else if (ss->contains("LEVEL_UP"))
 		restoreLevelUpOrDown(ss, !isUndo);
 	else if (ss->contains("LEVEL_BOTTOM"))
-		restoreLevelTopOrBottom(ss, isUndo);
+	{
+		if (!(isUndo && suneerUndoLevelMove(this, ss)))
+			restoreLevelTopOrBottom(ss, isUndo);
+	}
 	else if (ss->contains("LEVEL_TOP"))
-		restoreLevelTopOrBottom(ss, !isUndo);
+	{
+		if (!(isUndo && suneerUndoLevelMove(this, ss)))
+			restoreLevelTopOrBottom(ss, !isUndo);
+	}
 	else if (ss->contains("PAGE_CHANGEPROPS"))
 		restoreChangePageProperties(ss, isUndo);
 	else if (ss->contains("DELETE_FRAMETEXT"))
@@ -7713,6 +7754,9 @@ void ScribusDoc::sendItemSelectionToBack()
 		auto *is = new ScItemState<QList<QPointer<PageItem> > >(Um::LevelBottom);
 		is->set("LEVEL_BOTTOM");
 		is->setItem(m_Selection->selectionList());
+		for (int i = 0; i < docSelectionCount; ++i)
+			if (!m_Selection->itemAt(i)->isGroupChild())
+				is->set(QString("SUNEER_OLD_LEVEL_%1").arg(i), int(Items->indexOf(m_Selection->itemAt(i))));
 		m_undoManager->action(this, is);
 	}
 	if (docSelectionCount > 1)
@@ -7781,6 +7825,9 @@ void ScribusDoc::bringItemSelectionToFront()
 		auto *is = new ScItemState<QList<QPointer<PageItem> > >(Um::LevelTop);
 		is->set("LEVEL_TOP");
 		is->setItem(m_Selection->selectionList());
+		for (int i = 0; i < docSelectionCount; ++i)
+			if (!m_Selection->itemAt(i)->isGroupChild())
+				is->set(QString("SUNEER_OLD_LEVEL_%1").arg(i), int(Items->indexOf(m_Selection->itemAt(i))));
 		m_undoManager->action(this, is);
 	}
 	if (docSelectionCount > 1)
@@ -16942,6 +16989,28 @@ void ScribusDoc::itemSelection_convertItemsToSymbol(QString& patternName)
 //CB TODO Use the selection loop properly
 void ScribusDoc::itemSelection_AdjustFrametoImageSize( Selection *customSelection)
 {
+	// Suneer: one group selected -> its image frames, nested groups included, as one undo step.
+	if (customSelection == nullptr)
+	{
+		if (PageItem* group = SuneerGroupEdit::soleGroup(this))
+		{
+			Selection children(this, false);
+			children.addItems(SuneerGroupEdit::imageChildren(group));
+			if (children.isEmpty())
+				return;
+			UndoTransaction groupTransaction;
+			if (UndoManager::undoEnabled())
+				groupTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::AdjustFrameToImage, "", Um::IResize);
+			SuneerGroupEdit::markRefit(group, false);
+			itemSelection_AdjustFrametoImageSize(&children);
+			SuneerGroupEdit::markRefit(group, true);
+			if (groupTransaction)
+				groupTransaction.commit();
+			regionsChanged()->update(QRectF());
+			changed();
+			return;
+		}
+	}
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
 	assert(itemSelection != nullptr);
 	int selectedItemCount = itemSelection->count();
@@ -17015,6 +17084,26 @@ void ScribusDoc::itemSelection_AdjustFrametoImageSize( Selection *customSelectio
 }
 void ScribusDoc::itemSelection_AdjustImagetoFrameSize( Selection *customSelection)
 {
+	// Suneer: one group selected -> its image frames, nested groups included, as one undo step.
+	if (customSelection == nullptr)
+	{
+		if (PageItem* group = SuneerGroupEdit::soleGroup(this))
+		{
+			Selection children(this, false);
+			children.addItems(SuneerGroupEdit::imageChildren(group));
+			if (children.isEmpty())
+				return;
+			UndoTransaction groupTransaction;
+			if (UndoManager::undoEnabled())
+				groupTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::ImageScaling, "", Um::IImageScaling);
+			itemSelection_AdjustImagetoFrameSize(&children);
+			if (groupTransaction)
+				groupTransaction.commit();
+			regionsChanged()->update(QRectF());
+			changed();
+			return;
+		}
+	}
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
 	assert(itemSelection != nullptr);
 	int selectedItemCount = itemSelection->count();
@@ -17038,6 +17127,28 @@ void ScribusDoc::itemSelection_AdjustImagetoFrameSize( Selection *customSelectio
 
 void ScribusDoc::itemSelection_AdjustFrameHeightToText( Selection *customSelection)
 {
+	// Suneer: one group selected -> its text frames, nested groups included, as one undo step.
+	if (customSelection == nullptr)
+	{
+		if (PageItem* group = SuneerGroupEdit::soleGroup(this))
+		{
+			Selection children(this, false);
+			children.addItems(SuneerGroupEdit::textChildren(group));
+			if (children.isEmpty())
+				return;
+			UndoTransaction groupTransaction;
+			if (UndoManager::undoEnabled())
+				groupTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::Resize, "", Um::IResize);
+			SuneerGroupEdit::markRefit(group, false);
+			itemSelection_AdjustFrameHeightToText(&children);
+			SuneerGroupEdit::markRefit(group, true);
+			if (groupTransaction)
+				groupTransaction.commit();
+			regionsChanged()->update(QRectF());
+			changed();
+			return;
+		}
+	}
 	Selection* itemSelection = (customSelection != nullptr) ? customSelection : m_Selection;
 	assert(itemSelection != nullptr);
 	int selectedItemCount = itemSelection->count();

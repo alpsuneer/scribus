@@ -834,16 +834,30 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - **Mixed group** (image + caption text, as Design Style makes): a small **Edit:** dropdown at the
   start of the bar lists the kinds present with their counts (Images / Text / Lines / Shapes). It
   starts on the first kind found; the last kind picked is remembered until Scribus is closed.
-- A change made from the bar goes to **every** child of that kind, as **one** undo step
-  ("Change Group Contents"). The group stays selected, grouped and in place. Text changes apply to all
-  the text in those frames, as when a frame is selected.
-- A number or list that differs between the children (two fonts, two sizes, two line widths) is shown
-  **blank**; typing a value sets it on all of them. Colour swatches and the on/off buttons (alignment,
-  underline ...) still show the first child's value.
-- Tools that only make sense for one frame are greyed out for a group: crop, remove background,
-  contour drawing/editing, edge feather, and frame width/height.
+- **Controls that act on the group itself:** text flow (none / shape / box / contour) and the wrap
+  **Gap** buttons - news text flows around the whole group - plus flip, rotate 90, the W / H fields
+  (group size), to front / up / down / to back, and Align and Distribute. "Image clip" flow is greyed
+  out (a group has no clip path). The group's wrap gap is now saved in the .sla file.
+- **Controls that act on every matching frame inside the group:** image rotation, fit frame / fit
+  image, Auto-Fit, fill and line colour / opacity / width, corner radius; font, size, style, effects,
+  alignment, colours, line spacing, tracking, scaling, indents, paragraph spacing, columns, frame
+  line and fill, and the text "Gap" buttons when **Internal** is ticked (text inset). With Internal
+  unticked those Gap buttons set the group's wrap distance.
+- **One frame at a time:** Crop, Resize image (RS), DPI, Remove background, Draw / Edit / Auto contour
+  and Edge feather work when the group holds exactly one image (or one text frame) - the image +
+  caption case - and are greyed out when it holds several. Crop and the contour tools select that
+  frame inside the group first, like Ctrl+click.
+- Every change is **one** undo step ("Change Group Contents"); the group stays selected and grouped.
+  After a change the bar shows the new values; a number or list that still differs between the
+  children is shown **blank**. Colour swatches and on/off buttons show the first child's value.
+- **Shortcuts and right-click on a group:** Adjust Frame to Image (Ctrl+Alt+I), Adjust Image to Frame
+  (Ctrl+Alt+F), Adjust Frame Height to Text, Fit Caption Frame and Embed Image now act on the frames
+  inside the group, and the group's outline follows frames that changed size. Embed Image on a group
+  embeds every linked image in it (taking images back out stays a one-frame command).
+- Also fixed on the way: the "all sides" Gap +/- buttons took two Ctrl+Z per click (now one, still
+  1 mm per click); undo of To Front / To Back put an item taken from the middle at the wrong level;
+  Bold / Italic on a font named "... Regular" now finds "... Bold".
 - Entering the group and selecting one child shows that child's normal toolbar.
-- The Align and Distribute button stays at the right end.
 
 ### 39. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)

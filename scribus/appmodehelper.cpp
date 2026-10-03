@@ -33,6 +33,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "selection.h"
+#include "suneergroupedit.h"
 #include "textframespellchecker.h"
 #include "ui/charselect.h"
 #include "ui/hruler.h"
@@ -1047,6 +1048,23 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 		scmw->layerMenu->setEnabled(!inAnEditMode);
 	}
 
+
+	// Suneer: with ONE group selected these commands act on the image / text
+	// frames inside it (see suneergroupedit.h), so they stay available.
+	if (const PageItem* group = SuneerGroupEdit::soleGroup(doc))
+	{
+		const QList<PageItem*> groupImages = SuneerGroupEdit::imageChildren(group);
+		const QList<PageItem*> groupTexts = SuneerGroupEdit::textChildren(group);
+		bool allInline = !groupImages.isEmpty();
+		for (const PageItem* image : groupImages)
+			allInline = allInline && image->isImageInline();
+		(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(!groupImages.isEmpty());
+		(*a_scrActions)["itemAdjustImageToFrame"]->setEnabled(!groupImages.isEmpty());
+		(*a_scrActions)["itemToggleInlineImage"]->setEnabled(!groupImages.isEmpty());
+		(*a_scrActions)["itemToggleInlineImage"]->setChecked(allInline);
+		(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(!groupTexts.isEmpty());
+		(*a_scrActions)["itemFitCaptionFrame"]->setEnabled(!groupTexts.isEmpty());
+	}
 }
 
 void AppModeHelper::setModeActionsPerMode(int newMode)

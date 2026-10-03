@@ -32,6 +32,7 @@
 #include "pageitem_table.h"
 #include "pageitem_textframe.h"
 #include "selection.h"
+#include "suneergroupedit.h"
 #include "styles/paragraphstyle.h"
 #include "styles/charstyle.h"
 #include "ui/smcheckbox.h"
@@ -104,6 +105,9 @@ struct SuneerGroupUndo
 			bar->m_groupItem->update();
 		if (bar->m_doc)
 			bar->m_doc->regionsChanged()->update(QRectF());
+		// The bar shows the new values (or blank, where the children still
+		// differ). Queued: the slot that owns this object is still running.
+		QTimer::singleShot(0, bar, &SuneerControlBar::refreshAfterGroupChange);
 	}
 };
 
@@ -409,10 +413,10 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imageWidgets << m_imgCropApplyBtn;
 	// Resize Image button — resample the source file to what the frame needs
 	// in print (Fit @ 240dpi one-click path); writes name_resized.* + relinks.
-	QToolButton* imgResizeBtn = makeButton("RS", "Resize Image (reduce file resolution to frame)");
-	connect(imgResizeBtn, &QToolButton::clicked, this, [this]{ ResizeImageDialog::openForSelection(m_doc, this); });
-	row1->addWidget(imgResizeBtn);
-	m_imageWidgets << imgResizeBtn;
+	m_imgResizeBtn = makeButton("RS", "Resize Image (reduce file resolution to frame)");
+	connect(m_imgResizeBtn, &QToolButton::clicked, this, [this]{ ResizeImageDialog::openForSelection(m_doc, this); });
+	row1->addWidget(m_imgResizeBtn);
+	m_imageWidgets << m_imgResizeBtn;
 	// Background Remove button (rembg)
 	m_imgRemoveBgBtn = makeButton("BG", "Remove Background (AI)");
 	m_imgRemoveBgBtn->setFixedSize(26, 22);
@@ -1350,8 +1354,11 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_lineSpModeCombo,  QOverload<int>::of(&QComboBox::currentIndexChanged),   this, &SuneerControlBar::onLineSpModeChanged);
 
 	connect(m_padResetBtn,      &QToolButton::clicked, this, &SuneerControlBar::onPadReset);
-	connect(m_padAllPlusBtn,    &QToolButton::clicked, this, [this]{ onPadAllChanged(+0.5); });
-	connect(m_padAllMinusBtn,   &QToolButton::clicked, this, [this]{ onPadAllChanged(-0.5); });
+	// 1 mm per click. These three were connected twice, so one click ran the
+	// 0.5 mm slot twice: the same 1 mm, but as TWO undo steps. Connected once
+	// now, with the step the buttons have always had.
+	connect(m_padAllPlusBtn,    &QToolButton::clicked, this, [this]{ onPadAllChanged(+1.0); });
+	connect(m_padAllMinusBtn,   &QToolButton::clicked, this, [this]{ onPadAllChanged(-1.0); });
 	connect(m_padTopPlusBtn,    &QToolButton::clicked, this, [this]{ onPadSideChanged(0, +0.5); });
 	connect(m_padTopMinusBtn,   &QToolButton::clicked, this, [this]{ onPadSideChanged(0, -0.5); });
 	connect(m_padBottomPlusBtn, &QToolButton::clicked, this, [this]{ onPadSideChanged(1, +0.5); });
@@ -1415,6 +1422,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		for (int i = 0; i < sel()->count(); ++i)
 		{
 			PageItem* item = sel()->itemAt(i);
+			if (item && m_groupActive && item->isLine())
+				continue;   // a rounded corner would turn the line into a shape
 			if (item)
 			{
 				// This spin means "every corner this much". Individual radii
@@ -1428,6 +1437,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		{
 			for (PageItem* item : sel()->items())
 			{
+				if (item->isLine())
+					continue;
 				if (item->cornerRadius() == 0.0)
 					item->SetRectFrame();
 				else
@@ -1444,6 +1455,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			sel()->itemAt(0)->update();
 	});
 	connect(m_autoFitChk, &QCheckBox::toggled, this, [this](bool checked){
+		SuneerGroupUndo groupUndo(this);
 		ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 		if (!doc) return;
 		for (int i = 0; i < sel()->count(); ++i)
@@ -1557,9 +1569,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		this, &SuneerControlBar::onLineNamedStyleChanged);
 	connect(m_lineStyleEditBtn,   &QToolButton::clicked,    this, &SuneerControlBar::onLineStyleEditClicked);
 	connect(m_lineStyleNewBtn,    &QToolButton::clicked,    this, &SuneerControlBar::onLineStyleNewClicked);
-	connect(m_padResetBtn,      &QToolButton::clicked, this, &SuneerControlBar::onPadReset);
-	connect(m_padAllPlusBtn,    &QToolButton::clicked, this, [this]{ onPadAllChanged(+0.5); });
-	connect(m_padAllMinusBtn,   &QToolButton::clicked, this, [this]{ onPadAllChanged(-0.5); });
 	connect(m_columnsSpin,      QOverload<int>::of(&QSpinBox::valueChanged),           this, &SuneerControlBar::onColumnsChanged);
 	connect(m_columnGapSpin,    QOverload<double>::of(&QDoubleSpinBox::valueChanged),  this, &SuneerControlBar::onColumnGapChanged);
 	connect(m_columnGapCombo,   QOverload<int>::of(&QComboBox::currentIndexChanged),   this, &SuneerControlBar::onColumnGapModeChanged);
@@ -2232,14 +2241,27 @@ void SuneerControlBar::updateFromSelection()
 	}
 
 	if (m_groupActive)
+	{
 		showGroupMixedValues();
-	// These work on exactly one frame (a dialog, a canvas mode, a new image
-	// file, or a size that would rearrange the group), so not for a group.
+		// Flow mode, wrap distance and size belong to the group itself.
+		updateTextWrapControls(m_groupItem);
+		for (QDoubleSpinBox* sb : { m_imgWidthSpin, m_imgHeightSpin })
+		{
+			if (!sb) continue;
+			QSignalBlocker blocker(sb);
+			sb->setValue((sb == m_imgWidthSpin ? m_groupItem->width() : m_groupItem->height()) * PT2MM);
+		}
+	}
+	// These open a dialog or a canvas mode on exactly ONE frame. For a group
+	// they work when it holds one frame of the kind (image + caption), on that
+	// frame; with several there is no single target.
+	const bool oneTarget = !m_groupActive || m_groupSel->count() == 1;
 	for (QWidget* w : QList<QWidget*>{ m_imgCropApplyBtn, m_imgCropEnableChk, m_imgCropW, m_imgCropH,
 	                                   m_imgRemoveBgBtn, m_imgDrawContourBtn, m_imgContourEditBtn,
-	                                   m_autoContourBtn, m_imgWidthSpin, m_imgHeightSpin,
-	                                   m_featherBtn, m_textFeatherBtn })
-		if (w) w->setEnabled(!m_groupActive);
+	                                   m_autoContourBtn, m_imgResizeBtn, m_featherBtn, m_textFeatherBtn })
+		if (w) w->setEnabled(oneTarget);
+	for (QWidget* w : QList<QWidget*>{ m_imgWidthSpin, m_imgHeightSpin })
+		if (w) w->setEnabled(true);
 
 	blockAllSignals(false);
 	m_updating = false;
@@ -2316,6 +2338,50 @@ PageItem* SuneerControlBar::resolveGroupTarget(PageItem* item)
 Selection* SuneerControlBar::sel() const
 {
 	return (m_groupActive || !m_doc) ? m_groupSel : m_doc->m_Selection;
+}
+
+Selection* SuneerControlBar::wrapSel() const
+{
+	// Text flow, wrap distance, flip and rotation are properties of what is
+	// selected in the document: in group mode that is the group itself. Text
+	// layout only looks at top-level items, so a flow mode set on a child
+	// inside a group changes nothing on the page.
+	return m_doc ? m_doc->m_Selection : m_groupSel;
+}
+
+void SuneerControlBar::enterSoleGroupChild()
+{
+	if (!m_groupActive || !m_doc || m_groupSel->count() != 1)
+		return;
+	// A canvas mode works on the document selection, so select the frame
+	// inside the group, the same as Ctrl+click on it.
+	PageItem* child = m_groupSel->itemAt(0);
+	m_doc->m_Selection->delaySignalsOn();
+	m_doc->m_Selection->clear();
+	m_doc->m_Selection->addItem(child);
+	m_doc->m_Selection->delaySignalsOff();
+	updateFromSelection();
+}
+
+void SuneerControlBar::refreshAfterGroupChange()
+{
+	if (!m_groupActive || !m_doc)
+		return;
+	// A field that is being typed in keeps its text and caret: re-setting the
+	// value reformats the text ("2" -> "2.00 pt") under the user's fingers.
+	QAbstractSpinBox* typing = qobject_cast<QAbstractSpinBox*>(QApplication::focusWidget());
+	if (!typing && QApplication::focusWidget())
+		typing = qobject_cast<QAbstractSpinBox*>(QApplication::focusWidget()->parentWidget());
+	QLineEdit* edit = (typing && isAncestorOf(typing)) ? typing->findChild<QLineEdit*>() : nullptr;
+	const QString text = edit ? edit->text() : QString();
+	const int caret = edit ? edit->cursorPosition() : 0;
+	updateFromSelection();
+	if (edit && edit->text() != text)
+	{
+		QSignalBlocker blocker(typing);
+		edit->setText(text);
+		edit->setCursorPosition(caret);
+	}
 }
 
 QList<PageItem*> SuneerControlBar::targetItems() const
@@ -2424,10 +2490,6 @@ void SuneerControlBar::showGroupMixedValues()
 		setSpinMixed(m_imgLineWidthSpin);
 		setSpinMixed(m_lineWidthSpin);
 	}
-	if (differs([](const PageItem* it) { return it->width(); }))
-		setSpinMixed(m_imgWidthSpin);
-	if (differs([](const PageItem* it) { return it->height(); }))
-		setSpinMixed(m_imgHeightSpin);
 	if (first->isImageFrame())
 	{
 		if (differs([](const PageItem* it) { return it->imageRotation(); }))
@@ -2764,6 +2826,31 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 	// returns only on Enter or Esc, via returnFocusToCanvas().
 }
 
+// "Family Regular" + Bold is "Family Bold", not "Family Regular Bold": the
+// face name replaces Regular. Returns an empty name when the family has no
+// such face, so the caller leaves that text alone instead of naming a font
+// that does not exist.
+static QString suneerStyledFontName(QString base, const QString& style)
+{
+	for (const char* face : { " Bold Italic", " Bold", " Italic", " Regular" })
+		if (base.endsWith(QLatin1String(face)))
+		{
+			base.chop(int(qstrlen(face)));
+			break;
+		}
+	base = base.trimmed();
+	const auto& fonts = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts;
+	QStringList candidates;
+	if (style == "Regular")
+		candidates << base + " Regular" << base;
+	else
+		candidates << base + " " + style;
+	for (const QString& name : std::as_const(candidates))
+		if (fonts.contains(name))
+			return name;
+	return QString();
+}
+
 void SuneerControlBar::onStyleChanged(int)
 {
 	SuneerGroupUndo groupUndo(this);
@@ -2774,12 +2861,12 @@ void SuneerControlBar::onStyleChanged(int)
 		const QString style = m_styleCombo->currentText();
 		for (PageItem* frame : sel()->items())
 		{
-			QString base = frame->currentCharStyle().font().scName();
-			base = base.replace(" Bold Italic","").replace(" Bold","").replace(" Italic","").trimmed();
-			if (style != "Regular") base += " " + style;
+			const QString styled = suneerStyledFontName(frame->currentCharStyle().font().scName(), style);
+			if (styled.isEmpty())
+				continue;   // this family has no such face
 			Selection one(this, false);
 			one.addItem(frame);
-			m_doc->itemSelection_SetFont(base.trimmed(), &one);
+			m_doc->itemSelection_SetFont(styled, &one);
 		}
 		m_doc->changed();
 		return;
@@ -3246,7 +3333,7 @@ void SuneerControlBar::onTextFlowNone()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowDisabled);
+	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowDisabled);
 	m_doc->changed();
 }
 
@@ -3254,7 +3341,7 @@ void SuneerControlBar::onTextFlowShape()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesFrameShape);
+	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesFrameShape);
 	m_doc->changed();
 }
 
@@ -3262,7 +3349,7 @@ void SuneerControlBar::onTextFlowBBox()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
+	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
 	m_doc->changed();
 }
 
@@ -3270,7 +3357,7 @@ void SuneerControlBar::onTextFlowContour()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesContourLine);
 	m_doc->changed();
 }
 
@@ -3278,16 +3365,16 @@ void SuneerControlBar::onTextFlowClip()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesImageClipping);
+	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesImageClipping);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgRot90CCW()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
-	for (int i = 0; i < sel()->count(); i++) {
-		PageItem* item = sel()->itemAt(i);
+	if (!m_doc || wrapSel()->isEmpty()) return;
+	for (int i = 0; i < wrapSel()->count(); i++) {
+		PageItem* item = wrapSel()->itemAt(i);
 		m_doc->rotateItem(-90.0, item);
 	}
 	m_doc->changed();
@@ -3296,9 +3383,9 @@ void SuneerControlBar::onImgRot90CCW()
 void SuneerControlBar::onImgRot90CW()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
-	for (int i = 0; i < sel()->count(); i++) {
-		PageItem* item = sel()->itemAt(i);
+	if (!m_doc || wrapSel()->isEmpty()) return;
+	for (int i = 0; i < wrapSel()->count(); i++) {
+		PageItem* item = wrapSel()->itemAt(i);
 		m_doc->rotateItem(90.0, item);
 	}
 	m_doc->changed();
@@ -3335,40 +3422,18 @@ void SuneerControlBar::onImgToBack()
 void SuneerControlBar::onImgFlipH()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
-	if (m_groupActive)
-	{
-		// Each child flips in place; the stock multi-item flip would mirror
-		// their positions across the group as well.
-		for (PageItem* child : sel()->items())
-		{
-			Selection one(this, false);
-			one.addItem(child);
-			m_doc->itemSelection_FlipH(&one);
-		}
-	}
-	else
-		m_doc->itemSelection_FlipH();
+	if (!m_doc || wrapSel()->isEmpty()) return;
+	// The document selection: a selected group flips as one object.
+	m_doc->itemSelection_FlipH();
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgFlipV()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
-	if (m_groupActive)
-	{
-		// Each child flips in place; the stock multi-item flip would mirror
-		// their positions across the group as well.
-		for (PageItem* child : sel()->items())
-		{
-			Selection one(this, false);
-			one.addItem(child);
-			m_doc->itemSelection_FlipV(&one);
-		}
-	}
-	else
-		m_doc->itemSelection_FlipV();
+	if (!m_doc || wrapSel()->isEmpty()) return;
+	// The document selection: a selected group flips as one object.
+	m_doc->itemSelection_FlipV();
 	m_doc->changed();
 }
 
@@ -3376,7 +3441,7 @@ void SuneerControlBar::onImgFitFrame()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc || sel()->isEmpty()) return;
-	m_doc->itemSelection_AdjustFrametoImageSize(tsel());
+	m_doc->itemSelection_AdjustFrametoImageSize();
 	m_doc->changed();
 }
 
@@ -3393,6 +3458,7 @@ void SuneerControlBar::onImgFitImage()
 
 void SuneerControlBar::onImgDrawContour()
 {
+	enterSoleGroupChild();
 	if (!m_doc || sel()->isEmpty()) return;
 	PageItem* item = sel()->itemAt(0);
 	if (!item->isImageFrame()) return;
@@ -3404,6 +3470,8 @@ void SuneerControlBar::onImgDrawContour()
 
 void SuneerControlBar::onImgContourEditToggle(bool checked)
 {
+	if (checked)
+		enterSoleGroupChild();
 	if (!m_doc || sel()->isEmpty()) return;
 	ScribusMainWindow* mw = ScCore->primaryMainWindow();
 	if (!mw) return;
@@ -3574,9 +3642,9 @@ void SuneerControlBar::onImgRemoveBackground()
 void SuneerControlBar::onPadReset()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
-	for (int i = 0; i < sel()->count(); i++)
-		sel()->itemAt(i)->setWrapOffsets(0, 0, 0, 0);
+	if (!m_doc || wrapSel()->isEmpty()) return;
+	for (int i = 0; i < wrapSel()->count(); i++)
+		wrapSel()->itemAt(i)->setWrapOffsets(0, 0, 0, 0);
 	m_doc->changed();
 }
 
@@ -3587,14 +3655,15 @@ void SuneerControlBar::onTextPadReset()
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc || sel()->isEmpty()) return;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
+	Selection* padSel = internal ? sel() : wrapSel();
 	// One undo step per button press rather than one per selected frame.
 	UndoTransaction padTransaction;
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < sel()->count(); i++) {
-		PageItem* item = sel()->itemAt(i);
-		if (item->isTextFrame()) {
+	for (int i = 0; i < padSel->count(); i++) {
+		PageItem* item = padSel->itemAt(i);
+		if (item->isTextFrame() || (!internal && item->isGroup())) {
 			if (internal)
 				item->setTextToFrameDist(0, 0, 0, 0);  // internal text distance
 			else
@@ -3614,6 +3683,7 @@ void SuneerControlBar::onTextPadAllChanged(double delta)
 	if (!m_doc || sel()->isEmpty()) return;
 	const double step = delta * 2.8346;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
+	Selection* padSel = internal ? sel() : wrapSel();
 	// One undo step per button press rather than one per selected frame.
 	// setTextToFrameDist() records its own state; setWrapOffsets() records
 	// none, and an empty transaction is discarded by commit(), so wrapping
@@ -3622,9 +3692,9 @@ void SuneerControlBar::onTextPadAllChanged(double delta)
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < sel()->count(); i++) {
-		PageItem* item = sel()->itemAt(i);
-		if (!item->isTextFrame()) continue;
+	for (int i = 0; i < padSel->count(); i++) {
+		PageItem* item = padSel->itemAt(i);
+		if (!item->isTextFrame() && (internal || !item->isGroup())) continue;
 		if (internal)
 			item->setTextToFrameDist(   // internal text distance (left, right, top, bottom)
 				qMax(0.0, item->textToFrameDistLeft()   + step),
@@ -3652,14 +3722,15 @@ void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 	if (!m_doc || sel()->isEmpty()) return;
 	const double step = delta * 2.8346;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
+	Selection* padSel = internal ? sel() : wrapSel();
 	// One undo step per button press rather than one per selected frame.
 	UndoTransaction padTransaction;
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < sel()->count(); i++) {
-		PageItem* item = sel()->itemAt(i);
-		if (!item->isTextFrame()) continue;
+	for (int i = 0; i < padSel->count(); i++) {
+		PageItem* item = padSel->itemAt(i);
+		if (!item->isTextFrame() && (internal || !item->isGroup())) continue;
 		if (internal) {
 			double l = item->textToFrameDistLeft(),  r = item->textToFrameDistRight();
 			double t = item->textToFrameDistTop(),   b = item->textToFrameDistBottom();
@@ -3688,11 +3759,11 @@ void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 void SuneerControlBar::onPadAllChanged(double delta)
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
+	if (!m_doc || wrapSel()->isEmpty()) return;
 	double step = delta * MM2PT;
-	for (int i = 0; i < sel()->count(); i++)
+	for (int i = 0; i < wrapSel()->count(); i++)
 	{
-		PageItem* item = sel()->itemAt(i);
+		PageItem* item = wrapSel()->itemAt(i);
 		// Contour mode ആണോ check
 		if (item->textFlowMode() == PageItem::TextFlowUsesContourLine
 			&& !item->ContourLine.empty()
@@ -3750,11 +3821,11 @@ void SuneerControlBar::onPadAllChanged(double delta)
 void SuneerControlBar::onPadSideChanged(int side, double delta)
 {
 	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || sel()->isEmpty()) return;
+	if (!m_doc || wrapSel()->isEmpty()) return;
 	double step = delta * MM2PT;
-	for (int i = 0; i < sel()->count(); i++)
+	for (int i = 0; i < wrapSel()->count(); i++)
 	{
-		PageItem* item = sel()->itemAt(i);
+		PageItem* item = wrapSel()->itemAt(i);
 		if (item->textFlowMode() == PageItem::TextFlowUsesContourLine
 			&& !item->ContourLine.empty()
 			&& m_doc->nodeEdit.isContourLine())
@@ -3953,6 +4024,7 @@ void SuneerControlBar::onCollectToFolder()
 
 void SuneerControlBar::onImgCropApply()
 {
+    enterSoleGroupChild();
     if (!m_doc || sel()->isEmpty()) return;
     PageItem* item = sel()->itemAt(0);
     if (!item || !item->isImageFrame()) return;
@@ -4502,7 +4574,8 @@ void SuneerControlBar::onImgWidthChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	PageItem* item = sel()->itemAt(0);
+	PageItem* item = m_groupActive ? m_groupItem.data() : sel()->itemAt(0);
+	if (!item) return;
 	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigW <= 0)
 	{
@@ -4576,7 +4649,8 @@ void SuneerControlBar::onImgHeightChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	PageItem* item = sel()->itemAt(0);
+	PageItem* item = m_groupActive ? m_groupItem.data() : sel()->itemAt(0);
+	if (!item) return;
 	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigH <= 0)
 	{
@@ -4667,6 +4741,8 @@ void SuneerControlBar::applyCornerRadius()
 	{
 		PageItem* item = sel()->itemAt(i);
 		if (!item) continue;
+		if (m_groupActive && item->isLine())
+			continue;   // a rounded corner would turn the line into a shape
 
 		if (tl == tr && tr == bl && bl == br)
 		{
@@ -4946,7 +5022,7 @@ void SuneerControlBar::onTextEdgeFeather()
 	double ih = item->height();
 	int pg = item->OwnPage;
 
-	sel()->clear();
+	m_doc->m_Selection->clear();
 	int z = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified,
 	                       ix, iy, iw, ih, 0,
 	                       m_doc->itemToolPrefs().imageFillColor,
