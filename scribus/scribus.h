@@ -383,7 +383,8 @@ public slots:
 	void windowsMenuAboutToShow();
 	//! \brief Handle the Extras menu for its items availability.
 	void extrasMenuAboutToShow();
-	void duplicateContentCheck();
+	//! Extras > SR Tools > Duplicate News Checker: opens (or raises) the results panel.
+	void duplicateNewsCheck();
 	void newActWin(QMdiSubWindow *w);
 	void closeActiveWindowMasterPageEditor();
 	void updateActiveWindowCaption(const QString &newCaption);

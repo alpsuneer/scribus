@@ -1164,7 +1164,7 @@ void ActionManager::initExtrasMenuActions()
 	name = "extrasUpdateDocument";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 
-	name = "SRDuplicateContentCheck";
+	name = "SRDuplicateNewsCheck";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasAutoflowToNewPages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
@@ -1185,7 +1185,7 @@ void ActionManager::initExtrasMenuActions()
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
 	connect( (*scrActions)["extrasUpdateDocument"], SIGNAL(triggered()), mainWindow, SLOT(updateDocument()) );
-	connect( (*scrActions)["SRDuplicateContentCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateContentCheck()) );
+	connect( (*scrActions)["SRDuplicateNewsCheck"], SIGNAL(triggered()), mainWindow, SLOT(duplicateNewsCheck()) );
 	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
 	connect( (*scrActions)["extrasFixOverflowFrames"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFrames()) );
 	connect( (*scrActions)["extrasFixOverflowFramesDoc"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFramesDoc()) );
@@ -2048,7 +2048,9 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasDeHyphenateText"]->setTexts( tr("Dehyphenate Text"));
 	(*scrActions)["extrasGenerateTableOfContents"]->setTexts( tr("&Generate Table Of Contents and Indexes"));
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
-	(*scrActions)["SRDuplicateContentCheck"]->setTexts( tr("Duplicate Content Check"));
+	(*scrActions)["SRDuplicateNewsCheck"]->setTexts( tr("Duplicate News Checker..."));
+	(*scrActions)["SRDuplicateNewsCheck"]->setToolTip( tr("Duplicate News Checker: find the same headline or the same story printed more than once"));
+	(*scrActions)["SRDuplicateNewsCheck"]->setStatusTip( tr("Find the same headline or the same story printed more than once"));
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
 	(*scrActions)["extrasFixOverflowFrames"]->setTexts( tr("Fix Overflowing Frames"));
 	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
@@ -2759,7 +2761,8 @@ void ActionManager::createDefaultMenus()
 		<< "extrasFixOverflowFramesDoc"
 		<< "extrasImposition"
 		<< "extrasEmbedAllImages"
-		<< "extrasWarnLinkedImages";
+		<< "extrasWarnLinkedImages"
+		<< "SRDuplicateNewsCheck";
 	//Windows
 	++itmenu;
 	itmenu->second

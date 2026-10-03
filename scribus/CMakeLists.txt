@@ -159,6 +159,8 @@ if(HAVE_OSG)
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/suneerduplicatenewsdialog.cpp
+		suneerduplicatenews.cpp
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
@@ -251,6 +253,8 @@ else()
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/suneerduplicatenewsdialog.cpp
+		suneerduplicatenews.cpp
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp

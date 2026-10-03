@@ -38,6 +38,7 @@
 #include "selection.h"
 #include "ui/hruler.h"
 #include "ui/vruler.h"
+#include "ui/suneerduplicatenewsdialog.h"
 #include "util_math.h"
 #include "units.h"
 
@@ -977,6 +978,9 @@ void Canvas::paintEvent ( QPaintEvent * p )
 	t5 = t.elapsed();
 	t.start();
 #endif
+	// Suneer: Duplicate News Checker marks. Drawn on the widget over the page
+	// buffer, so they never reach print, PDF, export or page thumbnails.
+	SuneerDupHighlights::paint(&qp, this, m_doc);
 	// does mode specific rendering, currently selection in legacymode and nodes in nodeedit
 	m_view->m_canvasMode->drawControls(&qp);
 	m_view->m_canvasMode->drawSnapLine(&qp);

@@ -797,7 +797,55 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   "Too large to preview" with the size in pixels and megapixels. Smaller images preview as before.
   (The size is read from the file header for TIFF, PSD, JPEG, PNG and the other formats Qt reads.)
 
-### 37. Authors
+### 37. Duplicate News Checker (Extras > SR Tools)
+- Replaces the old "Duplicate Content Check". Finds news printed more than once: the same
+  **headline**, or the same **story text** (exact or nearly the same).
+- A chain of linked frames is one story. The headline is the leading paragraphs in a headline style
+  (size styles such as "16 M" / "72 B", kicker styles), else the leading paragraphs set clearly larger
+  than the body, else the first paragraph. Bylines and datelines are never part of the headline.
+- Before comparing, Malayalam is normalised: ZWJ/ZWNJ dropped, old chillus (ന്‍) and new chillus (ൻ)
+  treated as the same, spaces, line breaks, hyphenation and punctuation ignored.
+- **Similarity threshold** (default 85 %). A story's score is the share of its characters inside
+  passages both stories have, so a story with a few words changed still scores in the 90s. A short
+  story that is fully inside a longer one is reported as "(short story inside a longer one)".
+- **Check:** current page / whole document / all open documents / all .sla files in a folder (for
+  today's pages). Files in the folder are read straight from disk, without opening them; a file that
+  is already open is checked as it is on screen, unsaved changes included.
+- Captions, pull quotes and highlight boxes are left out by default (they repeat a sentence of their
+  story), and so are frames on the pasteboard; a checkbox brings each back. One-word headlines and
+  bodyless furniture (date line, masthead, "NEWS PAPER") are not compared as headlines.
+- **Results:** each group is listed as "Headline duplicate" or "Content duplicate" with its %, and
+  each item with page (and file), frame name and first words. Clicking an item goes to the page and
+  selects the frame; an item in a folder file that is not open opens that file first.
+- **On the page:** every frame of a group gets the group's colour (group 1 orange, 2 purple, 3 teal,
+  4 blue, 5 green ...) as an outline, a light tint and a numbered badge, and the matching headline /
+  passages are tinted inside the frame. Screen only: never in print, PDF or export, and not shown in
+  Preview mode.
+- **Clear highlights** / **Show highlights**. Highlights disappear when the window is closed unless
+  **Keep highlights after closing** is ticked. Reopening the window shows the last results again.
+- Right-click a group > **Ignore this headline/text from now on** for page furniture that repeats on
+  every page (masthead, imprint). **Forget ignored** clears the list.
+- Runs in the background with a progress bar and **Cancel**. 16 real pages read from a folder: 0.8 s.
+
+### 38. Control bar for a selected group
+- Selecting a **group** used to leave the top control bar empty. It now shows the toolbar of what is
+  inside the group (nested groups included): only images -> image toolbar, only text frames -> text
+  toolbar, only lines -> line toolbar, only shapes -> shape toolbar.
+- **Mixed group** (image + caption text, as Design Style makes): a small **Edit:** dropdown at the
+  start of the bar lists the kinds present with their counts (Images / Text / Lines / Shapes). It
+  starts on the first kind found; the last kind picked is remembered until Scribus is closed.
+- A change made from the bar goes to **every** child of that kind, as **one** undo step
+  ("Change Group Contents"). The group stays selected, grouped and in place. Text changes apply to all
+  the text in those frames, as when a frame is selected.
+- A number or list that differs between the children (two fonts, two sizes, two line widths) is shown
+  **blank**; typing a value sets it on all of them. Colour swatches and the on/off buttons (alignment,
+  underline ...) still show the first child's value.
+- Tools that only make sense for one frame are greyed out for a group: crop, remove background,
+  contour drawing/editing, edge feather, and frame width/height.
+- Entering the group and selecting one child shows that child's normal toolbar.
+- The Align and Distribute button stays at the right end.
+
+### 39. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

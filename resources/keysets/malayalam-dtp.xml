@@ -32,7 +32,7 @@
     <function name="PathStroker" shortcut=""/>
     <function name="Picture Browser" shortcut=""/>
     <function name="PrintPreview" shortcut=""/>
-    <function name="SRDuplicateContentCheck" shortcut=""/>
+    <function name="SRDuplicateNewsCheck" shortcut=""/>
     <function name="SaveAsDocumentTemplate" shortcut="Ctrl+Alt+S"/>
     <function name="ShortWords" shortcut=""/>
     <function name="SmoothPath" shortcut=""/>

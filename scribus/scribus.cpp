@@ -31,6 +31,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/scshortcutregistry.h"
 #include "ui/suneercontrolbar.h"
 #include "ui/suneer_news_panel.h"
+#include "ui/suneerduplicatenewsdialog.h"
 #include <QAction>
 #include <QtGui/QShortcut>
 #include <QApplication>
@@ -1738,7 +1739,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasImposition", "Extras");
 	scrMenuMgr->createMenu("SRTools", tr("SR Tools"), "Extras");
 	scrMenuMgr->addMenuItemString("SRTools", "Extras");
-	scrMenuMgr->addMenuItemString("SRDuplicateContentCheck", "SRTools");
+	scrMenuMgr->addMenuItemString("SRDuplicateNewsCheck", "SRTools");
 //	Disabled for release as it does nothing useful
 //	scrMenuMgr->addMenuItemString("extrasTestQTQuick2_1", "Extras");
 
@@ -2857,133 +2858,16 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 }
 
 
-void ScribusMainWindow::duplicateContentCheck()
+void ScribusMainWindow::duplicateNewsCheck()
 {
-	QDialog dlg(this);
-	dlg.setWindowTitle(tr("Duplicate Content Check"));
-	dlg.resize(700, 450);
-
-	QVBoxLayout* layout = new QVBoxLayout(&dlg);
-
-	QRadioButton* fullStory = new QRadioButton(tr("Full Story Check"));
-	QRadioButton* headlineOnly = new QRadioButton(tr("Headline Only"));
-	fullStory->setChecked(true);
-
-	layout->addWidget(fullStory);
-	layout->addWidget(headlineOnly);
-
-	QHBoxLayout* thresholdLayout = new QHBoxLayout();
-	thresholdLayout->addWidget(new QLabel(tr("Similarity Threshold (%)")));
-
-	QSpinBox* threshold = new QSpinBox();
-	threshold->setRange(1, 100);
-	threshold->setValue(80);
-
-	thresholdLayout->addWidget(threshold);
-	layout->addLayout(thresholdLayout);
-
-	QPushButton* checkBtn =
-		new QPushButton(tr("Check Current Document"));
-
-	layout->addWidget(checkBtn);
-
-	QListWidget* results = new QListWidget();
-	results->addItem("No scan performed yet.");
-	layout->addWidget(results);
-
-	QPushButton* closeBtn = new QPushButton(tr("Close"));
-	layout->addWidget(closeBtn);
-
-	QObject::connect(closeBtn, &QPushButton::clicked,
-	                 &dlg, &QDialog::accept);
-
-	QObject::connect(checkBtn, &QPushButton::clicked,
-	                 [this, results]()
-	{
-		results->clear();
-
-		if (!doc)
-		{
-			results->addItem("No document loaded.");
-			return;
-		}
-
-		int textFrames = 0;
-
-		QVector<QString> texts;
-		QVector<int> frameIds;
-
-		for (int i = 0; i < doc->Items->count(); ++i)
-		{
-			PageItem* item = doc->Items->at(i);
-
-			if (item && item->itemType() == PageItem::TextFrame)
-				++textFrames;
-		}
-
-		results->addItem(QString("Pages : %1").arg(doc->Pages->count()));
-		results->addItem(QString("Text Frames : %1").arg(textFrames));
-
-		for (int i = 0; i < doc->Items->count(); ++i)
-		{
-			PageItem* item = doc->Items->at(i);
-
-			if (!item)
-				continue;
-
-			if (item->itemType() != PageItem::TextFrame)
-				continue;
-
-			QString txt = item->itemText.text(0, item->itemText.length());
-
-			txt = txt.simplified();
-
-			texts.append(txt);
-			frameIds.append(i + 1);
-
-			if (txt.length() > 80)
-				txt = txt.left(80) + "...";
-
-			results->addItem(
-				QString("Frame %1 (%2 chars) : %3")
-				.arg(i + 1)
-				.arg(txt.length())
-				.arg(txt)
-			);
-
-			if (txt.contains("തിരുവനന്തപുരം"))
-			{
-				results->addItem(
-					QString("*** Duplicate Candidate : Frame %1 ***")
-					.arg(i + 1)
-				);
-			}
-
-		}
-		results->addItem("");
-		results->addItem("=== Duplicate Scan Results ===");
-
-		for (int a = 0; a < texts.count(); ++a)
-		{
-			for (int b = a + 1; b < texts.count(); ++b)
-			{
-				if (texts[a].isEmpty() || texts[b].isEmpty())
-					continue;
-
-				if (texts[a] == texts[b])
-				{
-					results->addItem(
-						QString("DUPLICATE : Frame %1 <-> Frame %2 (100%)")
-							.arg(frameIds[a])
-							.arg(frameIds[b])
-					);
-				}
-			}
-		}
-
-	});
-
-	dlg.exec();
+	// One panel for the session: closing it hides it, so the last results are
+	// still there when it is opened again.
+	static QPointer<SuneerDuplicateNewsDialog> panel;
+	if (!panel)
+		panel = new SuneerDuplicateNewsDialog(this);
+	panel->show();
+	panel->raise();
+	panel->activateWindow();
 }
 
 void ScribusMainWindow::newActWin(QMdiSubWindow *w)

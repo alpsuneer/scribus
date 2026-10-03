@@ -1891,3 +1891,56 @@ Traps:
   filesystem that answers FUSE_INIT and nothing else; it is mounted on `/mnt/F` **only inside
   `unshare -m`**, never in the real namespace (it would freeze the desktop). Tested against that
   fake, not against a real dead NFS server.
+
+## Duplicate News Checker (2026-10-03, branch feature/duplicate-news-checker)
+
+Extras > SR Tools > Duplicate News Checker (action `SRDuplicateNewsCheck`, was `SRDuplicateContentCheck`;
+renamed in `resources/keysets/malayalam-dtp.xml` too). Engine `scribus/suneerduplicatenews.{h,cpp}`
+(Qt Core only, runs on a QtConcurrent worker); panel + canvas marks `scribus/ui/suneerduplicatenewsdialog.{h,cpp}`;
+one hook in `Canvas::paintEvent`.
+- **Live stories are snapshotted on the GUI thread** (StoryText is not thread-safe), folder files are
+  parsed with QXmlStreamReader on the worker. Only the chain head carries `<StoryText>` in the SLA;
+  followers are reached through `NextItem` (= ItemID hash).
+- **Headline styles: only the paragraph's own named style counts.** Listing styles inherit from the
+  size styles (`cinema -> cine theatre -> cine place -> 11 M`, `31 Mash News -> 10 M`), so matching the
+  parent chain makes listings "headlines".
+- **Shingle Dice undersells edits on short stories** (4 words changed in a 469-char body = 86 %). Dice
+  is only the prefilter (>= 0.6 x threshold); the score is character coverage by shared 7-shingles (94 %).
+- **Marks are screen-only by construction**: drawn on the widget after the page buffer, never inside
+  `PageItem::DrawObj`. Passage rects come from the frame's `textLayout` box tree (line -> glyph-cluster
+  boxes carry story char ranges), so Malayalam clusters are tinted whole.
+- **A folder file opened from the results is matched by normalised text**, not by frame name: unnamed
+  frames are named only when Scribus loads the file. Ranges are stored in normalised coordinates and
+  mapped through the live story's own maps.
+- **QSettings (`Faircode/ScribusDuplicateNews`) ignores `-pr`**: a test run writes the real user's file.
+- Test set: `~/scribus-crashlogs/dupnews-test/` (`make_testset.py` builds p1/p2 from the real 30 Sep
+  page; `sixteen/` = 16 real pages, `big/` = 112 files). Standalone engine harness: compile
+  `suneerduplicatenews.cpp` with a small `main.cpp` against Qt6Core.
+- Not exercised: printing to the HP (PDF export verified clean), the IM path (the checker only reads text).
+
+## Control bar for a selected group (2026-10-03, `87396be`)
+
+All in `scribus/ui/suneercontrolbar.{h,cpp}`. One group selected -> `resolveGroupTarget()` fills
+`m_groupSel` (a non-GUI `Selection`) with the children of the chosen kind (`getAllChildren()`, so
+nested groups too) and returns the first child for the bar to display. Slots act on `sel()` /
+`tsel()` / `targetItems()` instead of `m_doc->m_Selection`; the document selection is never touched.
+- **One undo step** comes from `SuneerGroupUndo`, an RAII object opened first thing in every slot: in
+  group mode it wraps the slot in one `UndoTransaction` ("Change Group Contents"); outside group mode
+  it does nothing. A slot added later without it gives one undo step per child.
+- **The "Edit:" chooser must live inside row 1, not be a toolbar action of its own.** The rows are ONE
+  toolbar widget; an extra action in front makes QToolBar push that whole widget into ">>", so the
+  mixed-group bar showed "Edit:" and nothing else (measured at 1536 px for images and at 1920 px for
+  text).
+- **Flip is applied per child** (a one-item Selection each): the stock multi-item flip also mirrors
+  the children's positions across the group.
+- Mixed values: `setSpinMixed()` uses `specialValueText(" ")` at the minimum; `updateFromSelection()`
+  clears it again on every pass. Colour buttons, AlignSelect and StyleSelect have no mixed state.
+- **Test harness** (`~/scribus-crashlogs/grouptest/`, `run.sh`): the startup script imports PyQt6
+  inside Scribus, finds the bar's real widgets and calls `setValue()` on them, triggers the Undo
+  QAction, and reads each saved SLA back. Two things it needs: the **installed** `scribus`
+  (`build/scribus/scribus` loads no plugins, so no scripter: "No File Loader Plugins Found"), and
+  `dismiss.sh` to Escape the Duplicate shortcuts / Crash Recovery / New Document dialogs on Xvfb :77
+  (they block the `-py` script). The 1.7.3 SLA uses `PageObject` / `AutoName` / `StoryText/Content`.
+- Not exercised: selecting one child inside a group (the scripter cannot select a child), a group made
+  by the real Design Style (an image + text group stood in for it), shapes-only groups, the colour
+  buttons in group mode, the IM path (nothing here touches typing).
