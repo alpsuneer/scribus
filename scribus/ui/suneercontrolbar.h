@@ -26,6 +26,8 @@ class PageItem;
 class ColorCombo;
 class SMPShadeWidget;
 class QPushButton;
+class Selection;
+struct SuneerGroupUndo;
 
 class SuneerControlBar : public QToolBar
 {
@@ -434,6 +436,34 @@ public:
 	void onAlignDistributeClicked();
 	//! Put the floating palette under the button instead of over the page.
 	void placeAlignPaletteByButton();
+
+	// ── Group editing ────────────────────────────────────────────
+	// One group selected: the bar shows the toolbar of what is INSIDE it, and
+	// every slot acts on m_groupSel (the children of the chosen kind, nested
+	// groups included) instead of the document selection. The document
+	// selection itself is never touched, so the group stays selected, grouped
+	// and in place.
+	enum GroupKind { GK_None = -1, GK_Image = 0, GK_Text, GK_Line, GK_Shape, GK_COUNT };
+	friend struct SuneerGroupUndo;
+	QWidget*   m_groupEditWidget {nullptr};   // "Edit:" + combo, first in row 1
+	QComboBox* m_groupEditCombo  {nullptr};
+	Selection* m_groupSel        {nullptr};   // non-GUI; empty unless m_groupActive
+	bool       m_groupActive     {false};
+	int        m_groupChoice     {GK_None};   // last kind picked, kept for the session
+	QPointer<PageItem> m_groupItem;
+	QList<QAbstractSpinBox*> m_mixedSpins;
+	static int groupKindOf(const PageItem* item);
+	//! Sets up group mode for \a item; returns the item the bar should display.
+	PageItem* resolveGroupTarget(PageItem* item);
+	//! Blanks the fields whose value differs between the group's children.
+	void showGroupMixedValues();
+	void setSpinMixed(QAbstractSpinBox* sb);
+	//! What the slots act on: the group's children in group mode, else the document selection.
+	Selection* sel() const;
+	//! Same, as a customSelection argument (nullptr = document selection).
+	Selection* tsel() const { return m_groupActive ? m_groupSel : nullptr; }
+	//! Group mode: every child of the chosen kind. Otherwise the first selected item only.
+	QList<PageItem*> targetItems() const;
 };
 
 #endif

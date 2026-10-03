@@ -78,6 +78,35 @@
 static const double MM2PT = 2.8346;
 static const double PT2MM = 1.0 / MM2PT;
 
+// Opened first thing in a slot. In group mode it wraps everything the slot
+// does to the children in ONE undo step (the document's own transactions nest
+// inside it; an empty one is discarded on commit) and repaints the group.
+// Outside group mode it does nothing at all.
+struct SuneerGroupUndo
+{
+	SuneerControlBar* bar;
+	UndoTransaction trans;
+	bool active {false};
+	explicit SuneerGroupUndo(SuneerControlBar* b) : bar(b)
+	{
+		active = bar->m_groupActive && !bar->m_updating && bar->m_doc;
+		if (active && UndoManager::undoEnabled())
+			trans = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup,
+			                                                  SuneerControlBar::tr("Change Group Contents"), QString(), Um::IGroup);
+	}
+	~SuneerGroupUndo()
+	{
+		if (!active)
+			return;
+		if (trans)
+			trans.commit();
+		if (bar->m_groupItem)
+			bar->m_groupItem->update();
+		if (bar->m_doc)
+			bar->m_doc->regionsChanged()->update(QRectF());
+	}
+};
+
 QDoubleSpinBox* SuneerControlBar::makeSpinBox(double min, double max, int dec, double step, const QString& suffix)
 {
 	QDoubleSpinBox* sb = new QDoubleSpinBox();
@@ -122,6 +151,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	setMovable(true);
 	setFloatable(true);
 
+	m_groupSel = new Selection(this, false);
 	QWidget* container = new QWidget(this);
 	QVBoxLayout* vlay = new QVBoxLayout(container);
 	vlay->setContentsMargins(2, 1, 2, 1);
@@ -134,6 +164,29 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	QHBoxLayout* row1 = new QHBoxLayout();
 	row1->setSpacing(3);
 	row1->setContentsMargins(0,0,0,0);
+	// "Edit:" chooser for a mixed group, first in row 1. It is in none of the
+	// show*Widgets() lists, so those passes never touch it. It has to live in
+	// the row and not be a toolbar action of its own: the rows are ONE toolbar
+	// widget, and an extra action in front pushes that whole widget into ">>".
+	{
+		QWidget* groupEdit = new QWidget(container);
+		QHBoxLayout* gl = new QHBoxLayout(groupEdit);
+		gl->setContentsMargins(0, 0, 4, 0);
+		gl->setSpacing(3);
+		gl->addWidget(new QLabel(tr("Edit:"), groupEdit));
+		m_groupEditCombo = new QComboBox(groupEdit);
+		m_groupEditCombo->setObjectName("controlBarGroupEdit");
+		m_groupEditCombo->setToolTip(tr("Which items of the group the control bar changes"));
+		gl->addWidget(m_groupEditCombo);
+		row1->addWidget(groupEdit);
+		m_groupEditWidget = groupEdit;
+		m_groupEditWidget->setVisible(false);
+		connect(m_groupEditCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int idx) {
+			m_groupChoice = m_groupEditCombo->itemData(idx).toInt();
+			updateFromSelection();
+		});
+	}
+
 	auto addR1 = [&](QWidget* w) { row1->addWidget(w); m_textWidgets << w; };
 
 	// Font Selection
@@ -1355,12 +1408,13 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		m_featherPopup->show();
 	});
 	connect(m_cornerRadiusSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val){
+		SuneerGroupUndo groupUndo(this);
 		ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 		if (!doc) return;
 		double unitRatio = doc->unitRatio();
-		for (int i = 0; i < doc->m_Selection->count(); ++i)
+		for (int i = 0; i < sel()->count(); ++i)
 		{
-			PageItem* item = doc->m_Selection->itemAt(i);
+			PageItem* item = sel()->itemAt(i);
 			if (item)
 			{
 				// This spin means "every corner this much". Individual radii
@@ -1370,19 +1424,31 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 				item->setCornerRadius(val / unitRatio);
 			}
 		}
-		doc->setFrameRounded();
+		if (m_groupActive)
+		{
+			for (PageItem* item : sel()->items())
+			{
+				if (item->cornerRadius() == 0.0)
+					item->SetRectFrame();
+				else
+					item->SetFrameRound();
+				item->update();
+			}
+		}
+		else
+			doc->setFrameRounded();
 		doc->changed();
 		doc->changedPagePreview();
 		doc->regionsChanged()->update(QRect());
-		if (doc->m_Selection->count() > 0)
-			doc->m_Selection->itemAt(0)->update();
+		if (sel()->count() > 0)
+			sel()->itemAt(0)->update();
 	});
 	connect(m_autoFitChk, &QCheckBox::toggled, this, [this](bool checked){
 		ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 		if (!doc) return;
-		for (int i = 0; i < doc->m_Selection->count(); ++i)
+		for (int i = 0; i < sel()->count(); ++i)
 		{
-			PageItem* item = doc->m_Selection->itemAt(i);
+			PageItem* item = sel()->itemAt(i);
 			if (item && item->isImageFrame())
 			{
 				// checked=true → AutoFit ON (scale=false)
@@ -1431,8 +1497,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_imgRemoveBgBtn,    &QToolButton::clicked, this, &SuneerControlBar::onImgRemoveBackground);
 	connect(m_textFeatherBtn, &QToolButton::clicked, this, &SuneerControlBar::onTextEdgeFeather);
 	connect(m_featherBtn, &QToolButton::clicked, this, [this](){
-		if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+		if (!m_doc || sel()->isEmpty()) return;
+		PageItem* item = sel()->itemAt(0);
 		if (item->isTextFrame())
 			onTextEdgeFeather();
 		else if (item->isImageFrame())
@@ -1699,6 +1765,10 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		if (m_captionTimer)
 			m_captionTimer->stop();
 		m_fontPreviewFrames.clear();
+		m_groupActive = false;
+		m_groupSel->clear();
+		if (m_groupEditWidget)
+			m_groupEditWidget->setVisible(false);
 		showTextWidgets(false);
 		showImageWidgets(false);
 		showTextWrapWidgets(false);
@@ -1834,8 +1904,12 @@ void SuneerControlBar::updateFromSelection()
 	// Before any early return: it follows the selection, not the item type.
 	updateAlignDistributeButton();
 	if (!m_doc) return;
+	for (QAbstractSpinBox* sb : m_mixedSpins)
+		sb->setSpecialValueText(QString());
+	m_mixedSpins.clear();
 	if (m_doc->m_Selection->isEmpty())
 	{
+		resolveGroupTarget(nullptr);
 		showTextWidgets(false);
 		showImageWidgets(false);
 		showTextWrapWidgets(false);
@@ -1845,7 +1919,8 @@ void SuneerControlBar::updateFromSelection()
 	m_updating = true;
 	blockAllSignals(true);
 
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	// One group selected: show (and act on) what is inside it.
+	PageItem* item = resolveGroupTarget(m_doc->m_Selection->itemAt(0));
 
 	// Table cell active → treat as text frame
 	PageItem* textItem = item;
@@ -2156,8 +2231,221 @@ void SuneerControlBar::updateFromSelection()
 			if (sb) sb->blockSignals(false);
 	}
 
+	if (m_groupActive)
+		showGroupMixedValues();
+	// These work on exactly one frame (a dialog, a canvas mode, a new image
+	// file, or a size that would rearrange the group), so not for a group.
+	for (QWidget* w : QList<QWidget*>{ m_imgCropApplyBtn, m_imgCropEnableChk, m_imgCropW, m_imgCropH,
+	                                   m_imgRemoveBgBtn, m_imgDrawContourBtn, m_imgContourEditBtn,
+	                                   m_autoContourBtn, m_imgWidthSpin, m_imgHeightSpin,
+	                                   m_featherBtn, m_textFeatherBtn })
+		if (w) w->setEnabled(!m_groupActive);
+
 	blockAllSignals(false);
 	m_updating = false;
+}
+
+// ── Group editing ───────────────────────────────────────────────────────────
+
+int SuneerControlBar::groupKindOf(const PageItem* item)
+{
+	// Same tests, same order, as the branches of updateFromSelection().
+	if (!item || item->isGroup())
+		return GK_None;
+	if (item->isTextFrame())
+		return GK_Text;
+	if (item->isImageFrame())
+		return GK_Image;
+	if (item->isLine() || item->isPolyLine() || item->isArc() || item->isSpiral())
+		return GK_Line;
+	if (item->isPolygon() || item->isRegularPolygon())
+		return GK_Shape;
+	return GK_None;
+}
+
+PageItem* SuneerControlBar::resolveGroupTarget(PageItem* item)
+{
+	m_groupActive = false;
+	m_groupItem = nullptr;
+	m_groupSel->clear();
+	const bool oneGroup = item && item->isGroup() && m_doc && m_doc->m_Selection->count() == 1;
+	if (!oneGroup)
+	{
+		m_groupEditWidget->setVisible(false);
+		return item;
+	}
+
+	QList<PageItem*> byKind[GK_COUNT];
+	QList<int> order;   // kinds in the order they are first met
+	const QList<PageItem*> children = item->getAllChildren();   // recursive
+	for (PageItem* child : children)
+	{
+		const int kind = groupKindOf(child);
+		if (kind == GK_None)
+			continue;
+		if (byKind[kind].isEmpty())
+			order.append(kind);
+		byKind[kind].append(child);
+	}
+	if (order.isEmpty())
+	{
+		m_groupEditWidget->setVisible(false);
+		return item;   // nothing the bar knows: stays empty, as before
+	}
+
+	const int kind = order.contains(m_groupChoice) ? m_groupChoice : order.first();
+	{
+		QSignalBlocker blocker(m_groupEditCombo);
+		m_groupEditCombo->clear();
+		for (int k : order)
+		{
+			const QString label = (k == GK_Image) ? tr("Images") : (k == GK_Text) ? tr("Text")
+			                    : (k == GK_Line) ? tr("Lines") : tr("Shapes");
+			m_groupEditCombo->addItem(QString("%1 (%2)").arg(label).arg(byKind[k].count()), k);
+		}
+		m_groupEditCombo->setCurrentIndex(order.indexOf(kind));
+	}
+	m_groupEditWidget->setVisible(order.count() > 1);
+
+	m_groupSel->addItems(byKind[kind]);
+	m_groupItem = item;
+	m_groupActive = true;
+	return byKind[kind].first();
+}
+
+Selection* SuneerControlBar::sel() const
+{
+	return (m_groupActive || !m_doc) ? m_groupSel : m_doc->m_Selection;
+}
+
+QList<PageItem*> SuneerControlBar::targetItems() const
+{
+	Selection* s = sel();
+	if (m_groupActive)
+		return s->items();
+	QList<PageItem*> one;
+	if (!s->isEmpty())
+		one.append(s->itemAt(0));
+	return one;
+}
+
+void SuneerControlBar::setSpinMixed(QAbstractSpinBox* sb)
+{
+	if (!sb)
+		return;
+	// Qt shows the special text while the value sits at the minimum, so the
+	// field reads blank and any value typed into it is a real change.
+	QSignalBlocker blocker(sb);
+	sb->setSpecialValueText(QStringLiteral(" "));
+	if (QDoubleSpinBox* d = qobject_cast<QDoubleSpinBox*>(sb))
+		d->setValue(d->minimum());
+	else if (QSpinBox* i = qobject_cast<QSpinBox*>(sb))
+		i->setValue(i->minimum());
+	m_mixedSpins.append(sb);
+}
+
+void SuneerControlBar::showGroupMixedValues()
+{
+	const QList<PageItem*> items = m_groupSel->items();
+	if (items.isEmpty())
+		return;
+	const PageItem* first = items.first();
+	auto differs = [&items](const std::function<QVariant(const PageItem*)>& get) {
+		const QVariant v = get(items.first());
+		for (const PageItem* it : items)
+			if (get(it) != v)
+				return true;
+		return false;
+	};
+
+	if (first->isTextFrame())
+	{
+		// Font and size are read from every character, so two fonts inside
+		// ONE caption count as mixed too.
+		QSet<QString> fonts;
+		QSet<int> sizes;
+		for (const PageItem* it : items)
+		{
+			const int len = it->itemText.length();
+			if (len == 0)
+			{
+				fonts.insert(it->itemText.defaultStyle().charStyle().font().scName());
+				sizes.insert(it->itemText.defaultStyle().charStyle().fontSize());
+			}
+			for (int i = 0; i < len && (fonts.count() < 2 || sizes.count() < 2); ++i)
+			{
+				const CharStyle& cs = it->itemText.charStyle(i);
+				fonts.insert(cs.font().scName());
+				sizes.insert(cs.fontSize());
+			}
+		}
+		if (fonts.count() > 1)
+		{
+			m_fontCombo->setCurrentIndex(-1);
+			m_fontCombo->clearEditText();
+			m_styleCombo->setCurrentIndex(-1);
+		}
+		if (sizes.count() > 1)
+			setSpinMixed(m_fontSizeSpin);
+		if (differs([](const PageItem* it) { return it->currentStyle().lineSpacing(); }))
+			setSpinMixed(m_lineSpSpin);
+		if (differs([](const PageItem* it) { return (int) it->currentStyle().lineSpacingMode(); }))
+			m_lineSpModeCombo->setCurrentIndex(-1);
+		if (differs([](const PageItem* it) { return it->currentStyle().firstIndent(); }))
+			setSpinMixed(m_firstLineIndentSpin);
+		if (differs([](const PageItem* it) { return it->currentStyle().gapBefore(); }))
+			setSpinMixed(m_gapBeforeSpin);
+		if (differs([](const PageItem* it) { return it->currentStyle().gapAfter(); }))
+			setSpinMixed(m_gapAfterSpin);
+		if (differs([](const PageItem* it) { return it->currentCharStyle().tracking(); }))
+			setSpinMixed(m_trackingSpin);
+		if (differs([](const PageItem* it) { return it->currentCharStyle().baselineOffset(); }))
+			setSpinMixed(m_baselineSpin);
+		if (differs([](const PageItem* it) { return it->currentCharStyle().scaleH(); }))
+			setSpinMixed(m_scaleHSpin);
+		if (differs([](const PageItem* it) { return it->currentCharStyle().scaleV(); }))
+			setSpinMixed(m_scaleVSpin);
+		if (differs([](const PageItem* it) { return it->columns(); }))
+			setSpinMixed(m_columnsSpin);
+		if (differs([](const PageItem* it) { return it->columnGap(); }))
+			setSpinMixed(m_columnGapSpin);
+		if (differs([](const PageItem* it) { return it->lineWidth(); }))
+			setSpinMixed(m_textLineWidthSpin);
+		if (m_textLineStyleCombo && differs([](const PageItem* it) { return (int) it->lineStyle(); }))
+		{
+			QSignalBlocker blocker(m_textLineStyleCombo);
+			m_textLineStyleCombo->setCurrentIndex(-1);
+		}
+		return;
+	}
+
+	if (differs([](const PageItem* it) { return it->lineWidth(); }))
+	{
+		setSpinMixed(m_imgLineWidthSpin);
+		setSpinMixed(m_lineWidthSpin);
+	}
+	if (differs([](const PageItem* it) { return it->width(); }))
+		setSpinMixed(m_imgWidthSpin);
+	if (differs([](const PageItem* it) { return it->height(); }))
+		setSpinMixed(m_imgHeightSpin);
+	if (first->isImageFrame())
+	{
+		if (differs([](const PageItem* it) { return it->imageRotation(); }))
+			setSpinMixed(m_imgRotSpin);
+		return;
+	}
+	if (differs([](const PageItem* it) { return it->fillTransparency(); }))
+		setSpinMixed(m_fillOpacitySpin);
+	if (differs([](const PageItem* it) { return it->lineTransparency(); }))
+	{
+		setSpinMixed(m_imgLineOpacitySpin);
+		setSpinMixed(m_lineOpacitySpin);
+	}
+	if (m_imgLineStyleCombo && differs([](const PageItem* it) { return it->NamedLStyle; }))
+	{
+		QSignalBlocker blocker(m_imgLineStyleCombo);
+		m_imgLineStyleCombo->setCurrentIndex(-1);
+	}
 }
 
 // ── Slots ─────────────────────────────────────────────────────
@@ -2166,14 +2454,14 @@ void SuneerControlBar::updateFromSelection()
 // Frames the font would land on, mirroring the target list
 // ScribusDoc::itemSelection_ApplyCharStyle() builds so tables preview the same way
 // they apply.
-static QList<PageItem*> suneerPreviewTargetFrames(ScribusDoc* doc)
+static QList<PageItem*> suneerPreviewTargetFrames(ScribusDoc* doc, Selection* selection)
 {
 	QList<PageItem*> frames;
-	if (!doc)
+	if (!doc || !selection)
 		return frames;
-	for (int i = 0; i < doc->m_Selection->count(); ++i)
+	for (int i = 0; i < selection->count(); ++i)
 	{
-		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem* item = selection->itemAt(i);
 		if (!item)
 			continue;
 		if (item->isTable() && doc->appMode == modeEditTable)
@@ -2202,7 +2490,7 @@ void SuneerControlBar::snapshotFontPreview()
 	m_fontPreviewFrames.clear();
 	if (!m_doc)
 		return;
-	const QList<PageItem*> frames = suneerPreviewTargetFrames(m_doc);
+	const QList<PageItem*> frames = suneerPreviewTargetFrames(m_doc, sel());
 	for (PageItem* item : frames)
 	{
 		if (!item || item->itemText.length() <= 0)
@@ -2246,7 +2534,7 @@ void SuneerControlBar::applyFontPreview(const QString& fontName)
 	// counter-based, and itemSelection_ApplyCharStyle() only opens a transaction when
 	// undo is enabled, so the preview leaves no undo steps behind.
 	UndoManager::instance()->setUndoEnabled(false);
-	m_doc->itemSelection_SetFont(fontName);
+	m_doc->itemSelection_SetFont(fontName, tsel());
 	UndoManager::instance()->setUndoEnabled(true);
 	m_fontPreviewApplied = fontName;
 }
@@ -2412,11 +2700,11 @@ namespace
 // the status bar, so a change that was meant for a selection is noticed.
 void SuneerControlBar::announceWholeFrameChange(const QString& what)
 {
-	if (!m_doc || !m_scmw || m_doc->m_Selection->isEmpty())
+	if (!m_doc || !m_scmw || sel()->isEmpty())
 		return;
 	if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
 		return;
-	const PageItem* item = m_doc->m_Selection->itemAt(0);
+	const PageItem* item = sel()->itemAt(0);
 	if (!item || !item->isTextFrame())
 		return;
 	// The temporary message area: the info label is rewritten by the next
@@ -2427,10 +2715,11 @@ void SuneerControlBar::announceWholeFrameChange(const QString& what)
 
 void SuneerControlBar::onFontChanged(const QFont& font)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
 	QString fontName = m_fontCombo->currentText();
-	if (!m_doc->m_Selection->isEmpty()) {
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!sel()->isEmpty()) {
+		PageItem* item = sel()->itemAt(0);
 		// suneer: table-wide Font — only handle the "whole table selected as an object"
 		// case here. In modeEditTable we fall through to itemSelection_SetFont, which
 		// routes through itemSelection_ApplyCharStyle and formats every selected cell
@@ -2454,7 +2743,7 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 			return;
 		}
 	}
-	m_doc->itemSelection_SetFont(fontName);
+	m_doc->itemSelection_SetFont(fontName, tsel());
 	m_doc->changed();
 	// The "sticky font" block that used to follow rewrote every selected frame's
 	// DEFAULT paragraph style with the new font, in edit mode as well. Every
@@ -2477,8 +2766,25 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 
 void SuneerControlBar::onStyleChanged(int)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	if (m_groupActive)
+	{
+		// Each frame keeps its own family and only gains the style.
+		const QString style = m_styleCombo->currentText();
+		for (PageItem* frame : sel()->items())
+		{
+			QString base = frame->currentCharStyle().font().scName();
+			base = base.replace(" Bold Italic","").replace(" Bold","").replace(" Italic","").trimmed();
+			if (style != "Regular") base += " " + style;
+			Selection one(this, false);
+			one.addItem(frame);
+			m_doc->itemSelection_SetFont(base.trimmed(), &one);
+		}
+		m_doc->changed();
+		return;
+	}
+	PageItem* item = sel()->itemAt(0);
 
 	// The family to restyle has to come from a cell, not from the table. A
 	// PageItem_Table has its own empty story, so currentCharStyle() there returns
@@ -2512,15 +2818,16 @@ void SuneerControlBar::onStyleChanged(int)
 		        [this, newFont](Selection& sel) { m_doc->itemSelection_SetFont(newFont, &sel); }))
 			return;
 	}
-	m_doc->itemSelection_SetFont(newFont);
+	m_doc->itemSelection_SetFont(newFont, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onFontSizeChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	if (!m_doc->m_Selection->isEmpty()) {
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!sel()->isEmpty()) {
+		PageItem* item = sel()->itemAt(0);
 		// suneer: table-wide FontSize — only handle the "whole table selected as an
 		// object" case here (no built-in doc support for that). In modeEditTable we fall
 		// through to itemSelection_SetFontSize, which routes through
@@ -2544,7 +2851,7 @@ void SuneerControlBar::onFontSizeChanged(double val)
 			return;
 		}
 	}
-	m_doc->itemSelection_SetFontSize(qRound(val * 10));
+	m_doc->itemSelection_SetFontSize(qRound(val * 10), tsel());
 	m_doc->changed();
 	// The "sticky size" default-style rewrite is gone for the same reason as
 	// in onFontChanged(): it changed every inheriting paragraph of the story.
@@ -2557,34 +2864,37 @@ void SuneerControlBar::onFontSizeChanged(double val)
 // otherwise the style would be applied to the table item's own (empty) story.
 void SuneerControlBar::onLineSpacingChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	if (m_doc->appMode != modeEditTable && !sel()->isEmpty())
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+		PageItem* item = sel()->itemAt(0);
 		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
 		        [this, val](Selection& sel) { m_doc->itemSelection_SetLineSpacing(val, &sel); }))
 			return;
 	}
-	m_doc->itemSelection_SetLineSpacing(val);
+	m_doc->itemSelection_SetLineSpacing(val, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onLineSpModeChanged(int mode)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	if (m_doc->appMode != modeEditTable && !sel()->isEmpty())
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+		PageItem* item = sel()->itemAt(0);
 		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
 		        [this, mode](Selection& sel) { m_doc->itemSelection_SetLineSpacingMode(mode, &sel); }))
 			return;
 	}
-	m_doc->itemSelection_SetLineSpacingMode(mode);
+	m_doc->itemSelection_SetLineSpacingMode(mode, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onAlignChanged(int align)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
 	// suneer: table-wide alignment.
 	// This used to walk every cell and skip any whose text frame had no HasSel.
@@ -2596,9 +2906,9 @@ void SuneerControlBar::onAlignChanged(int align)
 	// which walks selectedCells() and records a single transaction; only the
 	// "whole table selected as an object" case needs help here, and it gets it
 	// by handing the doc every cell frame in one Selection so undo stays atomic.
-	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	if (m_doc->appMode != modeEditTable && !sel()->isEmpty())
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+		PageItem* item = sel()->itemAt(0);
 		if (item->isTable())
 		{
 			if (suneerApplyToWholeTable(m_doc, item->asTable(),
@@ -2606,32 +2916,35 @@ void SuneerControlBar::onAlignChanged(int align)
 				return;
 		}
 	}
-	m_doc->itemSelection_SetAlignment(align);
+	m_doc->itemSelection_SetAlignment(align, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onStyleEffectChanged(int effect)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetEffects(effect);
+	m_doc->itemSelection_SetEffects(effect, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onOutlineWidthChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	if (!m_styleSelect || !m_styleSelect->OutlineVal || !m_styleSelect->OutlineVal->LWidth) return;
 	// CharStyle outline width is stored in tenths of a percent
 	int x = qRound(m_styleSelect->OutlineVal->LWidth->value() * 10.0);
-	m_doc->itemSelection_SetOutlineWidth(x);
+	m_doc->itemSelection_SetOutlineWidth(x, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onOutlineStrokeColorChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	if (!m_outlineStrokeColorCombo) return;
-	m_doc->itemSelection_SetStrokeColor(m_outlineStrokeColorCombo->currentColor());
+	m_doc->itemSelection_SetStrokeColor(m_outlineStrokeColorCombo->currentColor(), tsel());
 	m_doc->changed();
 }
 
@@ -2650,64 +2963,75 @@ void SuneerControlBar::onOutlineStepDown()
 
 void SuneerControlBar::onOutlineOutwardToggled(bool checked)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	m_doc->itemSelection_SetOutlineOutward(checked ? 1 : 0);
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	m_doc->itemSelection_SetOutlineOutward(checked ? 1 : 0, tsel());
 	m_doc->changed();
 	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onTrackingChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	if (m_doc->appMode != modeEditTable && !m_doc->m_Selection->isEmpty())
+	if (m_doc->appMode != modeEditTable && !sel()->isEmpty())
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(0);
+		PageItem* item = sel()->itemAt(0);
 		if (item->isTable() && suneerApplyToWholeTable(m_doc, item->asTable(),
 		        [this, val](Selection& sel) { m_doc->itemSelection_SetTracking(qRound(val * 10), &sel); }))
 			return;
 	}
-	m_doc->itemSelection_SetTracking(qRound(val * 10));
+	m_doc->itemSelection_SetTracking(qRound(val * 10), tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onBaselineChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetBaselineOffset(qRound(val * 10));
+	m_doc->itemSelection_SetBaselineOffset(qRound(val * 10), tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onScaleHChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetScaleH(qRound(val * 10));
+	m_doc->itemSelection_SetScaleH(qRound(val * 10), tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onScaleVChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetScaleV(qRound(val * 10));
+	m_doc->itemSelection_SetScaleV(qRound(val * 10), tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onColumnsChanged(int val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	if (item->isTextFrame()) {
-		item->setColumns(val);
-		item->update(); m_doc->changed();
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		if (item->isTextFrame()) {
+			item->setColumns(val);
+			item->update(); m_doc->changed();
+		}
 	}
 }
 
 void SuneerControlBar::onColumnGapChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	if (item->isTextFrame()) {
-		item->setColumnGap(val * MM2PT);
-		item->update(); m_doc->changed();
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		if (item->isTextFrame()) {
+			item->setColumnGap(val * MM2PT);
+			item->update(); m_doc->changed();
+		}
 	}
 }
 
@@ -2715,33 +3039,37 @@ void SuneerControlBar::onColumnGapModeChanged(int) {}
 
 void SuneerControlBar::onFirstLineIndentChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
 	ParagraphStyle ps; ps.setFirstIndent(val * MM2PT);
-	m_doc->itemSelection_ApplyParagraphStyle(ps);   // merge-only, matches Properties Palette Distances
+	m_doc->itemSelection_ApplyParagraphStyle(ps, tsel());   // merge-only, matches Properties Palette Distances
 	m_doc->changed();
 }
 
 void SuneerControlBar::onGapBeforeChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
 	ParagraphStyle ps; ps.setGapBefore(val);
-	m_doc->itemSelection_ApplyParagraphStyle(ps);   // merge-only, matches Properties Palette Distances
+	m_doc->itemSelection_ApplyParagraphStyle(ps, tsel());   // merge-only, matches Properties Palette Distances
 	m_doc->changed();
 }
 
 void SuneerControlBar::onGapAfterChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
 	ParagraphStyle ps; ps.setGapAfter(val);
-	m_doc->itemSelection_ApplyParagraphStyle(ps);   // merge-only, matches Properties Palette Distances
+	m_doc->itemSelection_ApplyParagraphStyle(ps, tsel());   // merge-only, matches Properties Palette Distances
 	m_doc->changed();
 }
 
 void SuneerControlBar::onTextColorChanged()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetFillColor(m_textColorBtn->colorName());
-	m_doc->itemSelection_SetFillShade(m_textColorBtn->colorData().Shade);
+	m_doc->itemSelection_SetFillColor(m_textColorBtn->colorName(), tsel());
+	m_doc->itemSelection_SetFillShade(m_textColorBtn->colorData().Shade, tsel());
 	m_doc->changed();
 }
 
@@ -2752,9 +3080,9 @@ void SuneerControlBar::onTextColorChanged()
 
 PageItem* SuneerControlBar::shadingTargetItem() const
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty())
+	if (!m_doc || sel()->isEmpty())
 		return nullptr;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	PageItem* item = sel()->itemAt(0);
 	if (item && item->isTable())
 	{
 		PageItem_Table* tbl = item->asTable();
@@ -2874,7 +3202,7 @@ void SuneerControlBar::onParagraphShadingChanged()
 		ps.setShadeMergeAdjacent(m_shadeWidget->mergeAdjacent->isChecked());
 
 	m_shadingTouched = true;
-	m_doc->itemSelection_ApplyParagraphStyle(ps);   // merge-only: never clobbers the style
+	m_doc->itemSelection_ApplyParagraphStyle(ps, tsel());   // merge-only: never clobbers the style
 	m_doc->changed();
 	m_doc->regionsChanged()->update(QRectF());
 }
@@ -2884,23 +3212,25 @@ void SuneerControlBar::onParagraphShadingReset()
 	if (!m_doc)
 		return;
 	m_shadingTouched = true;
-	m_doc->itemSelection_ResetParagraphShading();
+	m_doc->itemSelection_ResetParagraphShading(tsel());
 	// Re-read: the paragraph now shows whatever its style specifies again.
 	loadParagraphShading();
 }
 
 void SuneerControlBar::onBgColorChanged()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetBackgroundColor(m_bgColorBtn->colorName());
-	m_doc->itemSelection_SetBackgroundShade(m_bgColorBtn->colorData().Shade);
+	m_doc->itemSelection_SetBackgroundColor(m_bgColorBtn->colorName(), tsel());
+	m_doc->itemSelection_SetBackgroundShade(m_bgColorBtn->colorData().Shade, tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgRotChanged(double val)
 {
+	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetImageRotation(360 - val);
+	m_doc->itemSelection_SetImageRotation(360 - val, tsel());
 	m_doc->changed();
 }
 
@@ -2914,44 +3244,50 @@ void SuneerControlBar::onTextWrapShow()
 
 void SuneerControlBar::onTextFlowNone()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<m_doc->m_Selection->count();i++) m_doc->m_Selection->itemAt(i)->setTextFlowMode(PageItem::TextFlowDisabled);
+	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowDisabled);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onTextFlowShape()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<m_doc->m_Selection->count();i++) m_doc->m_Selection->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesFrameShape);
+	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesFrameShape);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onTextFlowBBox()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<m_doc->m_Selection->count();i++) m_doc->m_Selection->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
+	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onTextFlowContour()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<m_doc->m_Selection->count();i++) m_doc->m_Selection->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesContourLine);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onTextFlowClip()
 {
+	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
-	for (int i=0;i<m_doc->m_Selection->count();i++) m_doc->m_Selection->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesImageClipping);
+	for (int i=0;i<sel()->count();i++) sel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesImageClipping);
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgRot90CCW()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	for (int i = 0; i < m_doc->m_Selection->count(); i++) {
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	for (int i = 0; i < sel()->count(); i++) {
+		PageItem* item = sel()->itemAt(i);
 		m_doc->rotateItem(-90.0, item);
 	}
 	m_doc->changed();
@@ -2959,9 +3295,10 @@ void SuneerControlBar::onImgRot90CCW()
 
 void SuneerControlBar::onImgRot90CW()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	for (int i = 0; i < m_doc->m_Selection->count(); i++) {
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	for (int i = 0; i < sel()->count(); i++) {
+		PageItem* item = sel()->itemAt(i);
 		m_doc->rotateItem(90.0, item);
 	}
 	m_doc->changed();
@@ -2997,29 +3334,57 @@ void SuneerControlBar::onImgToBack()
 
 void SuneerControlBar::onImgFlipH()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	m_doc->itemSelection_FlipH();
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	if (m_groupActive)
+	{
+		// Each child flips in place; the stock multi-item flip would mirror
+		// their positions across the group as well.
+		for (PageItem* child : sel()->items())
+		{
+			Selection one(this, false);
+			one.addItem(child);
+			m_doc->itemSelection_FlipH(&one);
+		}
+	}
+	else
+		m_doc->itemSelection_FlipH();
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgFlipV()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	m_doc->itemSelection_FlipV();
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	if (m_groupActive)
+	{
+		// Each child flips in place; the stock multi-item flip would mirror
+		// their positions across the group as well.
+		for (PageItem* child : sel()->items())
+		{
+			Selection one(this, false);
+			one.addItem(child);
+			m_doc->itemSelection_FlipV(&one);
+		}
+	}
+	else
+		m_doc->itemSelection_FlipV();
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgFitFrame()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	m_doc->itemSelection_AdjustFrametoImageSize();
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	m_doc->itemSelection_AdjustFrametoImageSize(tsel());
 	m_doc->changed();
 }
 
 void SuneerControlBar::onImgFitImage()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	m_doc->itemSelection_AdjustImagetoFrameSize();
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	m_doc->itemSelection_AdjustImagetoFrameSize(tsel());
 	m_doc->changed();
 }
 
@@ -3028,8 +3393,8 @@ void SuneerControlBar::onImgFitImage()
 
 void SuneerControlBar::onImgDrawContour()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	if (!item->isImageFrame()) return;
 	ScribusMainWindow* mw = ScCore->primaryMainWindow();
 	if (!mw) return;
@@ -3039,7 +3404,7 @@ void SuneerControlBar::onImgDrawContour()
 
 void SuneerControlBar::onImgContourEditToggle(bool checked)
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	if (!m_doc || sel()->isEmpty()) return;
 	ScribusMainWindow* mw = ScCore->primaryMainWindow();
 	if (!mw) return;
 	if (checked) {
@@ -3070,8 +3435,8 @@ void SuneerControlBar::onImgContourEditToggle(bool checked)
 
 void SuneerControlBar::onImgRemoveBackground()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	if (item->Pfile.isEmpty()) {
 		QMessageBox::warning(this, "Remove Background", "No image loaded in this frame.");
 		return;
@@ -3208,9 +3573,10 @@ void SuneerControlBar::onImgRemoveBackground()
 
 void SuneerControlBar::onPadReset()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	for (int i = 0; i < m_doc->m_Selection->count(); i++)
-		m_doc->m_Selection->itemAt(i)->setWrapOffsets(0, 0, 0, 0);
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
+	for (int i = 0; i < sel()->count(); i++)
+		sel()->itemAt(i)->setWrapOffsets(0, 0, 0, 0);
 	m_doc->changed();
 }
 
@@ -3218,15 +3584,16 @@ void SuneerControlBar::onPadReset()
 
 void SuneerControlBar::onTextPadReset()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
 	// One undo step per button press rather than one per selected frame.
 	UndoTransaction padTransaction;
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < m_doc->m_Selection->count(); i++) {
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+	for (int i = 0; i < sel()->count(); i++) {
+		PageItem* item = sel()->itemAt(i);
 		if (item->isTextFrame()) {
 			if (internal)
 				item->setTextToFrameDist(0, 0, 0, 0);  // internal text distance
@@ -3243,7 +3610,8 @@ void SuneerControlBar::onTextPadReset()
 
 void SuneerControlBar::onTextPadAllChanged(double delta)
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
 	const double step = delta * 2.8346;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
 	// One undo step per button press rather than one per selected frame.
@@ -3254,8 +3622,8 @@ void SuneerControlBar::onTextPadAllChanged(double delta)
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < m_doc->m_Selection->count(); i++) {
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+	for (int i = 0; i < sel()->count(); i++) {
+		PageItem* item = sel()->itemAt(i);
 		if (!item->isTextFrame()) continue;
 		if (internal)
 			item->setTextToFrameDist(   // internal text distance (left, right, top, bottom)
@@ -3280,7 +3648,8 @@ void SuneerControlBar::onTextPadAllChanged(double delta)
 // side: 0=top 1=bottom 2=left 3=right
 void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
 	const double step = delta * 2.8346;
 	const bool internal = m_internalPadChk && m_internalPadChk->isChecked();
 	// One undo step per button press rather than one per selected frame.
@@ -3288,8 +3657,8 @@ void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 	if (UndoManager::undoEnabled())
 		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                          Um::TextFrameDist, QString(), Um::IBorder);
-	for (int i = 0; i < m_doc->m_Selection->count(); i++) {
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+	for (int i = 0; i < sel()->count(); i++) {
+		PageItem* item = sel()->itemAt(i);
 		if (!item->isTextFrame()) continue;
 		if (internal) {
 			double l = item->textToFrameDistLeft(),  r = item->textToFrameDistRight();
@@ -3318,11 +3687,12 @@ void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 
 void SuneerControlBar::onPadAllChanged(double delta)
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
 	double step = delta * MM2PT;
-	for (int i = 0; i < m_doc->m_Selection->count(); i++)
+	for (int i = 0; i < sel()->count(); i++)
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+		PageItem* item = sel()->itemAt(i);
 		// Contour mode ആണോ check
 		if (item->textFlowMode() == PageItem::TextFlowUsesContourLine
 			&& !item->ContourLine.empty()
@@ -3379,11 +3749,12 @@ void SuneerControlBar::onPadAllChanged(double delta)
 
 void SuneerControlBar::onPadSideChanged(int side, double delta)
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc || sel()->isEmpty()) return;
 	double step = delta * MM2PT;
-	for (int i = 0; i < m_doc->m_Selection->count(); i++)
+	for (int i = 0; i < sel()->count(); i++)
 	{
-		PageItem* item = m_doc->m_Selection->itemAt(i);
+		PageItem* item = sel()->itemAt(i);
 		if (item->textFlowMode() == PageItem::TextFlowUsesContourLine
 			&& !item->ContourLine.empty()
 			&& m_doc->nodeEdit.isContourLine())
@@ -3428,8 +3799,8 @@ void SuneerControlBar::onPadSideChanged(int side, double delta)
 
 void SuneerControlBar::onAutoContour()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	if (!item->isImageFrame() || !item->imageIsAvailable) return;
 	if (item->Pfile.isEmpty()) return;
 
@@ -3582,8 +3953,8 @@ void SuneerControlBar::onCollectToFolder()
 
 void SuneerControlBar::onImgCropApply()
 {
-    if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-    PageItem* item = m_doc->m_Selection->itemAt(0);
+    if (!m_doc || sel()->isEmpty()) return;
+    PageItem* item = sel()->itemAt(0);
     if (!item || !item->isImageFrame()) return;
     // Activate crop overlay mode
     item->imageCropMode = true;
@@ -3645,8 +4016,8 @@ void SuneerControlBar::setCropModeActive(bool active)
 
 void SuneerControlBar::onImgCropResize()
 {
-    if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-    PageItem* item = m_doc->m_Selection->itemAt(0);
+    if (!m_doc || sel()->isEmpty()) return;
+    PageItem* item = sel()->itemAt(0);
     if (!item || !item->isImageFrame()) return;
     if (item->Pfile.isEmpty()) {
         QMessageBox::warning(this, "Crop+Resize", "No image loaded!");
@@ -3747,25 +4118,29 @@ void SuneerControlBar::onImgCropResize()
 
 void SuneerControlBar::onLineMaskChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	if (!m_lineMaskBtn) return;
 	// Opacity: 1.0 = fully opaque → transparency = 1.0 - opacity
 	double opacity = m_lineMaskBtn->colorData().Opacity;
-	m_doc->itemSelection_SetItemLineTransparency(opacity);
+	m_doc->itemSelection_SetItemLineTransparency(opacity, tsel());
 }
 
 void SuneerControlBar::onLineNamedStyleChanged(int idx)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	if (idx == 0)
-		item->NamedLStyle.clear();
-	else
-		item->NamedLStyle = m_lineNamedStyleCombo->currentText();
-	m_lineStyleEditBtn->setEnabled(idx != 0);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		if (idx == 0)
+			item->NamedLStyle.clear();
+		else
+			item->NamedLStyle = m_lineNamedStyleCombo->currentText();
+		m_lineStyleEditBtn->setEnabled(idx != 0);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineStyleEditClicked()
@@ -3782,24 +4157,28 @@ void SuneerControlBar::onLineStyleNewClicked()
 
 void SuneerControlBar::onLineColorChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	ColorButton* srcBtn = m_txtLineColorBtn && sender() == m_txtLineColorBtn ? m_txtLineColorBtn : m_lineColorBtn;
-	item->setLineColor(srcBtn->colorName());
-	item->setLineShade(100.0);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		ColorButton* srcBtn = m_txtLineColorBtn && sender() == m_txtLineColorBtn ? m_txtLineColorBtn : m_lineColorBtn;
+		item->setLineColor(srcBtn->colorName());
+		item->setLineShade(100.0);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineWidthChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	// Spinbox value is in the document display unit; convert back to points.
 	const double ratio = m_doc->unitRatio();
 	// Same path as Properties Palette → Line → Thickness of Line:
 	// proper Um::LineWidth undo, multi-select, and redraw.
-	m_doc->itemSelection_SetLineWidth(ratio != 0.0 ? val / ratio : val);
+	m_doc->itemSelection_SetLineWidth(ratio != 0.0 ? val / ratio : val, tsel());
 }
 
 // Make the Line Width spinboxes follow the document unit (suffix, decimals,
@@ -3830,88 +4209,109 @@ void SuneerControlBar::unitChange()
 
 void SuneerControlBar::onLineStyleChanged(int /*idx*/)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	for (PageItem* item : targetItems())
+	{
 
-	QComboBox* combo =
-		(item->isTextFrame() && m_textLineStyleCombo)
-			? m_textLineStyleCombo
-			: m_lineStyleCombo;
+		QComboBox* combo =
+			(item->isTextFrame() && m_textLineStyleCombo)
+				? m_textLineStyleCombo
+				: m_lineStyleCombo;
 
-	Qt::PenStyle style =
-		(Qt::PenStyle) combo->currentData().toInt();
+		Qt::PenStyle style =
+			(Qt::PenStyle) combo->currentData().toInt();
 
-	item->setLineStyle(style);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+		item->setLineStyle(style);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineCapChanged(int cap)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setLineEnd((Qt::PenCapStyle)cap);
-	m_lineCapFlatBtn->setChecked(cap   == Qt::FlatCap);
-	m_lineCapRoundBtn->setChecked(cap  == Qt::RoundCap);
-	m_lineCapSquareBtn->setChecked(cap == Qt::SquareCap);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setLineEnd((Qt::PenCapStyle)cap);
+		m_lineCapFlatBtn->setChecked(cap   == Qt::FlatCap);
+		m_lineCapRoundBtn->setChecked(cap  == Qt::RoundCap);
+		m_lineCapSquareBtn->setChecked(cap == Qt::SquareCap);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineJoinChanged(int join)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setLineJoin((Qt::PenJoinStyle)join);
-	m_lineJoinMiterBtn->setChecked(join == Qt::MiterJoin);
-	m_lineJoinRoundBtn->setChecked(join == Qt::RoundJoin);
-	m_lineJoinBevelBtn->setChecked(join == Qt::BevelJoin);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setLineJoin((Qt::PenJoinStyle)join);
+		m_lineJoinMiterBtn->setChecked(join == Qt::MiterJoin);
+		m_lineJoinRoundBtn->setChecked(join == Qt::RoundJoin);
+		m_lineJoinBevelBtn->setChecked(join == Qt::BevelJoin);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineOpacityChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setLineTransparency(1.0 - val / 100.0);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setLineTransparency(1.0 - val / 100.0);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineStartArrowChanged(int idx)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setStartArrowIndex(idx);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setStartArrowIndex(idx);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineEndArrowChanged(int idx)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setEndArrowIndex(idx);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setEndArrowIndex(idx);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onLineDashOffsetChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setDashOffset(val);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setDashOffset(val);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onDocChangedForCaption()
@@ -4020,37 +4420,46 @@ void SuneerControlBar::updateCaptionFrame(PageItem* imgFrame)
 
 void SuneerControlBar::onFillColorChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	ColorButton* btn = qobject_cast<ColorButton*>(sender());
 	if (!btn) btn = m_fillColorBtn;
 	if (!btn) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setFillColor(btn->colorName());
-	item->setFillShade(btn->colorData().Shade);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	for (PageItem* item : targetItems())
+	{
+		item->setFillColor(btn->colorName());
+		item->setFillShade(btn->colorData().Shade);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onFillOpacityChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setFillTransparency(1.0 - val / 100.0);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		item->setFillTransparency(1.0 - val / 100.0);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onImgLineStyleChanged(int idx)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	QString styleName = (idx == 0) ? "" : m_imgLineStyleCombo->currentText();
-	item->setCustomLineStyle(styleName);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	for (PageItem* item : targetItems())
+	{
+		QString styleName = (idx == 0) ? "" : m_imgLineStyleCombo->currentText();
+		item->setCustomLineStyle(styleName);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onImgLineStyleEdit()
@@ -4074,22 +4483,26 @@ void SuneerControlBar::onImgLineStyleAdd()
 
 void SuneerControlBar::onImgLineColorChanged()
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
 	ColorButton* btn = qobject_cast<ColorButton*>(sender());
 	if (!btn) btn = m_imgLineColorBtn;
 	if (!btn) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
-	item->setLineColor(btn->colorName());
-	item->setLineShade(btn->colorData().Shade);
-	item->update();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
+	for (PageItem* item : targetItems())
+	{
+		item->setLineColor(btn->colorName());
+		item->setLineShade(btn->colorData().Shade);
+		item->update();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
 }
 
 void SuneerControlBar::onImgWidthChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigW <= 0)
 	{
@@ -4161,8 +4574,9 @@ void SuneerControlBar::onImgWidthChanged(double val)
 
 void SuneerControlBar::onImgHeightChanged(double val)
 {
-	if (m_updating || !m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigH <= 0)
 	{
@@ -4231,6 +4645,7 @@ void SuneerControlBar::onImgHeightChanged(double val)
 
 void SuneerControlBar::applyCornerRadius()
 {
+	SuneerGroupUndo groupUndo(this);
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 	if (!doc) return;
 	double unitRatio = doc->unitRatio();
@@ -4248,9 +4663,9 @@ void SuneerControlBar::applyCornerRadius()
 		cornerTransaction = UndoManager::instance()->beginTransaction(
 			Um::Selection, Um::IBorder, Um::RoundCorner, QString(), Um::IBorder);
 
-	for (int i = 0; i < doc->m_Selection->count(); ++i)
+	for (int i = 0; i < sel()->count(); ++i)
 	{
-		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem* item = sel()->itemAt(i);
 		if (!item) continue;
 
 		if (tl == tr && tr == bl && bl == br)
@@ -4282,6 +4697,7 @@ void SuneerControlBar::applyCornerRadius()
 
 void SuneerControlBar::applyFeather()
 {
+	SuneerGroupUndo groupUndo(this);
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 	if (!doc) return;
 	double unitRatio = doc->unitRatio();
@@ -4295,9 +4711,9 @@ void SuneerControlBar::applyFeather()
 	else if (m_featherRightBtn->isChecked())  { ox = -blurPts;oy = 0; }
 	// All → ox=0, oy=0
 
-	for (int i = 0; i < doc->m_Selection->count(); ++i)
+	for (int i = 0; i < sel()->count(); ++i)
 	{
-		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem* item = sel()->itemAt(i);
 		if (!item) continue;
 		item->setHasSoftShadow(blurPts > 0);
 		item->setSoftShadowBlurRadius(blurPts);
@@ -4319,8 +4735,8 @@ void SuneerControlBar::applyFeather()
 
 void SuneerControlBar::onImgEdgeFeather()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	if (item->Pfile.isEmpty()) {
 		QMessageBox::warning(this, "Edge Feather", "No image loaded in this frame.");
 		return;
@@ -4421,8 +4837,8 @@ void SuneerControlBar::onImgEdgeFeather()
 
 void SuneerControlBar::onTextEdgeFeather()
 {
-	if (!m_doc || m_doc->m_Selection->isEmpty()) return;
-	PageItem* item = m_doc->m_Selection->itemAt(0);
+	if (!m_doc || sel()->isEmpty()) return;
+	PageItem* item = sel()->itemAt(0);
 	if (!item->isTextFrame()) {
 		QMessageBox::warning(this, "Edge Feather", "Please select a text frame.");
 		return;
@@ -4530,7 +4946,7 @@ void SuneerControlBar::onTextEdgeFeather()
 	double ih = item->height();
 	int pg = item->OwnPage;
 
-	m_doc->m_Selection->clear();
+	sel()->clear();
 	int z = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified,
 	                       ix, iy, iw, ih, 0,
 	                       m_doc->itemToolPrefs().imageFillColor,
@@ -4557,8 +4973,9 @@ void SuneerControlBar::onTextEdgeFeather()
 
 void SuneerControlBar::onTextFrameBox()
 {
+	SuneerGroupUndo groupUndo(this);
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
-	if (!doc || doc->m_Selection->isEmpty()) return;
+	if (!doc || sel()->isEmpty()) return;
 
 	const double MM2PT = 2.8346;
 	const double inset = (m_borderInsetSpin ? m_borderInsetSpin->value() : 2.0) * MM2PT;
@@ -4576,9 +4993,9 @@ void SuneerControlBar::onTextFrameBox()
 		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                             Um::ObjectFrame, QString(), Um::IBorder);
 
-	for (int i = 0; i < doc->m_Selection->count(); ++i)
+	for (int i = 0; i < sel()->count(); ++i)
 	{
-		PageItem* item = doc->m_Selection->itemAt(i);
+		PageItem* item = sel()->itemAt(i);
 		if (!item || !item->isTextFrame()) continue;
 
 		// Per-side border flags (rendered by PageItem::DrawObj_Post etc.)
