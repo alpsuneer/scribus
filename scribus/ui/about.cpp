@@ -14,6 +14,10 @@ for which a new license (GPL+exception) is in place.
 ***************************************************************************/
 #include <iostream> // only for debugging
 
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QFileInfo>
+#include <QLocale>
 #include <QFile>
 #include <QLabel>
 #include <QPixmap>
@@ -53,6 +57,14 @@ for which a new license (GPL+exception) is in place.
 #include "iconmanager.h"
 #include "upgradechecker.h"
 #include "langmgr.h"
+
+// Suneer: when THIS binary was built - the executable's own modification time,
+// the same stamp the window title uses. Empty when it cannot be read.
+static QString suneerBuildStamp()
+{
+	const QDateTime buildTime = QFileInfo(QCoreApplication::applicationFilePath()).lastModified();
+	return buildTime.isValid() ? QLocale::c().toString(buildTime, "d MMMM yyyy, HH:mm:ss") : QString();
+}
 
 /*
 * The content for the About dialog is mostly built from the files in
@@ -142,6 +154,10 @@ About::About( QWidget* parent, AboutMode diaMode ) : QDialog( parent )
 	buildID->setAlignment(Qt::AlignCenter);
 	buildID->setTextInteractionFlags(Qt::TextSelectableByMouse);
 	buildID->setText( tr("<p align=\"center\"><b>%1 %2</b></p>").arg( tr("Scribus Version"), ScribusAPI::getVersion()));
+	// Suneer: the first thing asked on the phone is "which build do you have?"
+	const QString buildStamp = suneerBuildStamp();
+	if (!buildStamp.isEmpty())
+		buildID->setText(buildID->text() + tr("<p align=\"center\">Built: %1</p>").arg(buildStamp));
 	tabLayout1->addWidget( buildID, 0, Qt::AlignHCenter );
 	tabWidget2->addTab( tab, tr("&About") );
 
@@ -658,6 +674,15 @@ QString About::generateBuildInfo()
 		version += " \"" + BUILD_NAME + "\"";
 	if (BUILD_NAME == "BleedingEdge")
 		built = tr("%3-%2-%1 %4 %5").arg(BUILD_DAY, BUILD_MONTH, BUILD_YEAR, BUILD_TIME, BUILD_TZ);
+
+	// Suneer: BUILD_DAY/MONTH/YEAR above are the upstream release date, typed
+	// into this file, so every build of this fork said "13 April 2026". Show
+	// when THIS binary was built: the executable's own modification time, the
+	// same stamp the window title uses (see scribus.cpp for why not __DATE__).
+	// The package tools keep that time, so an installed copy shows it too.
+	const QString buildStamp = suneerBuildStamp();
+	if (!buildStamp.isEmpty())
+		built = buildStamp;
 
 	QString revText;
 	if (ScribusAPI::isSVN() && ScribusAPI::haveSVNRevision())

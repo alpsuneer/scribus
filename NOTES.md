@@ -2106,3 +2106,12 @@ same day: **the server does the installs**, the laptop only releases.
 - Not exercised: Print Preview window, the real printer, underline/strike decorations (not turned
   into shape), rotated or flipped text frames, text on a path, CMYK/TIFF images, very long text.
 
+## About box build stamp (2026-10-04)
+
+- `BUILD_DAY` / `BUILD_MONTH` / `BUILD_YEAR` in `ui/about.cpp` are the upstream release date, typed
+  into the file. `suneerBuildStamp()` there returns the executable's mtime instead (same source as
+  the window title in scribus.cpp); used on the first tab (`buildID` label) and in
+  `generateBuildInfo()`. dpkg, checkinstall and `cmake --install` all keep the mtime.
+- A `static` helper in about.cpp must sit above the `About::About` constructor's first use - the
+  string "About::About(" also appears earlier in the file than the definition one expects.
+

@@ -901,7 +901,12 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   the old image frame is replaced.
 - One undo step. The frame must not be linked to other frames or inside a group.
 
-### 42. Authors
+### 42. Help > About shows when this build was made
+- The About box said "Built: 13 April 2026" for every build (the date of the upstream release).
+  It now shows the real date and time this copy was built, on the first tab under the version and
+  on the Build Info tab - the same stamp as in the window title.
+
+### 43. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---
