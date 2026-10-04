@@ -736,6 +736,18 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_textFeatherBtn->setToolTip("Apply edge feather to text frame");
 	row2->addWidget(m_textFeatherBtn);
 	m_textWidgets << m_textFeatherBtn;
+	// Fill Text with Image: the same command as Item > Fill Text with Image...
+	{
+		QToolButton* fillImageBtn = makeButton("▣T", "Fill Text with Image...");
+		fillImageBtn->setFixedSize(30, 22);
+		fillImageBtn->setToolTip(tr("Fill Text with Image: show an image only inside the letters"));
+		connect(fillImageBtn, &QToolButton::clicked, this, [this] {
+			if (m_scmw && m_scmw->scrActions["itemFillTextWithImage"])
+				m_scmw->scrActions["itemFillTextWithImage"]->trigger();
+		});
+		row2->addWidget(fillImageBtn);
+		m_textWidgets << fillImageBtn;
+	}
 	// Text Frame Box button — opens a popup to choose border sides + text inset
 	m_textBoxBtn = makeButton("☐", "Frame Border");
 	m_textBoxBtn->setFixedSize(34, 22);

@@ -353,6 +353,11 @@ void ContextMenu::createMenuItems_Selection()
 			m_ScMW->scrActions["itemFitCaptionFrame"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["itemFitCaptionFrame"]);
 		}
+		if (selectedItemCount == 1 && currItem->isTextFrame() && currItem->itemText.isNotEmpty())
+		{
+			m_ScMW->scrActions["itemFillTextWithImage"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["itemFillTextWithImage"]);
+		}
 		if (selectedItemCount == 1 && currItem->isTextFrame())
 		{
 			m_ScMW->scrActions["suneerTextToTable"]->setEnabled(true);

@@ -508,6 +508,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemFitCaptionFrame";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemFillTextWithImage";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameToImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustImageToFrame";
@@ -1864,6 +1866,8 @@ void ActionManager::languageChange()
 	(*scrActions)["tableAdjustTableToFrame"]->setTexts(tr("Adjust Table to Frame"));
 	(*scrActions)["itemAdjustFrameHeightToText"]->setTexts( tr("Adjust Frame Height to Text"));
 	(*scrActions)["itemFitCaptionFrame"]->setTexts( tr("Fit Caption Frame"));
+	(*scrActions)["itemFillTextWithImage"]->setTexts( tr("Fill Text with Image..."));
+	(*scrActions)["itemFillTextWithImage"]->setStatusTip( tr("Show an image only inside the letters of the selected text frame"));
 	(*scrActions)["itemAdjustFrameToImage"]->setTexts( tr("Adjust Frame to Image"));
 	(*scrActions)["itemAdjustImageToFrame"]->setTexts( tr("Adjust Image to Frame"));
 	(*scrActions)["itemToggleInlineImage"]->setTexts( tr("Embed Image"));
@@ -2555,6 +2559,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemUpdateImage"
 		<< "itemAdjustFrameHeightToText"
 		<< "itemFitCaptionFrame"
+		<< "itemFillTextWithImage"
 		<< "itemAdjustFrameToImage" 
 		<< "itemAdjustImageToFrame" 
 		<< "itemToggleInlineImage" 

@@ -184,6 +184,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribuswin.h"
 #include "selection.h"
 #include "suneergroupedit.h"
+#include "suneerfilltextimage.h"
 #include "serializer.h"
 #include "storyloader.h"
 #include "stylesearch.h"
@@ -946,6 +947,7 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
 	connect(scrActions["itemFitCaptionFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerFitCaptionFrames);
+	connect(scrActions["itemFillTextWithImage"], &QAction::triggered, this, [this] { SuneerFillTextImage::runForSelection(this); });
 	connect(scrActions["extrasCheckDuplicateShortcuts"], &QAction::triggered, this, [this] { ScShortcutRegistry::instance().showDuplicatesDialogNow(this); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
@@ -1436,6 +1438,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("itemConvertToPolygon", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToBezierCurve", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToOutlines", "ItemConvertTo");
+	scrMenuMgr->addMenuItemString("itemFillTextWithImage", "Item");
 	scrMenuMgr->addMenuItemString("itemConvertToSymbolFrame", "ItemConvertTo");
 	/* AI Text Tools. Its own submenu rather than loose entries in Item: six
 	   actions that all cost money and all send something out of the building

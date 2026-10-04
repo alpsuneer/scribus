@@ -887,7 +887,21 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - Note: existing pages with rounded or other non-rectangular text frames that have an inset will
   re-flow slightly when opened, because the inset now applies along the curve too.
 
-### 41. Authors
+### 41. Fill Text with Image (image visible only inside the letters)
+- **Item > Fill Text with Image...**, also in the right-click menu of a text frame and as the
+  **▣T** button on the text control bar. Select one text frame, choose an image.
+- The text becomes ONE image frame in the shape of the letters, as the page shows them (so Malayalam
+  conjuncts and vowel signs are right), with the image scaled to cover the letters, proportions
+  kept, centred. It is an ordinary image frame afterwards: double-click to move or scale the image
+  inside the letters.
+- Options in the dialog: a thin **outline** around the letters (width and colour) and a soft
+  **drop shadow**. The choices are remembered.
+- The original text frame is kept on the layer **"Original text"**, which is hidden and does not
+  print. To change the words: show that layer, edit the text, select it and run the command again -
+  the old image frame is replaced.
+- One undo step. The frame must not be linked to other frames or inside a group.
+
+### 42. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

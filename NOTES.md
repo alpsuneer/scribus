@@ -2084,3 +2084,25 @@ same day: **the server does the installs**, the laptop only releases.
   new inset path, rotated frames, contour-line and image-clip wrap modes, vertical alignment in such
   frames, linked frame chains, master pages, a real production page, print, the IM path.
 
+## Fill Text with Image, part A (2026-10-04)
+
+- `scribus/suneerfilltextimage.{h,cpp}` (in both CMake source lists), action `itemFillTextWithImage`
+  (Item menu, context menu, text control bar), connected by lambda in scribus.cpp.
+- **One path, not one polygon per glyph.** `GlyphPathCollector` (a `TextLayoutPainter`) is rendered
+  from `textLayout`, so it gets the SHAPED glyphs with their offsets; same placement maths as
+  `TextToPathPainter` in scribusview.cpp. That one `return`s on a glyph without an outline and
+  drops the rest of the cluster; this one skips it. `QPainterPath::simplified()` unites overlapping
+  glyphs; the frame is `setFillEvenOdd(false)`.
+- **Image offsets are stored in unscaled image units**: `setImageXYOffset(points / scale)`.
+- **The parking layer is created with undo disabled and its flags are set on every run.**
+  `setLayerVisible()` / `setLayerPrintable()` record no undo, so a layer re-created by redo came back
+  visible and the black original text covered the image. Undo therefore leaves an empty, hidden
+  "Original text" layer behind.
+- Re-run on a parked text frame: the image frame named `<text frame name> image` is deleted and
+  re-made on the layer it was on.
+- Dialog settings: QSettings `Faircode/ScribusFillTextImage` (ignores `-pr`, like the others).
+- Part B (live, editable, clipped at render/export time) is NOT built; the assessment is in
+  `/home/s1/Desktop/claude/result-*-fill-text-with-image.md`.
+- Not exercised: Print Preview window, the real printer, underline/strike decorations (not turned
+  into shape), rotated or flipped text frames, text on a path, CMYK/TIFF images, very long text.
+

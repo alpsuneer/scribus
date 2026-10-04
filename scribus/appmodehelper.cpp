@@ -519,6 +519,7 @@ void AppModeHelper::enableActionsForSelection(ScribusMainWindow* scmw, ScribusDo
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(SelectedType == PageItem::TextFrame && currItem->itemText.isNotEmpty());
 	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(SelectedType == PageItem::TextFrame);
 	(*a_scrActions)["itemFitCaptionFrame"]->setEnabled(SelectedType == PageItem::TextFrame);
+	(*a_scrActions)["itemFillTextWithImage"]->setEnabled(SelectedType == PageItem::TextFrame && docSelectionCount == 1 && currItem->itemText.isNotEmpty());
 	(*a_scrActions)["suneerAutoFitText"]->setEnabled(SelectedType == PageItem::TextFrame);
 	(*a_scrActions)["extrasAutoflowToNewPages"]->setEnabled(SelectedType == PageItem::TextFrame && currItem && currItem->nextInChain() == nullptr && currItem->frameOverflows());
 	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
@@ -2049,6 +2050,7 @@ void AppModeHelper::setStartupActionsEnabled(bool enabled)
 	(*a_scrActions)["itemAdjustFrameHeightToText"]->setEnabled(false);
 	(*a_scrActions)["suneerAutoFitHeight"]->setEnabled(false);
 	(*a_scrActions)["itemFitCaptionFrame"]->setEnabled(false);
+	(*a_scrActions)["itemFillTextWithImage"]->setEnabled(false);
 	(*a_scrActions)["suneerAutoFitText"]->setEnabled(false);
 	(*a_scrActions)["suneerGetImage"]->setEnabled(true);
 	(*a_scrActions)["itemAdjustFrameToImage"]->setEnabled(false);
