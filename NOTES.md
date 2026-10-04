@@ -2007,3 +2007,19 @@ nested groups too) and returns the first child for the bar to display. Slots act
 - `tools/release.sh --dry-run` leaves `build/` configured with the NEXT version
   (`-DSCRIBUS_RELEASE_VERSION`); a later `cmake --install build` then installs a binary that claims
   an unreleased version. Reconfigure with the last released version before installing by hand.
+
+## tools/push-update.sh - push to the office PCs over SSH (2026-10-04)
+
+- `--scan` (read-only), `--set-url`, `--install`; site values in `~/scribus-keys/push-update.conf`
+  (`SUBNET`, `SKIP_HOSTS`, `UPDATE_BASE_URL`, `PC_SSH_USER`, `PC_SUDO`), never in the repo.
+- It does NOT upload to the update server: a manifest is signed for one URL and the client refuses a
+  .deb from another origin, so only `tools/release.sh` (with `UPDATE_BASE_URL` / `UPLOAD_*` in
+  `release.conf`) can put a release on the server.
+- `--install` refuses a version without a `release/<version>` tag (a `--dry-run` build leaves a
+  complete, validly signed folder under `build/release/`), a .deb that does not match its
+  `latest.json`, and a signature that does not verify with the build's public key.
+- Hosts in `SKIP_HOSTS` are excluded from the scan and refused when named.
+- Host keys of the PCs go to `~/scribus-keys/push-update.known_hosts`, not the user's known_hosts.
+- Run as root it needs `--config /home/s1/scribus-keys/push-update.conf` (same HOME trap as release.sh).
+- Not exercised: `--set-url` and `--install` against a real PC, the package check (no PC accepted a
+  login, so the script stops before it).
