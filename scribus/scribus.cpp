@@ -946,6 +946,7 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
 	connect(scrActions["itemFitCaptionFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerFitCaptionFrames);
+	connect(scrActions["extrasCheckDuplicateShortcuts"], &QAction::triggered, this, [this] { ScShortcutRegistry::instance().showDuplicatesDialogNow(this); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
@@ -1731,6 +1732,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasEmbedAllImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasWarnLinkedImages", "Extras");
+	scrMenuMgr->addMenuItemString("extrasCheckDuplicateShortcuts", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
@@ -5747,6 +5749,11 @@ QString ScribusMainWindow::suneerActionOwningShortcut(const QKeySequence& key) c
 
 int ScribusMainWindow::suneerLogShortcutConflicts(const QString& when)
 {
+	// Runs at startup and after every shortcut rebuild (each document or
+	// template opened). Skipped with the preference off, so opening costs no
+	// scan; SUNEER_SHORTCUT_DEBUG still forces it for diagnosis.
+	if (!ScShortcutRegistry::checkOnOpenEnabled() && qEnvironmentVariableIsEmpty("SUNEER_SHORTCUT_DEBUG"))
+		return 0;
 	// Only shortcuts that can actually fire in THIS window count. An action
 	// that is attached to no widget never fires (the Style Manager keeps one
 	// such "Apply" action per style key), and an action on a widget of

@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/preferences/prefs_experimental.h"
 #include "prefsstructs.h"
 #include "scribusdoc.h"
+#include "ui/scshortcutregistry.h"
 
 Prefs_Experimental::Prefs_Experimental(QWidget* parent, ScribusDoc* /*doc*/)
 	: Prefs_Pane(parent)
@@ -30,11 +31,15 @@ void Prefs_Experimental::restoreDefaults(struct ApplicationPrefs *prefsData)
 {
 	enableNotesCheckBox->setChecked(prefsData->experimentalFeaturePrefs.notesEnabled);
 	enableNewsBrowserCheckBox->setChecked(prefsData->experimentalFeaturePrefs.newsBrowserEnabled);
+	// Kept with the other shortcut-check settings (QSettings), not in
+	// ApplicationPrefs: a new member there changes a struct the plugins share.
+	checkDuplicateShortcutsCheckBox->setChecked(ScShortcutRegistry::checkOnOpenEnabled());
 }
 
 void Prefs_Experimental::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 {
 	prefsData->experimentalFeaturePrefs.notesEnabled = enableNotesCheckBox->isChecked();
 	prefsData->experimentalFeaturePrefs.newsBrowserEnabled = enableNewsBrowserCheckBox->isChecked();
+	ScShortcutRegistry::setCheckOnOpenEnabled(checkDuplicateShortcutsCheckBox->isChecked());
 }
 

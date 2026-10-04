@@ -531,18 +531,57 @@ void ScShortcutRegistry::loadDesktopGrabs() const
 
 // --- startup dialog ---------------------------------------------------------
 
+// Stored next to "ignoredDuplicatesHash", per user. No key means off, so a
+// fresh install - the office PCs after an update - starts with the check off.
+bool ScShortcutRegistry::checkOnOpenEnabled()
+{
+	return QSettings("Faircode", "ScribusShortcuts").value("checkOnOpen", false).toBool();
+}
+
+void ScShortcutRegistry::setCheckOnOpenEnabled(bool enabled)
+{
+	QSettings cfg("Faircode", "ScribusShortcuts");
+	if (enabled)
+		cfg.setValue("checkOnOpen", true);
+	else
+		cfg.remove("checkOnOpen");
+}
+
 void ScShortcutRegistry::maybeShowDuplicatesDialog(QWidget* parent, const QString& when)
 {
-	const QMap<QString, QList<Owner>> dups = duplicates();
-	if (dups.isEmpty() || m_duplicatesDialog)
+	// Before duplicates(): with the preference off no time goes into scanning.
+	if (!checkOnOpenEnabled())
 		return;
+	showDuplicatesDialog(parent, when, false);
+}
+
+void ScShortcutRegistry::showDuplicatesDialogNow(QWidget* parent)
+{
+	showDuplicatesDialog(parent, tr("checked now"), true);
+}
+
+void ScShortcutRegistry::showDuplicatesDialog(QWidget* parent, const QString& when, bool onDemand)
+{
+	if (m_duplicatesDialog)
+	{
+		if (!onDemand)
+			return;
+		m_duplicatesDialog->close();   // asked for a fresh list
+	}
+	const QMap<QString, QList<Owner>> dups = duplicates();
+	if (dups.isEmpty())
+	{
+		if (onDemand)
+			QMessageBox::information(parent, tr("Duplicate shortcuts"), tr("No shortcut is assigned more than once."));
+		return;
+	}
 	QStringList lines;
 	for (auto it = dups.constBegin(); it != dups.constEnd(); ++it)
 		lines << QString("%1\n    %2").arg(native(QKeySequence(it.key(), QKeySequence::PortableText)), columnJoin(it.value(), "\n    "));
 	const QString report = lines.join("\n\n");
 	const QString hash = QString::fromLatin1(QCryptographicHash::hash(report.toUtf8(), QCryptographicHash::Sha1).toHex());
 	QSettings cfg("Faircode", "ScribusShortcuts");
-	if (cfg.value("ignoredDuplicatesHash").toString() == hash)
+	if (!onDemand && cfg.value("ignoredDuplicatesHash").toString() == hash)
 		return;
 
 	auto* dlg = new QDialog(parent);
@@ -559,12 +598,17 @@ void ScShortcutRegistry::maybeShowDuplicatesDialog(QWidget* parent, const QStrin
 	text->setPlainText(report);
 	lay->addWidget(text, 1);
 	auto* dontShow = new QCheckBox(tr("Don't show again until something changes"), dlg);
+	dontShow->setChecked(cfg.value("ignoredDuplicatesHash").toString() == hash);
+	// Only the automatic check can be silenced; on demand it has no meaning.
+	dontShow->setVisible(!onDemand);
 	lay->addWidget(dontShow);
 	auto* bb = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
 	connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
 	connect(bb, &QDialogButtonBox::accepted, dlg, &QDialog::accept);
 	lay->addWidget(bb);
-	connect(dlg, &QDialog::finished, dlg, [dontShow, hash]() {
+	connect(dlg, &QDialog::finished, dlg, [dontShow, hash, onDemand]() {
+		if (onDemand)
+			return;   // leave the "don't show again" choice as it was
 		QSettings c("Faircode", "ScribusShortcuts");
 		if (dontShow->isChecked())
 			c.setValue("ignoredDuplicatesHash", hash);

@@ -88,6 +88,16 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="checkDuplicateShortcutsCheckBox">
+         <property name="toolTip">
+          <string>Off: nothing is checked and no popup appears when Scribus starts or a document or template is opened. Extras &gt; Check Duplicate Shortcuts... runs the check whenever you want it.</string>
+         </property>
+         <property name="text">
+          <string>Check for duplicate shortcuts when opening documents and at startup</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

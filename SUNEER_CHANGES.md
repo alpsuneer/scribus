@@ -859,7 +859,19 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   Bold / Italic on a font named "... Regular" now finds "... Bold".
 - Entering the group and selecting one child shows that child's normal toolbar.
 
-### 39. Authors
+### 39. Duplicate-shortcut check only when wanted
+- **Preferences > SR Menu > "Check for duplicate shortcuts when opening documents and at startup"**.
+  Off by default, also on the office PCs after an update.
+- **Off:** no "Duplicate shortcuts" popup when Scribus starts or a document or template is opened, and
+  the check itself is not run, so opening costs no time for it.
+- **On:** as before - the popup lists the keys assigned more than once, with "Don't show again until
+  something changes".
+- **Extras > Check Duplicate Shortcuts...** runs the check once whenever you want, whatever the
+  checkbox says, and shows the same list (or says that nothing is assigned twice).
+- Unchanged: the red "already used by..." warning while assigning a key (Keyboard Shortcuts, Assign
+  Shortcut on styles, chains and column configs).
+
+### 40. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

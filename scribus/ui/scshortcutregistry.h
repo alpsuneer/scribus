@@ -80,8 +80,18 @@ public:
 	void notifyChanged();
 
 	//! Startup / document-open check: list duplicates once in a small dialog,
-	//! with "Don't show again until something changes".
+	//! with "Don't show again until something changes". Does nothing at all,
+	//! not even the scan, unless checkOnOpenEnabled().
 	void maybeShowDuplicatesDialog(QWidget* parent, const QString& when);
+	//! Extras > Check Duplicate Shortcuts...: the same list, once, on demand.
+	//! Runs whatever the preference says, ignores "Don't show again", and
+	//! says so when there is nothing to list.
+	void showDuplicatesDialogNow(QWidget* parent);
+
+	//! Preferences > SR Menu > "Check for duplicate shortcuts when opening
+	//! documents and at startup". Off unless the user ticked it.
+	static bool checkOnOpenEnabled();
+	static void setCheckOnOpenEnabled(bool enabled);
 
 	//! Keys grabbed by the desktop or fcitx5 (read once, on first use).
 	QList<Owner> desktopGrabs() const;
@@ -105,6 +115,7 @@ private:
 	mutable bool m_desktopLoaded = false;
 	mutable QList<Owner> m_desktopGrabs;
 	QPointer<QWidget> m_duplicatesDialog;
+	void showDuplicatesDialog(QWidget* parent, const QString& when, bool onDemand);
 };
 
 /*!

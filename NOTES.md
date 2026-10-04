@@ -1986,3 +1986,24 @@ nested groups too) and returns the first child for the bar to display. Slots act
   the right-click menu itself, real keyboard shortcuts (actions were triggered), named line styles
   (none in the test document), shapes-only groups, a real Design Style group, the IM path, print.
 
+## Duplicate-shortcut check is opt-in (2026-10-04)
+
+- Three things ran on every start / document open: `ScShortcutRegistry::maybeShowDuplicatesDialog()`
+  (scribus.cpp startup timer, `ParagraphStylesPanel::setDocument`) and the log scan
+  `ScribusMainWindow::suneerLogShortcutConflicts()` (startup + after every style / column shortcut
+  rebuild). All three now return first thing unless `ScShortcutRegistry::checkOnOpenEnabled()`.
+  `SUNEER_SHORTCUT_DEBUG` still forces the log scan.
+- **The setting is QSettings `Faircode/ScribusShortcuts` key `checkOnOpen`**, next to
+  `ignoredDuplicatesHash` - not a member of `ApplicationPrefs`, which would change a struct the
+  plugins share. No key = off, so nothing has to ship in the .deb for "off on the office PCs".
+  Same trap as the other Faircode QSettings: it ignores `-pr`, and root and s1 have separate files.
+- The checkbox lives in the SR Menu pane (`Prefs_Experimental`); the user calls that page "St Menu".
+- `showDuplicatesDialogNow()` (Extras > Check Duplicate Shortcuts..., action
+  `extrasCheckDuplicateShortcuts`, connected by lambda in scribus.cpp - no new slot) ignores the
+  "don't show again" hash and hides that checkbox; closing it leaves the stored hash alone.
+- The assign-time conflict warning (`askOnConflict` / `conflictText`) is untouched.
+- Test: `SC_PHASE=off|on GROUPTEST_PY=sccheck.py DISMISS_NAMES='Crash Recovery|New Document'
+  ~/scribus-crashlogs/grouptest/run.sh`; it drives the real Preferences dialog from a QTimer.
+- `tools/release.sh --dry-run` leaves `build/` configured with the NEXT version
+  (`-DSCRIBUS_RELEASE_VERSION`); a later `cmake --install build` then installs a binary that claims
+  an unreleased version. Reconfigure with the last released version before installing by hand.

@@ -1180,6 +1180,8 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	(*scrActions)["extrasWarnLinkedImages"]->setToggleAction(true);
 	(*scrActions)["extrasWarnLinkedImages"]->setChecked(true);
+	name = "extrasCheckDuplicateShortcuts";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasEmbedAllImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerEmbedAllImages()) );
 	connect( (*scrActions)["extrasWarnLinkedImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleWarnLinkedImages()) );
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
@@ -2057,6 +2059,8 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
 	(*scrActions)["extrasEmbedAllImages"]->setTexts( tr("Embed All Images"));
 	(*scrActions)["extrasWarnLinkedImages"]->setTexts( tr("Warn About Linked Images in This Document"));
+	(*scrActions)["extrasCheckDuplicateShortcuts"]->setTexts( tr("Check Duplicate Shortcuts..."));
+	(*scrActions)["extrasCheckDuplicateShortcuts"]->setStatusTip( tr("List every shortcut key that is assigned more than once"));
 	//(*scrActions)["extrasTestQTQuick2_1"]->setTexts( tr("Test Qt Quick"));
 	//Windows Menu
 	(*scrActions)["windowsCascade"]->setText( tr("&Cascade"));
@@ -2762,6 +2766,7 @@ void ActionManager::createDefaultMenus()
 		<< "extrasImposition"
 		<< "extrasEmbedAllImages"
 		<< "extrasWarnLinkedImages"
+		<< "extrasCheckDuplicateShortcuts"
 		<< "SRDuplicateNewsCheck";
 	//Windows
 	++itmenu;
