@@ -343,6 +343,9 @@ DEPENDS=$(
 	done | sort -u | grep -vx scribus | paste -sd, | sed 's/,/, /g'
 )
 [ -n "$DEPENDS" ] || die "could not work out the package dependencies"
+# The push helper (/usr/local/sbin/scribus-install-update) is a Python script;
+# no shared library points at the interpreter, so it is named here.
+case ", $DEPENDS," in *", python3,"*) ;; *) DEPENDS="$DEPENDS, python3" ;; esac
 echo "   Depends: $(echo "$DEPENDS" | tr ',' '\n' | wc -l) packages"
 # Built with dpkg-deb from a DESTDIR install, not with `cpack -G DEB`: on this
 # tree CPack's DEB generator spins for more than ten minutes before it writes
@@ -388,6 +391,26 @@ rm -rf "$STAGE"
 dpkg-deb -c "$DEB" > "$OUT/contents.txt"
 grep -q '/usr/local/lib/scribus/plugins/.*\.so' "$OUT/contents.txt" || die ".deb has no plugins under /usr/local/lib/scribus/plugins"
 grep -q '/usr/local/bin/scribus$' "$OUT/contents.txt" || die ".deb has no /usr/local/bin/scribus launcher"
+# Push installs from the update server: the helper must be root-owned and
+# carry this build's public key; the sudoers entry, when the build names a push
+# account, must be 0440 and parse - a broken file in sudoers.d breaks sudo.
+grep -q '^-rwxr-xr-x root/root .* \./usr/local/sbin/scribus-install-update$' "$OUT/contents.txt" || die ".deb has no root-owned /usr/local/sbin/scribus-install-update"
+dpkg-deb --fsys-tarfile "$DEB" | tar -xO ./usr/local/sbin/scribus-install-update > "$OUT/helper.check"
+grep -qF "PUBKEY = \"$PUB_IN_BUILD\"" "$OUT/helper.check" || die "the install helper inside the .deb does not carry the release public key"
+rm -f "$OUT/helper.check"
+PUSH_USER=$(sed -n 's/^SCRIBUS_PUSH_USER:STRING=//p' "$BUILD/CMakeCache.txt" 2>/dev/null || true)
+if [ -n "$PUSH_USER" ]; then
+	grep -q '^-r--r----- root/root .* \./etc/sudoers.d/scribus-push$' "$OUT/contents.txt" || die ".deb has no 0440 root-owned /etc/sudoers.d/scribus-push"
+	dpkg-deb --fsys-tarfile "$DEB" | tar -xO ./etc/sudoers.d/scribus-push > "$OUT/sudoers.check"
+	VISUDO=$(command -v visudo || echo /usr/sbin/visudo)
+	"$VISUDO" -cf "$OUT/sudoers.check" >/dev/null || die "the sudoers entry inside the .deb does not parse"
+	[ "$(grep -vc '^#' "$OUT/sudoers.check")" = "1" ] && grep -qx "$PUSH_USER ALL=(root) NOPASSWD: /usr/local/sbin/scribus-install-update" "$OUT/sudoers.check" \
+		|| die "the sudoers entry inside the .deb allows something other than the install helper"
+	rm -f "$OUT/sudoers.check"
+	echo "   push installs: $PUSH_USER may run scribus-install-update (and nothing else) without a password"
+else
+	echo "   NOTE: SCRIBUS_PUSH_USER is not set; the .deb ships the install helper but no sudoers entry"
+fi
 dpkg-deb --fsys-tarfile "$DEB" | tar -xO ./usr/local/bin/scribus.bin > "$OUT/scribus.bin.check"
 grep -aqF "$VERSION" "$OUT/scribus.bin.check" || die "the scribus.bin inside the .deb does not carry $VERSION"
 grep -aqF "$PUB_IN_BUILD" "$OUT/scribus.bin.check" || die "the scribus.bin inside the .deb does not carry the release public key"

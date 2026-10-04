@@ -1,0 +1,5 @@
+# Installed as /etc/sudoers.d/scribus-push by the Scribus .deb.
+# The update server pushes releases as this account. It may run ONE program as
+# root without a password: the helper that installs a Scribus .deb only after
+# checking its signature and sha256. Nothing else - not dpkg, not a shell.
+@SCRIBUS_PUSH_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/scribus-install-update

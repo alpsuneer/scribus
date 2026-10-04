@@ -424,6 +424,26 @@ set(SCRIBUS_UPDATE_DEFAULT_URL "" CACHE STRING "Default update server URL writte
 configure_file("${CMAKE_SOURCE_DIR}/resources/updater/update.conf.in" "${CMAKE_BINARY_DIR}/update.conf" @ONLY)
 install(FILES "${CMAKE_BINARY_DIR}/update.conf" DESTINATION /etc/scribus)
 
+# Push installs from the update server (tools/push-update.sh). The helper is the
+# only thing the push account may run as root: it installs a Scribus .deb only
+# after verifying its signed manifest with the release public key above.
+# SCRIBUS_PUSH_USER is that account on the office PCs; empty (the default)
+# installs the helper but no sudoers entry, so nobody can use it without a
+# password.
+configure_file("${CMAKE_SOURCE_DIR}/resources/updater/scribus-install-update.in" "${CMAKE_BINARY_DIR}/scribus-install-update" @ONLY)
+install(PROGRAMS "${CMAKE_BINARY_DIR}/scribus-install-update" DESTINATION /usr/local/sbin)
+set(SCRIBUS_PUSH_USER "" CACHE STRING "Account on the office PCs that may run scribus-install-update with sudo, without a password")
+if (SCRIBUS_PUSH_USER)
+	if (NOT SCRIBUS_PUSH_USER MATCHES "^[a-z_][a-z0-9_-]*$")
+		message(FATAL_ERROR "SCRIBUS_PUSH_USER must be a plain account name, not '${SCRIBUS_PUSH_USER}'")
+	endif()
+	configure_file("${CMAKE_SOURCE_DIR}/resources/updater/scribus-push.sudoers.in" "${CMAKE_BINARY_DIR}/scribus-push.sudoers" @ONLY)
+	# sudo ignores a sudoers.d file that is not 0440, and names with a dot.
+	install(FILES "${CMAKE_BINARY_DIR}/scribus-push.sudoers" DESTINATION /etc/sudoers.d RENAME scribus-push
+	        PERMISSIONS OWNER_READ GROUP_READ)
+	message(STATUS "Push installs: ${SCRIBUS_PUSH_USER} may run scribus-install-update without a password")
+endif()
+
 if (HAVE_OSG)
 	target_link_libraries(${EXE_NAME}
 		PUBLIC

@@ -2008,18 +2008,37 @@ nested groups too) and returns the first child for the bar to display. Slots act
   (`-DSCRIBUS_RELEASE_VERSION`); a later `cmake --install build` then installs a binary that claims
   an unreleased version. Reconfigure with the last released version before installing by hand.
 
-## tools/push-update.sh - push to the office PCs over SSH (2026-10-04)
+## Push installs from the update server (2026-10-04)
 
-- `--scan` (read-only), `--set-url`, `--install`; site values in `~/scribus-keys/push-update.conf`
-  (`SUBNET`, `SKIP_HOSTS`, `UPDATE_BASE_URL`, `PC_SSH_USER`, `PC_SUDO`), never in the repo.
-- It does NOT upload to the update server: a manifest is signed for one URL and the client refuses a
-  .deb from another origin, so only `tools/release.sh` (with `UPDATE_BASE_URL` / `UPLOAD_*` in
-  `release.conf`) can put a release on the server.
-- `--install` refuses a version without a `release/<version>` tag (a `--dry-run` build leaves a
-  complete, validly signed folder under `build/release/`), a .deb that does not match its
-  `latest.json`, and a signature that does not verify with the build's public key.
-- Hosts in `SKIP_HOSTS` are excluded from the scan and refused when named.
-- Host keys of the PCs go to `~/scribus-keys/push-update.known_hosts`, not the user's known_hosts.
-- Run as root it needs `--config /home/s1/scribus-keys/push-update.conf` (same HOME trap as release.sh).
-- Not exercised: `--set-url` and `--install` against a real PC, the package check (no PC accepted a
-  login, so the script stops before it).
+The first version of `tools/push-update.sh` (commit `ffa733d`) ran on the laptop. It was replaced the
+same day: **the server does the installs**, the laptop only releases.
+
+- **Pieces.** `tools/push-update.sh` = `/usr/local/bin/scribus-push-update` on the server (settings
+  `/etc/scribus-push/push.conf`, PC list `/etc/scribus-push/pcs`, push SSH key
+  `/etc/scribus-push/push_key`). `tools/update-server/deploy-push-server.sh` (laptop) copies it plus
+  `setup-push-server.sh` and a generated `push.conf` to `~/scribus-push-setup/` on the server;
+  `setup-push-server.sh` (server, sudo, once) installs nginx on the LAN address:8081 with
+  `allow SUBNET; deny all`, creates the update folder, the tool, the config dir and the key.
+  Site values come from `~/scribus-keys/push-update.conf`; none are in the repo.
+- **The signing key never goes to the server.** `push.conf` carries the PUBLIC key; the server
+  verifies `latest.json` + .deb before every push and the PC verifies again.
+- **PC side, shipped in the .deb:** `/usr/local/sbin/scribus-install-update`
+  (`resources/updater/scribus-install-update.in`, the public key is configured in) and
+  `/etc/sudoers.d/scribus-push` (only when `-DSCRIBUS_PUSH_USER=<account>`; 0440, one line, checked
+  with `visudo -cf` in release.sh). The helper copies both files into a root-only dir, verifies the
+  Ed25519 signature, sha256, package name and version, refuses an older version and a running
+  Scribus, runs `dpkg --force-confold -i`, and sets `update.conf` to the origin of the SIGNED url.
+- **Ed25519 is verified in plain Python in the helper, not with openssl.** `openssl pkeyutl -rawin`
+  needs OpenSSL 3; the office PCs answer as `OpenSSH_8.4p1 Debian-5` (Debian 11, OpenSSL 1.1.1).
+  Checked against three real manifests and RFC 8032 vector 2.
+- **A PC without the helper needs `--first` once** (`ssh -t`, plain `sudo dpkg -i`, password typed).
+- **The laptop's dpkg version can rank below every release.** A checkinstall package is versioned
+  DDMMYY (`1.7.3-041026-1`); dpkg sorts that under `1.7.3-20261001-2`, so the helper's "not older"
+  rule lets any release install over it. Testing the helper's positive path on the laptop really
+  installs (it did, on 2026-10-04; restored with `dpkg -i build/scribus_1.7.3-041026-1_amd64.deb`).
+- The agent shell's PATH lacks `/usr/sbin`: `dpkg -i`, `visudo` and release.sh's sudoers check need
+  `PATH=/usr/sbin:/sbin:$PATH` when run from it.
+- `cmake --install build` on the laptop now also installs the helper, `/etc/sudoers.d/scribus-push`
+  (the build cache has `SCRIBUS_PUSH_USER`) and an `update.conf` with the new URL.
+- Not exercised: `setup-push-server.sh` (needs the server's sudo password), nginx and its
+  allow/deny, `--copy-keys`, `--first`, a push to a real PC, the rsync upload in release.sh.

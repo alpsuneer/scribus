@@ -1,0 +1,222 @@
+#!/usr/bin/python3 -I
+# Installed root-owned as /usr/local/sbin/scribus-install-update by the Scribus
+# .deb, together with a sudoers entry that lets ONE account run it, and only
+# it, without a password. The update server pushes with it:
+#
+#   sudo -n /usr/local/sbin/scribus-install-update <latest.json> <scribus.deb>
+#
+# It runs as root on files an ordinary account hands it, so it trusts neither.
+# Both are copied into a root-only directory first and everything is checked
+# on the copies. A .deb is installed only when ALL of this holds, the same
+# rules the built-in updater applies (ScUpdateClient):
+#
+#   - latest.json carries a valid Ed25519 signature over
+#     "scribus-update-v1\n<version>\n<url>\n<sha256>\n" for the release public
+#     key this build was made with (SCRIBUS_UPDATE_PUBKEY, compiled in below);
+#   - the .deb has exactly that sha256;
+#   - the .deb is the package "scribus" in exactly that version;
+#   - that version is not older than the installed one;
+#   - Scribus is not running on this PC.
+#
+# Afterwards /etc/scribus/update.conf is pointed at the server named in the
+# SIGNED url, so the caller cannot redirect a PC to a server of its choosing.
+#
+# Exit status: 0 installed or already installed, 2 usage, 3 not verified,
+# 4 Scribus is running, 5 older than installed, 6 dpkg failed.
+import base64, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+from urllib.parse import urlsplit
+
+PUBKEY = "@SCRIBUS_UPDATE_PUBKEY@"
+CONF = "/etc/scribus/update.conf"
+ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "DEBIAN_FRONTEND": "noninteractive"}
+MAX_DEB = 1 << 30
+MAX_JSON = 1 << 16
+
+
+# Ed25519 verification (RFC 8032, section 6) in plain Python. Not the openssl
+# command: "pkeyutl -rawin", which Ed25519 needs, only exists from OpenSSL 3.0,
+# and office PCs on an older Debian do not have it. Verifying uses public
+# values only, so the timing of this code gives nothing away.
+_P = 2**255 - 19
+_Q = 2**252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _add(a, b):
+    A = (a[1] - a[0]) * (b[1] - b[0]) % _P
+    B = (a[1] + a[0]) * (b[1] + b[0]) % _P
+    C = 2 * a[3] * b[3] * _D % _P
+    Dd = 2 * a[2] * b[2] % _P
+    E, F, G, H = B - A, Dd - C, Dd + C, B + A
+    return (E * F % _P, G * H % _P, F * G % _P, E * H % _P)
+
+
+def _mul(s, pt):
+    acc = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            acc = _add(acc, pt)
+        pt = _add(pt, pt)
+        s >>= 1
+    return acc
+
+
+def _recover_x(y, sign):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * pow(_D * y * y + 1, _P - 2, _P) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P != 0:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _P - x
+    return x
+
+
+def _decompress(raw):
+    y = int.from_bytes(raw, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _recover_x(y, sign)
+    return None if x is None else (x, y, 1, x * y % _P)
+
+
+def ed25519_verify(public, message, signature):
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    A = _decompress(public)
+    R = _decompress(signature[:32])
+    s = int.from_bytes(signature[32:], "little")
+    if A is None or R is None or s >= _Q:
+        return False
+    gy = 4 * pow(5, _P - 2, _P) % _P
+    gx = _recover_x(gy, 0)
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _Q
+    left = _mul(s, (gx, gy, 1, gx * gy % _P))
+    right = _add(R, _mul(h, A))
+    return (left[0] * right[2] - right[0] * left[2]) % _P == 0 and (left[1] * right[2] - right[1] * left[2]) % _P == 0
+
+
+def stop(code, message):
+    print("scribus-install-update: " + message, file=sys.stderr)
+    sys.exit(code)
+
+
+def run(args, **kw):
+    return subprocess.run(args, env=ENV, stdin=subprocess.DEVNULL, capture_output=True, text=True, **kw)
+
+
+def copy_in(src, dst, limit):
+    # O_NOFOLLOW: the caller's path must be the file itself, not a link to
+    # something only root can read.
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        stop(3, "cannot open %s: %s" % (src, e.strerror))
+    with os.fdopen(fd, "rb") as f, open(dst, "wb") as out:
+        size = 0
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            size += len(chunk)
+            if size > limit:
+                stop(3, "%s is larger than expected" % src)
+            out.write(chunk)
+
+
+def installed_version():
+    r = run(["/usr/bin/dpkg-query", "-W", "-f=${Status}|${Version}", "scribus"])
+    if r.returncode != 0 or not r.stdout.startswith("install ok installed|"):
+        return ""
+    return r.stdout.split("|", 1)[1]
+
+
+def main():
+    if len(sys.argv) != 3:
+        stop(2, "usage: scribus-install-update <latest.json> <scribus.deb>")
+    if os.geteuid() != 0:
+        stop(2, "must run as root (sudo -n /usr/local/sbin/scribus-install-update ...)")
+    if not PUBKEY or PUBKEY.startswith("@"):
+        stop(3, "this build has no release public key; nothing can be verified")
+
+    work = tempfile.mkdtemp(prefix="scribus-install-", dir="/var/tmp")   # 0700, root
+    try:
+        manifest = os.path.join(work, "latest.json")
+        deb = os.path.join(work, "scribus.deb")
+        copy_in(sys.argv[1], manifest, MAX_JSON)
+        copy_in(sys.argv[2], deb, MAX_DEB)
+
+        try:
+            obj = json.load(open(manifest, encoding="utf-8"))
+            version, url = str(obj["version"]), str(obj["url"])
+            sha, sig = str(obj["sha256"]).lower(), base64.b64decode(obj["signature"], validate=True)
+            key = base64.b64decode(PUBKEY, validate=True)
+        except Exception:
+            stop(3, "latest.json is not a signed Scribus update manifest")
+        if not re.fullmatch(r"[0-9A-Za-z.+~-]{1,64}", version) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+            stop(3, "latest.json has an invalid version or sha256")
+        if len(key) != 32 or len(sig) != 64:
+            stop(3, "the public key or the signature has the wrong length")
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not re.fullmatch(r"[0-9A-Za-z.\-]+(:[0-9]{1,5})?", parts.netloc):
+            stop(3, "latest.json has an invalid url")
+
+        message = ("scribus-update-v1\n%s\n%s\n%s\n" % (version, url, sha)).encode()
+        if not ed25519_verify(key, message, sig):
+            stop(3, "the signature in latest.json does not verify with the release key of this build")
+
+        h = hashlib.sha256()
+        with open(deb, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != sha:
+            stop(3, "the .deb does not have the signed sha256")
+
+        r = run(["/usr/bin/dpkg-deb", "-f", deb, "Package", "Version"])
+        fields = dict(line.split(": ", 1) for line in r.stdout.splitlines() if ": " in line)
+        if r.returncode != 0 or fields.get("Package") != "scribus" or fields.get("Version") != version:
+            stop(3, "the .deb is not scribus %s" % version)
+
+        old = installed_version()
+        if old and old != version:
+            if run(["/usr/bin/dpkg", "--compare-versions", version, "gt", old]).returncode != 0:
+                stop(5, "%s is older than the installed %s" % (version, old))
+        if run(["/usr/bin/pgrep", "-x", "scribus.bin"]).returncode == 0:
+            stop(4, "Scribus is running on this PC; close it first")
+
+        if old != version:
+            # --force-confold: a locally edited /etc/scribus/update.conf is kept
+            # without a question nobody is there to answer.
+            r = run(["/usr/bin/dpkg", "--force-confold", "-i", deb])
+            if r.returncode != 0 or installed_version() != version:
+                sys.stderr.write(r.stdout[-2000:] + r.stderr[-2000:])
+                stop(6, "dpkg -i failed")
+
+        origin = "%s://%s" % (parts.scheme, parts.netloc)
+        lines, seen = [], False
+        if os.path.exists(CONF):
+            for line in open(CONF, encoding="utf-8", errors="replace").read().splitlines():
+                if line.startswith("url="):
+                    if not seen:
+                        lines.append("url=" + origin)
+                    seen = True
+                else:
+                    lines.append(line)
+        if not seen:
+            lines.append("url=" + origin)
+        os.makedirs(os.path.dirname(CONF), exist_ok=True)
+        tmp = CONF + ".new"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, CONF)
+
+        print("scribus %s -> %s, update url %s" % (old or "none", version, origin))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+main()
