@@ -7542,16 +7542,41 @@ void PageItem::restoreCornerRadius(SimpleState *state, bool isUndo)
 		m_roundedCornerRadius = state->getDouble("OLD_RADIUS");
 	else
 		m_roundedCornerRadius = state->getDouble("NEW_RADIUS");
+	const FPointArray oldShape = PoLine.copy();
 	Selection tmpSelection = *(doc()->m_Selection);
 	doc()->m_Selection->clear();
 	doc()->m_Selection->addItem(this);
 	doc()->setFrameRounded();
 	*(doc()->m_Selection) = tmpSelection;
+	// Suneer: the contour line and the text follow the outline back.
+	suneerShapeChanged(oldShape);
+}
+
+void PageItem::suneerShapeChanged(const FPointArray& oldShape)
+{
+	// A contour line that still equals the old outline was never edited by
+	// hand: it is the outline, so it follows. An edited one is the user's.
+	bool contourFollows = ContourLine.isEmpty() || ContourLine.size() == oldShape.size();
+	for (int i = 0; contourFollows && i < ContourLine.size(); ++i)
+		contourFollows = (ContourLine.at(i) == oldShape.at(i));
+	if (contourFollows)
+		ContourLine = PoLine.copy();
+	if (isTextFrame())
+		asTextFrame()->invalidateLayout(true);
+	else
+		invalidateLayout();
+	// Text of other frames that flows around this item, or around its group.
+	PageItem* outer = this;
+	while (outer->isGroupChild() && outer->Parent)
+		outer = outer->Parent;
+	outer->checkTextFlowInteractions(true);
+	update();
 }
 
 void PageItem::restoreCornerRadii(SimpleState *state, bool isUndo)
 {
 	const QString p = isUndo ? QStringLiteral("OLD_") : QStringLiteral("NEW_");
+	const FPointArray oldShape = PoLine.copy();
 	m_cornerRadiusTL = state->getDouble(p + "TL");
 	m_cornerRadiusTR = state->getDouble(p + "TR");
 	m_cornerRadiusBL = state->getDouble(p + "BL");
@@ -7563,6 +7588,7 @@ void PageItem::restoreCornerRadii(SimpleState *state, bool isUndo)
 		SetFrameRound();
 	else
 		SetRectFrame();
+	suneerShapeChanged(oldShape);
 	m_Doc->setRedrawBounding(this);
 	m_Doc->regionsChanged()->update(getRedrawBounding(1.0));
 }
@@ -10171,6 +10197,59 @@ QRectF PageItem::getEndArrowOldBoundingRect() const
 	return arrowRect;
 }
 
+// Suneer: a group's flow outline is its rectangle, whatever is inside. When a
+// child with rounded corners sits at the edge of the group, the rectangle
+// sticks out past the curve and text keeps away from a corner that is not
+// there. This returns the parts of the group rectangle that lie between such a
+// child's bounding box and its real outline AND reach the group's edge - the
+// corner cut-outs - so the caller can take them away. Cut-outs between two
+// children inside the group are left alone: text must not run into the group.
+static QRegion suneerGroupCornerCutouts(const PageItem* group, const QTransform& groupToCanvas, const QRegion& groupRegion)
+{
+	QRegion cutouts;
+	const PageItem_Group* g = dynamic_cast<const PageItem_Group*>(group);
+	if (!g || g->groupWidth <= 0.0 || g->groupHeight <= 0.0)
+		return cutouts;
+	for (const PageItem* child : g->groupItemList)
+	{
+		if (!child || child->isGroup() || child->isLine() || child->Clip.size() < 3)
+			continue;
+		if (QRegion(child->Clip).rectCount() <= 1)
+			continue;   // a plain rectangle has no corner to cut
+		QTransform toCanvas;
+		toCanvas.translate(child->gXpos, child->gYpos);
+		toCanvas.rotate(child->rotation());
+		toCanvas = toCanvas * QTransform::fromScale(group->width() / g->groupWidth, group->height() / g->groupHeight) * groupToCanvas;
+		const double w = child->width(), h = child->height();
+		const QRegion shape(toCanvas.map(child->Clip));
+		// Each quadrant, and the same quadrant reaching 2 pt past the child's two
+		// outer sides. A region made from a polygon leaves out its last pixel
+		// row and column, so the exact quadrant would leave a hair of the group
+		// rectangle standing along the edge - and the wrap distance then turns
+		// that hair into a bar that splits every line passing the corner.
+		const double e = 2.0;
+		const QRectF quadrants[4] = { QRectF(0, 0, w / 2, h / 2), QRectF(w / 2, 0, w / 2, h / 2),
+		                              QRectF(0, h / 2, w / 2, h / 2), QRectF(w / 2, h / 2, w / 2, h / 2) };
+		const QRectF reaching[4]  = { QRectF(-e, -e, w / 2 + e, h / 2 + e), QRectF(w / 2, -e, w / 2 + e, h / 2 + e),
+		                              QRectF(-e, h / 2, w / 2 + e, h / 2 + e), QRectF(w / 2, h / 2, w / 2 + e, h / 2 + e) };
+		for (int q = 0; q < 4; ++q)
+		{
+			const QRegion corner = QRegion(toCanvas.map(QPolygonF(quadrants[q])).toPolygon()).subtracted(shape);
+			if (corner.isEmpty())
+				continue;
+			QRegion probe;
+			for (const QRect& r : corner)
+				probe += r.adjusted(-2, -2, 2, 2);
+			if (probe.subtracted(groupRegion).isEmpty())
+				continue;   // a corner between two children, inside the group
+			// Only around the rounded corner itself, not along the whole side.
+			const QRect around = corner.boundingRect().adjusted(-3, -3, 3, 3);
+			cutouts += QRegion(toCanvas.map(QPolygonF(reaching[q])).toPolygon()).subtracted(shape).intersected(around);
+		}
+	}
+	return cutouts;
+}
+
 QRegion PageItem::textInteractionRegion(double xOffset, double yOffset) const
 {
 	QRegion res;
@@ -10261,6 +10340,8 @@ QRegion PageItem::textInteractionRegion(double xOffset, double yOffset) const
 		}
 		else
 			res = QRegion(pp.map(Clip));
+		if (isGroup())
+			res = res.subtracted(suneerGroupCornerCutouts(this, pp, res));
 	}
 
 	// Suneer: inflate the wrap region by the item's wrap offsets so image

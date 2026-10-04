@@ -1419,11 +1419,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 		if (!doc) return;
 		double unitRatio = doc->unitRatio();
+		QHash<PageItem*, FPointArray> oldShapes;
 		for (int i = 0; i < sel()->count(); ++i)
 		{
 			PageItem* item = sel()->itemAt(i);
 			if (item && m_groupActive && item->isLine())
 				continue;   // a rounded corner would turn the line into a shape
+			if (item)
+				oldShapes.insert(item, item->PoLine.copy());
 			if (item)
 			{
 				// This spin means "every corner this much". Individual radii
@@ -1448,6 +1451,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		}
 		else
 			doc->setFrameRounded();
+		// The outline changed: text inside and text flowing around it must follow now.
+		for (auto it = oldShapes.constBegin(); it != oldShapes.constEnd(); ++it)
+			it.key()->suneerShapeChanged(it.value());
 		doc->changed();
 		doc->changedPagePreview();
 		doc->regionsChanged()->update(QRect());
@@ -3669,6 +3675,10 @@ void SuneerControlBar::onTextPadReset()
 			else
 				item->setWrapOffsets(0, 0, 0, 0);       // external wrap boundary
 		}
+		// The setters record undo but do not re-lay-out; without this the new
+		// distance only showed after something else touched the frame.
+		if (internal && item->isTextFrame())
+			item->asTextFrame()->invalidateLayout(true);
 		item->update();
 	}
 	if (padTransaction)
@@ -3707,6 +3717,10 @@ void SuneerControlBar::onTextPadAllChanged(double delta)
 				qMax(0.0, item->wrapOffsetBottom() + step),
 				qMax(0.0, item->wrapOffsetLeft()   + step),
 				qMax(0.0, item->wrapOffsetRight()  + step));
+		// The setters record undo but do not re-lay-out; without this the new
+		// distance only showed after something else touched the frame.
+		if (internal && item->isTextFrame())
+			item->asTextFrame()->invalidateLayout(true);
 		item->update();
 	}
 	if (padTransaction)
@@ -3748,6 +3762,10 @@ void SuneerControlBar::onTextPadSideChanged(int side, double delta)
 			else if (side == 3) r = qMax(0.0, r + step);
 			item->setWrapOffsets(t, b, l, r);       // external wrap boundary
 		}
+		// The setters record undo but do not re-lay-out; without this the new
+		// distance only showed after something else touched the frame.
+		if (internal && item->isTextFrame())
+			item->asTextFrame()->invalidateLayout(true);
 		item->update();
 	}
 	if (padTransaction)
@@ -4743,6 +4761,7 @@ void SuneerControlBar::applyCornerRadius()
 		if (!item) continue;
 		if (m_groupActive && item->isLine())
 			continue;   // a rounded corner would turn the line into a shape
+		const FPointArray oldShape = item->PoLine.copy();
 
 		if (tl == tr && tr == bl && bl == br)
 		{
@@ -4760,6 +4779,8 @@ void SuneerControlBar::applyCornerRadius()
 			item->setCornerRadii(tl, tr, bl, br);
 			item->SetFrameRound();
 		}
+		// The outline changed: text inside and text flowing around it must follow now.
+		item->suneerShapeChanged(oldShape);
 		item->update();
 		doc->setRedrawBounding(item);
 	}

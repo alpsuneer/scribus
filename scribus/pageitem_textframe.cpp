@@ -112,6 +112,125 @@ struct SpanInfo {
 // spanInfoList is per-layout, cleared at start of each layout() call
 static thread_local QList<SpanInfo> s_spanInfoList;
 
+// ── Suneer: text distances inside a frame that is not a rectangle ──────────
+// Layout applies the four text distances as a rectangle (column left/right,
+// first/last line) and then only keeps lines inside the frame's real outline.
+// On a rounded corner that leaves the text touching the curve: the distance
+// exists on the straight sides and is zero along the arc.
+//
+// For such a frame the area text may use is the outline moved INWARD by the
+// distances: every point closer to the outline than the distance on that side
+// is taken away. With four equal distances this is the true inward offset (a
+// constant gap measured across the curve); with unequal ones the gap blends
+// from one side's distance to the next around the corner. A plain rectangle
+// is left exactly as it was - there the rectangle of distances is already
+// right, and no existing page may move.
+static bool suneerNeedsInsetShape(const PageItem_TextFrame* frame, double dist[4])
+{
+	const double lineCorr = (frame->lineColor() != CommonStrings::None) ? frame->lineWidth() / 2.0 : 0.0;
+	dist[0] = frame->textToFrameDistLeft();
+	dist[1] = frame->textToFrameDistRight();
+	dist[2] = frame->textToFrameDistTop();
+	dist[3] = frame->textToFrameDistBottom();
+	bool any = false;
+	for (int i = 0; i < 4; ++i)
+	{
+		if (dist[i] > 0.0)
+		{
+			dist[i] += lineCorr;
+			any = true;
+		}
+		else
+			dist[i] = 0.0;
+	}
+	if (!any || frame->Clip.size() < 3)
+		return false;
+	return QRegion(frame->Clip).rectCount() > 1;   // one rectangle = a plain frame
+}
+
+static QPolygonF suneerConvexHull(QList<QPointF> pts)
+{
+	std::sort(pts.begin(), pts.end(), [](const QPointF& a, const QPointF& b) {
+		return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+	});
+	auto cross = [](const QPointF& o, const QPointF& a, const QPointF& b) {
+		return (a.x() - o.x()) * (b.y() - o.y()) - (a.y() - o.y()) * (b.x() - o.x());
+	};
+	QList<QPointF> hull;
+	for (int pass = 0; pass < 2; ++pass)
+	{
+		const int start = hull.size();
+		for (int i = 0; i < pts.size(); ++i)
+		{
+			const QPointF& p = pass == 0 ? pts.at(i) : pts.at(pts.size() - 1 - i);
+			while (hull.size() >= start + 2 && cross(hull.at(hull.size() - 2), hull.last(), p) <= 0)
+				hull.removeLast();
+			hull.append(p);
+		}
+		hull.removeLast();
+	}
+	return QPolygonF(hull);
+}
+
+static QRegion suneerInsetShapeRegion(const PageItem_TextFrame* frame, const double dist[4])
+{
+	// Layout runs on every keystroke; the outline and the distances rarely change.
+	struct Entry { QPolygon clip; double d[4]; QRegion region; };
+	static thread_local QList<Entry> cache;
+	for (const Entry& e : std::as_const(cache))
+		if (e.d[0] == dist[0] && e.d[1] == dist[1] && e.d[2] == dist[2] && e.d[3] == dist[3] && e.clip == frame->Clip)
+			return e.region;
+
+	const double l = dist[0], r = dist[1], t = dist[2], b = dist[3];
+	// Offsets (point minus outline point) that are too close: up to l to the
+	// right of the outline, r to its left, t below it, b above it - a quarter
+	// ellipse per quadrant, so equal distances give a circle.
+	QList<QPointF> stamp;
+	const int steps = 6;
+	const double ax[4] = {  l, -r, -r,  l };
+	const double ay[4] = {  t,  t, -b, -b };
+	for (int q = 0; q < 4; ++q)
+	{
+		for (int i = 0; i <= steps; ++i)
+		{
+			const double a = (M_PI / 2.0) * i / steps;
+			// quadrants 0 and 2 run x-axis -> y-axis, 1 and 3 the other way, so the stamp is one loop
+			const double c = (q % 2 == 0) ? cos(a) : sin(a);
+			const double s = (q % 2 == 0) ? sin(a) : cos(a);
+			stamp.append(QPointF(ax[q] * c, ay[q] * s));
+		}
+	}
+
+	QRegion band;
+	const QList<QPolygonF> outlines = frame->PoLine.toQPainterPath(true).toSubpathPolygons();
+	for (const QPolygonF& outline : outlines)
+	{
+		const int n = outline.size();
+		for (int i = 0; i < n; ++i)
+		{
+			const QPointF a = outline.at(i);
+			const QPointF c = outline.at((i + 1) % n);
+			QList<QPointF> pts;
+			pts.reserve(stamp.size() * 2);
+			for (const QPointF& s : std::as_const(stamp))
+			{
+				pts.append(a + s);
+				pts.append(c + s);
+			}
+			band += QRegion(suneerConvexHull(pts).toPolygon(), Qt::WindingFill);
+		}
+	}
+	Entry e;
+	e.clip = frame->Clip;
+	for (int i = 0; i < 4; ++i)
+		e.d[i] = dist[i];
+	e.region = QRegion(frame->Clip).subtracted(band);
+	cache.prepend(e);
+	while (cache.size() > 8)
+		cache.removeLast();
+	return e.region;
+}
+
 QRegion PageItem_TextFrame::calcAvailableRegion()
 {
 	// Recursion guard — span + wrap infinite loop prevention
@@ -122,6 +241,9 @@ QRegion PageItem_TextFrame::calcAvailableRegion()
 	struct DepthGuard { ~DepthGuard() { --calcDepth; } } guard;
 
 	QRegion result(this->Clip);
+	double textDist[4];
+	if (suneerNeedsInsetShape(this, textDist))
+		result = suneerInsetShapeRegion(this, textDist);
 	if (isEmbedded && !isGroupChild())
 		return result;
 
@@ -422,6 +544,12 @@ struct LineControl {
 
 	double   maxShrink { 0.0 };
 	double   maxStretch { 0.0 };
+	// Suneer: set for a non-rectangular frame with text distances. endOfLine()
+	// then returns the last position that fits, to a quarter point, instead of
+	// the first coarse step that does not - otherwise the gap along a curve
+	// varies by up to the step. Off for every other frame: their line ends
+	// must not move.
+	bool     preciseEnd { false };
 	ScribusDoc* doc { nullptr };
 	ITextContext* context { nullptr };
 
@@ -667,6 +795,30 @@ struct LineControl {
 		/* BINARY SEARCH DISABLED FOR TEST */
 		double Interval = qMax(4.0, (maxX - endX2) / 100.0);
 		int endOfLineLimit = 0;
+		if (preciseEnd)
+		{
+			auto fits = [&](double x) {
+				pt.moveTopLeft(QPoint(static_cast<int>(ceil(x + morespace)), yAsc));
+				return regionContainsRect(shape, pt);
+			};
+			if (!fits(endX2))
+				return qMin(endX2, maxX);
+			double good = endX2;
+			while (good + Interval < maxX && fits(good + Interval) && ++endOfLineLimit < 500)
+				good += Interval;
+			if (fits(maxX))
+				return maxX;
+			double bad = qMin(good + Interval, maxX);
+			while (bad - good > 0.25)
+			{
+				const double mid = (good + bad) / 2.0;
+				if (fits(mid))
+					good = mid;
+				else
+					bad = mid;
+			}
+			return qMin(good, maxX);
+		}
 		do
 		{
 			int xP = static_cast<int>(ceil(endX2 + morespace));
@@ -1408,6 +1560,10 @@ void PageItem_TextFrame::layout()
 		// std::sort(glyphClusters.begin(), glyphClusters.end(), logicalGlyphRunComp);
 
 		LineControl current(m_width, m_height, m_textDistanceMargins, lineCorr, m_Doc, context, columnWidth(), m_columnGap);
+		{
+			double textDist[4];
+			current.preciseEnd = suneerNeedsInsetShape(this, textDist);
+		}
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();

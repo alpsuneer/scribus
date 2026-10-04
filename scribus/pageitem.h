@@ -584,6 +584,12 @@ public: // Start public functions
 	/*! \brief Sets all four corners in one undoable step. The shape is not
 	rebuilt here; call SetFrameRound() (or updateClip()) afterwards. */
 	void setCornerRadii(double tl, double tr, double bl, double br);
+	//! Call after the frame's outline was rebuilt (corner radius changed).
+	//! \a oldShape is PoLine as it was before. The contour line follows the
+	//! new outline unless it had been edited by hand, the frame's own text is
+	//! laid out again, and so is the text of every frame that flows around
+	//! this item or the group it is in.
+	void suneerShapeChanged(const FPointArray& oldShape);
 	// PDF bookmark
 	bool isPDFBookmark() const { return isBookmark; }
 	void setIsPDFBookmark(bool val) { isBookmark = val; }

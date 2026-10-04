@@ -871,7 +871,23 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - Unchanged: the red "already used by..." warning while assigning a key (Keyboard Shortcuts, Assign
   Shortcut on styles, chains and column configs).
 
-### 40. Authors
+### 40. Text keeps its distance from rounded corners
+- A text frame with rounded corners (one radius for all, or individual corners from the control bar)
+  applied the text distances (inset) only on its straight sides; along the curve the text ran right
+  up to the edge. The text area is now the frame's real outline moved inward by the text distances,
+  so lines are shortened near a curve and keep the same gap there. Works with columns.
+  A plain rectangular frame is laid out exactly as before.
+- Changing a corner radius, or the inset with the control bar's **Internal** Gap buttons, now
+  re-flows the text at once. Before, the old layout stayed until something else touched the frame.
+- Text flowing **around** a rounded frame already followed the curve in "frame shape" mode; it now
+  also updates at once when a corner radius changes, and the contour line follows the new outline
+  (unless you edited the contour by hand).
+- Text flowing around a **group** follows the rounded corners of a frame that sits at the group's
+  edge, instead of the group's plain rectangle.
+- Note: existing pages with rounded or other non-rectangular text frames that have an inset will
+  re-flow slightly when opened, because the inset now applies along the curve too.
+
+### 41. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

@@ -2042,3 +2042,45 @@ same day: **the server does the installs**, the laptop only releases.
   (the build cache has `SCRIBUS_PUSH_USER`) and an `update.conf` with the new URL.
 - Not exercised: `setup-push-server.sh` (needs the server's sudo password), nginx and its
   allow/deny, `--copy-keys`, `--first`, a push to a real PC, the rsync upload in release.sh.
+
+## Text distances and wrap on rounded frames (2026-10-04)
+
+- **What the corner radius changes.** Both the uniform radius and the individual radii rebuild
+  `PoLine` and `Clip` in `PageItem::SetFrameRound()`; layout (`calcAvailableRegion()` starts from
+  `QRegion(Clip)`) and "frame shape" wrap (`textInteractionRegion()`) therefore always saw the real
+  outline. `ContourLine` was NOT rebuilt (`updateClip()` only fills it when empty), and nothing
+  invalidated any layout - so contour-mode wrap stayed rectangular and nothing moved until another
+  edit. Those two were the "text ignores the curve" part.
+- **The inset was a rectangle.** `LineControl` applies the four text distances as column left/right
+  and first/last line; the outline only clips. On a curve that is a zero gap. Fix, in
+  `pageitem_textframe.cpp`: for a frame whose `QRegion(Clip)` is more than one rectangle and that
+  has a text distance, `calcAvailableRegion()` starts from `suneerInsetShapeRegion()` = the outline
+  minus a band around it (each outline segment swept with a quarter-ellipse stamp: l/r/t/b + half
+  the line width; equal distances = a true inward offset). Small LRU cache keyed by `Clip` + the
+  four distances, because layout runs per keystroke.
+- **A plain rectangle takes the old path, bit for bit** (`rectCount() <= 1`). Existing pages with
+  non-rectangular text frames that have an inset DO re-flow.
+- **`LineControl::preciseEnd`**: `endOfLine()` steps 4 pt and returns the first position that does
+  NOT fit, so a line can overshoot by up to the step; fine against a wrap object, visible as an
+  uneven gap along a curve. With `preciseEnd` (set only for the frames above) it bisects to 0.25 pt
+  and returns the last position that fits. Every other frame keeps the stock search - changing it
+  globally would move line ends on every page with an image wrap.
+- **`PageItem::suneerShapeChanged(oldShape)`** (new, non-virtual): contour follows the outline
+  unless hand-edited, own layout invalidated, `checkTextFlowInteractions(true)` on the item or its
+  outermost group. Called from the control bar's two corner-radius slots and from both corner-radius
+  undo paths (`restoreCornerRadius`, `restoreCornerRadii`). Without the undo calls the contour
+  stayed rounded after Ctrl+Z (caught by the group suite).
+- **Group wrap** (`suneerGroupCornerCutouts` in pageitem.cpp): the group's rectangle minus the
+  corner cut-outs of direct children that reach the group's edge. The cut-out reaches 2 pt past the
+  child's outer sides: a QRegion from a polygon drops its last row/column, and the hair of group
+  rectangle left along the edge became, after the wrap distance, a bar that split every line passing
+  the corner. Nested groups' children are not looked at.
+- The setters `setTextToFrameDist*()` record undo but never invalidate; the control bar's Internal
+  Gap buttons now do. The scripter's `setTextDistances()` still does not.
+- Test: `CT_TAG=after CT_REOPEN=1 GROUPTEST_PY=../cornertest/cornertest.py ~/scribus-crashlogs/grouptest/run.sh`
+  then `python3 ~/scribus-crashlogs/cornertest/measure.py before after`. The layout fingerprint
+  rounds to 0.01 pt (a distance that went 3 -> 5 -> 3 mm comes back as 8.503799999999998).
+- Not exercised: left/top rounded corners, uniform radius and other shapes (ellipse, polygon) in the
+  new inset path, rotated frames, contour-line and image-clip wrap modes, vertical alignment in such
+  frames, linked frame chains, master pages, a real production page, print, the IM path.
+
