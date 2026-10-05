@@ -946,7 +946,18 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   is greyed: press **OK** in the Nodes palette (or Esc) first, then Ctrl+Z. The **Auto Contour**
   button is one undo step too, and its contour is now really restored.
 
-### 45. Authors
+### 45. Design Style icons work on every PC
+- Icon ഇനി file പേരുകൊണ്ട് സൂക്ഷിക്കുന്നു (`style-1.png`), മുഴുവൻ path അല്ല
+- നോക്കുന്ന ക്രമം: `~/.local/share/scribus/design-icons/` → `/usr/local/share/scribus/design-icons/` → `/usr/share/scribus/design-icons/`
+- പഴയ conf-ലെ ഇല്ലാത്ത path (`/home/s1/Documents/style-1.png`) പേരുകൊണ്ട് കണ്ടെത്തും — തിരുത്തേണ്ട
+- 14 default icons .deb-ൽ തന്നെ ഉണ്ട്
+- Upload Icon: file `~/.local/share/scribus/design-icons/`-ലേക്ക് copy ചെയ്യും; അതേ പേരിൽ വേറെ ചിത്രം ഉണ്ടെങ്കിൽ ചോദിക്കും
+- Style Settings-ൽ icon കണ്ടെത്തിയ path കാണിക്കും
+- Export Design icon ചിത്രങ്ങളും കൂടെ കൊണ്ടുപോകും; Import Design അവ തിരികെ ഇടും
+- Icon കിട്ടിയില്ലെങ്കിൽ button-ൽ `?` കാണിക്കും
+- Settings files ഇരിക്കുന്നത് `~/.config/Scribus/`-ൽ (`SuneerDesignStyle.conf`, `SuneerColumnConfig.conf`)
+
+### 46. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

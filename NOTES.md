@@ -248,6 +248,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
 | Column Style config → Design Style — per-config "Design Style" link applied after the columns, one undo step, missing-style status message, rename/remove follow-through, "Link Config N → style-N", export/import field. Verified by the user | `c0130ad` | feature/ctp-output |
+| Design Style icons stored by file name — looked up in `~/.local/share/scribus/design-icons/`, then `/usr/local/share/…`, `/usr/share/…`; 14 default icons shipped (`resources/design-icons/`); Upload Icon copies into the user folder; Export/Import Design embeds the pictures; `?` placeholder for a missing icon. Verified by the user on the laptop | `git log -- resources/design-icons` | feature/ctp-output |
 | Paragraph Styles panel — per-style keyboard shortcut (right-click / ⌨ button), stored in `ParagraphStyle::shortcut()` (the Style Manager field, so in the .sla), conflict check with Replace/Cancel, export/import JSON. Verified by the user | `ea52dc3` | feature/ctp-output |
 | Default workspace layout, Faircode splash, title-bar build stamp | `3590de5`, `f57058a`, `09c2b02` | |
 | Paragraph Shading popup on the control bar — local override, never edits the style; embeds the Style Manager's `SMPShadeWidget`; `itemSelection_ResetParagraphShading()` ⚠ | `7a02607` | feature/paragraph-shading-popup |
@@ -1415,6 +1416,19 @@ to test, since a bad matrix could itself explain "no visible difference".
   applies the design with its columns step skipped, and `m_applyingDesignStyle` /
   `m_inColumnConfig` guard the other direction; remove either guard and Ctrl+Alt+N
   recurses.
+- **The panel's QSettings files live in `~/.config/Scribus/`, not `~/.config/scribus/Scribus/`.**
+  `QSettings("Scribus", "SuneerDesignStyle")` (also `SuneerColumnConfig`,
+  `ParagraphStyleShortcuts`, `SuneerImageTools`) resolves to the capital-S folder
+  directly under `~/.config`. An installer that copied them under the lowercase
+  prefs folder shipped Design Styles nobody read, and a check against that copy
+  looked fine. Design Style icons are stored by file name (`resolveDesignIcon()`),
+  so a conf carried to another PC needs no path rewriting; an old absolute path
+  that no longer exists falls back to its file name.
+- **Style Settings reloads `~/.config/scribus/scribus_design_styles.json` over the
+  conf every time it opens**, when that file exists (pre-existing, not changed).
+  Editing the conf by hand does nothing on a machine that has it.
+- **Saving Style Settings with no document open blanks p1–p8** (pre-existing): the
+  dropdowns list only the open document's paragraph styles.
 - **Design/Column Style paragraph styles are applied by attributes, not by name**
   (pre-existing, not changed). `itemText.applyStyle(pos, namedStyle)` copies the
   named style's attributes; `ParagraphStyle::applyStyle` only sets the parent when

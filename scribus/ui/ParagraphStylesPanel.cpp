@@ -48,12 +48,16 @@
 #include <QSettings>
 #include <QDirIterator>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QSet>
+#include <QStandardPaths>
+#include <QUrl>
 #include "commonstrings.h"
 #include "resourcecollection.h"
 #include "scribusstructs.h"
 #include "prefsmanager.h"
 #include "scraction.h"
+#include "scpaths.h"
 #include "ui/stylemanager.h"
 #include "ui/scshortcutregistry.h"
 #include "styles/charstyle.h"
@@ -202,6 +206,225 @@ struct SuneerColumnConfigEntry {
 	bool autoFit {false};
 	QString designStyle;     // Design Style (by name) applied after the columns; empty = None
 };
+
+// ---- Design Style icons ----------------------------------------------------
+// SuneerDesignStyle.conf stores an icon by file name only ("style-1.png"), so
+// a conf, an export file or a profile copied from another PC keeps working.
+// The file is looked up in the user's icon folder first, then in the folders
+// the package installs to. An absolute path written by an older build is used
+// while it exists; when it does not, its file name is looked up the same way.
+
+static QString designIconUserDir()
+{
+	return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/scribus/design-icons";
+}
+
+static QStringList designIconDirs()
+{
+	QStringList dirs;
+	dirs << QDir::cleanPath(designIconUserDir())
+	     << QStringLiteral("/usr/local/share/scribus/design-icons")
+	     << QStringLiteral("/usr/share/scribus/design-icons")
+	     << QDir::cleanPath(ScPaths::instance().shareDir() + "/design-icons");
+	dirs.removeDuplicates();
+	return dirs;
+}
+
+// The stored value as written by any build: older ones saved the label text
+// "No icon selected" for a style without an icon.
+static QString cleanDesignIconValue(const QString& value)
+{
+	QString stored = value.trimmed();
+	if (stored == QLatin1String("No icon selected"))
+		stored.clear();
+	if (stored.startsWith(QLatin1String("file://")))
+		stored = QUrl(stored).toLocalFile();
+	return stored;
+}
+
+static QString designIconFileName(const QString& value)
+{
+	const QString stored = cleanDesignIconValue(value);
+	return stored.isEmpty() ? QString() : QFileInfo(stored).fileName();
+}
+
+//! Full path of the icon file for a stored value, empty when there is none.
+static QString resolveDesignIcon(const QString& value)
+{
+	const QString stored = cleanDesignIconValue(value);
+	if (stored.isEmpty())
+		return QString();
+	const QFileInfo fi(stored);
+	if (fi.isAbsolute() && fi.isFile())
+		return fi.absoluteFilePath();
+	const QString name = fi.fileName();
+	if (name.isEmpty())
+		return QString();
+	const QStringList dirs = designIconDirs();
+	for (const QString& dir : dirs)
+	{
+		const QString candidate = dir + "/" + name;
+		if (QFileInfo(candidate).isFile())
+			return candidate;
+	}
+	return QString();
+}
+
+// Shown on a Design Style button whose icon file cannot be found.
+static QIcon designIconPlaceholder()
+{
+	QPixmap pm(100, 100);
+	pm.fill(Qt::transparent);
+	QPainter p(&pm);
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(QPen(QColor(0x95, 0xa5, 0xa6), 2, Qt::DashLine));
+	p.drawRoundedRect(QRectF(6, 6, 88, 88), 6, 6);
+	QFont f = p.font();
+	f.setPixelSize(48);
+	f.setBold(true);
+	p.setFont(f);
+	p.drawText(pm.rect(), Qt::AlignCenter, QStringLiteral("?"));
+	p.end();
+	return QIcon(pm);
+}
+
+//! Icon for a stored value: null for "no icon", a placeholder when the file is missing or unreadable.
+static QIcon designIconFor(const QString& value)
+{
+	if (cleanDesignIconValue(value).isEmpty())
+		return QIcon();
+	const QString path = resolveDesignIcon(value);
+	if (path.isEmpty() || !QImageReader(path).canRead())
+		return designIconPlaceholder();
+	return QIcon(path);
+}
+
+static QString designIconToolTip(const QString& tooltip, const QString& value)
+{
+	if (cleanDesignIconValue(value).isEmpty() || !resolveDesignIcon(value).isEmpty())
+		return tooltip;
+	return tooltip + QString("\n(icon not found: %1)").arg(designIconFileName(value));
+}
+
+static bool sameFileContents(const QString& a, const QString& b)
+{
+	QFile fa(a), fb(b);
+	if (!fa.open(QIODevice::ReadOnly) || !fb.open(QIODevice::ReadOnly))
+		return false;
+	return fa.size() == fb.size() && fa.readAll() == fb.readAll();
+}
+
+//! Value Save writes for an icon: the file name, with the file brought into
+//! the user's icon folder when it still lives somewhere else.
+static QString designIconValueToStore(const QString& value)
+{
+	const QString stored = cleanDesignIconValue(value);
+	if (stored.isEmpty())
+		return QString();
+	const QFileInfo fi(stored);
+	if (!fi.isAbsolute() || !fi.isFile())
+		return fi.fileName();
+	if (designIconDirs().contains(QDir::cleanPath(fi.absolutePath())))
+		return fi.fileName();
+	const QString dest = designIconUserDir() + "/" + fi.fileName();
+	if (QFileInfo::exists(dest))
+		return sameFileContents(stored, dest) ? fi.fileName() : stored;
+	QDir().mkpath(designIconUserDir());
+	return QFile::copy(stored, dest) ? fi.fileName() : stored;
+}
+
+//! Copy an icon the user picked into their icon folder. Returns the name to
+//! store, or an empty string when the user cancelled or the copy failed.
+static QString installDesignIcon(QWidget* parent, const QString& file)
+{
+	const QFileInfo fi(file);
+	const QString name = fi.fileName();
+	if (designIconDirs().contains(QDir::cleanPath(fi.absolutePath())))
+		return name;
+	const QString dest = designIconUserDir() + "/" + name;
+	if (QFileInfo::exists(dest))
+	{
+		if (sameFileContents(file, dest))
+			return name;
+		const auto answer = QMessageBox::question(parent, "Upload Icon",
+			QString("A different icon named \"%1\" is already in\n%2\n\n"
+			        "Replace it? Every Design Style that uses \"%1\" will show the new picture.")
+				.arg(name, designIconUserDir()),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+		if (answer != QMessageBox::Yes)
+			return QString();
+		QFile::remove(dest);
+	}
+	QDir().mkpath(designIconUserDir());
+	if (!QFile::copy(file, dest))
+	{
+		QMessageBox::warning(parent, "Upload Icon", QString("Could not copy the icon to\n%1").arg(dest));
+		return QString();
+	}
+	return name;
+}
+
+// Style Settings shows where the icon was found; the stored name rides along
+// in a property for Save.
+static void setDesignIconLabel(QLabel* label, const QString& value)
+{
+	const QString stored = cleanDesignIconValue(value);
+	label->setProperty("iconStored", stored);
+	QString text;
+	if (stored.isEmpty())
+		text = "No icon selected";
+	else
+	{
+		text = resolveDesignIcon(stored);
+		if (text.isEmpty())
+			text = QString("%1 — not found").arg(designIconFileName(stored));
+	}
+	label->setText(text);
+	label->setToolTip(text);
+}
+
+//! One exported Design Style's icon: the name, and the picture itself so the
+//! export file brings its icons to another PC.
+static void exportDesignIcon(QJsonObject& obj, const QString& value)
+{
+	obj["iconPath"] = designIconFileName(value);
+	QFile icon(resolveDesignIcon(value));
+	if (!icon.fileName().isEmpty() && icon.open(QIODevice::ReadOnly))
+		obj["iconData"] = QString::fromLatin1(icon.readAll().toBase64());
+}
+
+//! Icon value to store for an imported Design Style; unpacks an embedded
+//! picture into the user's icon folder. \a askParent null: never overwrite.
+static QString importDesignIcon(const QJsonObject& obj, QWidget* askParent)
+{
+	const QString name = designIconFileName(obj["iconPath"].toString());
+	if (name.isEmpty() || !obj.contains("iconData"))
+		return cleanDesignIconValue(obj["iconPath"].toString());
+	const QByteArray data = QByteArray::fromBase64(obj["iconData"].toString().toLatin1());
+	if (data.isEmpty())
+		return name;
+	// Already here with the same picture (user folder or shipped): nothing to do.
+	QFile current(resolveDesignIcon(name));
+	if (!current.fileName().isEmpty() && current.open(QIODevice::ReadOnly) && current.readAll() == data)
+		return name;
+	const QString dest = designIconUserDir() + "/" + name;
+	if (QFileInfo::exists(dest))
+	{
+		if (!askParent)
+			return name;
+		const auto answer = QMessageBox::question(askParent, "Import Design Style",
+			QString("A different icon named \"%1\" is already in\n%2\n\nReplace it with the one from the import file?")
+				.arg(name, designIconUserDir()),
+			QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+		if (answer != QMessageBox::Yes)
+			return name;
+	}
+	QDir().mkpath(designIconUserDir());
+	QFile out(dest);
+	if (out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		out.write(data);
+	return name;
+}
 
 static QList<SuneerColumnConfigEntry> s_columnConfigs;
 
@@ -1212,10 +1435,10 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 		QString iconPath = dsCfg.value("iconPath").toString();
 		QString tooltip = dsCfg.value("tooltip", QString("Style %1").arg(i+1)).toString();
 		QPushButton* btn = new QPushButton(designTab);
-		if (!iconPath.isEmpty()) btn->setIcon(QIcon(iconPath));
+		btn->setIcon(designIconFor(iconPath));
 		btn->setIconSize(QSize(100, 100));
 		btn->setFixedSize(110, 110);
-		btn->setToolTip(tooltip);
+		btn->setToolTip(designIconToolTip(tooltip, iconPath));
 		btn->setStyleSheet("QPushButton { border: 2px solid #ddd; border-radius: 4px; }QPushButton:hover { border-color: #3498db; }");
 		// Apply styles on click
 		QStringList styles = dsCfg.value("styles").toStringList();
@@ -2666,7 +2889,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
                         QJsonObject obj = dsArr[i].toObject();
 
                         dsCfg.setValue("tooltip",       obj["tooltip"].toString());
-                        dsCfg.setValue("iconPath",      obj["iconPath"].toString());
+                        dsCfg.setValue("iconPath",      importDesignIcon(obj, nullptr));
                         dsCfg.setValue("styles",        obj["styles"].toVariant());
                         dsCfg.setValue("imagePosition", obj["imagePosition"].toString());
                         dsCfg.setValue("columns",       obj["columns"].toInt());
@@ -2755,7 +2978,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
             dsCfg.setArrayIndex(i);
             QJsonObject obj;
             obj["tooltip"]       = dsCfg.value("tooltip").toString();
-            obj["iconPath"]      = dsCfg.value("iconPath").toString();
+            exportDesignIcon(obj, dsCfg.value("iconPath").toString());
             obj["styles"]        = QJsonValue::fromVariant(dsCfg.value("styles"));
             obj["imagePosition"] = dsCfg.value("imagePosition").toString();
             obj["columns"]       = dsCfg.value("columns").toInt();
@@ -2839,7 +3062,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
                 dsCfg.setArrayIndex(i);
                 QJsonObject obj = dsArr[i].toObject();
                 dsCfg.setValue("tooltip",       obj["tooltip"].toString());
-                dsCfg.setValue("iconPath",      obj["iconPath"].toString());
+                dsCfg.setValue("iconPath",      importDesignIcon(obj, dlg));
                 dsCfg.setValue("styles",        obj["styles"].toVariant());
                 dsCfg.setValue("imagePosition", obj["imagePosition"].toString());
                 dsCfg.setValue("columns",       obj["columns"].toInt());
@@ -3044,7 +3267,10 @@ void ParagraphStylesPanel::openDesignStyleSettings()
         gl->addWidget(nameField, 1, 1);
         // Icon
         QPushButton* iconBtn = new QPushButton("📁 Upload Icon", grp);
-        QLabel* iconPathLabel = new QLabel(savedIcon.isEmpty() ? "No icon selected" : savedIcon, grp);
+        QLabel* iconPathLabel = new QLabel(grp);
+        setDesignIconLabel(iconPathLabel, savedIcon);
+        iconBtn->setIcon(designIconFor(savedIcon));
+        iconBtn->setIconSize(QSize(32, 32));
         iconPathLabel->setObjectName("iconPathLabel");
         iconPathLabel->setStyleSheet("color: #7f8c8d; font-size: 9pt;");
         gl->addWidget(new QLabel("Icon:"), 2, 0);
@@ -3053,15 +3279,21 @@ void ParagraphStylesPanel::openDesignStyleSettings()
         iconRow->addWidget(iconPathLabel, 1);
         gl->addLayout(iconRow, 2, 1);
         connect(iconBtn, &QPushButton::clicked, [iconBtn, iconPathLabel]() {
+            // Starts in the folder the last icon came from, on any PC.
+            static QString lastDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
             QString file = QFileDialog::getOpenFileName(
-                nullptr, "Select Icon", "/home/s1/Desktop/workflow/icon",
+                iconBtn, "Select Icon", lastDir,
                 "Images (*.png *.jpg *.svg)");
-            if (!file.isEmpty()) {
-                iconBtn->setIcon(QIcon(file));
-                iconBtn->setIconSize(QSize(32, 32));
-                iconPathLabel->setText(file);
-                iconPathLabel->setToolTip(file);
-            }
+            if (file.isEmpty())
+                return;
+            lastDir = QFileInfo(file).absolutePath();
+            // Copied into the user's icon folder; only the name is stored.
+            const QString name = installDesignIcon(iconBtn, file);
+            if (name.isEmpty())
+                return;
+            iconBtn->setIcon(designIconFor(name));
+            iconBtn->setIconSize(QSize(32, 32));
+            setDesignIconLabel(iconPathLabel, name);
         });
 
         // Paragraph styles — p1..p8 dropdowns
@@ -3218,7 +3450,7 @@ void ParagraphStylesPanel::openDesignStyleSettings()
             cfg.setArrayIndex(i);
             QGroupBox* grp = groups[i];
             QLabel* iconLbl = grp->findChild<QLabel*>("iconPathLabel");
-            if (iconLbl) cfg.setValue("iconPath", iconLbl->text());
+            if (iconLbl) cfg.setValue("iconPath", designIconValueToStore(iconLbl->property("iconStored").toString()));
             QLineEdit* nameEd = grp->findChild<QLineEdit*>("styleName");
             cfg.setValue("tooltip", nameEd ? nameEd->text() : QString("Style %1").arg(i+1));
             QList<QComboBox*> combos = grp->findChildren<QComboBox*>();
@@ -3282,10 +3514,10 @@ void ParagraphStylesPanel::refreshDesignIcons()
         QString tooltip  = dsCfg.value("tooltip", QString("Style %1").arg(i+1)).toString();
         dsCfg.endArray();
         QPushButton* btn = new QPushButton(m_designTab);
-        if (!iconPath.isEmpty()) btn->setIcon(QIcon(iconPath));
+        btn->setIcon(designIconFor(iconPath));
         btn->setIconSize(QSize(100, 100));
         btn->setFixedSize(110, 110);
-        btn->setToolTip(tooltip);
+        btn->setToolTip(designIconToolTip(tooltip, iconPath));
         btn->setStyleSheet("QPushButton { border: 2px solid #ddd; border-radius: 4px; }"
                            "QPushButton:hover { border-color: #3498db; }");
         // Read the style at click time: the settings may change again before then.

@@ -544,6 +544,7 @@ add_custom_target(uninstall
 #Add our source subdirs
 add_subdirectory(scribus)
 add_subdirectory(doc)
+add_subdirectory(resources/design-icons)
 add_subdirectory(resources/dicts)
 add_subdirectory(resources/editorconfig)
 add_subdirectory(resources/iconsets)
