@@ -1500,6 +1500,11 @@ void SuneerTextEffects::deletePieces(ScribusDoc* doc, PageItem* face)
 		deleteItem(doc, piece);
 }
 
+bool SuneerTextEffects::savedDocumentText(const QString& documentFile, QByteArray& text)
+{
+	return readDocumentText(documentFile, text);
+}
+
 void SuneerTextEffects::sweepUnusedFiles(const QString& documentFile)
 {
 	sweep(nullptr, documentFile);

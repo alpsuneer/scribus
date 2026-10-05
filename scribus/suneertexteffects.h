@@ -73,6 +73,9 @@ namespace SuneerTextEffects
 	//! Deletes the frames Bevel & Emboss put behind / over \a face. The caller owns the undo transaction.
 	void deletePieces(ScribusDoc* doc, PageItem* face);
 
+	//! Reads \a documentFile (.sla or .sla.gz) as it is on disk. False when it cannot be read.
+	bool savedDocumentText(const QString& documentFile, QByteArray& text);
+
 	//! Deletes the generated images the saved document does not use. Called when a document closes.
 	void sweepUnusedFiles(const QString& documentFile);
 }

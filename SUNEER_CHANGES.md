@@ -933,7 +933,20 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - The Phase-1 effects (extrude, stroke, shadow, gradient) are not in this build; this dialog holds
   Bevel & Emboss only.
 
-### 44. Authors
+### 44. Edge Feather/Blur can be undone
+- One **Ctrl+Z** takes back one Apply of Edge Feather (image frame, text frame "Fe" button, the
+  feather popup for shapes / several frames / a group). **Ctrl+Shift+Z** brings it back. The Action
+  History shows it as **Edge Feather/Blur**.
+- A locked frame, or a frame on a locked layer, is not changed: a message says to unlock it first.
+- The feathered picture files are not deleted at Apply (Undo needs them). The ones the saved
+  document does not use are removed when the document is closed.
+- Exporting a PDF no longer adds "Drop Shadow" steps to the Action History.
+- **Remove Background** is the same: one Ctrl+Z takes back the picture, the contour and the text
+  flow together ("Remove Background" in the Action History). It ends in contour editing, where Undo
+  is greyed: press **OK** in the Nodes palette (or Esc) first, then Ctrl+Z. The **Auto Contour**
+  button is one undo step too, and its contour is now really restored.
+
+### 45. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

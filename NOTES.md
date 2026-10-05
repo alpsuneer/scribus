@@ -2167,3 +2167,49 @@ same day: **the server does the installs**, the laptop only releases.
 - Known: Live does not survive PostScript print (white letters) - the dialog says so. Image Effects
   set on the base picture are not baked. The face moves to the top of its layer when a back frame is
   made. Grouping the face with its pieces makes the command refuse ("inside a group").
+
+## Edge Feather/Blur undo (2026-10-05, not committed until the user has tested)
+
+Code: `ui/suneercontrolbar.cpp` - `onImgEdgeFeather()` (image frame: PIL writes `<name>_feather.png`),
+`onTextEdgeFeather()` (text frame: a new image frame over it, `text_feather_<secs>.png`),
+`applyFeather()` (popup: stock soft shadow with opacity 0 on every selected item).
+
+- **Why Undo did nothing on an image frame:** the slot did `item->Pfile = output` and THEN
+  `loadPict(output)`. `PageItem::loadImage` records `OLD_IMAGE_PATH = Pfile`, so old == new and
+  Undo reloaded the same picture. Never assign `Pfile` before `loadPict`. `onImgRemoveBackground()`
+  did the same and was fixed the same way afterwards (see the next list item).
+- **Remove Background** is one transaction "Remove Background": picture, scale/offset, embedding,
+  auto contour and text flow. The contour and flow used to run from a 400 ms timer (their own undo
+  steps, and `ContourLine` was assigned with no undo at all); they run inside the transaction now and
+  the timer only switches to contour editing. `onAutoContour()` records the contour with the new
+  state `SUNEER_CONTOUR` (`ScOldNewState<FPointArray>`, inline in `PageItem::restore`) inside its own
+  "Auto Contour" transaction. Do NOT use stock `EDIT_SHAPE_OR_CONTOUR` for this: its restore calls
+  `adjustItemSize()`, which leaves `ClipEdited=1` on the frame after Undo (measured).
+- **Undo is greyed right after Remove Background**: the command ends in contour editing, and stock
+  `AppModeHelper::setFrameEditMode` disables Undo there. OK in the node palette (or Esc) first, then
+  Ctrl+Z takes it all back. Left as it is; ask before changing.
+- `SuneerAlphaWrap` writes `/tmp/scribus_alphawrap.txt`; when s1 owns it, a root-run test cannot
+  (protected_regular) and gets no contour. Run such tests with `RUNAS=s1 run.sh rembgtest.py`.
+- Each Apply is one `UndoTransaction` named "Edge Feather/Blur". In group mode `SuneerGroupUndo`
+  is the outer transaction; its new `actionName` member renames it on commit.
+- Embedded frame: the output is `/tmp/scribus_temp_*_feather.png` (derived from the temp copy), so
+  the slot sets `isInlineImage`/`isTempFile` itself (like ResizeImageDialog) instead of
+  `embedItem()`; `restoreGetImage` keeps the flags for `scribus_temp_` names.
+- Files: `s_featherFiles` (per `ScribusDoc*`, this session only). `sweepFeatherFiles()` runs in
+  `DoFileClose` and deletes a file only when the .sla on disk does not name it and no other open
+  document shows it. With "always embed" on, the saved document never names `*_feather.png`, so
+  those all go at close. Files of earlier sessions are never touched.
+- **Stock bug found on the way:** `PDFLibCore::PDF_SoftShadow...` (pdflib_core.cpp ~4277) switches
+  the shadow off and on with `setHasSoftShadow()`, which records undo. Every PDF export pushed two
+  "Drop Shadow" states per shadowed item; the next Ctrl+Z hit those. Undo is disabled around it now.
+- `m_textFeatherBtn` was connected twice (two dialogs per click): one connection removed.
+  `m_featherBtn` is still connected twice on purpose-unknown: popup (soft shadow) AND, for an
+  image / text frame, the dialog. Left alone; ask before changing.
+- Test: `~/scribus-crashlogs/feathertest/run.sh` (-> `out/log.txt`), then `run.sh feathertest2.py`
+  (PDF before / applied / undone / redone + Print Preview, -> `out2/`). The scripter's
+  `setScaleImageToFrame` records no undo, so "redo everything" differs from the applied state in
+  ImageScale* - a harness artefact.
+- Not exercised: the real mouse on the user's desktop (buttons were clicked through Qt), real
+  Ctrl+Z / Ctrl+Shift+Z keys (the Undo / Redo actions were triggered), the Print Preview picture
+  (window opened, pane empty in Xvfb), the real printer, "always embed" switched off, master pages,
+  a .sla.gz document, a frame copied to a second open document, Cancel while PIL runs.

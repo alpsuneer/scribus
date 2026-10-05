@@ -71,6 +71,10 @@
 #include <QToolButton>
 #include "util_printer.h"
 #include "suneerimagelinks.h"
+#include "suneertexteffects.h"
+#include "scribuswin.h"
+#include <QMdiArea>
+#include <QMdiSubWindow>
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QComboBox>
@@ -88,6 +92,7 @@ struct SuneerGroupUndo
 	SuneerControlBar* bar;
 	UndoTransaction trans;
 	bool active {false};
+	QString actionName;   // set by a slot that wants its own name in the Action History
 	explicit SuneerGroupUndo(SuneerControlBar* b) : bar(b)
 	{
 		active = bar->m_groupActive && !bar->m_updating && bar->m_doc;
@@ -99,7 +104,9 @@ struct SuneerGroupUndo
 	{
 		if (!active)
 			return;
-		if (trans)
+		if (trans && !actionName.isEmpty())
+			trans.commit(Um::SelectionGroup, Um::IGroup, actionName, QString(), Um::IGroup);
+		else if (trans)
 			trans.commit();
 		if (bar->m_groupItem)
 			bar->m_groupItem->update();
@@ -110,6 +117,68 @@ struct SuneerGroupUndo
 		QTimer::singleShot(0, bar, &SuneerControlBar::refreshAfterGroupChange);
 	}
 };
+
+// ---- Edge Feather / Blur, Remove Background
+// Every Apply writes a new image file and Undo points the frame back at the
+// one before, so nothing is deleted at Apply. The files of a session are kept
+// here per document and looked at once more when that document closes.
+static QHash<ScribusDoc*, QSet<QString> > s_featherFiles;
+
+static void noteFeatherFile(ScribusDoc* doc, const QString& path)
+{
+	if (doc && !path.isEmpty())
+		s_featherFiles[doc].insert(QFileInfo(path).absoluteFilePath());
+}
+
+// Empty when Edge Feather may change the item.
+static QString featherBlockReason(ScribusDoc* doc, const PageItem* item)
+{
+	if (!doc || !item)
+		return SuneerControlBar::tr("Nothing is selected.");
+	if (item->locked())
+		return SuneerControlBar::tr("\"%1\" is locked. Unlock it first.").arg(item->itemName());
+	if (doc->layerLocked(item->m_layerID))
+		return SuneerControlBar::tr("The layer of \"%1\" is locked. Unlock it first.").arg(item->itemName());
+	return QString();
+}
+
+void SuneerControlBar::sweepFeatherFiles(ScribusDoc* doc)
+{
+	if (!doc || !s_featherFiles.contains(doc))
+		return;
+	const QSet<QString> files = s_featherFiles.take(doc);
+	// What the document needs is what its file on disk names. When that cannot
+	// be read, keep everything.
+	QByteArray saved;
+	if (doc->hasName && !SuneerTextEffects::savedDocumentText(doc->documentFileName(), saved))
+		return;
+	// A frame copied into another open document still shows the file.
+	QSet<QString> usedElsewhere;
+	ScribusMainWindow* mw = ScCore->primaryMainWindow();
+	const QList<QMdiSubWindow*> windows = (mw && mw->mdiArea) ? mw->mdiArea->subWindowList() : QList<QMdiSubWindow*>();
+	for (QMdiSubWindow* sub : windows)
+	{
+		const ScribusWin* win = dynamic_cast<ScribusWin*>(sub->widget());
+		ScribusDoc* other = win ? win->doc() : nullptr;
+		if (!other || other == doc)
+			continue;
+		const QList<PageItem*> all = other->getAllItems(other->DocItems) + other->getAllItems(other->MasterItems) + other->getAllItems(other->FrameItems.values());
+		for (const PageItem* item : all)
+		{
+			if (!item->Pfile.isEmpty())
+				usedElsewhere.insert(QFileInfo(item->Pfile).absoluteFilePath());
+		}
+	}
+	for (const QString& path : files)
+	{
+		const QString name = QFileInfo(path).fileName();
+		if (usedElsewhere.contains(path) || saved.contains(name.toUtf8()) || saved.contains(name.toHtmlEscaped().toUtf8()))
+			continue;
+		if (ScCore->fileWatcher->isWatching(path))
+			ScCore->fileWatcher->removeFile(path);
+		QFile::remove(path);
+	}
+}
 
 QDoubleSpinBox* SuneerControlBar::makeSpinBox(double min, double max, int dec, double step, const QString& suffix)
 {
@@ -1525,7 +1594,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_imgFitImageBtn,   &QToolButton::clicked, this, &SuneerControlBar::onImgFitImage);
 	connect(m_imgCropApplyBtn,  &QToolButton::clicked, this, &SuneerControlBar::onImgCropApply);
 	connect(m_imgRemoveBgBtn,    &QToolButton::clicked, this, &SuneerControlBar::onImgRemoveBackground);
-	connect(m_textFeatherBtn, &QToolButton::clicked, this, &SuneerControlBar::onTextEdgeFeather);
 	connect(m_featherBtn, &QToolButton::clicked, this, [this](){
 		if (!m_doc || sel()->isEmpty()) return;
 		PageItem* item = sel()->itemAt(0);
@@ -3527,6 +3595,11 @@ void SuneerControlBar::onImgRemoveBackground()
 		QMessageBox::warning(this, "Remove Background", "No image loaded in this frame.");
 		return;
 	}
+	const QString rembgBlocked = featherBlockReason(m_doc, item);
+	if (!rembgBlocked.isEmpty()) {
+		QMessageBox::warning(this, "Remove Background", rembgBlocked);
+		return;
+	}
 
 	// Model selection dialog
 	QDialog dlg(this);
@@ -3600,18 +3673,40 @@ void SuneerControlBar::onImgRemoveBackground()
 	QString stdOut = QString::fromLocal8Bit(proc.readAllStandardOutput());
 	QString stdErr = QString::fromLocal8Bit(proc.readAllStandardError());
 
-	if (proc.exitCode() == 0) {
-		// loadPict() deletes Pfile when the frame holds an embedded picture's
-		// temp copy - and Pfile is about to be our new output. Drop the flag
-		// first (the old temp copy stays behind for undo), embed again after.
+	if (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0 && QFileInfo::exists(outputPath)) {
+		noteFeatherFile(m_doc, outputPath);
+		// One undo step: the picture, its scale, the embedding, the contour
+		// and the text flow.
+		UndoTransaction rembgTransaction;
+		if (UndoManager::undoEnabled())
+			rembgTransaction = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(),
+			                                                             tr("Remove Background"), QString(), Um::IGetImage);
+		// loadPict() deletes the temp copy of an embedded picture. Undo has to
+		// find it again, so drop the flag first. Pfile must still be the OLD
+		// picture here: loadImage() records it as the picture Undo goes back to.
 		const bool wasEmbedded = item->isImageInline();
-		if (wasEmbedded)
+		if (wasEmbedded) {
+			noteFeatherFile(m_doc, inputPath);
 			item->isTempFile = false;
-		item->Pfile = outputPath;
-		m_doc->loadPict(outputPath, item, false, true);
+		}
+		if (!m_doc->loadPict(outputPath, item, false, true)) {
+			if (rembgTransaction)
+				rembgTransaction.cancel();
+			UndoManager::instance()->setUndoEnabled(false);
+			m_doc->loadPict(inputPath, item, false, true);
+			item->isInlineImage = wasEmbedded;
+			item->isTempFile = wasEmbedded;
+			UndoManager::instance()->setUndoEnabled(true);
+			QMessageBox::warning(this, "rembg Error", "Could not load the new image:\n" + outputPath);
+			return;
+		}
 		updateCaptionFrame(item);
-		if (wasEmbedded)
-			SuneerImageLinks::embedItem(m_doc, item);
+		if (wasEmbedded) {
+			// The output of an embedded picture is a scribus_temp_ file next to
+			// the old temp copy: it is the embedded data now (see onImgEdgeFeather()).
+			item->isInlineImage = true;
+			item->isTempFile = true;
+		}
 		else
 			SuneerImageLinks::embedPlaced(m_doc, item);
 		// Auto fit image to frame
@@ -3625,11 +3720,15 @@ void SuneerControlBar::onImgRemoveBackground()
 				(item->height() - item->OrigH * scale) / 2.0);
 		}
 		item->update();
+		// Auto contour + text flow, inside the same undo step
+		onAutoContour();
+		onTextFlowContour();
+		if (rembgTransaction)
+			rembgTransaction.commit();
 		m_doc->changed();
-		// Auto contour + text flow + enable contour editing mode
+		// Enable contour editing mode
 		QTimer::singleShot(400, this, [this]() {
-			onAutoContour();
-			onTextFlowContour();
+			if (!m_doc) return;
 			m_doc->regionsChanged()->update(QRectF());
 			// Enable Contour Line Editing Mode
 			ScribusMainWindow* mw = ScCore->primaryMainWindow();
@@ -3905,6 +4004,11 @@ void SuneerControlBar::onAutoContour()
 	if (!item->isImageFrame() || !item->imageIsAvailable) return;
 	if (item->Pfile.isEmpty()) return;
 
+	// One undo step (it nests inside Remove Background's).
+	UndoTransaction contourTransaction;
+	if (UndoManager::undoEnabled())
+		contourTransaction = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                               tr("Auto Contour"), QString(), Um::IBorder);
 	// Auto fit image to frame first
 	if (item->OrigW > 0 && item->OrigH > 0) {
 		double imgAspect   = (double)item->OrigW / item->OrigH;
@@ -3930,10 +4034,25 @@ void SuneerControlBar::onAutoContour()
 		item->imageYOffset()
 	);
 
-	if (contour.size() < 3) return;
+	if (contour.size() < 3)
+	{
+		if (contourTransaction)
+			contourTransaction.commit();
+		return;
+	}
 
+	if (UndoManager::undoEnabled())
+	{
+		// handled in PageItem::restore
+		auto* state = new ScOldNewState<FPointArray>(Um::EditContourLine, QString(), Um::IBorder);
+		state->set("SUNEER_CONTOUR");
+		state->setStates(item->ContourLine, contour);
+		UndoManager::instance()->action(item, state);
+	}
 	item->ContourLine = contour;
 	item->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+	if (contourTransaction)
+		contourTransaction.commit();
 	item->update();
 	m_doc->changed();
 	m_doc->regionsChanged()->update(QRectF());
@@ -4806,9 +4925,37 @@ void SuneerControlBar::applyCornerRadius()
 
 void SuneerControlBar::applyFeather()
 {
-	SuneerGroupUndo groupUndo(this);
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 	if (!doc) return;
+	m_featherPopup->hide();
+	// Locked frames and frames on a locked layer stay as they are.
+	QList<PageItem*> targets;
+	QString blocked;
+	for (int i = 0; i < sel()->count(); ++i)
+	{
+		PageItem* item = sel()->itemAt(i);
+		if (!item) continue;
+		const QString reason = featherBlockReason(doc, item);
+		if (reason.isEmpty())
+			targets.append(item);
+		else if (blocked.isEmpty())
+			blocked = reason;
+	}
+	if (targets.isEmpty())
+	{
+		if (!blocked.isEmpty())
+			QMessageBox::warning(this, tr("Edge Feather/Blur"), blocked);
+		return;
+	}
+	// One undo step for the whole Apply, whatever number of frames it changes.
+	SuneerGroupUndo groupUndo(this);
+	groupUndo.actionName = tr("Edge Feather/Blur");
+	UndoTransaction featherTransaction;
+	if (UndoManager::undoEnabled())
+		featherTransaction = UndoManager::instance()->beginTransaction(
+			targets.count() == 1 ? targets.first()->getUName() : Um::SelectionGroup,
+			targets.count() == 1 ? targets.first()->getUPixmap() : Um::IGroup,
+			tr("Edge Feather/Blur"), QString(), Um::IGroup);
 	double unitRatio = doc->unitRatio();
 	double blurPts = m_featherSpin->value() / unitRatio;
 
@@ -4820,10 +4967,8 @@ void SuneerControlBar::applyFeather()
 	else if (m_featherRightBtn->isChecked())  { ox = -blurPts;oy = 0; }
 	// All → ox=0, oy=0
 
-	for (int i = 0; i < sel()->count(); ++i)
+	for (PageItem* item : std::as_const(targets))
 	{
-		PageItem* item = sel()->itemAt(i);
-		if (!item) continue;
 		item->setHasSoftShadow(blurPts > 0);
 		item->setSoftShadowBlurRadius(blurPts);
 		item->setSoftShadowXOffset(ox);
@@ -4837,9 +4982,10 @@ void SuneerControlBar::applyFeather()
 		item->update();
 		doc->setRedrawBounding(item);
 	}
+	if (featherTransaction)
+		featherTransaction.commit();
 	doc->regionsChanged()->update(QRect());
 	doc->changed();
-	m_featherPopup->hide();
 }
 
 void SuneerControlBar::onImgEdgeFeather()
@@ -4848,6 +4994,11 @@ void SuneerControlBar::onImgEdgeFeather()
 	PageItem* item = sel()->itemAt(0);
 	if (item->Pfile.isEmpty()) {
 		QMessageBox::warning(this, "Edge Feather", "No image loaded in this frame.");
+		return;
+	}
+	const QString imgBlocked = featherBlockReason(m_doc, item);
+	if (!imgBlocked.isEmpty()) {
+		QMessageBox::warning(this, "Edge Feather", imgBlocked);
 		return;
 	}
 	QDialog dlg(this);
@@ -4924,18 +5075,46 @@ void SuneerControlBar::onImgEdgeFeather()
 	proc.waitForFinished(60000);
 	QApplication::restoreOverrideCursor();
 
-	if (proc.exitCode() == 0) {
-		// see onImgRemoveBackground()
+	if (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0 && QFileInfo::exists(outputPath)) {
+		noteFeatherFile(m_doc, outputPath);
+		// One undo step: the picture change and, for a linked picture, the
+		// embedding that follows it.
+		UndoTransaction featherTransaction;
+		if (UndoManager::undoEnabled())
+			featherTransaction = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(),
+			                                                               tr("Edge Feather/Blur"), QString(), Um::IGetImage);
+		// loadPict() deletes the temp copy of an embedded picture. Undo has to
+		// find it again, so drop the flag first (see onImgRemoveBackground()).
+		// Pfile must still be the OLD picture here: loadImage() records it as
+		// the picture Undo goes back to.
 		const bool wasEmbedded = item->isImageInline();
-		if (wasEmbedded)
+		if (wasEmbedded) {
+			noteFeatherFile(m_doc, inputPath);
 			item->isTempFile = false;
-		item->Pfile = outputPath;
-		m_doc->loadPict(outputPath, item, false, true);
-		if (wasEmbedded)
-			SuneerImageLinks::embedItem(m_doc, item);
+		}
+		if (!m_doc->loadPict(outputPath, item, false, true)) {
+			if (featherTransaction)
+				featherTransaction.cancel();
+			UndoManager::instance()->setUndoEnabled(false);
+			m_doc->loadPict(inputPath, item, false, true);
+			item->isInlineImage = wasEmbedded;
+			item->isTempFile = wasEmbedded;
+			UndoManager::instance()->setUndoEnabled(true);
+			QMessageBox::warning(this, "Error", "Could not load the feathered image:\n" + outputPath);
+			return;
+		}
+		if (wasEmbedded) {
+			// The output of an embedded picture is a scribus_temp_ file next to
+			// the old temp copy: it is the embedded data now. Undo and redo keep
+			// these flags (see ResizeImageDialog).
+			item->isInlineImage = true;
+			item->isTempFile = true;
+		}
 		else
 			SuneerImageLinks::embedPlaced(m_doc, item);
 		item->update();
+		if (featherTransaction)
+			featherTransaction.commit();
 		m_doc->changed();
 		QMessageBox::information(this, "Done", "Edge feather applied!\nSaved: " + outputPath);
 	} else {
@@ -4950,6 +5129,11 @@ void SuneerControlBar::onTextEdgeFeather()
 	PageItem* item = sel()->itemAt(0);
 	if (!item->isTextFrame()) {
 		QMessageBox::warning(this, "Edge Feather", "Please select a text frame.");
+		return;
+	}
+	const QString textBlocked = featherBlockReason(m_doc, item);
+	if (!textBlocked.isEmpty()) {
+		QMessageBox::warning(this, "Edge Feather", textBlocked);
 		return;
 	}
 
@@ -5004,9 +5188,14 @@ void SuneerControlBar::onTextEdgeFeather()
 	// Save to temp PNG
 	QString docPath = m_doc->documentFileName();
 	QFileInfo fi(docPath.isEmpty() ? QDir::homePath() + "/untitled" : docPath);
-	QString outputPath = fi.absolutePath() + "/text_feather_" +
-	                     QString::number(QDateTime::currentSecsSinceEpoch()) + ".png";
+	// Never the name of an earlier Apply: Undo still shows that picture.
+	const QString outputBase = fi.absolutePath() + "/text_feather_" +
+	                           QString::number(QDateTime::currentSecsSinceEpoch());
+	QString outputPath = outputBase + ".png";
+	for (int n = 2; n < 1000 && QFileInfo::exists(outputPath); ++n)
+		outputPath = outputBase + QString("_%1.png").arg(n);
 	pm.save(outputPath, "PNG");
+	noteFeatherFile(m_doc, outputPath);
 
 	// Apply feather via Python PIL
 	QString script = QString(
@@ -5055,12 +5244,19 @@ void SuneerControlBar::onTextEdgeFeather()
 	double ih = item->height();
 	int pg = item->OwnPage;
 
+	// One undo step: the new frame, its picture, the embedding and the scale.
+	UndoTransaction featherTransaction;
+	if (UndoManager::undoEnabled())
+		featherTransaction = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(),
+		                                                               tr("Edge Feather/Blur"), QString(), Um::IImageFrame);
 	m_doc->m_Selection->clear();
 	int z = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified,
 	                       ix, iy, iw, ih, 0,
 	                       m_doc->itemToolPrefs().imageFillColor,
 	                       m_doc->itemToolPrefs().imageStrokeColor);
 	if (z < 0) {
+		if (featherTransaction)
+			featherTransaction.cancel();
 		QMessageBox::warning(this, "Error", "Could not create image frame.");
 		return;
 	}
@@ -5076,6 +5272,8 @@ void SuneerControlBar::onTextEdgeFeather()
 		imgItem->setImageXYOffset(0, 0);
 	}
 	imgItem->update();
+	if (featherTransaction)
+		featherTransaction.commit();
 	m_doc->changed();
 	QMessageBox::information(this, "Done", "Text edge feather applied!\nNew image frame created.");
 }

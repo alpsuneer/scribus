@@ -206,6 +206,8 @@ private:
 	void restoreFontPreview();
 	void endFontPreview();
 public:
+	/// Deletes the Edge Feather images of this session that \a doc, as it is saved, does not use. Called when it closes.
+	static void sweepFeatherFiles(ScribusDoc* doc);
 	void focusFontCombo();
 	/// Hands the caret back to the text frame (Enter applies, Esc cancels).
 	void returnFocusToCanvas();

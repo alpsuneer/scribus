@@ -82,6 +82,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "scstreamfilter_flate.h"
 #include "tableutils.h"
+#include "undomanager.h"
 #include "util.h"
 #include "util_file.h"
 #include "util_formats.h"
@@ -4274,6 +4275,10 @@ QByteArray PDFLibCore::PDF_PutSoftShadow(PageItem* ite)
 	bool saveControl = ite->doc()->guidesPrefs().showControls;
 	ite->doc()->guidesPrefs().showControls = false;
 	bool savedShadow = ite->hasSoftShadow();
+	// Suneer: the shadow is switched off only to render the item without it.
+	// The setter records an undo state, so every export left two "Drop Shadow"
+	// steps per item in the Action History and the next Ctrl+Z hit those.
+	UndoManager::instance()->setUndoEnabled(false);
 	ite->setHasSoftShadow(false);
 	double transF = ite->fillTransparency();
 	double transS = ite->lineTransparency();
@@ -4306,6 +4311,7 @@ QByteArray PDFLibCore::PDF_PutSoftShadow(PageItem* ite)
 
 	ite->doc()->guidesPrefs().showControls = saveControl;
 	ite->setHasSoftShadow(savedShadow);
+	UndoManager::instance()->setUndoEnabled(true);
 
 	// Unfortunately imgC.convertToFormat(QImage::Format_Alpha8).convertToFormat(QImage::Format_RGB32)
 	// won't give use the expected result

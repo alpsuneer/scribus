@@ -5116,6 +5116,9 @@ bool ScribusMainWindow::DoFileClose()
 	// Text Effects images that the document, as it is saved now, does not use
 	if (doc && doc->hasName && !doc->openedReadOnly())
 		SuneerTextEffects::sweepUnusedFiles(doc->documentFileName());
+	// Edge Feather images of this session that the saved document does not use
+	if (doc && !doc->openedReadOnly())
+		SuneerControlBar::sweepFeatherFiles(doc);
 	slotEndSpecialEdit();
 	view->deselectItems(false);
 	if (doc == storyEditor->currentDocument())

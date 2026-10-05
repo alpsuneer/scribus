@@ -5338,6 +5338,18 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			if (as)
 				pageItemAttributes = isUndo ? as->getItem().first : as->getItem().second;
 		}
+		else if (ss->contains("SUNEER_CONTOUR"))
+		{
+			// Suneer: the contour line replaced by a command (Auto Contour, Remove
+			// Background). Only the contour: EDIT_SHAPE_OR_CONTOUR also runs
+			// adjustItemSize(), which marks the frame shape as hand-edited.
+			const auto* cs = dynamic_cast<ScOldNewState<FPointArray>*>(ss);
+			if (cs)
+			{
+				ContourLine = isUndo ? cs->getOldState() : cs->getNewState();
+				m_Doc->regionsChanged()->update(QRectF());
+			}
+		}
 		else if (ss->contains("IMAGE_SCALE"))
 			restoreImageScaleChange(ss, isUndo);
 		else if (ss->contains("IMAGE_OFFSET"))
