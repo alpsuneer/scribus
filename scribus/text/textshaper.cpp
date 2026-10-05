@@ -14,6 +14,7 @@
 #include "pageitem.h"
 #include "scribusdoc.h"
 #include "storytext.h"
+#include "suneerclusterlevel.h"
 #include "styles/paragraphstyle.h"
 #include "util.h"
 
@@ -369,7 +370,10 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 		hb_buffer_set_direction(hbBuffer, hbDirection);
 		hb_buffer_set_script(hbBuffer, hbScript);
 		hb_buffer_set_language(hbBuffer, hbLanguage);
-		hb_buffer_set_cluster_level(hbBuffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
+		// A document from an older Scribus keeps its line breaks: see suneerclusterlevel.h
+		const bool charClusters = suneerDocUsesCharClusters(m_context ? m_context->getDoc() : nullptr);
+		hb_buffer_set_cluster_level(hbBuffer, charClusters ? HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS
+		                                                   : HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
 
 		QVector<hb_feature_t> hbFeatures;
 		const QList<FeaturesRun> featuresRuns = itemizeFeatures(textRun);

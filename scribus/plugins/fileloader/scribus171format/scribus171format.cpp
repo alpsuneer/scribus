@@ -47,6 +47,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpattern.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneerclusterlevel.h"
 #include "sctextstream.h"
 #include "scxmlstreamreader.h"
 #include "textnote.h"
@@ -2602,6 +2603,7 @@ void Scribus171Format::readDocAttributes(ScribusDoc* doc, const ScXmlStreamAttri
 	{
 		m_Doc->setPageSize(attrs.valueAsString("PageSize"));
 		m_Doc->setPageOrientation(attrs.valueAsInt("PageOrientation", 0));
+		suneerSetDocUsesCharClusters(m_Doc, attrs.valueAsString("SuneerClusterLevel") == QLatin1String("chars"));
 		m_Doc->FirstPnum = attrs.valueAsInt("FirstPageNumber", 1);
 		m_Doc->setPagePositioning(attrs.valueAsInt("PagePositioning", 0));
 

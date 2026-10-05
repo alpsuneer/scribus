@@ -58,6 +58,7 @@ for which a new license (GPL+exception) is in place.
 #include "scraction.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "suneerclusterlevel.h"
 #include "scribusview.h"
 #include "scribusstructs.h"
 #include "selection.h"
@@ -550,6 +551,11 @@ struct LineControl {
 	// varies by up to the step. Off for every other frame: their line ends
 	// must not move.
 	bool     preciseEnd { false };
+	// Set for a document that came from an older Scribus (suneerclusterlevel.h):
+	// endOfLine() then uses the stock quarter-point search, so its lines end
+	// where 1.5.x/1.6.x ended them. Pages made in this build keep the coarse
+	// step they were laid out with.
+	bool     stockLineEnd { false };
 	ScribusDoc* doc { nullptr };
 	ITextContext* context { nullptr };
 
@@ -792,8 +798,7 @@ struct LineControl {
 		QRect   pt(pt12, pt22);
 
 		double endX2 = startX;
-		/* BINARY SEARCH DISABLED FOR TEST */
-		double Interval = qMax(4.0, (maxX - endX2) / 100.0);
+		double Interval = stockLineEnd ? 0.25 : qMax(4.0, (maxX - endX2) / 100.0);
 		int endOfLineLimit = 0;
 		if (preciseEnd)
 		{
@@ -1564,6 +1569,7 @@ void PageItem_TextFrame::layout()
 			double textDist[4];
 			current.preciseEnd = suneerNeedsInsetShape(this, textDist);
 		}
+		current.stockLineEnd = suneerDocUsesCharClusters(m_Doc);
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();

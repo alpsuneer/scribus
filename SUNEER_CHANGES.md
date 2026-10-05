@@ -957,7 +957,15 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - Icon കിട്ടിയില്ലെങ്കിൽ button-ൽ `?` കാണിക്കും
 - Settings files ഇരിക്കുന്നത് `~/.config/Scribus/`-ൽ (`SuneerDesignStyle.conf`, `SuneerColumnConfig.conf`)
 
-### 46. Authors
+### 46. Old Scribus pages keep their old line breaks
+- Scribus 1.5/1.6-ൽ ഉണ്ടാക്കിയ page തുറന്നാൽ വാക്കുകൾ പഴയ സ്ഥലത്ത് തന്നെ മുറിയും — fit ആക്കിയ frames overflow ആകുന്നത് കുറയും
+- കാരണം നമ്മുടെ build-ലെ രണ്ട് മാറ്റങ്ങളായിരുന്നു (Qt/font അല്ല)
+- Save ചെയ്താൽ ഈ അടയാളം file-ൽ സൂക്ഷിക്കും
+- നമ്മുടെ പഴയ build-ൽ ഇതിനകം save ചെയ്ത പഴയ page-ന്: **Extras → Old Scribus Line Breaks (This Document)** tick ചെയ്യുക
+- ഈ build-ൽ ഉണ്ടാക്കിയ pages മാറില്ല
+- പഴയ layout 100% അല്ല: ചില frames ഇപ്പോഴും overflow ചെയ്യാം
+
+### 47. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

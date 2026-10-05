@@ -1176,6 +1176,9 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("scale-height", "scale-height", "", defaultKey(name), mainWindow));
 	name = "extrasFixOverflowFramesDoc";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasOldLineBreaks";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	(*scrActions)[name]->setCheckable(true);
 	name = "extrasImposition";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasEmbedAllImages";
@@ -1195,6 +1198,7 @@ void ActionManager::initExtrasMenuActions()
 	connect( (*scrActions)["extrasAutoflowToNewPages"], SIGNAL(triggered()), mainWindow, SLOT(suneerAutoflowToNewPages()) );
 	connect( (*scrActions)["extrasFixOverflowFrames"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFrames()) );
 	connect( (*scrActions)["extrasFixOverflowFramesDoc"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFramesDoc()) );
+	connect( (*scrActions)["extrasOldLineBreaks"], SIGNAL(toggled(bool)), mainWindow, SLOT(suneerSetOldLineBreaks(bool)) );
 	connect( (*scrActions)["extrasImposition"], SIGNAL(triggered()), mainWindow, SLOT(suneerOpenImposition()) );
 }
 
@@ -2064,6 +2068,7 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
 	(*scrActions)["extrasFixOverflowFrames"]->setTexts( tr("Fix Overflowing Frames"));
 	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
+	(*scrActions)["extrasOldLineBreaks"]->setTexts( tr("Old Scribus Line Breaks (This Document)"));
 	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
 	(*scrActions)["extrasEmbedAllImages"]->setTexts( tr("Embed All Images"));
 	(*scrActions)["extrasWarnLinkedImages"]->setTexts( tr("Warn About Linked Images in This Document"));
@@ -2343,6 +2348,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("suneerReduceLineSpacing", QKeySequence("Shift+&lt;"));
 	defKeys.insert("extrasFixOverflowFrames", QKeySequence());
 	defKeys.insert("extrasFixOverflowFramesDoc", QKeySequence());
+	defKeys.insert("extrasOldLineBreaks", QKeySequence());
 	defKeys.insert("itemImageScaleUp", QKeySequence(Qt::CTRL | Qt::Key_Period));
 	defKeys.insert("itemImageScaleDown", QKeySequence(Qt::CTRL | Qt::Key_Comma));
 	defKeys.insert("toolsLayers", QKeySequence(Qt::Key_F6));
@@ -2773,6 +2779,7 @@ void ActionManager::createDefaultMenus()
 		<< "extrasAutoflowToNewPages"
 		<< "extrasFixOverflowFrames"
 		<< "extrasFixOverflowFramesDoc"
+		<< "extrasOldLineBreaks"
 		<< "extrasImposition"
 		<< "extrasEmbedAllImages"
 		<< "extrasWarnLinkedImages"

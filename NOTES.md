@@ -44,6 +44,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Auto Fit Text — scales typography (font size/glyph scale/tracking/word space), never the frame; baseline saved in the file | `509359b`, `5e898d8` | autofit-typography |
 | Fix Overflowing Frames — grow-only batch autofit | `8602008` | |
 | Legacy-overflow prompt when an older file is opened | `d5a69ff` | legacy-overflow-prompt |
+| Old Scribus line breaks per document — a 1.5.x/1.6.x file keeps HarfBuzz character clusters and the stock 0.25 pt line-end search; saved as `Document SuneerClusterLevel="chars"`; Extras > Old Scribus Line Breaks (This Document) for pages already re-saved here. Verified by the user | `git log -- scribus/suneerclusterlevel.h` | feature/ctp-output |
 | Nested styles (InDesign-style, layout-time char overlay) | `4e80b33` | |
 | Paragraph rules — rule above / rule below, 28 style attrs, one render hook shared by canvas/PDF/PS/XPS/SVG | `e471a0f` | |
 | Paragraph shading — per-paragraph background band, 10 attrs | `a4fadee` | |
@@ -2057,6 +2058,35 @@ same day: **the server does the installs**, the laptop only releases.
 - Not exercised: `setup-push-server.sh` (needs the server's sudo password), nginx and its
   allow/deny, `--copy-keys`, `--first`, a push to a real PC, the rsync upload in release.sh.
 
+## Old pages reflowed: two of our own layout changes (2026-10-05)
+
+- **Symptom.** Pages fitted in the office Scribus 1.5.6 overflowed here. Not Qt6, HarfBuzz,
+  FreeType or fonts: Debian 1.6.3 and pristine upstream 1.7.3 (`eb57f7b`) agree on every frame;
+  every build of ours since at least 2026-09-05 disagrees with them.
+- **Cause A - cluster level.** `textshaper.cpp` shapes with `HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES`
+  (upstream: `_CHARACTERS`; changed in `d3b8f8b`, reason not recorded). Layout refuses a hyphen break
+  right after the first cluster of a word (`!text(glyphClusters[i-1].lastChar()).isSpace()`); with a
+  whole syllable as one cluster every stored break after a word's first syllable is lost, lines hold
+  less and the story grows.
+- **Cause B - line-end step.** `LineControl::endOfLine()` steps `qMax(4.0, ...)` where upstream steps
+  0.25 ("BINARY SEARCH DISABLED FOR TEST", June 2026). Justified lines end about 0.6 pt further right.
+- **Fix is per document, not global** (`suneerclusterlevel.h`, a dynamic property on ScribusDoc - no
+  class layout change). A file loaded by `scribus150format` gets it; the 171 saver writes
+  `SuneerClusterLevel="chars"` on `<Document>` and the 171 loader reads it. Documents without the
+  mark lay out exactly as before - three months of pages made here must not move, so do NOT make
+  either upstream behaviour the default without a migration.
+- A page from 1.5.6 that an earlier build of ours re-saved is `Version="1.7.3"` with no mark and
+  cannot be told apart from a page made here: that is what the Extras checkbox is for.
+- In a marked document clusters are per character, as upstream: the caret can stop inside a syllable
+  and tracking is added inside it.
+- Even with the fix only 60-70% of text rows match PDFs made by the real 1.5.6 (upstream scores the
+  same). The rest is unexplained: column-spanning headlines in the office build, its older libraries.
+- How to measure: memory note "old-scribus-layout-comparison"; scripts in `/home/s1/overflow-test/`.
+  Line counts are too coarse - compare text-row extents of exported PDFs.
+- `scribus150format.cpp` has CRLF line endings; a Python read/write edit converts the whole file.
+- Not exercised: the IM path in a marked document, unticking the checkbox, several open documents,
+  1.2/1.3 files, New from Template, print.
+
 ## Text distances and wrap on rounded frames (2026-10-04)
 
 - **What the corner radius changes.** Both the uniform radius and the individual radii rebuild
@@ -2077,7 +2107,8 @@ same day: **the server does the installs**, the laptop only releases.
 - **`LineControl::preciseEnd`**: `endOfLine()` steps 4 pt and returns the first position that does
   NOT fit, so a line can overshoot by up to the step; fine against a wrap object, visible as an
   uneven gap along a curve. With `preciseEnd` (set only for the frames above) it bisects to 0.25 pt
-  and returns the last position that fits. Every other frame keeps the stock search - changing it
+  and returns the last position that fits. Every other frame keeps this build's coarse search (NOT stock: upstream steps
+  0.25 pt, the 4 pt step is ours from June 2026 - see "Old pages reflowed" below) - changing it
   globally would move line ends on every page with an image wrap.
 - **`PageItem::suneerShapeChanged(oldShape)`** (new, non-virtual): contour follows the outline
   unless hand-edited, own layout invalidated, `checkTextFlowInteractions(true)` on the item or its

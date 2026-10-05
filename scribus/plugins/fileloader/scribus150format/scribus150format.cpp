@@ -45,6 +45,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpattern.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneerclusterlevel.h"
 #include "sctextstream.h"
 #include "scxmlstreamreader.h"
 #include "textnote.h"
@@ -1585,6 +1586,9 @@ bool Scribus150Format::loadFile(const QString & fileName, const FileFormat & /* 
 		Q_ASSERT(m_Doc == nullptr || m_AvailableFonts == nullptr);
 		return false;
 	}
+
+	// Laid out by a Scribus that shaped one cluster per character.
+	suneerSetDocUsesCharClusters(m_Doc, true);
 
 	Xp = 0.0;
 	Yp = 0.0;

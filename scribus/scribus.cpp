@@ -180,6 +180,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneerclusterlevel.h"
 #include "scribusview.h"
 #include "scribuswin.h"
 #include "selection.h"
@@ -1743,6 +1744,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasAutoflowToNewPages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFramesDoc", "Extras");
+	scrMenuMgr->addMenuItemString("extrasOldLineBreaks", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasImposition", "Extras");
@@ -2864,6 +2866,9 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 	// Document-scoped: available whenever a document is open, selection or not.
 	scrActions["extrasFixOverflowFrames"]->setEnabled(HaveDoc);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(HaveDoc);
+	scrActions["extrasOldLineBreaks"]->setEnabled(HaveDoc);
+	if (!HaveDoc)
+		scrActions["extrasOldLineBreaks"]->setChecked(false);
 }
 
 
@@ -3009,6 +3014,8 @@ void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 	scrActions["extrasUpdateDocument"]->setEnabled(true);
 	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
+	scrActions["extrasOldLineBreaks"]->setEnabled(true);
+	scrActions["extrasOldLineBreaks"]->setChecked(suneerDocUsesCharClusters(doc));
 	if (!doc->masterPageMode())
 		pagePalette->rebuild();
 	outlinePalette->setDoc(doc);
@@ -8889,6 +8896,8 @@ void ScribusMainWindow::slotDocSetup()
 	scrActions["extrasUpdateDocument"]->setEnabled(true);
 	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
+	scrActions["extrasOldLineBreaks"]->setEnabled(true);
+	scrActions["extrasOldLineBreaks"]->setChecked(suneerDocUsesCharClusters(doc));
 	scrActions["viewToggleCMS"]->setChecked(doc->HasCMS);
 	scrActions["viewToggleWhiteSpaceMode"]->setChecked(doc->whiteSpaceModeEnabled);
 	view->setRulersShown(doc->guidesPrefs().rulersShown);
@@ -11025,6 +11034,23 @@ void ScribusMainWindow::suneerFixOverflowFrames()
 void ScribusMainWindow::suneerFixOverflowFramesDoc()
 {
 	suneerFixOverflowFramesRun(true);
+}
+
+// Extras > Old Scribus Line Breaks (This Document). On by itself for a file
+// from Scribus 1.5.x/1.6.x; this is the switch for an old page that was already
+// saved by an earlier build of ours and so lost the mark. See suneerclusterlevel.h.
+void ScribusMainWindow::suneerSetOldLineBreaks(bool on)
+{
+	if (!HaveDoc || !doc || suneerDocUsesCharClusters(doc) == on)
+		return;
+	suneerSetDocUsesCharClusters(doc, on);
+	doc->invalidateAll();
+	doc->changed();
+	doc->regionsChanged()->update(QRectF());
+	if (view)
+		view->DrawNew();
+	setStatusBarInfoText(on ? tr("This document now breaks lines like Scribus 1.5/1.6")
+	                        : tr("This document now breaks lines like pages made in this version"));
 }
 
 void ScribusMainWindow::suneerOpenImposition()

@@ -510,6 +510,8 @@ public slots:
 	//! \brief Add or remove the News Browser tab in the Paragraph Styles docker.
 	void suneerSetNewsBrowserTabVisible(bool visible);
 	void suneerFixOverflowFramesDoc();
+	//! \brief Lay this document out with the line breaks of Scribus 1.5/1.6 (on) or of this build (off).
+	void suneerSetOldLineBreaks(bool on);
 	//! \brief Suneer: open the two-page CTP imposition dialog
 	void suneerOpenImposition();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection

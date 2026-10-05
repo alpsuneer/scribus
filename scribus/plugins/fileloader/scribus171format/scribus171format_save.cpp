@@ -39,6 +39,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpaths.h"
 #include "scpattern.h"
 #include "scribusdoc.h"
+#include "suneerclusterlevel.h"
 #include "scribusview.h"
 #include "scxmlstreamwriter.h"
 #include "textnote.h"
@@ -333,6 +334,9 @@ bool Scribus171Format::saveFile(const QString & fileName, const FileFormat & /* 
 	docu.writeAttribute("BleedRight", m_Doc->bleeds()->right());
 	docu.writeAttribute("BleedBottom", m_Doc->bleeds()->bottom());
 	docu.writeAttribute("PageOrientation", m_Doc->pageOrientation());
+	// Written only for a document that came from an older Scribus.
+	if (suneerDocUsesCharClusters(m_Doc))
+		docu.writeAttribute("SuneerClusterLevel", "chars");
 	docu.writeAttribute("PageSize", m_Doc->pageSize());
 	docu.writeAttribute("FirstPageNumber", m_Doc->FirstPnum);
 	docu.writeAttribute("PagePositioning", m_Doc->pagePositioning());
