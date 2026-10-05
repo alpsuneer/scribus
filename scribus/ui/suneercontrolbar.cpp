@@ -805,6 +805,18 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_textFeatherBtn->setToolTip("Apply edge feather to text frame");
 	row2->addWidget(m_textFeatherBtn);
 	m_textWidgets << m_textFeatherBtn;
+	// Condense to Fit: the same command as Item > Condense to Fit (Keep Frame Size)
+	{
+		QToolButton* condenseBtn = makeButton("→T←", "Condense to Fit");
+		condenseBtn->setFixedSize(40, 22);
+		condenseBtn->setToolTip(tr("Condense to Fit: narrow the text until it fits, the frame keeps its size"));
+		connect(condenseBtn, &QToolButton::clicked, this, [this] {
+			if (m_scmw && m_scmw->scrActions["itemCondenseToFit"])
+				m_scmw->scrActions["itemCondenseToFit"]->trigger();
+		});
+		row2->addWidget(condenseBtn);
+		m_textWidgets << condenseBtn;
+	}
 	// Fill Text with Image: the same command as Item > Fill Text with Image...
 	{
 		QToolButton* fillImageBtn = makeButton("▣T", "Fill Text with Image...");

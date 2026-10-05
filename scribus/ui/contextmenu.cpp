@@ -351,6 +351,8 @@ void ContextMenu::createMenuItems_Selection()
 		addAction(m_ScMW->scrActions["suneerAutoFitHeight"]);
 		if (currItem->isTextFrame())
 		{
+			m_ScMW->scrActions["itemCondenseToFit"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["itemCondenseToFit"]);
 			m_ScMW->scrActions["itemFitCaptionFrame"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["itemFitCaptionFrame"]);
 		}

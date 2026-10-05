@@ -27,6 +27,10 @@ class SCRIBUS_API Prefs_Experimental : public Prefs_Pane, Ui::Prefs_Experimental
 
 	public slots:
 		void languageChange();
+
+	private:
+		class QDoubleSpinBox* m_condenseMinScale { nullptr };
+		class QDoubleSpinBox* m_condenseMinTracking { nullptr };
 };
 
 #endif // PREFS_EXPERIMENTAL_H

@@ -508,6 +508,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemFitCaptionFrame";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemCondenseToFit";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemFillTextWithImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemTextEffects";
@@ -1872,6 +1874,8 @@ void ActionManager::languageChange()
 	(*scrActions)["tableAdjustTableToFrame"]->setTexts(tr("Adjust Table to Frame"));
 	(*scrActions)["itemAdjustFrameHeightToText"]->setTexts( tr("Adjust Frame Height to Text"));
 	(*scrActions)["itemFitCaptionFrame"]->setTexts( tr("Fit Caption Frame"));
+	(*scrActions)["itemCondenseToFit"]->setTexts( tr("Condense to Fit (Keep Frame Size)"));
+	(*scrActions)["itemCondenseToFit"]->setStatusTip( tr("Narrow the text of the selected overflowing frames until it fits, without resizing the frames"));
 	(*scrActions)["itemFillTextWithImage"]->setTexts( tr("Fill Text with Image..."));
 	(*scrActions)["itemFillTextWithImage"]->setStatusTip( tr("Show an image only inside the letters of the selected text frame"));
 	(*scrActions)["itemTextEffects"]->setTexts( tr("Text Effects..."));
@@ -2569,6 +2573,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemUpdateImage"
 		<< "itemAdjustFrameHeightToText"
 		<< "itemFitCaptionFrame"
+		<< "itemCondenseToFit"
 		<< "itemFillTextWithImage"
 		<< "itemTextEffects"
 		<< "itemAdjustFrameToImage" 

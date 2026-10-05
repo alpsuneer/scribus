@@ -44,6 +44,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Auto Fit Text — scales typography (font size/glyph scale/tracking/word space), never the frame; baseline saved in the file | `509359b`, `5e898d8` | autofit-typography |
 | Fix Overflowing Frames — grow-only batch autofit | `8602008` | |
 | Legacy-overflow prompt when an older file is opened | `d5a69ff` | legacy-overflow-prompt |
+| Condense to Fit — overflowing stories are narrowed (horizontal scale in 0.5% steps, then tracking) and the frame is never resized; option in the Legacy Document prompt (default), Item menu, right-click, control bar `→T←`; limits in Preferences > SR Menu (90%, -2%); one undo step. Verified by the user | `git log -S suneerCondenseStoryToFit` | feature/ctp-output |
 | Old Scribus line breaks per document — a 1.5.x/1.6.x file keeps HarfBuzz character clusters and the stock 0.25 pt line-end search; saved as `Document SuneerClusterLevel="chars"`; Extras > Old Scribus Line Breaks (This Document) for pages already re-saved here. Verified by the user | `git log -- scribus/suneerclusterlevel.h` | feature/ctp-output |
 | Nested styles (InDesign-style, layout-time char overlay) | `4e80b33` | |
 | Paragraph rules — rule above / rule below, 28 style attrs, one render hook shared by canvas/PDF/PS/XPS/SVG | `e471a0f` | |
@@ -2086,6 +2087,26 @@ same day: **the server does the installs**, the laptop only releases.
 - `scribus150format.cpp` has CRLF line endings; a Python read/write edit converts the whole file.
 - Not exercised: the IM path in a marked document, unticking the checkbox, several open documents,
   1.2/1.3 files, New from Template, print.
+
+## Condense to Fit (2026-10-05)
+
+- `ScribusMainWindow::suneerCondenseStoryToFit()` in scribus.cpp. Works on the story, so it must be
+  called on the LAST frame of a chain (only that frame knows whether the story fits) and relayouts
+  the whole chain per trial. About 20 layouts per story at most, then 4 for tracking.
+- Trials are applied straight to the StoryText (no undo); a story that cannot fit is restored with
+  `eraseCharStyle(delta)` + `applyCharStyle(old)` per style run. Success records one
+  `APPLY_CHARSTYLE` state per run (old run style -> delta) inside one transaction, the same record a
+  character-style change makes, so `PageItem::restoreCharStyle()` undoes it exactly.
+- The minimum scale is absolute and never raises a run: `max(round(old * f), min(old, minimum))`.
+  The percentage shown to the user is the factor `f`, not the resulting scale.
+- Group children ARE condensed (nothing is resized), unlike Fix Overflowing Frames which skips them.
+  Locked item or locked layer anywhere in the chain: skipped and listed.
+- Limits live in the prefs-file context `suneer_condense` (`min_scale`, `min_tracking`), the dialog
+  choice in `suneer_legacy_overflow` / `condense` - not in ApplicationPrefs (plugin ABI).
+- The Legacy Document prompt is a QMessageBox, which has one check-box slot (used by "Don't ask
+  again"); the second box is put into its grid above the button row.
+- Not exercised: the right-click entry, the tracking stage, linked chains, locked layers, Redo,
+  the unticked (grow) path together with this change, Print Preview's picture, paper.
 
 ## Text distances and wrap on rounded frames (2026-10-04)
 

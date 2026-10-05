@@ -965,7 +965,16 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - ഈ build-ൽ ഉണ്ടാക്കിയ pages മാറില്ല
 - പഴയ layout 100% അല്ല: ചില frames ഇപ്പോഴും overflow ചെയ്യാം
 
-### 47. Authors
+### 47. Condense to Fit (frame വലുപ്പം മാറ്റാതെ)
+- Overflow ചെയ്യുന്ന text-ന്റെ അക്ഷര വീതി (horizontal scale) 0.5% വീതം കുറച്ച് fit ആക്കും; frame-ന്റെ വലുപ്പവും സ്ഥാനവും മാറില്ല
+- Story മുഴുവനും ഒരുപോലെ ചുരുങ്ങും; overflow ഇല്ലാത്ത frames തൊടില്ല
+- പഴയ file തുറക്കുമ്പോൾ വരുന്ന **Legacy Document** ചോദ്യത്തിൽ "Condense text to fit - don't resize the frame" (default tick)
+- ഏത് page-ലും: **Item → Condense to Fit (Keep Frame Size)**, right-click menu, control bar-ലെ `→T←`
+- പരിധി: **Preferences → SR Menu** — scale 90%, tracking −2% (മാറ്റാം)
+- Fit ആകാത്തവ പഴയപടി വെച്ച് പേര് കാണിക്കും (**Select Them**); locked frame / locked layer തൊടില്ല
+- ഒരു Ctrl+Z കൊണ്ട് എല്ലാം തിരികെ ("Condense to fit")
+
+### 48. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

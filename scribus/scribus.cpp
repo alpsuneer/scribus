@@ -89,6 +89,8 @@ for which a new license (GPL+exception) is in place.
 #include <QTimer>
 #include <QTranslator>
 #include <QCheckBox>
+#include <QDialogButtonBox>
+#include <QGridLayout>
 #include <QWindow>
 #include <QWheelEvent>
 
@@ -950,6 +952,7 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
 	connect(scrActions["itemFitCaptionFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerFitCaptionFrames);
 	connect(scrActions["itemFillTextWithImage"], &QAction::triggered, this, [this] { SuneerFillTextImage::runForSelection(this); });
+	connect(scrActions["itemCondenseToFit"], &QAction::triggered, this, &ScribusMainWindow::suneerCondenseToFit);
 	connect(scrActions["itemTextEffects"], &QAction::triggered, this, [this] { SuneerTextEffects::runForSelection(this); });
 	connect(scrActions["extrasCheckDuplicateShortcuts"], &QAction::triggered, this, [this] { ScShortcutRegistry::instance().showDuplicatesDialogNow(this); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
@@ -1441,6 +1444,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("itemConvertToPolygon", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToBezierCurve", "ItemConvertTo");
 	scrMenuMgr->addMenuItemString("itemConvertToOutlines", "ItemConvertTo");
+	scrMenuMgr->addMenuItemString("itemCondenseToFit", "Item");
 	scrMenuMgr->addMenuItemString("itemFillTextWithImage", "Item");
 	scrMenuMgr->addMenuItemString("itemTextEffects", "Item");
 	scrMenuMgr->addMenuItemString("itemConvertToSymbolFrame", "ItemConvertTo");
@@ -10933,11 +10937,44 @@ void ScribusMainWindow::suneerMaybeOfferLegacyOverflowFix(int loadedFormatID)
 	box.setDefaultButton(fixButton);
 	QCheckBox* dontAsk = new QCheckBox(tr("Don't ask again this session"), &box);
 	box.setCheckBox(dontAsk);
+	// A message box takes one check box of its own; this one goes into its grid.
+	QCheckBox* condense = new QCheckBox(tr("Condense text to fit - don't resize the frame"), &box);
+	condense->setToolTip(QString::fromUtf8("Frame-ന്റെ വലുപ്പവും സ്ഥാനവും മാറ്റില്ല. അക്ഷരങ്ങളുടെ വീതി (horizontal scale) കുറച്ച് text fit ആക്കും.\n"
+	                                       "Tick ഇല്ലെങ്കിൽ: frame-ന്റെ ഉയരം കൂട്ടും (5% വരെ)."));
+	condense->setChecked(!prefs || prefs->getBool("condense", true));
+	if (QGridLayout* grid = qobject_cast<QGridLayout*>(box.layout()))
+	{
+		// Above the buttons: move the button row down one and take its place.
+		int row = -1, column = 0, rowSpan = 1, columnSpan = 1;
+		QDialogButtonBox* buttons = box.findChild<QDialogButtonBox*>();
+		const int index = buttons ? grid->indexOf(buttons) : -1;
+		if (index >= 0)
+		{
+			grid->getItemPosition(index, &row, &column, &rowSpan, &columnSpan);
+			grid->removeWidget(buttons);
+			grid->addWidget(condense, row, 0, 1, grid->columnCount());
+			grid->addWidget(buttons, row + 1, column, rowSpan, columnSpan);
+		}
+		else
+			grid->addWidget(condense, grid->rowCount(), 0, 1, grid->columnCount());
+	}
 	box.exec();
 	if (dontAsk->isChecked())
 		m_suneerLegacyOverflowAsked = true;
 	if (box.clickedButton() != fixButton)
 		return;
+	if (prefs)
+		prefs->set("condense", condense->isChecked());
+	if (condense->isChecked())
+	{
+		// Every overflowing story, frames inside groups too: nothing is
+		// resized, so a group's geometry is not at stake.
+		QList<PageItem*> all;
+		for (PageItem* item : std::as_const(doc->DocItems))
+			all.append(item);
+		suneerCondenseFramesRun(all, tr("Legacy Document"));
+		return;
+	}
 
 	QList<PageItem*> tooBig;
 	QList<PageItem*> wouldCollide;
@@ -11034,6 +11071,278 @@ void ScribusMainWindow::suneerFixOverflowFrames()
 void ScribusMainWindow::suneerFixOverflowFramesDoc()
 {
 	suneerFixOverflowFramesRun(true);
+}
+
+// ---------------------------------------------------------------------------
+// Condense to Fit: make an overflowing story fit by narrowing its glyphs, never
+// by touching the frame. The whole story is scaled evenly (every paragraph, and
+// every frame of a linked chain), so a column does not end up with a few tight
+// lines at the bottom. Horizontal scale goes down in half-percent steps to the
+// minimum from Preferences > SR Menu; only then is tracking reduced, also to
+// its minimum. A story that still does not fit is put back exactly as it was.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	struct SuneerCondenseRun
+	{
+		int start { 0 };
+		int length { 0 };
+		CharStyle old;      //!< the run's style before any trial
+		CharStyle delta;    //!< what the last trial applied on top of it
+	};
+
+	double suneerCondenseMinScale()
+	{
+		PrefsContext* prefs = PrefsManager::instance().prefsFile->getContext("suneer_condense");
+		return qBound(50.0, prefs ? prefs->getDouble("min_scale", 90.0) : 90.0, 100.0);
+	}
+
+	double suneerCondenseMinTracking()
+	{
+		PrefsContext* prefs = PrefsManager::instance().prefsFile->getContext("suneer_condense");
+		return qBound(-10.0, prefs ? prefs->getDouble("min_tracking", -2.0) : -2.0, 0.0);
+	}
+
+	void suneerRelayoutChain(PageItem* tail)
+	{
+		for (PageItem* it = tail->firstInChain(); it; it = it->nextInChain())
+			it->invalid = true;
+		for (PageItem* it = tail->firstInChain(); it; it = it->nextInChain())
+			it->layout();
+	}
+
+	// Text frames among the candidates, with the text frames inside groups.
+	QList<PageItem_TextFrame*> suneerTextFramesOf(const QList<PageItem*>& candidates)
+	{
+		QList<PageItem_TextFrame*> frames;
+		for (PageItem* item : candidates)
+		{
+			if (!item)
+				continue;
+			QList<PageItem*> flat;
+			if (item->isGroup())
+				flat = item->getAllChildren();
+			else
+				flat.append(item);
+			for (PageItem* it : std::as_const(flat))
+			{
+				PageItem_TextFrame* tf = it->asTextFrame();
+				if (tf && !it->isNoteFrame() && !frames.contains(tf))
+					frames.append(tf);
+			}
+		}
+		return frames;
+	}
+}
+
+bool ScribusMainWindow::suneerCondenseStoryToFit(PageItem_TextFrame* tf, double& scalePercent, double& trackingPercent)
+{
+	scalePercent = 100.0;
+	trackingPercent = 0.0;
+	StoryText& story = tf->itemText;
+	const int len = story.length();
+	if (len <= 0)
+		return false;
+
+	const double minScale = suneerCondenseMinScale();
+	const double minTracking = suneerCondenseMinTracking();
+
+	QList<SuneerCondenseRun> runs;
+	{
+		int lastPos = 0;
+		CharStyle last = story.charStyle(0);
+		for (int i = 1; i <= len; ++i)
+		{
+			if (i < len && story.charStyle(i).equiv(last))
+				continue;
+			SuneerCondenseRun run;
+			run.start = lastPos;
+			run.length = i - lastPos;
+			run.old = story.charStyle(lastPos);
+			runs.append(run);
+			lastPos = i;
+			if (i < len)
+				last = story.charStyle(i);
+		}
+	}
+
+	// Scale and tracking are stored in tenths of a percent. A run that is
+	// already below a minimum is left where it is, never raised.
+	auto apply = [&](double scale, double tracking) {
+		for (SuneerCondenseRun& run : runs)
+		{
+			CharStyle delta;
+			const double oldScale = run.old.scaleH();
+			const double newScale = qMax((double) qRound(oldScale * scale / 100.0), qMin(oldScale, minScale * 10.0));
+			if (newScale != oldScale)
+				delta.setScaleH(newScale);
+			const double oldTracking = run.old.tracking();
+			const double newTracking = qMax(oldTracking + tracking * 10.0, qMin(oldTracking, minTracking * 10.0));
+			if (newTracking != oldTracking)
+				delta.setTracking(newTracking);
+			story.eraseCharStyle(run.start, run.length, run.delta);
+			story.applyCharStyle(run.start, run.length, run.old);
+			run.delta = delta;
+			story.applyCharStyle(run.start, run.length, delta);
+		}
+		suneerRelayoutChain(tf);
+		return !tf->frameOverflows();
+	};
+
+	bool fits = false;
+	for (double scale = 99.5; scale >= minScale - 0.001 && !fits; scale -= 0.5)
+	{
+		fits = apply(scale, 0.0);
+		if (fits)
+			scalePercent = scale;
+	}
+	for (double tracking = -0.5; tracking >= minTracking - 0.001 && !fits; tracking -= 0.5)
+	{
+		fits = apply(minScale, tracking);
+		if (fits)
+		{
+			scalePercent = minScale;
+			trackingPercent = tracking;
+		}
+	}
+
+	if (!fits)
+	{
+		for (SuneerCondenseRun& run : runs)
+		{
+			story.eraseCharStyle(run.start, run.length, run.delta);
+			story.applyCharStyle(run.start, run.length, run.old);
+		}
+		suneerRelayoutChain(tf);
+		scalePercent = 100.0;
+		return false;
+	}
+
+	// Same record a character-style change makes, one per style run, so Undo
+	// puts every run back to exactly the style it had.
+	if (UndoManager::undoEnabled())
+	{
+		for (const SuneerCondenseRun& run : std::as_const(runs))
+		{
+			auto* state = new ScOldNewState<CharStyle>(Um::ApplyTextStyle);
+			state->set("APPLY_CHARSTYLE");
+			state->set("START", run.start);
+			state->set("LENGTH", run.length);
+			state->setStates(run.old, run.delta);
+			m_undoManager->action(tf, state);
+		}
+	}
+	return true;
+}
+
+void ScribusMainWindow::suneerCondenseFramesRun(const QList<PageItem*>& candidates, const QString& title)
+{
+	if (!HaveDoc || !doc || !view)
+		return;
+
+	QStringList condensed;
+	QList<PageItem*> noFit;
+	QStringList locked;
+	int done = 0;
+
+	UndoTransaction batch;
+	if (UndoManager::undoEnabled())
+		batch = m_undoManager->beginTransaction(Um::Selection, Um::ITextFrame, tr("Condense to fit"),
+		                                        QString(), Um::IFont);
+
+	const QList<PageItem_TextFrame*> frames = suneerTextFramesOf(candidates);
+	for (PageItem_TextFrame* tf : frames)
+	{
+		// Only the last frame of a chain can say whether the story fits, and
+		// only frames that overflow are touched at all.
+		if (tf->nextInChain() != nullptr || !tf->frameOverflows())
+			continue;
+		bool chainLocked = false;
+		for (PageItem* it = tf->firstInChain(); it; it = it->nextInChain())
+			chainLocked = chainLocked || it->locked() || doc->layerLocked(it->m_layerID);
+		if (chainLocked)
+		{
+			locked << tf->itemName();
+			continue;
+		}
+		double scale = 100.0, tracking = 0.0;
+		if (suneerCondenseStoryToFit(tf, scale, tracking))
+		{
+			++done;
+			QString entry = QString("%1 → %2%").arg(tf->itemName()).arg(scale, 0, 'f', 1);
+			if (tracking < 0.0)
+				entry += tr(", tracking %1%").arg(tracking, 0, 'f', 1);
+			condensed << entry;
+		}
+		else
+			noFit.append(tf);
+	}
+
+	if (batch)
+	{
+		if (done > 0)
+			batch.commit();
+		else
+			batch.cancel();
+	}
+
+	if (done > 0)
+	{
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		view->DrawNew();
+	}
+
+	if (done == 0 && noFit.isEmpty() && locked.isEmpty())
+	{
+		setStatusBarInfoText( tr("Condense to Fit: no overflowing text frame"));
+		return;
+	}
+
+	QString summary = tr("Condensed %n frame(s)", "", done);
+	if (!condensed.isEmpty())
+		summary += QString(" (%1)").arg(condensed.join(", "));
+	setStatusBarInfoText(summary);
+
+	QStringList details;
+	if (!noFit.isEmpty())
+	{
+		QStringList names;
+		for (const PageItem* item : std::as_const(noFit))
+			names << item->itemName();
+		details << tr("%n could not fit even at the minimum (scale %1%, tracking %2%) and were left unchanged: %3", "", noFit.count())
+		               .arg(suneerCondenseMinScale(), 0, 'f', 1).arg(suneerCondenseMinTracking(), 0, 'f', 1).arg(names.join(", "));
+	}
+	if (!locked.isEmpty())
+		details << tr("Skipped, locked item or locked layer: %1").arg(locked.join(", "));
+
+	ScMessageBox info(QMessageBox::Information, title, summary, QMessageBox::NoButton, this);
+	info.setInformativeText(details.join("\n\n"));
+	QPushButton* selectButton = noFit.isEmpty() ? nullptr : info.addButton(tr("Select Them"), QMessageBox::AcceptRole);
+	info.addButton(QMessageBox::Close);
+	info.exec();
+	if (!selectButton || info.clickedButton() != selectButton)
+		return;
+
+	view->deselectItems(true);
+	doc->m_Selection->delaySignalsOn();
+	for (PageItem* item : std::as_const(noFit))
+		doc->m_Selection->addItem(item);
+	doc->m_Selection->delaySignalsOff();
+	view->DrawNew();
+}
+
+// Item > Condense to Fit (Keep Frame Size), the right-click entry and the
+// control bar button: the selected text frames, on any page.
+void ScribusMainWindow::suneerCondenseToFit()
+{
+	if (!HaveDoc || !doc)
+		return;
+	QList<PageItem*> candidates;
+	for (int i = 0; i < doc->m_Selection->count(); ++i)
+		candidates.append(doc->m_Selection->itemAt(i));
+	suneerCondenseFramesRun(candidates, tr("Condense to Fit"));
 }
 
 // Extras > Old Scribus Line Breaks (This Document). On by itself for a file

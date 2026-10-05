@@ -510,6 +510,8 @@ public slots:
 	//! \brief Add or remove the News Browser tab in the Paragraph Styles docker.
 	void suneerSetNewsBrowserTabVisible(bool visible);
 	void suneerFixOverflowFramesDoc();
+	//! \brief Make the selected overflowing text frames fit by narrowing the glyphs; the frames keep their size.
+	void suneerCondenseToFit();
 	//! \brief Lay this document out with the line breaks of Scribus 1.5/1.6 (on) or of this build (off).
 	void suneerSetOldLineBreaks(bool on);
 	//! \brief Suneer: open the two-page CTP imposition dialog
@@ -804,6 +806,10 @@ private:
 	//! \brief Offer to fix overflowing frames in a file written by an older
 	//! Scribus. Must run outside loadDoc() so undo is live; see the call site.
 	void suneerMaybeOfferLegacyOverflowFix(int loadedFormatID);
+	//! \brief Condense the story ending in \a tf until it fits. False, and nothing changed, when it cannot.
+	bool suneerCondenseStoryToFit(PageItem_TextFrame* tf, double& scalePercent, double& trackingPercent);
+	//! \brief Condense every overflowing story among \a candidates in one undo step and report.
+	void suneerCondenseFramesRun(const QList<PageItem*>& candidates, const QString& title);
 	//! \brief Set by the prompt's "Don't ask again this session" checkbox.
 	bool m_suneerLegacyOverflowAsked { false };
     /** init methods */
