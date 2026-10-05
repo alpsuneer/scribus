@@ -974,7 +974,16 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
 - Fit ആകാത്തവ പഴയപടി വെച്ച് പേര് കാണിക്കും (**Select Them**); locked frame / locked layer തൊടില്ല
 - ഒരു Ctrl+Z കൊണ്ട് എല്ലാം തിരികെ ("Condense to fit")
 
-### 48. Authors
+### 48. Frame Border: rounded corners
+- Control bar-ലെ **☐ Frame Border** popup-ൽ **Corner radius** (mm) + നാല് corner checkboxes
+- തിരഞ്ഞെടുത്ത രണ്ട് വശങ്ങൾ ചേരുന്ന corner മാത്രം വളയും; തുറന്ന വശത്ത് വര നേരെ അവസാനിക്കും
+- Border ഒറ്റ വരയായി (വര → വളവ് → വര): PDF-ലും print-ലും join വൃത്തിയായി
+- Text വളവിൽ തൊടില്ല
+- Frame resize ചെയ്താൽ border കൂടെ വരും; popup വീണ്ടും തുറന്നാൽ ഇപ്പോഴത്തെ മൂല്യങ്ങൾ
+- ഒരു Apply = ഒരു Ctrl+Z; പല frames ഒരുമിച്ച്
+- പഴയ pages-ലെ border മാറില്ല
+
+### 49. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

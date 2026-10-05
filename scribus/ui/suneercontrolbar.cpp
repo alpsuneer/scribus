@@ -856,6 +856,75 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			il->addWidget(m_borderInsetSpin);
 			bl->addLayout(il);
 		}
+		{
+			// Rounded corners, only where two chosen sides meet.
+			QHBoxLayout* rl = new QHBoxLayout();
+			rl->addWidget(new QLabel(tr("Corner radius:"), bw));
+			m_borderRadiusSpin = makeSpinBox(0, 50, 2, 0.5, " mm");
+			m_borderRadiusSpin->setValue(0.0);
+			m_borderRadiusSpin->setToolTip(tr("0 = square corners. A corner is rounded only where both of its sides have a border."));
+			rl->addWidget(m_borderRadiusSpin);
+			bl->addLayout(rl);
+			QGridLayout* cg = new QGridLayout();
+			cg->setContentsMargins(0, 0, 0, 0);
+			m_borderCornerTLChk = new QCheckBox(tr("Top left"), bw);
+			m_borderCornerTRChk = new QCheckBox(tr("Top right"), bw);
+			m_borderCornerBLChk = new QCheckBox(tr("Bottom left"), bw);
+			m_borderCornerBRChk = new QCheckBox(tr("Bottom right"), bw);
+			cg->addWidget(m_borderCornerTLChk, 0, 0);
+			cg->addWidget(m_borderCornerTRChk, 0, 1);
+			cg->addWidget(m_borderCornerBLChk, 1, 0);
+			cg->addWidget(m_borderCornerBRChk, 1, 1);
+			bl->addLayout(cg);
+			for (QCheckBox* corner : { m_borderCornerTLChk, m_borderCornerTRChk, m_borderCornerBLChk, m_borderCornerBRChk })
+				corner->setChecked(true);
+			// A corner can be rounded only when both of its sides are chosen.
+			auto syncCorners = [this] {
+				const bool top = m_borderTopChk->isChecked(), bottom = m_borderBottomChk->isChecked();
+				const bool left = m_borderLeftChk->isChecked(), right = m_borderRightChk->isChecked();
+				m_borderCornerTLChk->setEnabled(top && left);
+				m_borderCornerTRChk->setEnabled(top && right);
+				m_borderCornerBLChk->setEnabled(bottom && left);
+				m_borderCornerBRChk->setEnabled(bottom && right);
+			};
+			for (QCheckBox* sideBox : { m_borderTopChk, m_borderBottomChk, m_borderLeftChk, m_borderRightChk })
+				connect(sideBox, &QCheckBox::toggled, this, [syncCorners](bool) { syncCorners(); });
+			syncCorners();
+			// The popup opens showing what the selected frame has now.
+			connect(borderMenu, &QMenu::aboutToShow, this, [this, syncCorners] {
+				PageItem* item = sel() && !sel()->isEmpty() ? sel()->itemAt(0) : nullptr;
+				if (!item || !item->isTextFrame())
+					return;
+				bool rounded = false;
+				if (const ObjAttrVector* all = item->getObjectAttributes())
+					for (const ObjectAttribute& a : *all)
+						rounded = rounded || a.name == QLatin1String("SuneerSideBorderRound");
+				if (item->hasSideBorders())
+				{
+					m_borderTopChk->setChecked(item->TopLine);
+					m_borderBottomChk->setChecked(item->BottomLine);
+					m_borderLeftChk->setChecked(item->LeftLine);
+					m_borderRightChk->setChecked(item->RightLine);
+					m_borderInsetSpin->setValue(item->textToFrameDistLeft() / 2.8346);
+				}
+				const bool individual = item->hasIndividualCornerRadii();
+				const double tl = individual ? item->cornerRadiusTL() : item->cornerRadius();
+				const double tr = individual ? item->cornerRadiusTR() : item->cornerRadius();
+				const double bl = individual ? item->cornerRadiusBL() : item->cornerRadius();
+				const double br = individual ? item->cornerRadiusBR() : item->cornerRadius();
+				const double radius = rounded ? qMax(qMax(tl, tr), qMax(bl, br)) : 0.0;
+				m_borderRadiusSpin->setValue(radius / 2.8346);
+				// A corner whose two sides are not both chosen keeps the default
+				// (ticked), so choosing the missing side later rounds it too.
+				const bool top = m_borderTopChk->isChecked(), bottom = m_borderBottomChk->isChecked();
+				const bool left = m_borderLeftChk->isChecked(), right = m_borderRightChk->isChecked();
+				m_borderCornerTLChk->setChecked(radius <= 0.0 || tl > 0.0 || !(top && left));
+				m_borderCornerTRChk->setChecked(radius <= 0.0 || tr > 0.0 || !(top && right));
+				m_borderCornerBLChk->setChecked(radius <= 0.0 || bl > 0.0 || !(bottom && left));
+				m_borderCornerBRChk->setChecked(radius <= 0.0 || br > 0.0 || !(bottom && right));
+				syncCorners();
+			});
+		}
 		QPushButton* applyBtn = new QPushButton(tr("Apply"), bw);
 		connect(applyBtn, &QPushButton::clicked, this, [this, borderMenu]{ onTextFrameBox(); borderMenu->close(); });
 		bl->addWidget(applyBtn);
@@ -5302,6 +5371,12 @@ void SuneerControlBar::onTextFrameBox()
 	const bool bottom = !m_borderBottomChk || m_borderBottomChk->isChecked();
 	const bool left   = !m_borderLeftChk   || m_borderLeftChk->isChecked();
 	const bool right  = !m_borderRightChk  || m_borderRightChk->isChecked();
+	// A corner is rounded only where both of its sides are chosen and its box is ticked.
+	const double radius = (m_borderRadiusSpin ? m_borderRadiusSpin->value() : 0.0) * MM2PT;
+	const double cornerTL = (top && left     && m_borderCornerTLChk && m_borderCornerTLChk->isChecked()) ? radius : 0.0;
+	const double cornerTR = (top && right    && m_borderCornerTRChk && m_borderCornerTRChk->isChecked()) ? radius : 0.0;
+	const double cornerBL = (bottom && left  && m_borderCornerBLChk && m_borderCornerBLChk->isChecked()) ? radius : 0.0;
+	const double cornerBR = (bottom && right && m_borderCornerBRChk && m_borderCornerBRChk->isChecked()) ? radius : 0.0;
 
 	// One undo step for the whole press. Safe to group now that the per-side
 	// flags record a state of their own: before that, grouping would have
@@ -5310,7 +5385,7 @@ void SuneerControlBar::onTextFrameBox()
 	UndoTransaction borderTransaction;
 	if (UndoManager::undoEnabled())
 		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
-		                                                             Um::ObjectFrame, QString(), Um::IBorder);
+		                                                             tr("Frame border"), QString(), Um::IBorder);
 
 	for (int i = 0; i < sel()->count(); ++i)
 	{
@@ -5319,6 +5394,51 @@ void SuneerControlBar::onTextFrameBox()
 
 		// Per-side border flags (rendered by PageItem::DrawObj_Post etc.)
 		item->setSideBorders(top, bottom, left, right);
+
+		// Rounded corners: the frame itself gets the radii (so the fill, the
+		// clip and the text inset along the curve all follow), and the mark
+		// makes the border follow the curve as one path. A frame that never had
+		// a radius from here is not reshaped at all.
+		{
+			ObjAttrVector* attributes = item->getObjectAttributes();
+			int markIndex = -1;
+			for (int a = 0; attributes && a < attributes->count(); ++a)
+				if (attributes->at(a).name == QLatin1String("SuneerSideBorderRound"))
+					markIndex = a;
+			const bool wantRound = cornerTL > 0.0 || cornerTR > 0.0 || cornerBL > 0.0 || cornerBR > 0.0;
+			if (wantRound || markIndex >= 0)
+			{
+				const FPointArray oldShape = item->PoLine.copy();
+				if (!wantRound)
+				{
+					item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+					item->setCornerRadius(0.0);
+					item->SetRectFrame();
+					attributes->remove(markIndex);
+				}
+				else
+				{
+					if (cornerTL == cornerTR && cornerTR == cornerBL && cornerBL == cornerBR)
+					{
+						item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+						item->setCornerRadius(cornerTL);
+					}
+					else
+						item->setCornerRadii(cornerTL, cornerTR, cornerBL, cornerBR);
+					item->SetFrameRound();
+					if (markIndex < 0 && attributes)
+					{
+						ObjectAttribute mark;
+						mark.name = QStringLiteral("SuneerSideBorderRound");
+						mark.type = QStringLiteral("none");
+						mark.value = QStringLiteral("1");
+						attributes->append(mark);
+					}
+				}
+				item->suneerShapeChanged(oldShape);
+				doc->setRedrawBounding(item);
+			}
+		}
 
 		// Border stroke used by the selected sides; if none selected, no border.
 		if (top || bottom || left || right)

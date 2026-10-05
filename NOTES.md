@@ -1017,6 +1017,7 @@ identical to the pixel, mean pixel difference 1.3%.
 | Accept the legacy all-caps `LINESPMODE` spelling | `14c1cab` | |
 | Text-wrap gap offsets serialized in all three SLA formats | `4895488` | |
 | Per-side frame borders survive copy/paste and save | `f9026b9` | |
+| Frame Border popup: rounded corners where two chosen sides meet — corner radius + per-corner boxes, border drawn as one path, text keeps off the curve. Verified by the user | `git log -S kSuneerSideBorderRound` | feature/ctp-output |
 | Cell style borders survive loading | `0eb65ec` | fix/cellstyle-border-load |
 
 ### Undo correctness (a recurring theme — most of these were one-line-looking bugs)
@@ -2107,6 +2108,26 @@ same day: **the server does the installs**, the laptop only releases.
   again"); the second box is put into its grid above the button row.
 - Not exercised: the right-click entry, the tracking stage, linked chains, locked layers, Redo,
   the unticked (grow) path together with this change, Print Preview's picture, paper.
+
+## Rounded side borders (2026-10-06)
+
+- `PageItem::sideBorderPath()` is the one place the per-side border is built; canvas
+  (`DrawObj_Post`, text frame), `scpageoutput`, `pslib` and `pdflib_core` all stroke what it returns.
+- Rounding is NOT a border-only decoration: the popup sets the frame's own corner radii
+  (`setCornerRadii()` / `setCornerRadius()` + `SetFrameRound()` + `suneerShapeChanged()`), so fill,
+  clip and the corner text inset follow for free. The path then walks the chosen sides clockwise and
+  adds the arc only where both sides of a corner are chosen; each run of chosen sides is one
+  sub-path, so joins are real joins.
+- **Opt-in mark.** Only a frame carrying the item attribute `SuneerSideBorderRound` gets the curved
+  path. Without it a frame with side borders AND corner radii keeps the four separate straight
+  edges it always had (pixel-identical to the build before). Do not drop the mark test.
+- The mark is a plain ObjectAttribute: no file-format change, older builds ignore it (they show the
+  rounded frame with straight border lines). It is not part of the undo record; after Undo it stays
+  on the frame with radius 0, which draws exactly like no mark.
+- Apply still forces 0.5 pt Black (pre-existing).
+- Not built: Cut/bevel corners, pt unit, an end gap.
+- Not exercised: Print Preview, the DBI PDF preset, dash styles, fill colour, rotated/grouped
+  frames, mouse resize, Redo, removing the rounding with radius 0.
 
 ## Text distances and wrap on rounded frames (2026-10-04)
 

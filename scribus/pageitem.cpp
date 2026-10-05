@@ -1850,11 +1850,96 @@ void PageItem::DrawObj_Pre(ScPainter *p)
 		p->setMaskMode(0);
 }
 
+// Set by the Frame Border popup when it rounds corners: the border then follows
+// the frame's rounded corners as one path. A frame without the mark keeps the
+// four separate straight edges it has always had, whatever its corner radii.
+static const QString kSuneerSideBorderRound = QStringLiteral("SuneerSideBorderRound");
+
+static bool suneerSideBorderRounded(const PageItem* item)
+{
+	const ObjAttrVector* all = const_cast<PageItem*>(item)->getObjectAttributes();
+	if (!all)
+		return false;
+	for (const ObjectAttribute& a : *all)
+		if (a.name == kSuneerSideBorderRound)
+			return true;
+	return false;
+}
+
 FPointArray PageItem::sideBorderPath() const
 {
 	FPointArray path;
 	const double w = width();
 	const double h = height();
+
+	if (suneerSideBorderRounded(this))
+	{
+		// Corner i sits at the start of side i, going clockwise from the top:
+		// top (TL to TR), right (TR to BR), bottom (BR to BL), left (BL to TL).
+		// The radii are the frame's own, clamped the way SetFrameRound() draws them.
+		const double maxR = qMin(w, h) / 2.0;
+		double r[4];
+		if (hasIndividualCornerRadii())
+		{
+			r[0] = qBound(0.0, m_cornerRadiusTL, maxR);
+			r[1] = qBound(0.0, m_cornerRadiusTR, maxR);
+			r[2] = qBound(0.0, m_cornerRadiusBR, maxR);
+			r[3] = qBound(0.0, m_cornerRadiusBL, maxR);
+		}
+		else
+			r[0] = r[1] = r[2] = r[3] = qBound(0.0, m_roundedCornerRadius, maxR);
+		if (r[0] > 0.0 || r[1] > 0.0 || r[2] > 0.0 || r[3] > 0.0)
+		{
+			const bool side[4] = { TopLine, RightLine, BottomLine, LeftLine };
+			const double cx[4] = { 0.0, w, w, 0.0 };
+			const double cy[4] = { 0.0, 0.0, h, h };
+			const double dx[4] = { 1.0, 0.0, -1.0, 0.0 };
+			const double dy[4] = { 0.0, 1.0, 0.0, -1.0 };
+			const double kappa = 0.552284749;
+			const bool allFour = side[0] && side[1] && side[2] && side[3];
+			// Start where a run of chosen sides begins, so each run is one
+			// continuous sub-path with real joins instead of butted line ends.
+			int start = 0;
+			for (int i = 0; i < 4 && !allFour; ++i)
+			{
+				if (side[i] && !side[(i + 3) % 4])
+				{
+					start = i;
+					break;
+				}
+			}
+			bool inRun = false;
+			for (int k = 0; k < 4; ++k)
+			{
+				const int i = (start + k) % 4;
+				const int j = (i + 1) % 4;
+				if (!side[i])
+				{
+					inRun = false;
+					continue;
+				}
+				if (!inRun && path.size() > 0)
+					path.setMarker();
+				inRun = true;
+				const double sx = cx[i] + dx[i] * r[i];
+				const double sy = cy[i] + dy[i] * r[i];
+				const double ex = cx[j] - dx[i] * r[j];
+				const double ey = cy[j] - dy[i] * r[j];
+				path.addQuadPoint(sx, sy, sx, sy, ex, ey, ex, ey);
+				// The curve is drawn only where both sides are chosen. An open
+				// side leaves this line ending at the start of the curve.
+				if (side[j] && r[j] > 0.0)
+				{
+					const double nx = cx[j] + dx[j] * r[j];
+					const double ny = cy[j] + dy[j] * r[j];
+					path.addQuadPoint(ex, ey, ex + dx[i] * kappa * r[j], ey + dy[i] * kappa * r[j],
+					                  nx, ny, nx - dx[j] * kappa * r[j], ny - dy[j] * kappa * r[j]);
+				}
+			}
+			return path;
+		}
+	}
+
 	bool first = true;
 	auto edge = [&](double x1, double y1, double x2, double y2) {
 		if (!first)

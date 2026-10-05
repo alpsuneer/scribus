@@ -357,6 +357,11 @@ public:
 	QCheckBox*      m_borderLeftChk        {nullptr};
 	QCheckBox*      m_borderRightChk       {nullptr};
 	QDoubleSpinBox* m_borderInsetSpin      {nullptr};
+	QDoubleSpinBox* m_borderRadiusSpin     {nullptr};
+	QCheckBox*      m_borderCornerTLChk    {nullptr};
+	QCheckBox*      m_borderCornerTRChk    {nullptr};
+	QCheckBox*      m_borderCornerBLChk    {nullptr};
+	QCheckBox*      m_borderCornerBRChk    {nullptr};
 	QWidget*        m_featherPopup         {nullptr};
 	QDoubleSpinBox* m_featherSpin          {nullptr};
 	QToolButton*    m_featherAllBtn        {nullptr};
