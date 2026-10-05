@@ -906,7 +906,34 @@ click ചെയ്ത് select ചെയ്ത paragraph-ന് നേരിട
   It now shows the real date and time this copy was built, on the first tab under the version and
   on the Build Info tab - the same stamp as in the window title.
 
-### 43. Authors
+### 43. Text Effects: Bevel & Emboss (Photoshop-style headline)
+- **Item > Text Effects...**, also in the right-click menu. Select ONE of: a Fill Text with Image
+  result, a text frame, a shape, or a group of shapes (a headline converted to outlines).
+- Styles: Inner Bevel, Outer Bevel, Emboss, Pillow Emboss, Deboss (Stamped). Settings: Technique
+  (Smooth / Chisel Hard), Depth, Direction, Size, Soften, Light Angle, Altitude, Highlight and
+  Shadow colour + opacity, Resolution (300 / 600 dpi), Output. Presets: Classic Emboss, Gold Bevel,
+  Stamped, Pillow. The dialog has a small preview.
+- **Bake (print-safe)** is the default: the highlight and the shadow are written into a copy of the
+  image inside the letters. No transparency goes to the PDF. For Outer Bevel, Emboss and Pillow
+  Emboss the part outside the letters sits in an opaque frame behind them, filled with the colour
+  chosen for "Behind the letters" - pick the colour the headline stands on.
+- **Live (transparency)** puts the highlight and the shadow in two frames (Screen / Multiply) over
+  the letters. PDF/X-1a, PDF 1.3 and PostScript printing cannot carry that - use Bake for the press.
+- A text frame, shape or group is kept on the hidden layer "Original text" and a letter-shaped image
+  frame with a plain-colour image is made from it (text colour / fill colour; a CMYK colour gives a
+  CMYK TIFF, so Black stays on the black plate).
+- The images are saved in the folder **"<document>_effects"** next to the .sla, so the document
+  must be saved first (the command asks). The original picture is never changed.
+- Apply again replaces the old result. "Remove Effect" takes it away. One Apply = one undo step.
+  Images that are no longer used are deleted when the document is closed.
+- The generated images are ordinary linked images: the linked-images check, Embed All Images and
+  Collect for Output see them.
+- Very large headlines: the image is limited to 40 megapixels (the resolution is lowered, with a
+  message).
+- The Phase-1 effects (extrude, stroke, shadow, gradient) are not in this build; this dialog holds
+  Bevel & Emboss only.
+
+### 44. Authors
 - Newspaper Page Layout: Suneer. A (alp.suneer@gmail.com)
 
 ---

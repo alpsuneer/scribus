@@ -1,6 +1,7 @@
 #ifndef SUNEERFILLTEXTIMAGE_H
 #define SUNEERFILLTEXTIMAGE_H
 
+#include <QPainterPath>
 #include <QString>
 
 class PageItem;
@@ -28,6 +29,10 @@ namespace SuneerFillTextImage
 
 	//! Name of the layer the original text frames are parked on.
 	QString originalTextLayerName();
+
+	//! The outline of the text as the frame lays it out and shapes it, in the frame's own
+	//! coordinates, all glyphs united into one winding path. Empty when nothing has an outline.
+	QPainterPath lettersPath(PageItem* textFrame);
 
 	//! Asks for the image and the options, then applies them to the selected text frame.
 	void runForSelection(ScribusMainWindow* mw);

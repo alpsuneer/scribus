@@ -5330,6 +5330,14 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreImageScaleMode(ss, isUndo);
 		else if (ss->contains("SUNEER_IMAGE_INLINE"))
 			restoreSuneerImageInline(ss, isUndo);
+		else if (ss->contains("SUNEER_ITEM_ATTRIBUTES"))
+		{
+			// Suneer: item attributes changed by a command (Text Effects keeps its
+			// settings there). The state carries the list before and the list after.
+			const auto* as = dynamic_cast<ScItemState<QPair<ObjAttrVector, ObjAttrVector> >*>(ss);
+			if (as)
+				pageItemAttributes = isUndo ? as->getItem().first : as->getItem().second;
+		}
 		else if (ss->contains("IMAGE_SCALE"))
 			restoreImageScaleChange(ss, isUndo);
 		else if (ss->contains("IMAGE_OFFSET"))

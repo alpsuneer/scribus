@@ -1,4 +1,5 @@
 #include "suneerfilltextimage.h"
+#include "suneertexteffects.h"
 
 #include <QCheckBox>
 #include <QDialog>
@@ -93,6 +94,18 @@ QString SuneerFillTextImage::originalTextLayerName()
 	return QStringLiteral("Original text");
 }
 
+QPainterPath SuneerFillTextImage::lettersPath(PageItem* textFrame)
+{
+	if (!textFrame || !textFrame->isTextFrame())
+		return QPainterPath();
+	textFrame->layout();
+	GlyphPathCollector collector(textFrame);
+	textFrame->textLayout.render(&collector);
+	collector.path.setFillRule(Qt::WindingFill);
+	// One shape: letters that overlap (a vowel sign over its consonant) are united.
+	return collector.path.simplified();
+}
+
 PageItem* SuneerFillTextImage::apply(ScribusMainWindow* mw, PageItem* textFrame, const Options& options, QString* error)
 {
 	auto fail = [error](const QString& why) -> PageItem* {
@@ -113,12 +126,7 @@ PageItem* SuneerFillTextImage::apply(ScribusMainWindow* mw, PageItem* textFrame,
 		return fail(QObject::tr("Cannot read the image file:\n%1").arg(options.imageFile));
 
 	// The outline of the text exactly as the page shows it.
-	textFrame->layout();
-	GlyphPathCollector collector(textFrame);
-	textFrame->textLayout.render(&collector);
-	collector.path.setFillRule(Qt::WindingFill);
-	// One shape: letters that overlap (a vowel sign over its consonant) are united.
-	QPainterPath letters = collector.path.simplified();
+	QPainterPath letters = lettersPath(textFrame);
 	const QRectF bounds = letters.boundingRect();
 	if (letters.isEmpty() || bounds.width() < 1.0 || bounds.height() < 1.0)
 		return fail(QObject::tr("The text has no outlines (only spaces, or the font has no glyphs for it)."));
@@ -166,6 +174,8 @@ PageItem* SuneerFillTextImage::apply(ScribusMainWindow* mw, PageItem* textFrame,
 		                                                        QObject::tr("Fill Text with Image"), QString(), nullptr);
 	if (oldImage)
 	{
+		// a Bevel & Emboss made on the old image goes with it
+		SuneerTextEffects::deletePieces(doc, oldImage);
 		Selection gone(doc, false);
 		gone.addItem(oldImage);
 		doc->itemSelection_DeleteItem(&gone);

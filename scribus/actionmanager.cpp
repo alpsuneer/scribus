@@ -510,6 +510,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemFillTextWithImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemTextEffects";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameToImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustImageToFrame";
@@ -1868,6 +1870,8 @@ void ActionManager::languageChange()
 	(*scrActions)["itemFitCaptionFrame"]->setTexts( tr("Fit Caption Frame"));
 	(*scrActions)["itemFillTextWithImage"]->setTexts( tr("Fill Text with Image..."));
 	(*scrActions)["itemFillTextWithImage"]->setStatusTip( tr("Show an image only inside the letters of the selected text frame"));
+	(*scrActions)["itemTextEffects"]->setTexts( tr("Text Effects..."));
+	(*scrActions)["itemTextEffects"]->setStatusTip( tr("Bevel and emboss the letters of the selected headline"));
 	(*scrActions)["itemAdjustFrameToImage"]->setTexts( tr("Adjust Frame to Image"));
 	(*scrActions)["itemAdjustImageToFrame"]->setTexts( tr("Adjust Image to Frame"));
 	(*scrActions)["itemToggleInlineImage"]->setTexts( tr("Embed Image"));
@@ -2560,6 +2564,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemAdjustFrameHeightToText"
 		<< "itemFitCaptionFrame"
 		<< "itemFillTextWithImage"
+		<< "itemTextEffects"
 		<< "itemAdjustFrameToImage" 
 		<< "itemAdjustImageToFrame" 
 		<< "itemToggleInlineImage" 

@@ -2115,3 +2115,55 @@ same day: **the server does the installs**, the laptop only releases.
 - A `static` helper in about.cpp must sit above the `About::About` constructor's first use - the
   string "About::About(" also appears earlier in the file than the definition one expects.
 
+## Text Effects: Bevel & Emboss (2026-10-05, not committed until the user has tested)
+
+- `scribus/suneertexteffects.{h,cpp}` (both CMake lists), action `itemTextEffects` (Item menu,
+  context menu), enabled through `SuneerTextEffects::canRunOn()`. There was NO "Phase 1" Text Effects
+  dialog in any branch or installed build on 2026-10-05; the user chose a new dialog with only this
+  section. `SuneerFillTextImage::lettersPath()` now exports the glyph path for it.
+- **Model: one "face" = a letter-shaped image frame.** Text frame / polygon / group sources are
+  parked on the "Original text" layer exactly like Fill Text with Image, and the face is named
+  `<source name> image`, so both commands find each other's frames. Extra frames ("pieces": `emboss
+  back`, `emboss highlight`, `emboss shadow`) carry the item attribute `SuneerEmbossPiece` whose
+  Parameter is the face's id; the face carries `SuneerEmboss` (settings) and `SuneerEmbossBase` (what
+  it showed before). Pieces are found by id, never by name.
+- **"Does the face show our image?"** decides whether the base comes from the attribute or from the
+  frame as it is now. By file place (`fx_*` in `*_effects`) or, after Embed All Images turned it into
+  a temp file, by the recorded file size + pixel size. Getting this wrong stacks a bevel on a bevel.
+- An embedded base picture is a temp file that is gone next session: Apply copies it to
+  `fx_<id>_<stamp>_base.<ext>` and the attribute points there (also as a path relative to the .sla).
+  Remove Effect embeds it again.
+- **Bake needs opaque images**: a PNG with alpha becomes a soft mask in the PDF. Styles that reach
+  outside the letters therefore get an opaque rectangle behind the face ("Behind the letters"
+  colour), and the letter edge stays a vector clip. The new back frame is on top of the stack, so the
+  face is brought to front after it (`bringItemSelectionToFront`, undoable); moving `doc->Items`
+  directly breaks on redo, which re-appends created items at the END of the list.
+- CMYK: channels are blended as light (1 - ink), so a Black shadow only adds K. A plain colour that
+  is not RGB, or a CMYK TIFF/PSD base (ScImage `RawData`: C,M,Y,K in r,g,b,a), gives a CMYK TIFF
+  written with libtiff; everything else an RGB PNG. A CMYK JPEG base goes the RGB way.
+- **Chisel Hard needs a sub-pixel distance.** A distance transform on the mask at output resolution
+  shows the staircase of the edge as radial streaks. `signedDistance()` measures on a mask up to 4x
+  finer (limit 24 MP) and averages down. Above that size it falls back to 1x.
+- Undo: delete / create / Get Image states, plus one new state `SUNEER_ITEM_ATTRIBUTES`
+  (`ScItemState<QPair<ObjAttrVector,ObjAttrVector>>`, handled inline in `PageItem::restore`) because
+  `setObjectAttributes` records nothing.
+- Files: every Apply writes new names, so Undo still finds the old image. `sweep()` deletes an
+  `fx_*` file only when the open document, the .sla on disk (read through zlib, so .sla.gz too) and
+  this session's own files do not need it; `DoFileClose` sweeps with the disk test alone. So old
+  images of a session go at close, not at Apply.
+- Worker thread: `QtConcurrent::run` + local `QEventLoop`; the items are held in `QPointer`s and
+  checked again after the loop.
+- Test: `~/scribus-crashlogs/texteffects/run.sh fxtest.py` then `fxtest2.py` (needs out/ of the
+  first), `fxtest3.py` (Print Preview), `pdfcheck.py <pdf>` lists soft masks / blend modes.
+  Harness traps met: the build-tree binary does not load the stripped plugins of an installed .deb
+  ("No File Loader Plug-ins Found") - install first; scripter `setLayerLocked(name, x)` assigns x to
+  *editable* (0 locks); PyQt cannot call `accept()` on a C++-made QFileDialog (abort) - click its
+  button; `saveDoc()` stops on the linked-images dialog, `saveDocAs()` does not.
+- Not exercised: the IM path (no text-path change; text was set by the scripter), the real printer,
+  the Print Preview picture (window opened, pane stayed empty in Xvfb), Cancel in the progress
+  dialog, master pages, flipped / image-rotated bases, CMYK JPEG and PSD bases, .sla.gz documents,
+  copies of a face made with copy/paste, a document moved to another PC, PDF/X-1a export itself
+  (the DBI preset is PDF 1.5), Phase-1 effects together with this (they do not exist).
+- Known: Live does not survive PostScript print (white letters) - the dialog says so. Image Effects
+  set on the base picture are not baked. The face moves to the top of its layer when a back frame is
+  made. Grouping the face with its pieces makes the command refuse ("inside a group").
