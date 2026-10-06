@@ -63,6 +63,7 @@ for which a new license (GPL+exception) is in place.
 #include <QMdiArea>
 #include <QMdiSubWindow>
 #include <QMessageBox>
+#include <QPointer>
 
 #include <QDialog>
 #include <QVBoxLayout>
@@ -9888,7 +9889,9 @@ void ScribusMainWindow::suneerTextToTable()
 {
 	if (!doc || doc->m_Selection->isEmpty())
 		return;
-	PageItem* item = doc->m_Selection->itemAt(0);
+	// The frame is deleted at the end while this function still runs, and the
+	// context menu reaches here from text edit mode too: hold it weakly.
+	QPointer<PageItem> item = doc->m_Selection->itemAt(0);
 	if (!item || !item->isTextFrame())
 		return;
 
@@ -9909,13 +9912,21 @@ void ScribusMainWindow::suneerTextToTable()
 	if (rows.isEmpty())
 		return;
 
-	// 3. Split each row by TAB -> columns, and find the maximum column count.
+	// 3. Split each row into columns, and find the maximum column count.
+	// TAB is the separator when the text has any; a text without a single TAB
+	// is treated as comma separated. Deciding per text rather than per row
+	// keeps a comma inside a tab-separated cell ("സീത,കുട്ടി") in one cell.
+	const bool hasTab = raw.contains(SpecialChars::TAB);
+	const QChar separator = hasTab ? QChar(SpecialChars::TAB) : QChar(',');
 	QList<QStringList> grid;
 	grid.reserve(rows.size());
 	int numColumns = 0;
 	for (const QString& row : rows)
 	{
-		QStringList cols = row.split(SpecialChars::TAB);
+		QStringList cols = row.split(separator);
+		if (!hasTab)
+			for (QString& col : cols)
+				col = col.trimmed();
 		numColumns = qMax(numColumns, static_cast<int>(cols.size()));
 		grid.append(cols);
 	}
@@ -9930,20 +9941,39 @@ void ScribusMainWindow::suneerTextToTable()
 	double h = item->height();
 	int layerID = item->m_layerID;
 
+	// Leave text edit mode before the frame goes away. Converting from the
+	// context menu while editing used to leave the canvas in edit mode with a
+	// table (later a deleted frame) as the "edited" item, so the text cursor
+	// and the ruler pointed at nothing on the page.
+	if (doc->appMode != modeNormal)
+		view->requestMode(modeNormal);
+	if (!item)
+		return;
+
+	// The view stays where the operator left it. Remembered so that whatever
+	// the table build does to the canvas size, nothing moves afterwards.
+	const int oldContentsX = view->contentsX();
+	const int oldContentsY = view->contentsY();
+
 	UndoTransaction trans;
 	if (UndoManager::undoEnabled())
 		trans = m_undoManager->beginTransaction(Um::SelectionGroup, Um::ITable, tr("Convert Text to Table"), QString(), Um::ITable);
 
 	// 5. Create the table at the same position/size.
+	// dontResize keeps PageItem::updateClip() from widening the canvas while
+	// the cells are built: each cell frame is created at (0,0), and the canvas
+	// used to grow to (0,0) minus the scratch space, which shifted the whole
+	// view by that much (measured: 100 pt left, 20 pt up). It has to be set
+	// AFTER itemAdd(): the table constructor cleared it.
 	doc->dontResize = true;
 	int z = doc->itemAdd(PageItem::Table, PageItem::Unspecified, x, y, w, h, 0, CommonStrings::None, CommonStrings::None);
 	PageItem_Table* table = doc->Items->at(z)->asTable();
+	doc->dontResize = true;
 	table->setLayer(layerID);
 	table->insertRows(0, numRows - 1);
 	table->insertColumns(0, numColumns - 1);
 	table->adjustTableToFrame();
 	table->adjustFrameToTable();
-	doc->dontResize = false;
 
 	// 6. Fill each cell with its corresponding text.
 	for (int r = 0; r < numRows; ++r)
@@ -9960,6 +9990,8 @@ void ScribusMainWindow::suneerTextToTable()
 		}
 	}
 	table->adjustFrameToTable();
+	doc->dontResize = false;
+	doc->setRedrawBounding(table);
 
 	// 7. Optionally delete the original text frame.
 	QMessageBox::StandardButton ret = ScMessageBox::question(this, tr("Convert to Table"),
@@ -9969,7 +10001,7 @@ void ScribusMainWindow::suneerTextToTable()
 	// Drop the original frame from the current selection before touching it.
 	doc->m_Selection->clear();
 
-	if (ret == QMessageBox::Yes)
+	if (ret == QMessageBox::Yes && item)
 	{
 		Selection tmpSelection(this, false);
 		tmpSelection.addItem(item);
@@ -9979,10 +10011,36 @@ void ScribusMainWindow::suneerTextToTable()
 	if (trans)
 		trans.commit();
 
+	doc->m_Selection->clear();
 	doc->m_Selection->addItem(table);
+
+	// Keep zoom and scroll. If anything moved the view, put it back; then, only
+	// if the table is not in view, scroll the shortest distance that shows it.
+	if (view->contentsX() != oldContentsX || view->contentsY() != oldContentsY)
+		view->setContentsPos(oldContentsX, oldContentsY);
+	{
+		const QRectF visible = view->visibleCanvasRect();
+		const QRectF tableRect = table->getBoundingRect();
+		if (!visible.isEmpty() && !visible.contains(tableRect))
+		{
+			double dx = 0.0, dy = 0.0;
+			if (tableRect.left() < visible.left())
+				dx = tableRect.left() - visible.left();
+			else if (tableRect.right() > visible.right())
+				dx = qMin(tableRect.right() - visible.right(), tableRect.left() - visible.left());
+			if (tableRect.top() < visible.top())
+				dy = tableRect.top() - visible.top();
+			else if (tableRect.bottom() > visible.bottom())
+				dy = qMin(tableRect.bottom() - visible.bottom(), tableRect.top() - visible.top());
+			const double scale = view->scale();
+			view->scrollBy(qRound(dx * scale), qRound(dy * scale));
+		}
+	}
+
 	table->update();
 	doc->regionsChanged()->update(QRectF());
 	doc->changed();
+	HaveNewSel();
 }
 
 // StoryText has no undo hooks of its own, so applying styles straight into it

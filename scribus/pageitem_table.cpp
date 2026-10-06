@@ -52,10 +52,14 @@ PageItem_Table::PageItem_Table(ScribusDoc *pa, double x, double y, double w, dou
 {
 	initialize(numRows, numColumns);
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	adjustTableToFrame();
 	adjustFrameToTable();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 
 	ASSERT_VALID();
 }
@@ -67,10 +71,14 @@ PageItem_Table::~PageItem_Table()
 
 void PageItem_Table::adjustTable()
 {
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	adjustTableToFrame();
 	adjustFrameToTable();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 }
 
 void PageItem_Table::currentTextProps(ParagraphStyle& parStyle) const
@@ -1518,13 +1526,17 @@ void PageItem_Table::setCellFillColor(const QString& fillColor)
 		undoManager->action(this, ss);
 	}
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = m_Doc->dontResize;
 	m_Doc->dontResize = true;
 	for (auto cellIter = tableCells.begin(); cellIter != tableCells.end(); cellIter++)
 	{
 		TableCell currentCell(*cellIter);
 		currentCell.setFillColor(fillColor);
 	}
-	m_Doc->dontResize = false;
+	m_Doc->dontResize = oldDontResize;
 
 	emit changed();
 }
@@ -1557,13 +1569,17 @@ void PageItem_Table::setCellFillShade(double fillShade)
 		undoManager->action(this, ss);
 	}
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = m_Doc->dontResize;
 	m_Doc->dontResize = true;
 	for (auto cellIter = tableCells.begin(); cellIter != tableCells.end(); cellIter++)
 	{
 		TableCell currentCell(*cellIter);
 		currentCell.setFillShade(fillShade);
 	}
-	m_Doc->dontResize = false;
+	m_Doc->dontResize = oldDontResize;
 
 	emit changed();
 }
@@ -1596,13 +1612,17 @@ void PageItem_Table::setCellStyle(const QString& cellStyle)
 		undoManager->action(this, ss);
 	}
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = m_Doc->dontResize;
 	m_Doc->dontResize = true;
 	for (auto cellIter = tableCells.begin(); cellIter != tableCells.end(); cellIter++)
 	{
 		TableCell currentCell(*cellIter);
 		currentCell.setStyle(cellStyle);
 	}
-	m_Doc->dontResize = false;
+	m_Doc->dontResize = oldDontResize;
 
 	emit changed();
 }
@@ -1618,10 +1638,14 @@ void PageItem_Table::setStyle(const QString& style)
 		undoManager->action(this, ss);
 	}
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	m_style.setParent(style);
 	updateCells();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 	emit changed();
 }
 
@@ -1636,15 +1660,23 @@ void PageItem_Table::unsetStyle()
 		undoManager->action(this, ss);
 	}
 
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	m_style.setParent("");
 	updateCells();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 	emit changed();
 }
 
 void PageItem_Table::unsetDirectFormatting()
 {
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	QString parentStyle = m_style.parent();
 	m_style.setParent("");
@@ -1653,7 +1685,7 @@ void PageItem_Table::unsetDirectFormatting()
 	adjustTableToFrame();
 	adjustFrameToTable();
 	updateCells();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 	emit changed();
 }
 
@@ -1669,9 +1701,13 @@ QString PageItem_Table::styleName() const
 
 void PageItem_Table::handleStyleChanged()
 {
+	// Restore, do not clear: a caller that set dontResize around a whole
+	// table build (insertRows, insertColumns, cell fill) relies on it staying
+	// set, or the cells, created at (0,0), widen the canvas and shift the view.
+	const bool oldDontResize = doc()->dontResize;
 	doc()->dontResize = true;
 	updateCells();
-	doc()->dontResize = false;
+	doc()->dontResize = oldDontResize;
 }
 
 void PageItem_Table::applicableActions(QStringList& actionList)

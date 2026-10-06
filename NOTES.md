@@ -2109,6 +2109,21 @@ same day: **the server does the installs**, the laptop only releases.
 - Not exercised: the right-click entry, the tracking stage, linked chains, locked layers, Redo,
   the unticked (grow) path together with this change, Print Preview's picture, paper.
 
+## Text to Table: view jump and edit-mode leftovers (2026-10-06)
+
+- Every table cell frame is constructed at (0,0) (`tablecell.cpp`). While `insertRows()`/`insertColumns()`
+  run, `PageItem::updateClip()` -> `ScribusDoc::adjustCanvas()` widens the canvas to (0,0) minus the
+  scratch space (-100,-20 pt), and the whole view shifts by that much without any scroll call.
+  `dontResize` is the guard, but `PageItem_Table`'s constructor used to force it back to false, so a
+  caller setting it before `itemAdd()` was unprotected. All nine sites in `pageitem_table.cpp` now
+  restore the previous value. `suneerTextToTable()` also sets it again after `itemAdd()`.
+- Called from the context menu in text edit mode, the conversion left the canvas in modeEdit with the
+  table (then a deleted frame) as current item: `requestMode(modeNormal)` first, frame held in a QPointer.
+- View: contents position restored if changed; only when the table is not inside `visibleCanvasRect()`
+  does it `scrollBy()` the shortest distance. Zoom untouched. One undo transaction.
+- Separators: TAB when the text has any TAB, otherwise comma (cells trimmed). Decided per text, not per row.
+- Reproduced and verified on Xvfb with Malayalam text (gdb backtrace in the 2026-10-06 result report).
+
 ## Rounded side borders (2026-10-06)
 
 - `PageItem::sideBorderPath()` is the one place the per-side border is built; canvas
