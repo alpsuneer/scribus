@@ -2109,6 +2109,31 @@ same day: **the server does the installs**, the laptop only releases.
 - Not exercised: the right-click entry, the tracking stage, linked chains, locked layers, Redo,
   the unticked (grow) path together with this change, Print Preview's picture, paper.
 
+## Pop-out Subject (2026-10-06)
+
+- `scribus/suneerpopout.{h,cpp}`, action `itemPopOutSubject` (Item menu, context menu on an image frame
+  with a picture), plus a "Pop-out subject after OK" checkbox in Poster Stack. Works on any image frame.
+- Mask: rembg `only_mask` via python3 QProcess + QProgressDialog, cached as
+  `<doc>_effects/popout_<md5(path,size,mtime,model)>_mask.png`. Document must be saved (same rule as
+  Text Effects). The Xvfb harness runs as root: `/root/.u2net` needs the models.
+- Vector clip without OpenCV: mask downscaled to <= 900 px, threshold 128, unit pixel edges linked into
+  loops (holes come out as loops too, odd-even fill), Douglas-Peucker 1.1 px + one Chaikin pass. Picture
+  pixel -> face frame: `scale(imageXScale) . translate(imageXOffset)`.
+- Head line heuristic: widest row of the figure, then the narrowest row after it (neck), then the row
+  where it widens again (shoulders); cut at neck + 0.6 * (shoulder - neck). Crowd photos confuse it.
+- Pop frame "<face> popout": same Pfile/scale, offset = face offset - bounds/scale, PoLine = path.
+  `SuneerPopOut::itemChanged()` is called at the END of `PageItem::checkChanges()`; a face (attribute
+  `SuneerPopOut`) re-places its pop frame from the pixel polygon stored in the pop frame's
+  `SuneerPopOutPath` attribute, under UndoBlocker, guarded by a static against recursion. So image
+  move/zoom, frame moves and undo/redo all carry the pop-out along.
+- Group checkbox default OFF: grouping breaks the "<name> image" re-run model of Fill Text, Poster
+  Stack and Text Effects (all refuse group children). Shadow = stock soft shadow (soft mask in PDF,
+  said in the checkbox); Bake not built.
+- The orange triangle in an image frame's corner is Scribus's preflight resolution warning
+  (`pageitem.cpp` ~2165: 72/imageXScale outside the checker profile's min/max dpi, with
+  `showVerifierWarningsOnCanvas`). The orange LINK badge is ours (suneerimagelinks).
+- Not exercised: Custom shape, shadow, group, DBI preset, Print Preview, rotated faces, a real portrait.
+
 ## Poster Stack (2026-10-06)
 
 - `scribus/suneerposterstack.{h,cpp}` (both CMake lists), action `itemPosterStack` (Item menu, context

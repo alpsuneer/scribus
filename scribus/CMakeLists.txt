@@ -163,6 +163,7 @@ if(HAVE_OSG)
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp
 		suneerposterstack.cpp
+		suneerpopout.cpp
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp
@@ -260,6 +261,7 @@ else()
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp
 		suneerposterstack.cpp
+		suneerpopout.cpp
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
 		ui/scimagefilterdialogs.cpp

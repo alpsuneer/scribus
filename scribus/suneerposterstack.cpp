@@ -1,6 +1,7 @@
 #include "suneerposterstack.h"
 #include "suneerfilltextimage.h"
 #include "suneertexteffects.h"
+#include "suneerpopout.h"
 
 #include <memory>
 
@@ -625,6 +626,10 @@ void SuneerPosterStack::runForSelection(ScribusMainWindow* mw)
 	previewChk->setChecked(stored.value("preview", true).toBool());
 	grid->addWidget(previewChk, r, 3);
 	++r;
+	auto* popOutChk = new QCheckBox(QObject::tr("Pop-out subject after OK (the head comes in front of the letters)"), &dlg);
+	popOutChk->setChecked(stored.value("popOut", false).toBool());
+	grid->addWidget(popOutChk, r, 0, 1, 4);
+	++r;
 	auto* status = new QLabel(&dlg);
 	status->setWordWrap(true);
 	status->setMinimumHeight(40);
@@ -819,11 +824,15 @@ void SuneerPosterStack::runForSelection(ScribusMainWindow* mw)
 		stored.setValue("lastFolder", QFileInfo(v.imageFile).absolutePath());
 
 	QString error;
-	if (!apply(mw, textFrame, v, &error))
+	PageItem* made = apply(mw, textFrame, v, &error);
+	if (!made)
 	{
 		QMessageBox::warning(mw, QObject::tr("Poster Stack"), error);
 		return;
 	}
 	mw->setStatusBarInfoText(QObject::tr("Poster made. The words are kept on the hidden layer \"%1\"; run Poster Stack again on the poster to change them.")
 	                         .arg(SuneerFillTextImage::originalTextLayerName()));
+	stored.setValue("popOut", popOutChk->isChecked());
+	if (popOutChk->isChecked())
+		SuneerPopOut::runOn(mw, made);
 }

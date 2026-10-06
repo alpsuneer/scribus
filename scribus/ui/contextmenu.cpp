@@ -37,6 +37,7 @@
 #include "scribusdoc.h"
 #include "suneergroupedit.h"
 #include "suneertexteffects.h"
+#include "suneerpopout.h"
 #include "scribusview.h"
 #include "spellcheckfunctions.h"
 #include "textframespellchecker.h"
@@ -362,6 +363,11 @@ void ContextMenu::createMenuItems_Selection()
 			addAction(m_ScMW->scrActions["itemFillTextWithImage"]);
 			m_ScMW->scrActions["itemPosterStack"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["itemPosterStack"]);
+		}
+		if (selectedItemCount == 1 && SuneerPopOut::canRunOn(currItem))
+		{
+			m_ScMW->scrActions["itemPopOutSubject"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["itemPopOutSubject"]);
 		}
 		if (selectedItemCount == 1 && SuneerTextEffects::canRunOn(currItem))
 		{

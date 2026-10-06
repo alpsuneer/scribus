@@ -1018,3 +1018,7 @@ scribus
   reports the queue's real state (missing, disabled, not accepting) or says to install cups-bsd.
   The .deb depends on cups-bsd and cups-client. The proof dialog forgets a printer name that no
   longer exists and saves the default instead.
+- Pop-out Subject (Item > Pop-out Subject..., also from Poster Stack): the head of the person in the
+  picture comes out in front of the letters, the rest stays inside them. rembg finds the person; the
+  mask becomes a vector clip (no soft mask in the PDF). Head only / above a draggable line / custom
+  rectangle or ellipse. The pop-out follows the picture when it is moved or zoomed inside the letters.

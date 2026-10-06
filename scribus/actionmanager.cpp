@@ -516,6 +516,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemPosterStack";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemPopOutSubject";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameToImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustImageToFrame";
@@ -1884,6 +1886,8 @@ void ActionManager::languageChange()
 	(*scrActions)["itemTextEffects"]->setStatusTip( tr("Bevel and emboss the letters of the selected headline"));
 	(*scrActions)["itemPosterStack"]->setTexts( tr("Poster Stack..."));
 	(*scrActions)["itemPosterStack"]->setStatusTip( tr("Stretch the lines of text to fill the frame and show one image through all the letters"));
+	(*scrActions)["itemPopOutSubject"]->setTexts( tr("Pop-out Subject..."));
+	(*scrActions)["itemPopOutSubject"]->setStatusTip( tr("Bring the head of the person in the picture out in front of the letters"));
 	(*scrActions)["itemAdjustFrameToImage"]->setTexts( tr("Adjust Frame to Image"));
 	(*scrActions)["itemAdjustImageToFrame"]->setTexts( tr("Adjust Image to Frame"));
 	(*scrActions)["itemToggleInlineImage"]->setTexts( tr("Embed Image"));
@@ -2581,6 +2585,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemFillTextWithImage"
 		<< "itemTextEffects"
 		<< "itemPosterStack"
+		<< "itemPopOutSubject"
 		<< "itemAdjustFrameToImage" 
 		<< "itemAdjustImageToFrame" 
 		<< "itemToggleInlineImage" 

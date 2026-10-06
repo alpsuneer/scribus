@@ -78,6 +78,7 @@ for which a new license (GPL+exception) is in place.
 #include "sctextstream.h"
 #include "filewatcher.h"
 #include "suneerimagelinks.h"
+#include "suneerpopout.h"
 #include "selection.h"
 #include "text/storytext.h"
 #include "ui/contentpalette.h"
@@ -5020,6 +5021,8 @@ void PageItem::checkChanges(bool force)
 	{
 		checkTextFlowInteractions(textFlowCheckRect);
 	}
+	// Suneer: a Pop-out Subject frame follows its face (picture offset, scale, position).
+	SuneerPopOut::itemChanged(this);
 }
 
 bool PageItem::shouldCheck() const
