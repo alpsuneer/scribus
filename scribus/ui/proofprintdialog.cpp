@@ -156,7 +156,14 @@ void ProofPrintDialog::loadPrinters()
 
 	QString last = proofPrefs()->get("LastPrinter", QString());
 	if (last.isEmpty() || !printers.contains(last))
+	{
+		// The remembered queue is gone (renamed, or an auto-discovered one that
+		// cups-browsed no longer offers). Move to the default printer and
+		// remember that, so the dead name does not linger in the prefs.
 		last = PrinterUtil::getDefaultPrinterName();
+		if (!last.isEmpty() && printers.contains(last))
+			proofPrefs()->set("LastPrinter", last);
+	}
 	int idx = m_printerCombo->findText(last);
 	if (idx >= 0)
 		m_printerCombo->setCurrentIndex(idx);

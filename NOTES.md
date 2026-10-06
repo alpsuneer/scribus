@@ -2147,6 +2147,23 @@ same day: **the server does the installs**, the laptop only releases.
 - Separators: TAB when the text has any TAB, otherwise comma (cells trimmed). Decided per text, not per row.
 - Reproduced and verified on Xvfb with Malayalam text (gdb backtrace in the 2026-10-06 result report).
 
+## Printing: lpr/lp via QProcess, cups-bsd dependency (2026-10-06)
+
+- `PrinterUtil::sendToQueue()` (util_printer.cpp) is the one place a file is handed to CUPS; the PS
+  and PDF print engines both call it. No shell: argument list, `QProcess::splitCommand` for the
+  prefs' free-form option string. `lpr` (cups-bsd) first, `lp -d` (cups-client) when lpr is absent;
+  neither → message says to install cups-bsd. Non-zero exit → `lpstat -p/-a <queue>` decides between
+  missing, disabled, not accepting. Production prints now report a refused job too (they used to be silent).
+- **Why:** office PC clt-dsk24 had cups but no cups-bsd; `system("lpr …")` returned 127 and the
+  proof dialog blamed the queue. The queue was fine.
+- The cpack deb carries `Depends: cups-bsd, cups-client`. The **checkinstall** deb made in `build/`
+  carries no Depends unless you pass `--requires="cups-bsd,cups-client"` — add it to the usual command.
+  `InstallScribus/install.sh` step 1 installs both.
+- Proof dialog: a saved LastPrinter that is no longer offered is replaced by the default printer
+  and written back to prefs at once.
+- "Alternative print command" (useAltPrintCommand) still goes through `system()` on purpose.
+- Not exercised: lp fallback, "neither found" message, disabled/not-accepting branches, Windows build.
+
 ## Rounded side borders (2026-10-06)
 
 - `PageItem::sideBorderPath()` is the one place the per-side border is built; canvas

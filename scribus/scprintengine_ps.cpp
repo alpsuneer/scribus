@@ -70,12 +70,7 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 	}
 	else
 	{
-		QByteArray cc;
-		cmd += "lpr -P '";
-		cmd += options.printer.toLocal8Bit();
-		cmd += "'";
-		if (options.copies > 1)
-			cmd += " -#" + cc.setNum(options.copies);
+		QStringList cupsOptions;
 		// Page size. Production keeps asking for the document's own size so the
 		// output is 1:1. A proof goes onto whatever sheet the proof printer
 		// actually holds: ask for that media and let fit-to-page scale the
@@ -87,45 +82,34 @@ bool ScPrintEngine_PS::print(PrintOptions& options)
 			PrinterUtil::getDefaultPaperSize(options.printer, proofMedia);
 		if (options.isProofPrint)
 		{
-			cmd += " -o media=" + (proofMedia.isEmpty() ? QByteArray("A4") : proofMedia.toLocal8Bit());
+			cupsOptions << "media=" + (proofMedia.isEmpty() ? QStringLiteral("A4") : proofMedia);
 			// Pull from the tray the user picked, so the sheet that comes out is
 			// the one they chose the paper size for.
 			if (!options.inputSlot.isEmpty())
-				cmd += " -o InputSlot=" + options.inputSlot.toLocal8Bit();
+				cupsOptions << "InputSlot=" + options.inputSlot;
 		}
 		else
 		{
 			double pw = m_doc.pageWidth()  / 2.8346456693;
 			double ph = m_doc.pageHeight() / 2.8346456693;
-			cmd += " -o media=Custom.";
-			cmd += QByteArray::number((int)pw);
-			cmd += "x";
-			cmd += QByteArray::number((int)ph);
-			cmd += "mm";
+			cupsOptions << QStringLiteral("media=Custom.%1x%2mm").arg((int) pw).arg((int) ph);
 		}
-		cmd += " -o fit-to-page=true";
+		cupsOptions << QStringLiteral("fit-to-page=true");
 		if (options.isProofPrint)
 		{
-			cmd += " -o print-quality=draft";
-			cmd += " -o Resolution=150dpi";
+			cupsOptions << QStringLiteral("print-quality=draft");
+			cupsOptions << QStringLiteral("Resolution=150dpi");
 		}
-		cmd += options.printerOptions.toLocal8Bit();
-		cmd += " ";
-		cmd += "\"" + filename.toLocal8Bit() + "\"";
-		// Look at what lpr actually said. Discarding this status is how a proof
-		// to a queue that is missing, disabled or rejecting jobs used to report
-		// success and produce nothing: the only signal the operator got was the
-		// paper that never arrived. Name the queue in the failure instead.
-		//
-		// Proofs only. Production printing has always ignored this status, and
-		// changing that belongs in its own change with its own testing rather
-		// than riding along with the proof dialog.
-		int lprStatus = system(cmd.data());
-		if ((lprStatus != 0) && options.isProofPrint)
+		// No shell: lpr (or lp when lpr is not installed) gets an argument
+		// list, and a failure is reported with the queue's real state. The old
+		// system("lpr ...") call discarded its status, so a queue that was
+		// missing, disabled or rejecting jobs -- or a PC without lpr at all --
+		// reported success and produced nothing.
+		QString sendError;
+		if (!PrinterUtil::sendToQueue(options.printer, options.copies, cupsOptions,
+		                              options.printerOptions, filename, sendError))
 		{
-			m_errorMessage = tr("Could not send the job to printer \"%1\". "
-			                    "The queue may be missing, disabled or not accepting jobs.")
-			                    .arg(options.printer);
+			m_errorMessage = sendError;
 			return false;
 		}
 	}

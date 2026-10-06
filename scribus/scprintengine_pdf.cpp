@@ -12,6 +12,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsmanager.h"
 #include "scpaths.h"
 #include "scprintengine_pdf.h"
+#include "util_printer.h"
 #include "scribusstructs.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
@@ -59,16 +60,15 @@ bool ScPrintEngine_PDF::print(PrintOptions& options)
 	}
 	else
 	{
-		QByteArray cc;
-		cmd += "lpr -P '";
-		cmd += options.printer.toLocal8Bit();
-		cmd += "'";
-		if (options.copies > 1)
-			cmd += " -#" + cc.setNum(options.copies);
-		cmd += options.printerOptions.toLocal8Bit();
-		cmd += " ";
-		cmd += "\"" + fileName.toLocal8Bit() + "\"";
-		system(cmd.data());
+		// Same path as the PostScript engine: no shell, lp when lpr is absent,
+		// and the spooler's refusal is reported instead of swallowed.
+		QString sendError;
+		if (!PrinterUtil::sendToQueue(options.printer, options.copies, QStringList(),
+		                              options.printerOptions, fileName, sendError))
+		{
+			m_errorMessage = sendError;
+			return false;
+		}
 	}
 	// Disabled that for now, as kprinter won't work otherwise
 	// leaving that file around doesn't harm, as it will be overwritten the next time.

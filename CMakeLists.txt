@@ -672,6 +672,10 @@ if(EXISTS "${CMAKE_ROOT}/Modules/CPack.cmake")
 	# gdb is what makes scribus-debug more than a slow launcher, but Scribus
 	# itself runs fine without it, so this is Recommends and not Depends.
 	set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "gdb")
+	# Printing hands the file to lpr (cups-bsd), or lp (cups-client) when lpr is
+	# missing. A PC with cups but neither tool prints nothing, so both are hard
+	# dependencies.
+	set(CPACK_DEBIAN_PACKAGE_DEPENDS "cups-bsd, cups-client")
 	set(CPACK_SOURCE_IGNORE_FILES
 		CMakeCache.txt
 		scribus-1.7.0.tar.bz2

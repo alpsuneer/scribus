@@ -1014,3 +1014,7 @@ scribus
   Settings are kept on the frame; reopening the dialog edits the poster, re-apply replaces it.
 - Frame Border popup: live preview while choosing sides, inset, radius and corners; Preview
   checkbox (remembered); Cancel/Esc restores the frame exactly; Apply is one undo step.
+- Printing: the job goes to lpr, or to lp when lpr is not installed, without a shell; a refused job
+  reports the queue's real state (missing, disabled, not accepting) or says to install cups-bsd.
+  The .deb depends on cups-bsd and cups-client. The proof dialog forgets a printer name that no
+  longer exists and saves the default instead.

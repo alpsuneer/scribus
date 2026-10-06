@@ -26,6 +26,16 @@ class SCRIBUS_API PrinterUtil
 		static void getDefaultPrintOptions(PrintOptions& options, const MarginStruct& docBleeds);
 
 		QString static getDefaultPrinterName();
+
+		/*! \brief Hand a finished file to a CUPS queue.
+		Runs lpr, or lp when lpr is not installed, with an argument list (no
+		shell, so a queue name or path with odd characters cannot break out).
+		\param cupsOptions each entry is one "-o" value, e.g. "media=A4"
+		\param extraOptions a free-form option string from the preferences, split like a shell would
+		\param errorMessage on failure: what went wrong, naming the queue's real state from lpstat
+		\retval true when the job was accepted by the spooler */
+		static bool sendToQueue(const QString& queueName, int copies, const QStringList& cupsOptions,
+		                        const QString& extraOptions, const QString& filePath, QString& errorMessage);
 		QStringList static getPrinterNames();
 
 		/**

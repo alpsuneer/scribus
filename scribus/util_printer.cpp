@@ -16,6 +16,9 @@ for which a new license (GPL+exception) is in place.
  #include <winspool.h>
 #endif
 
+#include <QStandardPaths>
+#include <QFileInfo>
+#include <QObject>
 #include <QStringList>
 #include <QDataStream>
 #include <QByteArray>
@@ -110,6 +113,98 @@ QString PrinterUtil::getDefaultPrinterName()
 QStringList PrinterUtil::getPrinterNames()
 {
 	return QPrinterInfo::availablePrinterNames();
+}
+
+// Runs one CUPS client tool and returns its exit code; -1 when it could not be started.
+static int runPrintTool(const QString& program, const QStringList& arguments, QString& output)
+{
+	QProcess proc;
+	proc.setProcessChannelMode(QProcess::MergedChannels);
+	proc.start(program, arguments);
+	if (!proc.waitForStarted(5000))
+		return -1;
+	if (!proc.waitForFinished(60000))
+	{
+		proc.kill();
+		output = QObject::tr("%1 did not finish").arg(program);
+		return -1;
+	}
+	output = QString::fromLocal8Bit(proc.readAll()).trimmed();
+	if (proc.exitStatus() != QProcess::NormalExit)
+		return -1;
+	return proc.exitCode();
+}
+
+bool PrinterUtil::sendToQueue(const QString& queueName, int copies, const QStringList& cupsOptions,
+                              const QString& extraOptions, const QString& filePath, QString& errorMessage)
+{
+	errorMessage.clear();
+	// lpr comes from cups-bsd, lp from cups-client. A Debian install can have
+	// cups without cups-bsd (the office PC had exactly that), and then a shell
+	// "lpr ..." fails with 127 and nothing tells the operator why. Take
+	// whichever one exists; the options are the same CUPS "-o" options.
+	const QString lpr = QStandardPaths::findExecutable(QStringLiteral("lpr"));
+	const QString lp  = lpr.isEmpty() ? QStandardPaths::findExecutable(QStringLiteral("lp")) : QString();
+	if (lpr.isEmpty() && lp.isEmpty())
+	{
+		errorMessage = QObject::tr("Neither \"lpr\" nor \"lp\" was found on this computer, so nothing can be sent to printer \"%1\".\n"
+		                           "Install the CUPS client tools:  sudo apt install cups-bsd cups-client").arg(queueName);
+		return false;
+	}
+	const bool useLpr = !lpr.isEmpty();
+	const QString program = useLpr ? lpr : lp;
+
+	QStringList args;
+	args << (useLpr ? QStringLiteral("-P") : QStringLiteral("-d")) << queueName;
+	if (copies > 1)
+	{
+		if (useLpr)
+			args << QStringLiteral("-#%1").arg(copies);
+		else
+			args << QStringLiteral("-n") << QString::number(copies);
+	}
+	for (const QString& opt : cupsOptions)
+		if (!opt.isEmpty())
+			args << QStringLiteral("-o") << opt;
+	// The preferences hold a free-form string ("-o Duplex=None ..."): split it
+	// the way a shell would, but never run it through one.
+	args << QProcess::splitCommand(extraOptions.trimmed());
+	args << filePath;
+
+	QString output;
+	const int status = runPrintTool(program, args, output);
+	if (status == 0)
+		return true;
+
+	// The spooler refused the job. Say what the queue really is rather than
+	// guessing: a missing queue, a disabled one and one that rejects jobs all
+	// look the same from lpr's exit code.
+	QString state;
+	const QString lpstat = QStandardPaths::findExecutable(QStringLiteral("lpstat"));
+	if (!lpstat.isEmpty())
+	{
+		QString printerLine, acceptLine;
+		const int pStatus = runPrintTool(lpstat, { QStringLiteral("-p"), queueName }, printerLine);
+		runPrintTool(lpstat, { QStringLiteral("-a"), queueName }, acceptLine);
+		if (pStatus != 0 || printerLine.isEmpty())
+			state = QObject::tr("There is no printer queue named \"%1\" on this computer (lpstat: %2).").arg(queueName, printerLine);
+		else if (printerLine.contains(QLatin1String("disabled"), Qt::CaseInsensitive))
+			state = QObject::tr("The queue is disabled (paused): %1").arg(printerLine);
+		else if (acceptLine.contains(QLatin1String("not accepting"), Qt::CaseInsensitive))
+			state = QObject::tr("The queue is not accepting jobs: %1").arg(acceptLine);
+		else
+			state = QObject::tr("The queue reports: %1").arg(printerLine);
+	}
+	if (status == -1)
+		errorMessage = QObject::tr("\"%1\" could not be run.").arg(program);
+	else
+		errorMessage = QObject::tr("\"%1\" refused the job for printer \"%2\" (exit code %3).")
+		                   .arg(QFileInfo(program).fileName(), queueName).arg(status);
+	if (!output.isEmpty())
+		errorMessage += QLatin1Char('\n') + output;
+	if (!state.isEmpty())
+		errorMessage += QLatin1Char('\n') + state;
+	return false;
 }
 
 bool PrinterUtil::getDefaultPaperSize(const QString& printerName, QString& mediaName, QSizeF* sizePoints)
