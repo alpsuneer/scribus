@@ -13,6 +13,9 @@
 #include <QPointer>
 #include <QRadioButton>
 #include <QCheckBox>
+#include <QPolygon>
+#include <QTimer>
+#include "fpointarray.h"
 
 #include "alignselect.h"
 #include "styleselect.h"
@@ -28,6 +31,33 @@ class SMPShadeWidget;
 class QPushButton;
 class Selection;
 struct SuneerGroupUndo;
+
+//! What the Frame Border popup writes to a frame, read once from its widgets.
+struct SuneerBorderSettings
+{
+	bool top {true}, bottom {true}, left {true}, right {true};
+	double inset {0.0};
+	double cornerTL {0.0}, cornerTR {0.0}, cornerBL {0.0}, cornerBR {0.0};
+};
+
+//! Everything the Frame Border popup may change on one frame, taken when the
+//! popup opens so that Cancel and Apply both start from the real original.
+struct SuneerBorderSnapshot
+{
+	QPointer<PageItem> item;
+	bool top {false}, bottom {false}, left {false}, right {false};
+	double lineWidth {0.0};
+	QString lineColor;
+	double distLeft {0.0}, distRight {0.0}, distTop {0.0}, distBottom {0.0};
+	double radius {0.0};
+	double radiusTL {0.0}, radiusTR {0.0}, radiusBL {0.0}, radiusBR {0.0};
+	bool roundMark {false};
+	FPointArray poLine;
+	FPointArray contourLine;
+	QPolygon clip;
+	bool clipEdited {false};
+	int frameType {0};
+};
 
 class SuneerControlBar : public QToolBar
 {
@@ -128,6 +158,14 @@ private slots:
 	void onImgEdgeFeather();
 	void onTextEdgeFeather();
 	void onTextFrameBox();
+	// Frame Border live preview: no undo entries, no modified mark; Apply
+	// restores the original first so one undo step records original -> final.
+	SuneerBorderSettings borderSettingsFromUi() const;
+	void applyBorderToItem(PageItem* item, const SuneerBorderSettings& s, ScribusDoc* doc);
+	void snapshotBorderState();
+	void restoreBorderState();
+	void previewBorder();
+	void scheduleBorderPreview();
 	void onPadReset();
 	void onPadAllChanged(double delta);
 	void onPadSideChanged(int side, double delta);
@@ -362,6 +400,11 @@ public:
 	QCheckBox*      m_borderCornerTRChk    {nullptr};
 	QCheckBox*      m_borderCornerBLChk    {nullptr};
 	QCheckBox*      m_borderCornerBRChk    {nullptr};
+	QCheckBox*      m_borderPreviewChk     {nullptr};
+	QTimer*         m_borderPreviewTimer   {nullptr};
+	QList<SuneerBorderSnapshot> m_borderSnapshots;
+	bool            m_borderDocWasModified {false};
+	bool            m_borderPopupLoading   {false};
 	QWidget*        m_featherPopup         {nullptr};
 	QDoubleSpinBox* m_featherSpin          {nullptr};
 	QToolButton*    m_featherAllBtn        {nullptr};

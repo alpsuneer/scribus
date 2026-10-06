@@ -4,6 +4,9 @@
 #include <QAbstractItemView>
 #include <QStatusBar>
 #include <QTimer>
+#include <QScopeGuard>
+#include "prefscontext.h"
+#include "prefsfile.h"
 #include "undomanager.h"
 #include "scribus.h"
 #include "appmodes.h"
@@ -904,6 +907,16 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			syncCorners();
 			// The popup opens showing what the selected frame has now.
 			connect(borderMenu, &QMenu::aboutToShow, this, [this, syncCorners] {
+				// The originals are kept from the moment the popup opens: the
+				// preview draws over them, Cancel puts them back, Apply records
+				// its one undo step from them.
+				snapshotBorderState();
+				m_borderPopupLoading = true;
+				const auto loadingDone = qScopeGuard([this] {
+					m_borderPopupLoading = false;
+					if (m_borderPreviewTimer)
+						m_borderPreviewTimer->stop();
+				});
 				PageItem* item = sel() && !sel()->isEmpty() ? sel()->itemAt(0) : nullptr;
 				if (!item || !item->isTextFrame())
 					return;
@@ -937,9 +950,51 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 				syncCorners();
 			});
 		}
+		{
+			// Live preview. Every change redraws the selected frames after a short
+			// pause; nothing is recorded until Apply. Off by choice on heavy pages.
+			m_borderPreviewChk = new QCheckBox(tr("Preview"), bw);
+			m_borderPreviewChk->setToolTip(tr("Show the border on the page while choosing. Nothing is saved until Apply."));
+			PrefsContext* prefs = PrefsManager::instance().prefsFile->getContext("SuneerControlBar");
+			m_borderPreviewChk->setChecked(prefs ? prefs->getBool("borderPreview", true) : true);
+			bl->addWidget(m_borderPreviewChk);
+			m_borderPreviewTimer = new QTimer(this);
+			m_borderPreviewTimer->setSingleShot(true);
+			m_borderPreviewTimer->setInterval(50);
+			connect(m_borderPreviewTimer, &QTimer::timeout, this, &SuneerControlBar::previewBorder);
+			for (QCheckBox* box : { m_borderTopChk, m_borderBottomChk, m_borderLeftChk, m_borderRightChk,
+			                        m_borderCornerTLChk, m_borderCornerTRChk, m_borderCornerBLChk, m_borderCornerBRChk })
+				connect(box, &QCheckBox::toggled, this, [this](bool) { scheduleBorderPreview(); });
+			for (QDoubleSpinBox* spin : { m_borderInsetSpin, m_borderRadiusSpin })
+				connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) { scheduleBorderPreview(); });
+			connect(m_borderPreviewChk, &QCheckBox::toggled, this, [this](bool on) {
+				if (PrefsContext* prefs = PrefsManager::instance().prefsFile->getContext("SuneerControlBar"))
+					prefs->set("borderPreview", on);
+				if (on)
+					previewBorder();
+				else
+				{
+					m_borderPreviewTimer->stop();
+					restoreBorderState();
+				}
+			});
+			// Closing without Apply (Esc, click outside, Cancel) puts the originals back.
+			// After Apply the snapshot list is already empty, so this is a no-op then.
+			connect(borderMenu, &QMenu::aboutToHide, this, [this] {
+				m_borderPreviewTimer->stop();
+				restoreBorderState();
+				m_borderSnapshots.clear();
+			});
+		}
+		QHBoxLayout* buttons = new QHBoxLayout();
+		QPushButton* cancelBtn = new QPushButton(tr("Cancel"), bw);
+		connect(cancelBtn, &QPushButton::clicked, this, [borderMenu]{ borderMenu->close(); });
 		QPushButton* applyBtn = new QPushButton(tr("Apply"), bw);
+		applyBtn->setDefault(true);
 		connect(applyBtn, &QPushButton::clicked, this, [this, borderMenu]{ onTextFrameBox(); borderMenu->close(); });
-		bl->addWidget(applyBtn);
+		buttons->addWidget(cancelBtn);
+		buttons->addWidget(applyBtn);
+		bl->addLayout(buttons);
 		QWidgetAction* wa = new QWidgetAction(this);
 		wa->setDefaultWidget(bw);
 		borderMenu->addAction(wa);
@@ -5371,24 +5426,241 @@ void SuneerControlBar::onTextEdgeFeather()
 	QMessageBox::information(this, "Done", "Text edge feather applied!\nNew image frame created.");
 }
 
+SuneerBorderSettings SuneerControlBar::borderSettingsFromUi() const
+{
+	const double MM2PT = 2.8346;
+	SuneerBorderSettings s;
+	s.inset  = (m_borderInsetSpin ? m_borderInsetSpin->value() : 2.0) * MM2PT;
+	s.top    = !m_borderTopChk    || m_borderTopChk->isChecked();
+	s.bottom = !m_borderBottomChk || m_borderBottomChk->isChecked();
+	s.left   = !m_borderLeftChk   || m_borderLeftChk->isChecked();
+	s.right  = !m_borderRightChk  || m_borderRightChk->isChecked();
+	// A corner is rounded only where both of its sides are chosen and its box is ticked.
+	const double radius = (m_borderRadiusSpin ? m_borderRadiusSpin->value() : 0.0) * MM2PT;
+	s.cornerTL = (s.top && s.left     && m_borderCornerTLChk && m_borderCornerTLChk->isChecked()) ? radius : 0.0;
+	s.cornerTR = (s.top && s.right    && m_borderCornerTRChk && m_borderCornerTRChk->isChecked()) ? radius : 0.0;
+	s.cornerBL = (s.bottom && s.left  && m_borderCornerBLChk && m_borderCornerBLChk->isChecked()) ? radius : 0.0;
+	s.cornerBR = (s.bottom && s.right && m_borderCornerBRChk && m_borderCornerBRChk->isChecked()) ? radius : 0.0;
+	return s;
+}
+
+// Writes one frame. Records undo only when the UndoManager is enabled, so the
+// same code serves the preview (UndoBlocker active) and Apply.
+void SuneerControlBar::applyBorderToItem(PageItem* item, const SuneerBorderSettings& s, ScribusDoc* doc)
+{
+	const bool top = s.top, bottom = s.bottom, left = s.left, right = s.right;
+	const double cornerTL = s.cornerTL, cornerTR = s.cornerTR, cornerBL = s.cornerBL, cornerBR = s.cornerBR;
+
+	// Per-side border flags (rendered by PageItem::DrawObj_Post etc.)
+	item->setSideBorders(top, bottom, left, right);
+
+	// Rounded corners: the frame itself gets the radii (so the fill, the
+	// clip and the text inset along the curve all follow), and the mark
+	// makes the border follow the curve as one path. A frame that never had
+	// a radius from here is not reshaped at all.
+	{
+		ObjAttrVector* attributes = item->getObjectAttributes();
+		int markIndex = -1;
+		for (int a = 0; attributes && a < attributes->count(); ++a)
+			if (attributes->at(a).name == QLatin1String("SuneerSideBorderRound"))
+				markIndex = a;
+		const bool wantRound = cornerTL > 0.0 || cornerTR > 0.0 || cornerBL > 0.0 || cornerBR > 0.0;
+		if (wantRound || markIndex >= 0)
+		{
+			const FPointArray oldShape = item->PoLine.copy();
+			if (!wantRound)
+			{
+				item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+				item->setCornerRadius(0.0);
+				item->SetRectFrame();
+				attributes->remove(markIndex);
+			}
+			else
+			{
+				if (cornerTL == cornerTR && cornerTR == cornerBL && cornerBL == cornerBR)
+				{
+					item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
+					item->setCornerRadius(cornerTL);
+				}
+				else
+					item->setCornerRadii(cornerTL, cornerTR, cornerBL, cornerBR);
+				item->SetFrameRound();
+				if (markIndex < 0 && attributes)
+				{
+					ObjectAttribute mark;
+					mark.name = QStringLiteral("SuneerSideBorderRound");
+					mark.type = QStringLiteral("none");
+					mark.value = QStringLiteral("1");
+					attributes->append(mark);
+				}
+			}
+			item->suneerShapeChanged(oldShape);
+		}
+	}
+
+	// Border stroke used by the selected sides; if none selected, no border.
+	if (top || bottom || left || right)
+	{
+		item->setLineWidth(0.5);
+		item->setLineColor("Black");
+	}
+	else
+		item->setLineColor(CommonStrings::None);
+
+	// Text inset (editable value, applied to all four sides)
+	item->setTextToFrameDistLeft(s.inset);
+	item->setTextToFrameDistRight(s.inset);
+	item->setTextToFrameDistTop(s.inset);
+	item->setTextToFrameDistBottom(s.inset);
+
+	// The redraw region must cover the old and the new stroke, and the text
+	// has to lay out again against the new inset and corners.
+	doc->setRedrawBounding(item);
+	if (item->isTextFrame())
+		item->asTextFrame()->invalidateLayout(true);
+	item->update();
+}
+
+void SuneerControlBar::snapshotBorderState()
+{
+	m_borderSnapshots.clear();
+	ScribusDoc* doc = m_doc;
+	if (!doc || !sel() || sel()->isEmpty())
+		return;
+	m_borderDocWasModified = doc->isModified();
+	for (int i = 0; i < sel()->count(); ++i)
+	{
+		PageItem* item = sel()->itemAt(i);
+		if (!item || !item->isTextFrame())
+			continue;
+		SuneerBorderSnapshot snap;
+		snap.item = item;
+		snap.top = item->TopLine; snap.bottom = item->BottomLine;
+		snap.left = item->LeftLine; snap.right = item->RightLine;
+		snap.lineWidth = item->lineWidth();
+		snap.lineColor = item->lineColor();
+		snap.distLeft = item->textToFrameDistLeft();
+		snap.distRight = item->textToFrameDistRight();
+		snap.distTop = item->textToFrameDistTop();
+		snap.distBottom = item->textToFrameDistBottom();
+		snap.radius = item->cornerRadius();
+		snap.radiusTL = item->cornerRadiusTL(); snap.radiusTR = item->cornerRadiusTR();
+		snap.radiusBL = item->cornerRadiusBL(); snap.radiusBR = item->cornerRadiusBR();
+		if (const ObjAttrVector* all = item->getObjectAttributes())
+			for (const ObjectAttribute& a : *all)
+				snap.roundMark = snap.roundMark || a.name == QLatin1String("SuneerSideBorderRound");
+		snap.poLine = item->PoLine.copy();
+		snap.contourLine = item->ContourLine.copy();
+		snap.clip = item->Clip;
+		snap.clipEdited = item->ClipEdited;
+		snap.frameType = item->FrameType;
+		m_borderSnapshots.append(snap);
+	}
+}
+
+// Puts every snapshotted frame back exactly as it was when the popup opened.
+// Records nothing and leaves the modified flag as it was. The snapshots stay,
+// so the preview can be switched on again afterwards.
+void SuneerControlBar::restoreBorderState()
+{
+	ScribusDoc* doc = m_doc;
+	if (!doc || m_borderSnapshots.isEmpty())
+		return;
+	{
+		UndoBlocker block;
+		for (const SuneerBorderSnapshot& snap : m_borderSnapshots)
+		{
+			PageItem* item = snap.item.data();
+			if (!item)
+				continue;
+			item->setSideBorders(snap.top, snap.bottom, snap.left, snap.right);
+			item->setLineWidth(snap.lineWidth);
+			item->setLineColor(snap.lineColor);
+			item->setTextToFrameDistLeft(snap.distLeft);
+			item->setTextToFrameDistRight(snap.distRight);
+			item->setTextToFrameDistTop(snap.distTop);
+			item->setTextToFrameDistBottom(snap.distBottom);
+			item->setCornerRadii(snap.radiusTL, snap.radiusTR, snap.radiusBL, snap.radiusBR);
+			item->setCornerRadius(snap.radius);
+			if (ObjAttrVector* attributes = item->getObjectAttributes())
+			{
+				int markIndex = -1;
+				for (int a = 0; a < attributes->count(); ++a)
+					if (attributes->at(a).name == QLatin1String("SuneerSideBorderRound"))
+						markIndex = a;
+				if (snap.roundMark && markIndex < 0)
+				{
+					ObjectAttribute mark;
+					mark.name = QStringLiteral("SuneerSideBorderRound");
+					mark.type = QStringLiteral("none");
+					mark.value = QStringLiteral("1");
+					attributes->append(mark);
+				}
+				else if (!snap.roundMark && markIndex >= 0)
+					attributes->remove(markIndex);
+			}
+			// The outline itself is put back verbatim rather than rebuilt, so a
+			// frame that was never rounded from here is bit-for-bit as before.
+			const FPointArray previewShape = item->PoLine.copy();
+			item->PoLine = snap.poLine.copy();
+			item->Clip = snap.clip;
+			item->ClipEdited = snap.clipEdited;
+			item->FrameType = snap.frameType;
+			item->suneerShapeChanged(previewShape);
+			item->ContourLine = snap.contourLine.copy();
+			doc->setRedrawBounding(item);
+			if (item->isTextFrame())
+				item->asTextFrame()->invalidateLayout(true);
+			item->update();
+		}
+	}
+	doc->regionsChanged()->update(QRect());
+	// item->update() runs through the document updater, which marks the
+	// document changed. The preview is not a change.
+	doc->setModified(m_borderDocWasModified);
+}
+
+void SuneerControlBar::scheduleBorderPreview()
+{
+	if (m_borderPopupLoading || !m_borderPreviewTimer)
+		return;
+	if (!m_borderPreviewChk || !m_borderPreviewChk->isChecked())
+		return;
+	m_borderPreviewTimer->start();
+}
+
+void SuneerControlBar::previewBorder()
+{
+	ScribusDoc* doc = m_doc;
+	if (!doc || m_borderSnapshots.isEmpty())
+		return;
+	if (!m_borderPreviewChk || !m_borderPreviewChk->isChecked())
+		return;
+	const SuneerBorderSettings s = borderSettingsFromUi();
+	{
+		UndoBlocker block;
+		for (const SuneerBorderSnapshot& snap : m_borderSnapshots)
+			if (PageItem* item = snap.item.data())
+				applyBorderToItem(item, s, doc);
+	}
+	doc->regionsChanged()->update(QRect());
+	doc->setModified(m_borderDocWasModified);
+}
+
 void SuneerControlBar::onTextFrameBox()
 {
 	SuneerGroupUndo groupUndo(this);
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 	if (!doc || sel()->isEmpty()) return;
 
-	const double MM2PT = 2.8346;
-	const double inset = (m_borderInsetSpin ? m_borderInsetSpin->value() : 2.0) * MM2PT;
-	const bool top    = !m_borderTopChk    || m_borderTopChk->isChecked();
-	const bool bottom = !m_borderBottomChk || m_borderBottomChk->isChecked();
-	const bool left   = !m_borderLeftChk   || m_borderLeftChk->isChecked();
-	const bool right  = !m_borderRightChk  || m_borderRightChk->isChecked();
-	// A corner is rounded only where both of its sides are chosen and its box is ticked.
-	const double radius = (m_borderRadiusSpin ? m_borderRadiusSpin->value() : 0.0) * MM2PT;
-	const double cornerTL = (top && left     && m_borderCornerTLChk && m_borderCornerTLChk->isChecked()) ? radius : 0.0;
-	const double cornerTR = (top && right    && m_borderCornerTRChk && m_borderCornerTRChk->isChecked()) ? radius : 0.0;
-	const double cornerBL = (bottom && left  && m_borderCornerBLChk && m_borderCornerBLChk->isChecked()) ? radius : 0.0;
-	const double cornerBR = (bottom && right && m_borderCornerBRChk && m_borderCornerBRChk->isChecked()) ? radius : 0.0;
+	// Whatever the preview drew is taken off first, so the undo step below
+	// records the real original -> final values, not preview -> final.
+	if (m_borderPreviewTimer)
+		m_borderPreviewTimer->stop();
+	restoreBorderState();
+	m_borderSnapshots.clear();
+
+	const SuneerBorderSettings s = borderSettingsFromUi();
 
 	// One undo step for the whole press. Safe to group now that the per-side
 	// flags record a state of their own: before that, grouping would have
@@ -5403,71 +5675,7 @@ void SuneerControlBar::onTextFrameBox()
 	{
 		PageItem* item = sel()->itemAt(i);
 		if (!item || !item->isTextFrame()) continue;
-
-		// Per-side border flags (rendered by PageItem::DrawObj_Post etc.)
-		item->setSideBorders(top, bottom, left, right);
-
-		// Rounded corners: the frame itself gets the radii (so the fill, the
-		// clip and the text inset along the curve all follow), and the mark
-		// makes the border follow the curve as one path. A frame that never had
-		// a radius from here is not reshaped at all.
-		{
-			ObjAttrVector* attributes = item->getObjectAttributes();
-			int markIndex = -1;
-			for (int a = 0; attributes && a < attributes->count(); ++a)
-				if (attributes->at(a).name == QLatin1String("SuneerSideBorderRound"))
-					markIndex = a;
-			const bool wantRound = cornerTL > 0.0 || cornerTR > 0.0 || cornerBL > 0.0 || cornerBR > 0.0;
-			if (wantRound || markIndex >= 0)
-			{
-				const FPointArray oldShape = item->PoLine.copy();
-				if (!wantRound)
-				{
-					item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
-					item->setCornerRadius(0.0);
-					item->SetRectFrame();
-					attributes->remove(markIndex);
-				}
-				else
-				{
-					if (cornerTL == cornerTR && cornerTR == cornerBL && cornerBL == cornerBR)
-					{
-						item->setCornerRadii(0.0, 0.0, 0.0, 0.0);
-						item->setCornerRadius(cornerTL);
-					}
-					else
-						item->setCornerRadii(cornerTL, cornerTR, cornerBL, cornerBR);
-					item->SetFrameRound();
-					if (markIndex < 0 && attributes)
-					{
-						ObjectAttribute mark;
-						mark.name = QStringLiteral("SuneerSideBorderRound");
-						mark.type = QStringLiteral("none");
-						mark.value = QStringLiteral("1");
-						attributes->append(mark);
-					}
-				}
-				item->suneerShapeChanged(oldShape);
-				doc->setRedrawBounding(item);
-			}
-		}
-
-		// Border stroke used by the selected sides; if none selected, no border.
-		if (top || bottom || left || right)
-		{
-			item->setLineWidth(0.5);
-			item->setLineColor("Black");
-		}
-		else
-			item->setLineColor(CommonStrings::None);
-
-		// Text inset (editable value, applied to all four sides)
-		item->setTextToFrameDistLeft(inset);
-		item->setTextToFrameDistRight(inset);
-		item->setTextToFrameDistTop(inset);
-		item->setTextToFrameDistBottom(inset);
-
-		item->update();
+		applyBorderToItem(item, s, doc);
 	}
 	if (borderTransaction)
 		borderTransaction.commit();

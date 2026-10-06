@@ -2163,6 +2163,13 @@ same day: **the server does the installs**, the laptop only releases.
   rounded frame with straight border lines). It is not part of the undo record; after Undo it stays
   on the frame with radius 0, which draws exactly like no mark.
 - Apply still forces 0.5 pt Black (pre-existing).
+- **Live preview (2026-10-06).** Every popup control schedules a 50 ms redraw that runs the same
+  per-item code as Apply inside an `UndoBlocker`; `aboutToShow` snapshots sides, stroke, text
+  distances, radii, the mark, PoLine/ContourLine/Clip/ClipEdited/FrameType and the doc's modified
+  flag. Cancel/Esc restores the snapshot verbatim; Apply restores first and then applies, so the one
+  undo step records original -> final. Trap: `PageItem::update()` goes through DocUpdater and calls
+  `doc->changed()`, so the preview puts the modified flag back after each redraw. "Preview" checkbox
+  in PrefsContext `SuneerControlBar`, key `borderPreview`.
 - Not built: Cut/bevel corners, pt unit, an end gap.
 - Not exercised: Print Preview, the DBI PDF preset, dash styles, fill colour, rotated/grouped
   frames, mouse resize, Redo, removing the rounding with radius 0.

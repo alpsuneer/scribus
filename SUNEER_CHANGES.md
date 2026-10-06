@@ -1012,3 +1012,5 @@ scribus
   background colour. Malayalam splits only at grapheme clusters.
 - Result is a Fill Text with Image frame: move/zoom the image afterwards, Text Effects work on it.
   Settings are kept on the frame; reopening the dialog edits the poster, re-apply replaces it.
+- Frame Border popup: live preview while choosing sides, inset, radius and corners; Preview
+  checkbox (remembered); Cancel/Esc restores the frame exactly; Apply is one undo step.
