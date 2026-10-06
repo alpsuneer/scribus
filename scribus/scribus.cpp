@@ -190,6 +190,7 @@ for which a new license (GPL+exception) is in place.
 #include "suneergroupedit.h"
 #include "suneerfilltextimage.h"
 #include "suneertexteffects.h"
+#include "suneerposterstack.h"
 #include "serializer.h"
 #include "storyloader.h"
 #include "stylesearch.h"
@@ -955,6 +956,7 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["itemFillTextWithImage"], &QAction::triggered, this, [this] { SuneerFillTextImage::runForSelection(this); });
 	connect(scrActions["itemCondenseToFit"], &QAction::triggered, this, &ScribusMainWindow::suneerCondenseToFit);
 	connect(scrActions["itemTextEffects"], &QAction::triggered, this, [this] { SuneerTextEffects::runForSelection(this); });
+	connect(scrActions["itemPosterStack"], &QAction::triggered, this, [this] { SuneerPosterStack::runForSelection(this); });
 	connect(scrActions["extrasCheckDuplicateShortcuts"], &QAction::triggered, this, [this] { ScShortcutRegistry::instance().showDuplicatesDialogNow(this); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
@@ -1448,6 +1450,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("itemCondenseToFit", "Item");
 	scrMenuMgr->addMenuItemString("itemFillTextWithImage", "Item");
 	scrMenuMgr->addMenuItemString("itemTextEffects", "Item");
+	scrMenuMgr->addMenuItemString("itemPosterStack", "Item");
 	scrMenuMgr->addMenuItemString("itemConvertToSymbolFrame", "ItemConvertTo");
 	/* AI Text Tools. Its own submenu rather than loose entries in Item: six
 	   actions that all cost money and all send something out of the building

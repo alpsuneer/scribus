@@ -25,6 +25,8 @@ namespace SuneerFillTextImage
 		double  outlineWidth { 0.5 };       //!< points
 		QString outlineColor { "Black" };
 		bool    shadow { false };           //!< soft drop shadow behind the letters
+		//! When not empty, used as the letter shape (frame coordinates) instead of the text's own outline.
+		QPainterPath letters;
 	};
 
 	//! Name of the layer the original text frames are parked on.

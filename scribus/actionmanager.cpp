@@ -514,6 +514,8 @@ void ActionManager::initItemMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemTextEffects";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "itemPosterStack";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustFrameToImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "itemAdjustImageToFrame";
@@ -1880,6 +1882,8 @@ void ActionManager::languageChange()
 	(*scrActions)["itemFillTextWithImage"]->setStatusTip( tr("Show an image only inside the letters of the selected text frame"));
 	(*scrActions)["itemTextEffects"]->setTexts( tr("Text Effects..."));
 	(*scrActions)["itemTextEffects"]->setStatusTip( tr("Bevel and emboss the letters of the selected headline"));
+	(*scrActions)["itemPosterStack"]->setTexts( tr("Poster Stack..."));
+	(*scrActions)["itemPosterStack"]->setStatusTip( tr("Stretch the lines of text to fill the frame and show one image through all the letters"));
 	(*scrActions)["itemAdjustFrameToImage"]->setTexts( tr("Adjust Frame to Image"));
 	(*scrActions)["itemAdjustImageToFrame"]->setTexts( tr("Adjust Image to Frame"));
 	(*scrActions)["itemToggleInlineImage"]->setTexts( tr("Embed Image"));
@@ -2576,6 +2580,7 @@ void ActionManager::createDefaultMenus()
 		<< "itemCondenseToFit"
 		<< "itemFillTextWithImage"
 		<< "itemTextEffects"
+		<< "itemPosterStack"
 		<< "itemAdjustFrameToImage" 
 		<< "itemAdjustImageToFrame" 
 		<< "itemToggleInlineImage" 

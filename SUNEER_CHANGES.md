@@ -1003,3 +1003,12 @@ scribus
 
 ## Backup Location
 `/home/s1/suneer/backup/scribus-1.7.3-DDMMYY-HHMM`
+
+### 50. Poster Stack (Item > Poster Stack...)
+- Stretches each line of a text frame to the full frame width and stacks the lines to fill its
+  height, with one image showing through all the letters (typographic poster). Live preview.
+- Options: multi-line text with auto split (characters per line / balanced), font, letter gap,
+  line gap, outer margin, stretch or keep proportions, equal or proportional row heights, image,
+  background colour. Malayalam splits only at grapheme clusters.
+- Result is a Fill Text with Image frame: move/zoom the image afterwards, Text Effects work on it.
+  Settings are kept on the frame; reopening the dialog edits the poster, re-apply replaces it.

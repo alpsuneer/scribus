@@ -2109,6 +2109,29 @@ same day: **the server does the installs**, the laptop only releases.
 - Not exercised: the right-click entry, the tracking stage, linked chains, locked layers, Redo,
   the unticked (grow) path together with this change, Print Preview's picture, paper.
 
+## Poster Stack (2026-10-06)
+
+- `scribus/suneerposterstack.{h,cpp}` (both CMake lists), action `itemPosterStack` (Item menu, context
+  menu, text control bar ▣≡). Built on Fill Text with Image: `SuneerFillTextImage::Options::letters`
+  is a new optional shape override; the result is the usual "<text frame> image" face on the "Original
+  text" layer pattern, so Text Effects and re-run work unchanged.
+- Each line is laid out in a scratch `PageItem_TextFrame` (100 pt, chosen font, `sampleitem.cpp`
+  pattern incl. AddFont/decreaseUsage) and collected with `lettersPath()`, so Malayalam shaping is the
+  page's own. Rows are fitted by the real glyph bounding box (no side bearings). Letter gap = tracking
+  computed from a first pass so the gap after stretching is exactly the pt asked for.
+- Line splitting: `graphemeClusters()` = QTextBoundaryFinder(Grapheme) plus "never cut after U+0D4D
+  virama or before a mark/ZWJ", independent of the Qt Unicode version.
+- **Default font must cover the text**: a Latin "Bold Condensed" face gives .notdef boxes for
+  Malayalam. The chooser checks `ScFace::canRender` over the text; the dialog warns on a bad choice.
+- Live preview = scratch image frame "__poster preview__" under UndoBlocker; the text frame and any old
+  poster/back are moved to the park layer by `m_layerID` meanwhile; doc modified flag restored.
+- Settings: item attribute `SuneerPosterStack` on the parked text frame (QUrlQuery encoded, text
+  percent-encoded), undo via `SUNEER_ITEM_ATTRIBUTES`. Background rect "<name> poster back".
+- Not exercised: DBI PDF preset, Print Preview, printer, letter gap / keep-proportions / proportional
+  rows / background colour / auto split in the GUI, rotated frames.
+- Harness traps: the process is `scribus.bin` (`pgrep -x scribus` finds nothing); File > Open must be
+  used (shortcuts dead on Xvfb); the first Open after start tends to land in the New Document dialog.
+
 ## Text to Table: view jump and edit-mode leftovers (2026-10-06)
 
 - Every table cell frame is constructed at (0,0) (`tablecell.cpp`). While `insertRows()`/`insertColumns()`

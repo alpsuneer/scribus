@@ -120,13 +120,14 @@ PageItem* SuneerFillTextImage::apply(ScribusMainWindow* mw, PageItem* textFrame,
 		return fail(QObject::tr("The text frame is inside a group. Ungroup it, or enter the group and take the frame out, first."));
 	if (textFrame->prevInChain() || textFrame->nextInChain())
 		return fail(QObject::tr("The text frame is linked to other frames. Use a frame of its own for the headline."));
-	if (textFrame->itemText.length() == 0)
+	if (textFrame->itemText.length() == 0 && options.letters.isEmpty())
 		return fail(QObject::tr("The text frame is empty."));
 	if (!QFileInfo(options.imageFile).isReadable())
 		return fail(QObject::tr("Cannot read the image file:\n%1").arg(options.imageFile));
 
-	// The outline of the text exactly as the page shows it.
-	QPainterPath letters = lettersPath(textFrame);
+	// The outline of the text exactly as the page shows it (or the shape a
+	// caller such as Poster Stack built from it).
+	QPainterPath letters = options.letters.isEmpty() ? lettersPath(textFrame) : options.letters;
 	const QRectF bounds = letters.boundingRect();
 	if (letters.isEmpty() || bounds.width() < 1.0 || bounds.height() < 1.0)
 		return fail(QObject::tr("The text has no outlines (only spaces, or the font has no glyphs for it)."));

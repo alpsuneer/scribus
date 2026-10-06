@@ -829,6 +829,18 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		row2->addWidget(fillImageBtn);
 		m_textWidgets << fillImageBtn;
 	}
+	// Poster Stack: the same command as Item > Poster Stack...
+	{
+		QToolButton* posterBtn = makeButton("▣≡", "Poster Stack...");
+		posterBtn->setFixedSize(30, 22);
+		posterBtn->setToolTip(tr("Poster Stack: stretch the lines to fill the frame, one image through all the letters"));
+		connect(posterBtn, &QToolButton::clicked, this, [this] {
+			if (m_scmw && m_scmw->scrActions["itemPosterStack"])
+				m_scmw->scrActions["itemPosterStack"]->trigger();
+		});
+		row2->addWidget(posterBtn);
+		m_textWidgets << posterBtn;
+	}
 	// Text Frame Box button — opens a popup to choose border sides + text inset
 	m_textBoxBtn = makeButton("☐", "Frame Border");
 	m_textBoxBtn->setFixedSize(34, 22);

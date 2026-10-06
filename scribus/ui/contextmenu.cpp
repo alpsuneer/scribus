@@ -360,6 +360,8 @@ void ContextMenu::createMenuItems_Selection()
 		{
 			m_ScMW->scrActions["itemFillTextWithImage"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["itemFillTextWithImage"]);
+			m_ScMW->scrActions["itemPosterStack"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["itemPosterStack"]);
 		}
 		if (selectedItemCount == 1 && SuneerTextEffects::canRunOn(currItem))
 		{
