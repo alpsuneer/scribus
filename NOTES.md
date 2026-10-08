@@ -57,6 +57,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Malayalam-capable default text font — `initDefaults` prefers one, plus a one-time repair of an existing profile | `5f6be08` | print-proof |
 | Space Above survives a spanning headline | `456ea5d` | |
 | Outward text outline — `outlineOutward` CharStyle attribute, canvas matched to export painters | `882774a`, `68cef64` | |
+| Outward text outline persisted in the 1.7.1/1.7.0 SLA formats (`TextOutlineOutward` on char style, para char part, inline runs; 1.5 `TXTOUTWARD` still read), Style Manager "Grow outward" checkbox, PDF embedded-font branch strokes then fills (was ignored); round-trip test `tests/suneer/roundtrip_outline_outward.sh`. Verified by the user | `e27845e` | feature/ctp-output |
 | Convert Text Frame to Table; Ctrl+A selects all cells | `1343c34`, `71fc484`, `1fe5183` | |
 | Auto-hyphenation defaults; auto-fit/auto-hyphenate on open added, then removed | `fa3e4c5`, `1b97ec6`, `a6ef17a`, `1863b8f` | |
 
@@ -248,6 +249,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 |---|---|---|
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
+| News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
 | Column Style config → Design Style — per-config "Design Style" link applied after the columns, one undo step, missing-style status message, rename/remove follow-through, "Link Config N → style-N", export/import field. Verified by the user | `c0130ad` | feature/ctp-output |
 | Design Style icons stored by file name — looked up in `~/.local/share/scribus/design-icons/`, then `/usr/local/share/…`, `/usr/share/…`; 14 default icons shipped (`resources/design-icons/`); Upload Icon copies into the user folder; Export/Import Design embeds the pictures; `?` placeholder for a missing icon. Verified by the user on the laptop | `git log -- resources/design-icons` | feature/ctp-output |
@@ -1398,6 +1400,30 @@ constructed blue-noise matrix rather than the crude random-shuffle array used
 to test, since a bad matrix could itself explain "no visible difference".
 
 ### Other traps that cost real time
+
+- **News Browser.** (a) The server's `/external/edition-pages/<x>` wants the edition
+  SHORT NAME; an id answers 400 "Invalid edition short name!". (b) The picture
+  cache must be per user (`QStandardPaths::CacheLocation`): a root-owned
+  `/tmp/scribus_news` from a test run made every photo download fail silently
+  for s1. (c) `itemSelection_DeleteItem(customSelection)` crashes in
+  `DocUpdater::changed(nullptr)`; delete through `m_Selection` like the Delete
+  key. (d) New frames are born with `OwnPage` = current page; items meant for
+  the pasteboard need `OwnPage = -1` or `reformPages()` drags them along when the
+  scratch changes. (e) A welded caption that is auto-fitted before the weld is
+  rebuilt drags its photo by the weld offset: unweld, lay out, weld. (f) Scribus
+  refuses to group a single item; a text-only story is one frame. (g) Wrap
+  offsets are honoured only with bounding-box text flow; a contour line is not
+  rescaled on resize. (h) The dtp-status validator accepts only USED/BALANCED,
+  never UNUSED; the server records no owner or time.
+- **1.7.1 file format is the default writer.** A style attribute that is only
+  wired into `scribus150format` is lost on every save: check
+  `scribus171format_save.cpp` / `scribus171format.cpp` first (the attribute
+  coverage one-liner is in `change-20261008-1320-outline-outward-persist.md`).
+- **PDF text has two code paths.** Embedded fonts go through text render modes
+  (`Tr`), not the vector-outline branch; any glyph-painting feature must be
+  implemented in both (`pdflib_core.cpp drawGlyphOutline`).
+- **CRLF sources.** `ui/smcstylewidget.cpp` is CRLF; a scripted edit that writes
+  LF turns a 6-line change into a 1300-line diff. Check `git diff --stat`.
 
 - **Two live `QShortcut`s on one key fire neither.** Qt reports the key as
   ambiguous and delivers nothing to either. The Paragraph Styles panel owns

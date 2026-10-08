@@ -1022,3 +1022,33 @@ scribus
   picture comes out in front of the letters, the rest stays inside them. rembg finds the person; the
   mask becomes a vector clip (no soft mask in the PDF). Head only / above a draggable line / custom
   rectangle or ellipse. The pop-out follows the picture when it is moved or zoomed inside the letters.
+
+### 51. News Browser — പുതിയ workflow API, login, server-ൽ "placed" state, reference layout
+- Server-ൽ `/api/v1/external/*`-ൽ `editions`-ഉം `layout-templates`-ഉം ഇല്ലാതായി; ഇപ്പോൾ editions
+  public `initial-data/static`-ൽ നിന്ന് (user-ന്റെ editionGroups-ൽ ഉള്ളവ മാത്രം), pages
+  `/external/edition-pages/<SHORT NAME>` (displayOrder), news `/external/edition-pages/<pageId>/news`.
+- Settings (⚙): API server, Files base URL (default `http://<host>/files`), edition short-name fallback,
+  Layout (default photo position, text-wrap gap 2 mm, pasteboard left/right/page), Style tab
+  (title/kicker/highlights/byline/dateline/first-body/body/caption). പഴയ `apiUrl` തനിയെ migrate; settings password ഇല്ല.
+- **Login** (email + password; password ഒരിടത്തും store ചെയ്യുന്നില്ല). Token-ഉം refresh cookie-യും deviceId-ഉം
+  system keychain-ൽ (QtKeychain, service `org.scribus.news`). Expired → refresh ഒരു തവണ → login dialog.
+  Startup-ൽ silent refresh. Logout button. Login ഇല്ലാതെ panel locked.
+- List: title മാത്രം (Malayalam conjunct മുറിയാതെ "…"), tooltip-ൽ kicker/title/byline/photo, photo icon + count.
+- **Placed state server-ൽ** (`PATCH /news/dtp-status`): place ചെയ്താൽ USED; USED stories grey ✓ + disabled;
+  Check button; "Mark as unused" (list / right-click); page-ൽ right-click "Remove story (mark unused)" —
+  frames പോകും, server BALANCED; Undo → frames തിരിച്ച് + USED. Delete key = സാധാരണ delete (hint മാത്രം).
+- **Placement** (reference `sambile.sla` പോലെ): ഒരു text frame (kicker, headline, dateline, body — headline
+  style-ന്റെ SpanColumns), photo വേറെ frame (N columns, aspect ratio) + welded caption (`caption_<image>`, 09 Caption),
+  text wrap offsets 2 mm (live reflow). Group ഇല്ല; items story id attribute-ൽ; right-click "Select whole story",
+  "Photo position ▸" (Top / Top above / Right / Left / Middle / Bottom), "Photo columns ▸".
+- Place Selected → pasteboard-ൽ page-ന്റെ ഇടത്ത് story spike (stack, overlap ഇല്ല, pasteboard തനിയെ വീതി കൂടും,
+  ഒരു undo step). Photos `~/.cache/scribus/news/`-ൽ (300 ppi working copy, original-ഉം), normal preview resolution.
+- Commit `04c6eee` (feature/ctp-output).
+
+### 52. "Grow the outline stroke" save/reopen + PDF
+- Text outline "outward" option save + reopen-ൽ OFF ആകുമായിരുന്നു — 1.7.1 file format-ൽ attribute ഇല്ലായിരുന്നു.
+  ഇപ്പോൾ character style, paragraph style, selected characters — എല്ലാ level-ലും save/load (`TextOutlineOutward`).
+  Copy/paste, Scrapbook, Import styles ഇതേ വഴി. പഴയ files മാറ്റമില്ല (attribute ഇല്ലെങ്കിൽ off).
+- Style Manager → Character → Outline popup-ൽ "Grow outward" checkbox (control bar checkbox-ഉമായി sync).
+- **PDF bug**: embedded font-ൽ outward ignore ചെയ്തിരുന്നു; ഇപ്പോൾ PDF screen-ലെ പോലെ (stroke, പിന്നെ fill മുകളിൽ).
+- Test: `tests/suneer/roundtrip_outline_outward.sh <file.sla>`. Commit `e27845e`.
