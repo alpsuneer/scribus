@@ -20,6 +20,7 @@
 #include "undotransaction.h"
 #include "undostate.h"
 
+#include <QDateTime>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -255,12 +256,16 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		const QJsonObject news = m_newsData[idx].toObject();
 		const QString st = newsDtpStatus(news);
 		QMenu menu(this);
-		QAction* rel = st != "UNUSED" ? menu.addAction(tr("Mark as unused")) : nullptr;
-		QAction* bal = st != "BALANCED" ? menu.addAction(tr("Mark as balance (keep for later)")) : nullptr;
+		const QString sidRow = newsServerId(news);
+		QAction* retry = m_pendingMarks.contains(sidRow) ? menu.addAction(tr("Retry mark used (placed here, not marked on server)")) : nullptr;
+		QAction* rel = allowedTransition(st, unusedStatus()) ? menu.addAction(tr("Mark as unused")) : nullptr;
+		QAction* bal = allowedTransition(st, "BALANCED") ? menu.addAction(tr("Mark as balance (keep for later)")) : nullptr;
 		if (menu.isEmpty())
 			return;
 		QAction* chosen = menu.exec(m_newsList->viewport()->mapToGlobal(p));
-		if (chosen && chosen == rel)
+		if (chosen && retry && chosen == retry)
+			retryPendingMarks(QStringList() << sidRow);
+		else if (chosen && chosen == rel)
 			markStories(QList<QJsonObject>() << news, unusedStatus());
 		else if (chosen && chosen == bal)
 		{
@@ -563,31 +568,232 @@ bool SuneerNewsPanel::apiPatch(const QUrl& url, const QJsonObject& body, std::fu
 	return reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
 }
 
-// PATCH /news/dtp-status {newsIds, dtpStatus, pageId}. No ids or tokens are logged.
-bool SuneerNewsPanel::markOnServer(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error)
+// Transitions. Confirmed from the web app bundle (2026-10-08): UNUSED->USED,
+// UNUSED->BALANCED (Layout page), USED->UNUSED (Used page), BALANCED->UNUSED
+// (Balanced page). USED<->BALANCED are not used by the web app; the server
+// decides - they are offered and its answer is shown. Same->same is pointless.
+bool SuneerNewsPanel::allowedTransition(const QString& from, const QString& to)
 {
-	if (newsIds.isEmpty() || pageId.isEmpty())
-	{
-		if (error) *error = tr("no story id / page id");
+	if (from.isEmpty() || to.isEmpty() || from == to)
 		return false;
+	return true;
+}
+
+QString SuneerNewsPanel::transitionWhy(const QString& from, const QString& to)
+{
+	if (from == to)
+		return to == "USED" ? tr("already used") : to == "BALANCED" ? tr("already a balance story") : tr("already free");
+	return QString();
+}
+
+void SuneerNewsPanel::apiLog(const QString& line) const
+{
+	const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/news/";
+	QDir().mkpath(dir);
+	QFile f(dir + "api.log");
+	if (f.open(QIODevice::Append | QIODevice::Text))
+	{
+		QTextStream out(&f);
+		out << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss") << "  " << line << "\n";
 	}
+	qDebug().noquote() << "news api:" << line;
+}
+
+// Fresh read of one story's status on one page: GET /news/:id -> newsPages[];
+// when that route is not usable (older/other backend, no right), the page's
+// own news list (/external/edition-pages/:page/news) is read instead.
+QString SuneerNewsPanel::serverStatus(const QString& newsId, const QString& pageId, QString* who, QString* error)
+{
+	if (who) who->clear();
+	if (error) error->clear();
+	if (newsId.isEmpty())
+		return QString();
 	if (!qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
 	{
-		if (error) *error = tr("fixture mode, no server");
+		// Fixture: the FILE is "the server" - re-read it, so a status changed
+		// there after the list was fetched is seen like another PC's change.
+		QFile f(qEnvironmentVariable("SCRIBUS_NEWS_FIXTURE"));
+		if (f.open(QIODevice::ReadOnly))
+		{
+			const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+			for (const QJsonValue& v : root["data"].toArray())
+				if (newsServerId(v.toObject()) == newsId)
+				{
+					if (who) *who = v.toObject()["page"].toObject()["dtpUser"].toString();
+					return newsDtpStatus(v.toObject());
+				}
+		}
+		return QString();
+	}
+	QString status, err;
+	int code = 0;
+	apiGet(QUrl(apiUrl("/news/" + newsId)), [&](QNetworkReply* reply) {
+		code = httpStatus(reply);
+		if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300)
+		{
+			err = describeError(reply);
+			return;
+		}
+		const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+		QJsonObject news = root["data"].isObject() ? root["data"].toObject() : root;
+		if (news["news"].isObject())
+			news = news["news"].toObject();
+		QJsonObject hit;
+		for (const QJsonValue& v : news["newsPages"].toArray())
+		{
+			const QJsonObject p = v.toObject();
+			const QString pid = p["pageId"].toString().isEmpty() ? p["page"].toObject()["id"].toString() : p["pageId"].toString();
+			if (pid == pageId || pageId.isEmpty())
+			{
+				hit = p;
+				break;
+			}
+		}
+		if (hit.isEmpty() && news["newsPages"].toArray().size() == 1)
+			hit = news["newsPages"].toArray().first().toObject();
+		status = hit["dtpStatus"].toString().toUpper();
+		if (who)
+		{
+			// Whatever the server records about the last change, if anything.
+			for (const QString& k : {"dtpUpdatedBy", "dtpUser", "updatedBy", "lastUpdatedBy", "user"})
+			{
+				const QJsonValue v = hit[k];
+				QString name = v.isObject() ? (v.toObject()["name"].toString().isEmpty() ? v.toObject()["email"].toString() : v.toObject()["name"].toString()) : v.toString();
+				if (!name.isEmpty()) { *who = name; break; }
+			}
+		}
+	});
+	apiLog(QStringLiteral("GET /news/%1 -> HTTP %2, status on page %3 = %4%5").arg(newsId.right(6)).arg(code).arg(pageId.right(6), status.isEmpty() ? "?" : status, err.isEmpty() ? QString() : " (" + err + ")"));
+	if (status.isEmpty() && !pageId.isEmpty())
+	{
+		// Fallback: the same list the panel fetches, which needs no special right.
+		QUrl url(apiUrl("/external/edition-pages/" + pageId + "/news"));
+		QUrlQuery q;
+		q.addQueryItem("publishDate", m_fetchDate);
+		url.setQuery(q);
+		QString err2;
+		int code2 = 0;
+		apiGet(url, [&](QNetworkReply* reply) {
+			code2 = httpStatus(reply);
+			if (reply->error() != QNetworkReply::NoError || code2 < 200 || code2 >= 300)
+			{
+				err2 = describeError(reply);
+				return;
+			}
+			const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+			QJsonArray arr = root["data"].isArray() ? root["data"].toArray() : root["data"].toObject()["news"].toArray();
+			if (arr.isEmpty() && root["news"].isArray())
+				arr = root["news"].toArray();
+			for (const QJsonValue& v : arr)
+				if (newsServerId(v.toObject()) == newsId)
+				{
+					status = newsDtpStatus(v.toObject());
+					if (who) *who = v.toObject()["page"].toObject()["dtpUser"].toString();
+					break;
+				}
+		});
+		apiLog(QStringLiteral("GET /external/edition-pages/%1/news (fallback) -> HTTP %2, status = %3%4").arg(pageId.right(6)).arg(code2).arg(status.isEmpty() ? "?" : status, err2.isEmpty() ? QString() : " (" + err2 + ")"));
+		if (status.isEmpty() && err.isEmpty())
+			err = err2;
+	}
+	if (error) *error = err;
+	return status;
+}
+
+// PATCH /news/dtp-status {newsIds, dtpStatus, fromStatus, pageId}, one
+// story at a time so each carries its own fromStatus. No ids or tokens are
+// logged.
+bool SuneerNewsPanel::markOnServer(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error, const QString& expected)
+{
+	const bool fixture = !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE");
+	m_lastFrom.clear();
+	m_lastMarkError.clear();
+	if (newsIds.isEmpty() || (pageId.isEmpty() && !fixture))
+	{
+		if (error) *error = tr("no story id / page id");
+		for (const QString& id : newsIds) m_lastMarkError[id] = tr("no story id / page id");
 		return false;
 	}
-	QJsonObject body;
-	body["newsIds"]   = QJsonArray::fromStringList(newsIds);
-	body["dtpStatus"] = dtpStatus;
-	body["pageId"]    = pageId;
-	QString err;
-	const bool ok = apiPatch(QUrl(apiUrl("/news/dtp-status")), body, [&](QNetworkReply* reply) {
-		if (reply->error() != QNetworkReply::NoError || httpStatus(reply) < 200 || httpStatus(reply) >= 300)
-			err = describeError(reply);
-	});
-	qDebug() << "news dtp-status" << dtpStatus << newsIds.size() << "story(ies)" << (ok ? "ok" : "failed");
-	if (error) *error = err;
-	return ok;
+	QStringList errors;
+	auto fail = [&](const QString& id, const QString& why) { errors << why; m_lastMarkError[id] = why; };
+	for (const QString& id : newsIds)
+	{
+		QString who, rerr;
+		const QString current = serverStatus(id, pageId, &who, &rerr);
+		m_lastFrom[id] = current;
+		if (current.isEmpty())
+		{
+			fail(id, tr("could not read the current status (%1)").arg(rerr.isEmpty() ? tr("no page entry") : rerr));
+			continue;
+		}
+		if (current == dtpStatus)
+		{
+			// Already what we want (e.g. undo after a failed mark): nothing to send.
+			apiLog(QStringLiteral("story ..%1 already %2 on page ..%3 - no request").arg(id.right(6), dtpStatus, pageId.right(6)));
+			setRowStatus(id, current);
+			continue;
+		}
+		if (!expected.isEmpty() && current != expected)
+		{
+			// Someone else changed it since the list was read: show, refresh, stop.
+			setRowStatus(id, current);
+			fail(id, who.isEmpty() ? tr("this story was changed meanwhile - now %1").arg(current)
+			                       : tr("this story was changed by %1 - now %2").arg(who, current));
+			continue;
+		}
+		if (!allowedTransition(current, dtpStatus))
+		{
+			setRowStatus(id, current);
+			fail(id, tr("%1 (server status %2)").arg(transitionWhy(current, dtpStatus), current));
+			continue;
+		}
+		if (fixture)
+		{
+			fail(id, tr("fixture mode, no server"));   // the read and the checks above still ran
+			continue;
+		}
+		QJsonObject body;
+		body["newsIds"]    = QJsonArray::fromStringList(QStringList() << id);
+		body["dtpStatus"]  = dtpStatus;
+		body["fromStatus"] = current;
+		body["pageId"]     = pageId;
+		QString err;
+		int status = 0;
+		bool ok = apiPatch(QUrl(apiUrl("/news/dtp-status")), body, [&](QNetworkReply* reply) {
+			status = httpStatus(reply);
+			if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300)
+				err = describeError(reply);
+		});
+		if (!ok && status == 400 && err.contains("fromStatus", Qt::CaseInsensitive) && err.contains("not allowed", Qt::CaseInsensitive))
+		{
+			// An older backend that knows no fromStatus: same change, same
+			// story, field left out. Not a status retry.
+			body.remove("fromStatus");
+			err.clear();
+			ok = apiPatch(QUrl(apiUrl("/news/dtp-status")), body, [&](QNetworkReply* reply) {
+				status = httpStatus(reply);
+				if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300)
+					err = describeError(reply);
+			});
+		}
+		apiLog(QStringLiteral("PATCH /news/dtp-status {newsIds:[..%1], dtpStatus:%2, fromStatus:%3, pageId:..%4} -> HTTP %5 %6")
+		       .arg(id.right(6), dtpStatus, body.contains("fromStatus") ? current : "(omitted)", pageId.right(6)).arg(status).arg(ok ? "ok" : err));
+		if (!ok)
+		{
+			// Refused: read once more so the row shows the truth; no resend.
+			const QString now = serverStatus(id, pageId, &who);
+			if (!now.isEmpty() && now != current)
+			{
+				setRowStatus(id, now);
+				fail(id, who.isEmpty() ? tr("this story was changed meanwhile - now %1").arg(now)
+				                       : tr("this story was changed by %1 - now %2").arg(who, now));
+			}
+			else
+				fail(id, err.isEmpty() ? tr("server refused (HTTP %1)").arg(status) : err);
+		}
+	}
+	if (error) *error = errors.join("; ");
+	return errors.isEmpty();
 }
 
 // After a placement: mark USED on the server; keep the ids for a retry on
@@ -595,41 +801,106 @@ bool SuneerNewsPanel::markOnServer(const QStringList& newsIds, const QString& pa
 // at once.
 void SuneerNewsPanel::markPlaced(const QList<QJsonObject>& placedStories)
 {
-	QStringList ids;
+	QStringList okTitles, failed;
+	int placed = 0;
 	for (const QJsonObject& n : placedStories)
-		if (!newsServerId(n).isEmpty())
-			ids << newsServerId(n);
+	{
+		const QString sid = newsServerId(n);
+		const QString title = collapseSpaces(n["title"].toString()).left(40);
+		if (sid.isEmpty())
+			continue;
+		++placed;
+		QString err;
+		// Expected = what the list showed (free, or balance placed knowingly):
+		// a story someone else used meanwhile is reported, not overwritten.
+		const bool ok = markOnServer(QStringList() << sid, m_fetchPageId, "USED", &err, newsDtpStatus(n));
+		const QString prev = m_lastFrom.value(sid);
+		for (SimpleState* ss : m_placeStates)
+			if (ss && ss->get("SERVER_ID") == sid)
+			{
+				if (!prev.isEmpty())
+					ss->set("PREV", prev);
+				ss->set("MARKED", ok ? "1" : "0");
+			}
+		if (ok)
+		{
+			m_pendingMarks.remove(sid);
+			setRowStatus(sid, "USED");             // this row only
+			okTitles << title;
+		}
+		else
+		{
+			m_pendingMarks.insert(sid);
+			failed << tr("%1 - %2").arg(title, err);
+		}
+	}
+	m_placeStates.clear();
+	QString line = tr("Placed %n story(ies)", "", placed);
+	if (!failed.isEmpty())
+		line += tr("; %n could not be marked used on the server", "", failed.size());
+	else if (placed > 0)
+		line += tr(", marked USED on the server");
+	if (m_placeUsedSkipped > 0)
+		line += tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped);
+	m_placeUsedSkipped = 0;
+	m_statusLabel->setText(line);
+	refreshPlacedMarks();
+	if (!failed.isEmpty())
+		QMessageBox::warning(this, tr("Place Selected"),
+			tr("Placed %n story(ies); %1 could not be marked used on the server:", "", placed).arg(failed.size())
+			+ "\n\n" + failed.join("\n")
+			+ "\n\n" + tr("They stay placed and are shown as 'Placed here - not marked on server'. Right-click such a row > Retry mark used, or press Check."));
+}
+
+// Inside the placement transaction: the server side of the undo record.
+void SuneerNewsPanel::recordPlaceUndo(const QList<QJsonObject>& stories)
+{
+	m_placeStates.clear();
+	if (!UndoManager::undoEnabled())
+		return;
+	for (const QJsonObject& n : stories)
+	{
+		const QString sid = newsServerId(n);
+		if (sid.isEmpty())
+			continue;
+		auto* ss = new SimpleState(tr("Story status on server"), QString(), Um::ICreate);
+		ss->set("SUNEER_NEWS_PLACE");
+		ss->set("SERVER_ID", sid);
+		ss->set("PAGE_ID", m_fetchPageId);
+		ss->set("STORY", collapseSpaces(n["title"].toString()).left(40));
+		ss->set("PREV", newsDtpStatus(n));       // refined by markPlaced() with the fresh read
+		ss->set("MARKED", "0");
+		UndoManager::instance()->action(this, ss);
+		m_placeStates << ss;
+	}
+}
+
+// Placed but not marked USED: try again (Check, or right-click > Retry mark used).
+void SuneerNewsPanel::retryPendingMarks(const QStringList& which)
+{
+	QStringList ids = which.isEmpty() ? m_pendingMarks.values() : which;
 	if (ids.isEmpty())
 		return;
-	QString err;
-	const bool ok = markOnServer(ids, m_fetchPageId, "USED", &err);
-	if (ok)
+	QStringList done, failed;
+	for (const QString& sid : ids)
 	{
-		for (const QString& id : ids)
-			m_pendingMarks.remove(id);
-		for (int i = 0; i < m_newsData.size(); ++i)
+		QString err, title = sid.right(6);
+		for (const QJsonValue& v : m_newsData)
+			if (newsServerId(v.toObject()) == sid)
+				title = collapseSpaces(v.toObject()["title"].toString()).left(40);
+		if (markOnServer(QStringList() << sid, m_fetchPageId, "USED", &err))
 		{
-			QJsonObject n = m_newsData[i].toObject();
-			if (!ids.contains(newsServerId(n)))
-				continue;
-			QJsonObject pg = n["page"].toObject();
-			pg["dtpStatus"] = "USED";
-			n["page"] = pg;
-			m_newsData[i] = n;
+			m_pendingMarks.remove(sid);
+			setRowStatus(sid, "USED");
+			done << title;
 		}
-		m_statusLabel->setText(tr("Placed %1 and marked USED on the server").arg(ids.size())
-			+ (m_placeUsedSkipped > 0 ? tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped) : QString()));
-		m_placeUsedSkipped = 0;
-	}
-	else
-	{
-		for (const QString& id : ids)
-			m_pendingMarks.insert(id);
-		m_statusLabel->setText(tr("Warning: placed, but NOT marked on server (%1). Press Check to retry.").arg(err)
-			+ (m_placeUsedSkipped > 0 ? tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped) : QString()));
-		m_placeUsedSkipped = 0;
+		else
+			failed << tr("%1 - %2").arg(title, err);
 	}
 	refreshPlacedMarks();
+	m_statusLabel->setText(tr("Marked used: %1, still not marked: %2").arg(done.size()).arg(failed.size()));
+	if (!failed.isEmpty())
+		QMessageBox::warning(this, tr("Retry mark used"), tr("Still not marked used on the server:") + "\n\n" + failed.join("\n"));
 }
 
 // Update one story's status in the local reply copy and its row only.
@@ -660,15 +931,8 @@ void SuneerNewsPanel::setRowStatus(const QString& serverId, const QString& dtpSt
 // Check: retry pending marks, then re-read the page's status from the server.
 void SuneerNewsPanel::onCheck()
 {
-	if (!m_pendingMarks.isEmpty() && !m_fetchPageId.isEmpty())
-	{
-		QString err;
-		QStringList ids = m_pendingMarks.values();
-		if (markOnServer(ids, m_fetchPageId, "USED", &err))
-			m_pendingMarks.clear();
-		else
-			m_statusLabel->setText(tr("Warning: still not marked on server (%1)").arg(err));
-	}
+	if (!m_pendingMarks.isEmpty())
+		retryPendingMarks();
 	if (!m_fetchPageId.isEmpty())
 		onFetchNews();
 }
@@ -780,7 +1044,7 @@ bool SuneerNewsPanel::removeStoryFrames(PageItem* item, const QString& status, Q
 	m_removing = false;
 
 	QString err;
-	const bool marked = !sid.isEmpty() && !pageId.isEmpty() && markOnServer(QStringList() << sid, pageId, status, &err);
+	const bool marked = !sid.isEmpty() && !pageId.isEmpty() && markOnServer(QStringList() << sid, pageId, status, &err, QStringLiteral("USED"));
 	if (!marked && err.isEmpty())
 		err = (sid.isEmpty() || pageId.isEmpty()) ? tr("the frames carry no story id / page id") : tr("server refused");
 	if (UndoManager::undoEnabled() && !sid.isEmpty())
@@ -892,7 +1156,7 @@ void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString&
 		PageItem* inDoc = removeToo ? findStoryItemInDoc(sid) : nullptr;
 		if (inDoc)
 			ok = removeStoryFrames(inDoc, status, &err);   // frames gone + server mark + undo record
-		else if (markOnServer(QStringList() << sid, m_fetchPageId, status, &err))
+		else if (markOnServer(QStringList() << sid, m_fetchPageId, status, &err, newsDtpStatus(n)))
 		{
 			setRowStatus(sid, status);                  // this row only, no re-fetch
 			ok = true;
@@ -934,6 +1198,44 @@ void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString&
 void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
 {
 	auto* ss = dynamic_cast<SimpleState*>(state);
+	if (ss)
+		apiLog(QStringLiteral("undo/redo state %1 %2 story ..%3").arg(isUndo ? "undo" : "redo", ss->contains("SUNEER_NEWS_PLACE") ? "PLACE" : ss->contains("SUNEER_NEWS_DTP") ? "DTP" : "other", ss->get("SERVER_ID").right(6)));
+	if (ss && ss->contains("SUNEER_NEWS_PLACE"))
+	{
+		// Place Selected undone: frames are gone (the transaction), the story
+		// goes back to the status it had; redone: USED again.
+		const QString sid = ss->get("SERVER_ID");
+		const QString pageId = ss->get("PAGE_ID");
+		const QString story = ss->get("STORY");
+		const QString prev = ss->get("PREV").isEmpty() ? QStringLiteral("UNUSED") : ss->get("PREV");
+		const QString want = isUndo ? prev : QStringLiteral("USED");
+		const QString expect = isUndo ? QStringLiteral("USED") : prev;
+		QString err;
+		if (isUndo && ss->get("MARKED") != "1")
+		{
+			// It never became USED on the server: nothing to put back.
+			m_pendingMarks.remove(sid);
+			setRowStatus(sid, prev);
+			m_statusLabel->setText(tr("Placement undone: %1 (it was not marked used on the server)").arg(story));
+			return;
+		}
+		if (markOnServer(QStringList() << sid, pageId, want, &err, expect))
+		{
+			m_pendingMarks.remove(sid);
+			setRowStatus(sid, want);
+			m_statusLabel->setText(isUndo ? tr("Placement undone and the story is %1 again on the server: %2").arg(want, story)
+			                              : tr("Placed again and marked USED on the server: %1").arg(story));
+		}
+		else
+		{
+			m_statusLabel->setText(tr("Warning: placement %1, but the server status could not be set to %2 (%3)")
+			                       .arg(isUndo ? tr("undone") : tr("redone"), want, err));
+			QMessageBox::warning(this, tr("Undo placement"),
+				tr("The frames were %1, but the story could not be set to %2 on the server:\n%3\n\nUse Check / Mark unused in the News Browser.")
+				.arg(isUndo ? tr("removed") : tr("placed again"), want, err));
+		}
+		return;
+	}
 	if (!ss || !ss->contains("SUNEER_NEWS_DTP"))
 		return;
 	const QString sid = ss->get("SERVER_ID");
@@ -958,9 +1260,10 @@ void SuneerNewsPanel::deleteKeyHint()
 	if (m_removing || m_deleteHintShown)
 		return;
 	m_deleteHintShown = true;
+	// Main-window status bar only: the same document path also runs when a
+	// placement is undone, and the panel's own line must keep that result.
 	if (m_mw)
 		m_mw->setStatusBarInfoText(tr("Story frames deleted. To make the story available again, use right-click > Remove story (mark unused), or Mark as unused in the News Browser."));
-	m_statusLabel->setText(tr("Hint: a plain delete does not change the server; use Remove story (mark unused)."));
 }
 
 // Release from the document (right-click on a placed story item).
@@ -981,7 +1284,7 @@ void SuneerNewsPanel::releaseStory(PageItem* item)
 	        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		return;
 	QString err;
-	if (markOnServer(QStringList() << sid, pageId, unusedStatus(), &err))
+	if (markOnServer(QStringList() << sid, pageId, unusedStatus(), &err, QStringLiteral("USED")))
 	{
 		setRowStatus(sid, unusedStatus());
 		m_statusLabel->setText(tr("Marked unused on the server: %1").arg(name));
@@ -1007,7 +1310,7 @@ void SuneerNewsPanel::balanceStory(PageItem* item)
 	        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		return;
 	QString err;
-	if (markOnServer(QStringList() << sid, pageId, "BALANCED", &err))
+	if (markOnServer(QStringList() << sid, pageId, "BALANCED", &err, QStringLiteral("USED")))
 	{
 		setRowStatus(sid, "BALANCED");
 		m_statusLabel->setText(tr("Marked balance on the server: %1").arg(name));
@@ -1889,6 +2192,7 @@ void SuneerNewsPanel::onPlaceNews()
 		                                               QString(), Um::ICreate);
 	QList<PageItem*> items = placeNews(news, x, y, false);
 	Q_UNUSED(items);
+	recordPlaceUndo(QList<QJsonObject>() << news);
 	if (tx)
 		tx.commit();
 	markPlaced(QList<QJsonObject>() << news);
@@ -1960,9 +2264,9 @@ void SuneerNewsPanel::onPlaceSelected()
 			if (!r.isNull())
 				curY = r.bottom() + 3.0 * kMmToPt;
 		}
+		recordPlaceUndo(stories);
 		if (tx)
 			tx.commit();
-		m_statusLabel->setText(tr("Placed %1 stories on the page").arg(stories.size()));
 		markPlaced(stories);
 		return;
 	}
@@ -2167,6 +2471,7 @@ void SuneerNewsPanel::placeOnPasteboard(const QList<QJsonObject>& stories, bool 
 		for (PageItem* it : st)
 			it->OwnPage = -1;
 
+	recordPlaceUndo(stories);
 	if (tx)
 		tx.commit();
 	m_doc->m_Selection->clear();
@@ -2358,23 +2663,33 @@ void SuneerNewsPanel::updateTickButtons()
 {
 	if (!m_newsList || !m_releaseBtn || !m_placeBtn)
 		return;
-	int freeT = 0, usedT = 0, balT = 0;
+	int ticked = 0, toUsed = 0, toUnused = 0, toBal = 0;
+	QStringList whyUnused, whyBal;
 	for (int i = 0; i < m_newsList->count(); ++i)
 	{
 		const QListWidgetItem* row = m_newsList->item(i);
 		if (row->checkState() != Qt::Checked)
 			continue;
-		if (isPlacedRow(row)) ++usedT; else if (isBalanceRow(row)) ++balT; else ++freeT;
+		++ticked;
+		const QString st = row->data(Qt::UserRole + 4).toString();
+		if (allowedTransition(st, "USED")) ++toUsed;
+		if (allowedTransition(st, unusedStatus())) ++toUnused; else whyUnused << transitionWhy(st, unusedStatus());
+		if (allowedTransition(st, "BALANCED")) ++toBal; else whyBal << transitionWhy(st, "BALANCED");
 	}
-	const int placeable = freeT + balT, releasable = usedT + balT, balanceable = freeT + usedT;
-	m_placeBtn->setText(placeable > 0 ? tr("Place Selected (%1)").arg(placeable) : tr("Place Selected"));
+	m_placeBtn->setText(toUsed > 0 ? tr("Place Selected (%1)").arg(toUsed) : tr("Place Selected"));
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
-	m_releaseBtn->setText(releasable > 0 ? tr("Mark unused (%1)").arg(releasable) : tr("Mark unused"));
-	m_releaseBtn->setEnabled(releasable > 0);
+	m_releaseBtn->setText(toUnused > 0 ? tr("Mark unused (%1)").arg(toUnused) : tr("Mark unused"));
+	m_releaseBtn->setEnabled(toUnused > 0);
+	m_releaseBtn->setToolTip(toUnused > 0 || ticked == 0
+		? tr("Mark every TICKED used or balance story as unused on the server (available to everyone); optionally remove them from this page")
+		: tr("Not possible for the ticked story(ies): %1").arg(whyUnused.join(", ")));
 	if (m_balanceBtn)
 	{
-		m_balanceBtn->setText(balanceable > 0 ? tr("Mark balance (%1)").arg(balanceable) : tr("Mark balance"));
-		m_balanceBtn->setEnabled(balanceable > 0);
+		m_balanceBtn->setText(toBal > 0 ? tr("Mark balance (%1)").arg(toBal) : tr("Mark balance"));
+		m_balanceBtn->setEnabled(toBal > 0);
+		m_balanceBtn->setToolTip(toBal > 0 || ticked == 0
+			? tr("Mark every TICKED free or used story as BALANCE on the server (kept for a later day, listed under Balanced News); optionally remove them from this page")
+			: tr("Not possible for the ticked story(ies): %1").arg(whyBal.join(", ")));
 	}
 }
 

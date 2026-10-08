@@ -51,6 +51,7 @@ class PageItem;
  Secrets (tokens, deviceId, user name) live in the OS keychain via ScUpdateKeyStore.
  */
 class UndoState;
+class SimpleState;
 class SuneerNewsPanel : public QDockWidget, public UndoObject
 {
 	Q_OBJECT
@@ -238,7 +239,30 @@ private:
 	QPushButton* m_balanceBtn {nullptr};
 	bool isBalanceRow(const QListWidgetItem* item) const;
 	bool apiPatch(const QUrl& url, const QJsonObject& body, std::function<void(QNetworkReply*)> done, bool retried = false);
-	bool markOnServer(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error);
+	//! Change the status of each story on the server. Right before each
+	//! change the story's CURRENT status is read back (GET /news/:id) and sent
+	//! as fromStatus; when it differs from \a expected (what the user saw;
+	//! empty = unknown) the story is left alone, its row refreshed and the
+	//! error says who changed it and to what. Never retried blindly.
+	bool markOnServer(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error, const QString& expected = QString());
+	//! Current server status of one story on one page (fresh read), plus the
+	//! user that last touched it when the server says so. Empty = not readable.
+	QString serverStatus(const QString& newsId, const QString& pageId, QString* who = nullptr, QString* error = nullptr);
+	//! Request/response trail for the status calls (no tokens): ~/.cache/scribus/news/api.log
+	void apiLog(const QString& line) const;
+	//! Per-story outcome of the last markOnServer(): fresh from-status and error text.
+	QHash<QString, QString> m_lastFrom, m_lastMarkError;
+	//! Undo states of the placement in progress (SUNEER_NEWS_PLACE), so the
+	//! previous status read during marking can be stored in them.
+	QList<SimpleState*> m_placeStates;
+	//! Inside the placement transaction: one undo record per story (frames +
+	//! server status go back together).
+	void recordPlaceUndo(const QList<QJsonObject>& stories);
+	//! Mark the given pending (placed, not marked) stories USED again; empty = all.
+	void retryPendingMarks(const QStringList& ids = QStringList());
+	//! The status changes the server allows (one place; see result-20261008-2200).
+	static bool allowedTransition(const QString& from, const QString& to);
+	static QString transitionWhy(const QString& from, const QString& to);
 	void markPlaced(const QList<QJsonObject>& placedStories);
 	void onCheck();
 	void onReleaseRows();
