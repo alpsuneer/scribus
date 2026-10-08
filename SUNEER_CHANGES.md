@@ -1123,3 +1123,13 @@ scribus
   Success ആയ row ഉടൻ Used (✓).
 - Undo of Place Selected: frames പോകും + server-ൽ പഴയ status (fromStatus USED); fail ആയാൽ warning.
 - Request/response log (token ഇല്ല): `~/.cache/scribus/news/api.log`. Commit `dca3488`.
+
+### 61. Design Style apply — കൈകൊണ്ട് മാറ്റിയ size/spacing clear
+- Design Style apply ചെയ്യുമ്പോൾ paragraph style reference ആയി ഇടുന്നു → paragraph-ൽ കൈകൊണ്ട് മാറ്റിയ line spacing (+mode), alignment,
+  indents, space before/after, drop cap എല്ലാം style-ലേക്ക് തിരികെ. Character runs-ൽ font size, horizontal/vertical scale, tracking,
+  word tracking, baseline offset, മറ്റൊരു family font — clear. **നിലനിൽക്കുന്നത്**: bold/italic (same family), colour/shade, underline,
+  strikethrough, outline, shadow, super/subscript, caps, language, named character style.
+- ഒറ്റ undo. Frame select → whole story (linked frames-ഉം); edit mode-ൽ text selection → ആ paragraphs മാത്രം.
+- Preferences → SR Menu → "Clear manual size/spacing when applying a Design Style" (default ON). Icon **Shift+click** → പഴയപടി (manual values നിലനിർത്തും).
+- Column Style → Design Style link, Design Style shortcuts: ഇതേ behaviour. Paragraph-style shortcuts വേറെ path (അവിടെ എല്ലാ char formatting-ഉം പോകും — മാറ്റിയിട്ടില്ല).
+- Commit `d3fc7bc`.

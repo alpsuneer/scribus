@@ -256,6 +256,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | Updater hardening — saved server URL validated on every check (`ScUpdateClient::validateServerUrl`: one http(s) URL, retired hosts/ports by rule not address) and dropped in favour of update.conf; Update Settings inline validation, Use default, Enter=Check; single window-modal Settings instance raised over Check for Updates; "Try the default server"; plain-words errors incl. whose password pkexec wants. Verified by the user | `3494742` | feature/ctp-output |
 | Debian update server on port 8095 + `tools/publish-update.sh` (build/sign on the laptop, ordered rsync upload, keep last 3, HTTP read-back verify, --list, --rollback); updater says plainly when the server is unreachable. Verified by the user (in-app Update on the laptop) | `f901367` | feature/ctp-output |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
+| Design Style clears manual size/spacing — paragraphs applied as a parent reference, runs cleared selectively (`suneerClearManualCharFormatting`: size, scales, tracking, word tracking, baseline offset, other-family font; emphasis/colour/features/named char style kept), APPLY_PARASTYLE + SET_CHARSTYLE undo records in the existing transaction, selection scope in edit mode, setting `clearManualFormatting` (Prefs > SR Menu), Shift+click = old copy path. Verified by the user | `d3fc7bc` | feature/ctp-output |
 | Column Style config → Design Style — per-config "Design Style" link applied after the columns, one undo step, missing-style status message, rename/remove follow-through, "Link Config N → style-N", export/import field. Verified by the user | `c0130ad` | feature/ctp-output |
 | Design Style icons stored by file name — looked up in `~/.local/share/scribus/design-icons/`, then `/usr/local/share/…`, `/usr/share/…`; 14 default icons shipped (`resources/design-icons/`); Upload Icon copies into the user folder; Export/Import Design embeds the pictures; `?` placeholder for a missing icon. Verified by the user on the laptop | `git log -- resources/design-icons` | feature/ctp-output |
 | Paragraph Styles panel — per-style keyboard shortcut (right-click / ⌨ button), stored in `ParagraphStyle::shortcut()` (the Style Manager field, so in the .sla), conflict check with Replace/Cancel, export/import JSON. Verified by the user | `ea52dc3` | feature/ctp-output |
@@ -1481,6 +1482,13 @@ to test, since a bad matrix could itself explain "no visible difference".
   its own undo step and Ctrl+Z reverted the paragraph styles but left the new
   width and column count. Every doc call that records undo (`sizeItem`,
   `createPageItem`, `autoFitFrameHeight`) has to sit inside the transaction.
+- **Design Style used to apply the named style as a value copy** (`applyStyle(pos, doc.get(sn))`):
+  `ParagraphStyle::applyStyle` with a style that has a parent calls `setStyle()`, i.e. copies the
+  style's values and inherit flags into the paragraph, and copies nothing the style inherits.
+  Manual line spacing / font size therefore survived a re-apply. Scribus's own apply uses a
+  parent reference (`ParagraphStyle ref; ref.setParent(name)`); the clearing path now does the
+  same. `StoryText::applyStyle(..., rmDirectFormatting=true)` would also wipe bold/colour, so the
+  run clearing is selective and done by hand.
 - **Column config ↔ Design Style can call each other.** A Design Style has a
   "columns" config index; a config now has a Design Style name. `applyColumnConfig()`
   applies the design with its columns step skipped, and `m_applyingDesignStyle` /
