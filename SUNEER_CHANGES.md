@@ -1112,3 +1112,14 @@ scribus
 - Buttons tick അനുസരിച്ച്: Place Selected (free+balance), Mark unused (used+balance), Mark balance (free+used).
 - Balance story ticked ആയി Place Selected → ഒരു തവണ ചോദ്യം ("… BALANCE stories … Place them now? They will be marked USED") → place → USED.
 - ഓരോ story-ക്കും result; server refuse ചെയ്താൽ reason summary-ൽ; മാറിയ rows മാത്രം refresh. Commit `5664da8`.
+
+### 60. News Browser — status change-ന് മുമ്പ് server-ലെ ഇപ്പോഴത്തെ status (fromStatus), Place → USED ഉറപ്പ്, retry, undo
+- Server-ന്റെ `/news/dtp-status` ഇപ്പോൾ `fromStatus` ചോദിക്കുന്നു. എല്ലാ status മാറ്റങ്ങളും (Mark unused, Mark balance, Remove story,
+  Place → used, Undo) മാറ്റുന്നതിന് തൊട്ടുമുമ്പ് story-യുടെ ഇപ്പോഴത്തെ status server-ൽ നിന്ന് വായിച്ച് അത് fromStatus ആയി അയയ്ക്കുന്നു.
+  മറ്റൊരു PC മാറ്റിയിട്ടുണ്ടെങ്കിൽ: "this story was changed by X - now STATUS" — row refresh, retry ഇല്ല.
+- Buttons / right-click: ഇപ്പോഴത്തെ status-ൽ നിന്ന് പറ്റുന്ന actions മാത്രം (disabled ആയാൽ tooltip-ൽ കാരണം).
+- Place Selected / double-click: ഓരോ story-യും വെവ്വേറെ USED. Fail ആയാൽ summary "Placed N stories; M could not be marked used…
+  <headline> - <reason>", row "Placed here - not marked on server" (orange), right-click **Retry mark used**, Check-ഉം retry ചെയ്യും.
+  Success ആയ row ഉടൻ Used (✓).
+- Undo of Place Selected: frames പോകും + server-ൽ പഴയ status (fromStatus USED); fail ആയാൽ warning.
+- Request/response log (token ഇല്ല): `~/.cache/scribus/news/api.log`. Commit `dca3488`.
