@@ -250,6 +250,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
+| News Browser status model — `newsDtpStatus()` Free/Used/Balance from the server enum, three-state rows (icons `ok` / `panel-bookmarks`), Mark unused sends UNUSED (`unusedStatus()`, one place), Mark balance (button, list and document context menus), balance stories placeable after one question, shared `markStories()` with WANT status in the undo record. Backend patch `~/Desktop/claude/backend-20261008-dtp-status-unused.patch` deployed 2026-10-08. Verified by the user | `5664da8` | feature/ctp-output |
 | News Browser bulk "Mark unused (N)" — used rows tickable for releasing only, "Select all used", Place Selected skips used ticks and says so, one confirmation with headlines + optional removal from the page in one undo transaction, per-story server result summary; `removeStory()` shares `removeStoryFrames()`. Verified by the user | `3494742` | feature/ctp-output |
 | Updater hardening — saved server URL validated on every check (`ScUpdateClient::validateServerUrl`: one http(s) URL, retired hosts/ports by rule not address) and dropped in favour of update.conf; Update Settings inline validation, Use default, Enter=Check; single window-modal Settings instance raised over Check for Updates; "Try the default server"; plain-words errors incl. whose password pkexec wants. Verified by the user | `3494742` | feature/ctp-output |
 | Debian update server on port 8095 + `tools/publish-update.sh` (build/sign on the laptop, ordered rsync upload, keep last 3, HTTP read-back verify, --list, --rollback); updater says plainly when the server is unreachable. Verified by the user (in-app Update on the laptop) | `f901367` | feature/ctp-output |
@@ -1422,6 +1423,13 @@ to test, since a bad matrix could itself explain "no visible difference".
   tree; publish-update.sh enforces the clean tree itself, runs release.sh with
   `--allow-dirty`, and commits the stamp as a real release.sh run does (`--allow-dirty` on
   publish-update.sh = test build, no tag).
+- **The workflow server had no way to set UNUSED** (2026-10-08). `PATCH /news/dtp-status`
+  validated only USED/BALANCED and the service mapped everything else to BALANCED, so our
+  "Mark unused" silently produced balance stories for a day. UNUSED was written only by
+  createNews/updateNews and `PATCH /news/bulk-update/pages` (deletes and recreates the
+  story's page rows). Fixed in the backend (validator + service, two lines); the enum
+  already had UNUSED. Source: `/home/s1/dbi-workflow/backend` (local copy may lag the
+  server). Report: `result-20261008-2130-news-dtp-status-values.md`.
 - **rrsync deletion.** The upload account has no shell, so pruning is an rsync of an EMPTY
   folder with `--delete --include=<victim>… --exclude='*'`. Placeholder files in the
   source keep the victims alive (first version of keep-last-3 silently removed nothing).

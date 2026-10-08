@@ -1100,3 +1100,15 @@ scribus
   ഒരു undo step). ഓരോ story-ക്കും single "Mark as unused"-ന്റെ അതേ server call. Success → row free; fail → row used,
   അവസാനം summary-ൽ server-ന്റെ reason. മാറിയ rows മാത്രം refresh (re-fetch ഇല്ല).
 - Right-click "Mark as unused" / "Remove story (mark unused)" പഴയപടി. Commit `3494742`.
+
+### 59. News Browser — Free / Used / Balance status, Mark unused = UNUSED, Mark balance
+- Server-ലെ status (`UNUSED` / `USED` / `BALANCED`) list-ൽ: Free (plain), Used (grey, ✓ icon; tooltip-ൽ page/time/user ഉണ്ടെങ്കിൽ),
+  Balance (bookmark icon, amber — പിന്നീടേക്ക് മാറ്റിവെച്ചത്). മൂന്നും tick ചെയ്യാം.
+- **Mark unused** ഇപ്പോൾ server-ൽ UNUSED (story വീണ്ടും free). ഇതിന് backend-ൽ ഒരു patch വേണ്ടി വന്നു
+  (`/news/dtp-status` UNUSED സ്വീകരിക്കാൻ; 2026-10-08 deploy). പഴയ backend ആണെങ്കിൽ 400 → summary-ൽ reason.
+- **Mark balance (N)** — Place Selected-ന്റെ താഴെ Mark unused-ന്റെ അടുത്ത്; list right-click "Mark as balance (keep for later)";
+  page-ൽ story right-click "Mark as balance on server (keep frames)". Confirmation-ൽ headlines, "[in this document]",
+  "Also remove … from the page (one undo step)".
+- Buttons tick അനുസരിച്ച്: Place Selected (free+balance), Mark unused (used+balance), Mark balance (free+used).
+- Balance story ticked ആയി Place Selected → ഒരു തവണ ചോദ്യം ("… BALANCE stories … Place them now? They will be marked USED") → place → USED.
+- ഓരോ story-ക്കും result; server refuse ചെയ്താൽ reason summary-ൽ; മാറിയ rows മാത്രം refresh. Commit `5664da8`.
