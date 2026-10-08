@@ -572,12 +572,19 @@ public:
 				transform.translate(x() + gl.xoffset + current_x, y() + gl.yoffset);
 				transform.scale(qMax(gc.scaleH(), 0.1), qMax(gc.scaleV(), 0.1));
 				m_textState.textMatrix = transform;
-				
+
+				// Suneer: outward outline with an embedded font. Render mode 2
+				// strokes the outline centred on the glyph edge over the fill;
+				// to grow it outward, stroke first (mode 1) and then paint the
+				// fill on top (mode 0), exactly as the screen painter does.
+				const bool outwardText = fill && outlineOutward() && pdfFont.method != Use_XForm && !FillColor.isEmpty() && !StrokeColor.isEmpty();
+				if (outwardText)
+					m_textState.renderingMode = 1;
+
 				m_glyphBuffer += m_textState.write(m_prevState);
 				m_prevState = m_textState;
 
-				if (pdfFont.method != Use_Type3 || !FillColor.isEmpty())
-				{
+				auto emitTj = [&]() {
 					switch (pdfFont.encoding)
 					{
 					case Encode_224:
@@ -589,6 +596,15 @@ public:
 						m_glyphBuffer += Pdf::toHexString16(gid) + " Tj\n";
 						break;
 					}
+				};
+				if (pdfFont.method != Use_Type3 || !FillColor.isEmpty())
+					emitTj();
+				if (outwardText)
+				{
+					m_textState.renderingMode = 0;
+					m_glyphBuffer += m_textState.write(m_prevState);
+					m_prevState = m_textState;
+					emitTj();
 				}
 			}
 			current_x += gl.xadvance * gl.scaleH;

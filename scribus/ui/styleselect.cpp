@@ -88,6 +88,8 @@ OutlineValues::OutlineValues( QWidget* parent ) : QFrame( parent )
 	LWidthTxt = new QLabel( "Linewidth:", this );
 	group1Layout->addWidget( LWidth, 0, 1 );
 	group1Layout->addWidget( LWidthTxt, 0 , 0 );
+	Outward = new QCheckBox( this );
+	group1Layout->addWidget( Outward, 1, 0, 1, 2 );
 	languageChange();
 }
 
@@ -96,6 +98,11 @@ void OutlineValues::languageChange()
 	LWidth->setSuffix( tr(" %"));
 	LWidthTxt->setText( tr("Linewidth:"));
 	LWidthTxt->adjustSize();
+	if (Outward)
+	{
+		Outward->setText( tr("Grow outward") );
+		Outward->setToolTip( tr("Grow the outline stroke outward from the text (default: inward)") );
+	}
 }
 
 ShadowValues::ShadowValues( QWidget* parent ) : QFrame( parent )

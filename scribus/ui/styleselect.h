@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QCheckBox>
 #include <QMenu>
 #include <QPixmap>
 #include <QToolButton>
@@ -72,6 +73,7 @@ public:
 	
 	ScrSpinBox* LWidth;
 	QLabel* LWidthTxt;
+	QCheckBox* Outward { nullptr };   //!< Suneer: grow the outline stroke outward
 
 public slots:
 	void languageChange();

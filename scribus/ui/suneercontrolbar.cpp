@@ -1793,6 +1793,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		connect(m_outlineDecBtn, &QToolButton::clicked, this, &SuneerControlBar::onOutlineStepDown);
 	if (m_outlineOutwardChk)
 		connect(m_outlineOutwardChk, &QCheckBox::toggled, this, &SuneerControlBar::onOutlineOutwardToggled);
+	if (m_styleSelect && m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->Outward)
+		connect(m_styleSelect->OutlineVal->Outward, &QCheckBox::toggled, this, &SuneerControlBar::onOutlineOutwardToggled);
 	connect(m_textColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onTextColorChanged);
 	connect(m_bgColorBtn,       &ColorButton::changed,  this, &SuneerControlBar::onBgColorChanged);
 	connect(m_lineColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onLineColorChanged);
@@ -2226,6 +2228,12 @@ void SuneerControlBar::updateFromSelection()
 			m_outlineOutwardChk->blockSignals(true);
 			m_outlineOutwardChk->setChecked(cs.outlineOutward() != 0);
 			m_outlineOutwardChk->blockSignals(false);
+		}
+		if (m_styleSelect && m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->Outward)
+		{
+			m_styleSelect->OutlineVal->Outward->blockSignals(true);
+			m_styleSelect->OutlineVal->Outward->setChecked(cs.outlineOutward() != 0);
+			m_styleSelect->OutlineVal->Outward->blockSignals(false);
 		}
 
 		// Alignment

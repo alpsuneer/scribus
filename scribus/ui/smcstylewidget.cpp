@@ -257,6 +257,12 @@ void SMCStyleWidget::show(const CharStyle *cstyle, const QList<CharStyle> &cstyl
 	effects_->ShadowVal->Xoffset->setValue(cstyle->shadowXOffset() / 10.0);
 	effects_->ShadowVal->Yoffset->setValue(cstyle->shadowYOffset() / 10.0);
 	effects_->OutlineVal->LWidth->setValue(cstyle->outlineWidth() / 10.0);
+	if (effects_->OutlineVal->Outward)
+	{
+		effects_->OutlineVal->Outward->blockSignals(true);
+		effects_->OutlineVal->Outward->setChecked(cstyle->outlineOutward() != 0);
+		effects_->OutlineVal->Outward->blockSignals(false);
+	}
 	effects_->StrikeVal->LPos->setValue(cstyle->strikethruOffset() / 10.0);
 	effects_->StrikeVal->LWidth->setValue(cstyle->strikethruWidth() / 10.0);
 	effects_->UnderlineVal->LPos->setValue(cstyle->underlineOffset() / 10.0);

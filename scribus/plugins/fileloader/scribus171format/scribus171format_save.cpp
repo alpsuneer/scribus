@@ -1084,6 +1084,10 @@ void Scribus171Format::putCStyle(ScXmlStreamWriter & docu, const CharStyle & sty
 		docu.writeAttribute("TextShadowYOffset", style.shadowYOffset() / 10.0);
 	if (!style.isInhOutlineWidth())
 		docu.writeAttribute("TextOutlineWidth", style.outlineWidth() / 10.0);
+	// Suneer: "Grow the outline stroke outward" (char style, paragraph char
+	// part and inline runs all come through here).
+	if (!style.isInhOutlineOutward())
+		docu.writeAttribute("TextOutlineOutward", style.outlineOutward());
 	if (!style.isInhUnderlineOffset())
 		docu.writeAttribute("TextUnderlineOffset", style.underlineOffset() / 10.0);
 	if (!style.isInhUnderlineWidth())

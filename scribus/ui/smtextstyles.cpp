@@ -560,6 +560,7 @@ void SMParagraphStyle::setupConnections()
 	connect(m_pwidget->cpage->effects_->ShadowVal->Xoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_pwidget->cpage->effects_->ShadowVal->Yoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_pwidget->cpage->effects_->OutlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
+	connect(m_pwidget->cpage->effects_->OutlineVal->Outward, SIGNAL(toggled(bool)), this, SLOT(slotEffectProperties()));
 	connect(m_pwidget->cpage->effects_->UnderlineVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_pwidget->cpage->effects_->UnderlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_pwidget->cpage->effects_->StrikeVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
@@ -663,6 +664,7 @@ void SMParagraphStyle::removeConnections()
 	disconnect(m_pwidget->cpage->effects_->ShadowVal->Xoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_pwidget->cpage->effects_->ShadowVal->Yoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_pwidget->cpage->effects_->OutlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
+	disconnect(m_pwidget->cpage->effects_->OutlineVal->Outward, SIGNAL(toggled(bool)), this, SLOT(slotEffectProperties()));
 	disconnect(m_pwidget->cpage->effects_->UnderlineVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_pwidget->cpage->effects_->UnderlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_pwidget->cpage->effects_->StrikeVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
@@ -1483,6 +1485,7 @@ void SMParagraphStyle::slotEffects(int e)
 			m_selection[i]->charStyle().resetShadowXOffset();
 			m_selection[i]->charStyle().resetShadowYOffset();
 			m_selection[i]->charStyle().resetOutlineWidth();
+			m_selection[i]->charStyle().resetOutlineOutward();
 			m_selection[i]->charStyle().resetUnderlineOffset();
 			m_selection[i]->charStyle().resetUnderlineWidth();
 			m_selection[i]->charStyle().resetStrikethruOffset();
@@ -1522,6 +1525,7 @@ void SMParagraphStyle::slotEffects(int e)
 			m_selection[i]->charStyle().setShadowXOffset(qRound(sxo));
 			m_selection[i]->charStyle().setShadowYOffset(qRound(syo));
 			m_selection[i]->charStyle().setOutlineWidth(qRound(olw));
+			m_selection[i]->charStyle().setOutlineOutward(m_pwidget->cpage->effects_->OutlineVal->Outward->isChecked() ? 1 : 0);
 			m_selection[i]->charStyle().setUnderlineOffset(qRound(ulp));
 			m_selection[i]->charStyle().setUnderlineWidth(qRound(ulw));
 			m_selection[i]->charStyle().setStrikethruOffset(qRound(slp));
@@ -2523,6 +2527,7 @@ void SMCharacterStyle::setupConnections()
 	connect(m_page->effects_->ShadowVal->Xoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_page->effects_->ShadowVal->Yoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_page->effects_->OutlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
+	connect(m_page->effects_->OutlineVal->Outward, SIGNAL(toggled(bool)), this, SLOT(slotEffectProperties()));
 	connect(m_page->effects_->UnderlineVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_page->effects_->UnderlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	connect(m_page->effects_->StrikeVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
@@ -2559,6 +2564,7 @@ void SMCharacterStyle::removeConnections()
 	disconnect(m_page->effects_->ShadowVal->Xoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_page->effects_->ShadowVal->Yoffset, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_page->effects_->OutlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
+	disconnect(m_page->effects_->OutlineVal->Outward, SIGNAL(toggled(bool)), this, SLOT(slotEffectProperties()));
 	disconnect(m_page->effects_->UnderlineVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_page->effects_->UnderlineVal->LWidth, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
 	disconnect(m_page->effects_->StrikeVal->LPos, SIGNAL(valueChanged(double)), this, SLOT(slotEffectProperties()));
@@ -2615,6 +2621,7 @@ void SMCharacterStyle::slotEffects(int e)
 			m_selection[i]->resetShadowXOffset();
 			m_selection[i]->resetShadowYOffset();
 			m_selection[i]->resetOutlineWidth();
+			m_selection[i]->resetOutlineOutward();
 			m_selection[i]->resetUnderlineOffset();
 			m_selection[i]->resetUnderlineWidth();
 			m_selection[i]->resetStrikethruOffset();
@@ -2654,6 +2661,7 @@ void SMCharacterStyle::slotEffects(int e)
 			m_selection[i]->setShadowXOffset(qRound(sxo));
 			m_selection[i]->setShadowYOffset(qRound(syo));
 			m_selection[i]->setOutlineWidth(qRound(olw));
+			m_selection[i]->setOutlineOutward(m_page->effects_->OutlineVal->Outward->isChecked() ? 1 : 0);
 			m_selection[i]->setUnderlineOffset(qRound(ulp));
 			m_selection[i]->setUnderlineWidth(qRound(ulw));
 			m_selection[i]->setStrikethruOffset(qRound(slp));

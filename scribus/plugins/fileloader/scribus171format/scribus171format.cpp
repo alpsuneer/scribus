@@ -3445,6 +3445,15 @@ void Scribus171Format::readCharacterStyleAttrs(ScribusDoc *doc, const ScXmlStrea
 	else if (attrs.hasAttribute(TXTOUT171))
 		newStyle.setOutlineWidth(qRound(attrs.valueAsDouble(TXTOUT171) * 10));
 
+	// Suneer: outline grows outward; 1.5-format name TXTOUTWARD, 1.7.1 name
+	// TextOutlineOutward. Missing attribute = inherited/off (old files unchanged).
+	static const QString TXTOUTWARD("TXTOUTWARD");
+	static const QString TXTOUTWARD171("TextOutlineOutward");
+	if (attrs.hasAttribute(TXTOUTWARD))
+		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD, 0));
+	else if (attrs.hasAttribute(TXTOUTWARD171))
+		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD171, 0));
+
 	static const QString TXTULP("TXTULP");
 	static const QString TXTULP171("TextUnderlineOffset");
 	if (attrs.hasAttribute(TXTULP))
