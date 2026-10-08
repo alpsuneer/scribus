@@ -1071,3 +1071,32 @@ scribus
 ### 55. Context menu — "Send to Layer" crash fix
 - Code വഴി ഉണ്ടാക്കിയ layer-ന് action ഇല്ലാതിരുന്നാൽ right-click crash ആയിരുന്നു; ഇപ്പോൾ menu തുറക്കും മുമ്പ്
   layer list rebuild. Commit `17fd5f0`.
+
+### 56. Update server: Debian server port 8095, tools/publish-update.sh
+- Office PC-കൾക്കുള്ള updates ഇപ്പോൾ newsroom-ന്റെ Debian server-ൽ നിന്ന്: `http://<server>:8095/scribus-updates/latest.json`
+  (host nginx, port 8095; ports 80/443-ലെ docker containers workflow-ന്റേത് — തൊടരുത്). Address repo-യിൽ ഇല്ല
+  (`~/scribus-keys/release.conf`, build cache, `InstallScribus/install.sh`).
+- `tools/publish-update.sh -m "..."`: build + sign (laptop-ൽ മാത്രം) → rsync (.deb, .sha256, .sig, latest.json അവസാനം) →
+  server-ൽ last 3 → HTTP read-back (signature + sha256) → git tag. `--list`, `--rollback <version>`.
+- Updater: server off/unreachable → "Update server X did not answer within 15 seconds…" (hang ഇല്ല). curl/wget വേണ്ട.
+- Office PC ആദ്യ തവണ: പുതിയ .deb `InstallScribus/`-ൽ `sudo ./install.sh` (update.conf url ശരിയാക്കും); പിന്നെ Help > Check for Updates.
+- Runbook: `~/Desktop/claude/runbook-20261008-scribus-update-server.md`. Commit `f901367`.
+
+### 57. Help > Check for Updates — തെറ്റായ saved address, Settings dialog, messages
+- Update Settings-ൽ save ചെയ്ത തെറ്റായ address (`//host/...`, `curl -sS http://…` പോലുള്ള paste, പഴയ server
+  `scribus-updates.local` / port 8081 / port 80 `/scribus-updates`) ഇനി updates തടയില്ല: ഒഴിവാക്കി, മായ്ച്ച്,
+  `/etc/scribus/update.conf`-ലെ address ഉപയോഗിക്കും (dialog-ൽ കാരണം കാണിക്കും).
+- Settings: ഒരു http(s) address മാത്രം (തെറ്റെങ്കിൽ ചുവന്ന വരി, save ഇല്ല); **Use default** button; Enter = Check.
+- Settings dialog ഒറ്റ instance, Check for Updates-ന്റെ മുകളിൽ centre-ൽ ഓരോ തവണയും.
+- Saved address fail ആയാൽ **Try the default server** button. Open ചെയ്യുമ്പോൾ തന്നെ check; "You have the latest version (1.7.3-…)".
+- Install-ന് മുമ്പ്: ആരുടെ password system prompt ചോദിക്കും എന്ന് (sudo group-ൽ ഇല്ലെങ്കിൽ ADMINISTRATOR (root) password).
+- Signature + sha256 verify, pkexec install — മാറ്റമില്ല. Commit `3494742`.
+
+### 58. News Browser — ticked used stories → "Mark unused (N)"
+- Used (grey ✓) stories വീണ്ടും tick ചെയ്യാം — release ചെയ്യാൻ മാത്രം; place ചെയ്യില്ല. **Select all used** checkbox.
+- Buttons tick അനുസരിച്ച്: "Place Selected (N)" free മാത്രം (used ticks skip — status-ൽ "N used story(ies) skipped");
+  "Mark unused (N)" used ticks ഉണ്ടെങ്കിൽ (Place Selected-ന്റെ അടുത്ത്).
+- Mark unused (N): ഒറ്റ confirmation (headlines; document-ൽ ഉള്ളവയ്ക്ക് "Also remove these N stories from the page" — default on,
+  ഒരു undo step). ഓരോ story-ക്കും single "Mark as unused"-ന്റെ അതേ server call. Success → row free; fail → row used,
+  അവസാനം summary-ൽ server-ന്റെ reason. മാറിയ rows മാത്രം refresh (re-fetch ഇല്ല).
+- Right-click "Mark as unused" / "Remove story (mark unused)" പഴയപടി. Commit `3494742`.

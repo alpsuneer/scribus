@@ -250,6 +250,9 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
+| News Browser bulk "Mark unused (N)" — used rows tickable for releasing only, "Select all used", Place Selected skips used ticks and says so, one confirmation with headlines + optional removal from the page in one undo transaction, per-story server result summary; `removeStory()` shares `removeStoryFrames()`. Verified by the user | `3494742` | feature/ctp-output |
+| Updater hardening — saved server URL validated on every check (`ScUpdateClient::validateServerUrl`: one http(s) URL, retired hosts/ports by rule not address) and dropped in favour of update.conf; Update Settings inline validation, Use default, Enter=Check; single window-modal Settings instance raised over Check for Updates; "Try the default server"; plain-words errors incl. whose password pkexec wants. Verified by the user | `3494742` | feature/ctp-output |
+| Debian update server on port 8095 + `tools/publish-update.sh` (build/sign on the laptop, ordered rsync upload, keep last 3, HTTP read-back verify, --list, --rollback); updater says plainly when the server is unreachable. Verified by the user (in-app Update on the laptop) | `f901367` | feature/ctp-output |
 | Paragraph Styles panel — News Browser as a third tab, in-app help, dark-theme readability, Next Style chain icon | `a0dbf1b`, `39d7126`, `a3090b2`, `da7ef2a`, `f757648`, `3236fe11`, `c4c2bf4` | |
 | Column Style config → Design Style — per-config "Design Style" link applied after the columns, one undo step, missing-style status message, rename/remove follow-through, "Link Config N → style-N", export/import field. Verified by the user | `c0130ad` | feature/ctp-output |
 | Design Style icons stored by file name — looked up in `~/.local/share/scribus/design-icons/`, then `/usr/local/share/…`, `/usr/share/…`; 14 default icons shipped (`resources/design-icons/`); Upload Icon copies into the user folder; Export/Import Design embeds the pictures; `?` placeholder for a missing icon. Verified by the user on the laptop | `git log -- resources/design-icons` | feature/ctp-output |
@@ -1401,6 +1404,27 @@ constructed blue-noise matrix rather than the crude random-shuffle array used
 to test, since a bad matrix could itself explain "no visible difference".
 
 ### Other traps that cost real time
+
+- **The build-tree binary found no file-format plugins today** (`build/scribus/scribus`:
+  "No File Loader Plug-ins Found", every .sla "not in an acceptable format") while
+  `/usr/local/bin/scribus` opened the same files. Not diagnosed; after a release build
+  (`release.sh` reconfigures with `SCRIBUS_RELEASE_VERSION`) test GUI document work with the
+  installed binary, i.e. do the full `cmake --build` + `cmake --install` first.
+- **`pgrep -f` in a loop body kills the loop's own shell** when the pattern appears in the
+  command text; anchor it (`^/usr/local/bin/scribus -pr`, `^scribus -pr /tmp`) and kill in
+  a separate call. Cost one harness run on 2026-10-08.
+- **Xvfb clicks drift when a status line grows.** The News Browser status label wraps to two
+  lines and pushes every row/button down ~15 px; the Settings dialog grows when its inline
+  error shows. Screenshot before each click batch; `xdotool windowsize/windowmove` works
+  without a WM, `windowfocus` does not (BadMatch).
+- **publish-update.sh vs the keyset stamp.** `release.sh --dry-run` rewrites
+  `resources/keysets/malayalam-dtp.xml` (version stamp) and would then refuse its own dirty
+  tree; publish-update.sh enforces the clean tree itself, runs release.sh with
+  `--allow-dirty`, and commits the stamp as a real release.sh run does (`--allow-dirty` on
+  publish-update.sh = test build, no tag).
+- **rrsync deletion.** The upload account has no shell, so pruning is an rsync of an EMPTY
+  folder with `--delete --include=<victim>… --exclude='*'`. Placeholder files in the
+  source keep the victims alive (first version of keep-last-3 silently removed nothing).
 
 - **News Browser.** (a) The server's `/external/edition-pages/<x>` wants the edition
   SHORT NAME; an id answers 400 "Invalid edition short name!". (b) The picture
