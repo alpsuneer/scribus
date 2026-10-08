@@ -212,11 +212,19 @@ PageItem* SuneerFillTextImage::apply(ScribusMainWindow* mw, PageItem* textFrame,
 	if (!image->imageIsAvailable || image->OrigW <= 0 || image->OrigH <= 0)
 	{
 		// Take back the frame just made; the text frame was not touched yet.
-		if (transaction)
+		// Not with undo(1): a caller (Poster Stack) may hold an outer
+		// transaction, and undoing inside an open transaction corrupts the
+		// stack and crashed in the canvas redraw. Delete it quietly and drop
+		// the records instead.
 		{
-			transaction.commit();
-			UndoManager::instance()->undo(1);
+			UndoBlocker block;
+			Selection gone(doc, false);
+			gone.addItem(image);
+			doc->itemSelection_DeleteItem(&gone);
 		}
+		if (transaction)
+			transaction.cancel();
+		doc->regionsChanged()->update(QRectF());
 		return fail(QObject::tr("The image could not be loaded:\n%1").arg(options.imageFile));
 	}
 	// Cover the letters, keep the proportions, centred: the smaller excess is cut off evenly on both sides.

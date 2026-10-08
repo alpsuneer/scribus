@@ -33,8 +33,13 @@ namespace SuneerPopOut
 		QRectF  custom;                  //!< Custom: image pixel rectangle
 		bool    shadow { false };
 		bool    group { false };
-		QString maskFile;                //!< cached rembg mask (alpha as grey PNG)
+		QString maskFile;                //!< cached rembg mask (alpha as grey PNG), or a brush-edited copy
 		QString model { "u2net_human_seg" };
+		//! From the dialog: the picture placement the preview showed (applied to the face too). Not stored.
+		bool    setImage { false };
+		double  imageScale { 1.0 };
+		double  imageOffX { 0.0 };
+		double  imageOffY { 0.0 };
 
 		QString toString() const;
 		static Settings fromString(const QString& text);

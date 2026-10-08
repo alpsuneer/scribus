@@ -2,6 +2,7 @@
 #include "suneerfilltextimage.h"
 
 #include <cmath>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -22,9 +23,18 @@
 #include <QRadioButton>
 #include <QTimer>
 #include <QUrlQuery>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QSlider>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QDateTime>
+#include <QWheelEvent>
+#include <QPushButton>
 #include <QVector>
 
 #include "commonstrings.h"
+#include "sccolorengine.h"
 #include "fpointarray.h"
 #include "pageitem.h"
 #include "scribus.h"
@@ -495,98 +505,6 @@ void placePopOut(ScribusDoc* doc, PageItem* face, PageItem* pop, const QPainterP
 
 bool s_syncing = false;
 
-// ------------------------------------------------------------- preview widget
-
-class PopPreview : public QWidget
-{
-public:
-	PopPreview(const QImage& picture, const QImage& mask, QWidget* parent) : QWidget(parent), m_picture(picture), m_mask(mask)
-	{
-		setMinimumSize(420, 300);
-		setMouseTracking(true);
-	}
-	SuneerPopOut::Settings settings;
-	std::function<void()> changed;
-
-	QRectF pictureRect() const
-	{
-		const QSizeF s = QSizeF(m_picture.size()).scaled(QSizeF(width() - 8, height() - 8), Qt::KeepAspectRatio);
-		return QRectF((width() - s.width()) / 2.0, (height() - s.height()) / 2.0, s.width(), s.height());
-	}
-	double k() const { return pictureRect().width() / m_picture.width(); }
-	QPointF toPixel(const QPointF& w) const { const QRectF r = pictureRect(); return QPointF((w.x() - r.left()) / k(), (w.y() - r.top()) / k()); }
-	QPointF toWidget(const QPointF& p) const { const QRectF r = pictureRect(); return QPointF(r.left() + p.x() * k(), r.top() + p.y() * k()); }
-
-protected:
-	void paintEvent(QPaintEvent*) override
-	{
-		QPainter p(this);
-		p.setRenderHint(QPainter::Antialiasing);
-		p.fillRect(rect(), palette().window());
-		const QRectF r = pictureRect();
-		p.drawImage(r, m_picture);
-		// mask tint: what rembg calls the person
-		if (!m_mask.isNull())
-		{
-			QImage tint(m_mask.size(), QImage::Format_ARGB32);
-			tint.fill(Qt::transparent);
-			for (int y = 0; y < m_mask.height(); ++y)
-			{
-				const uchar* src = m_mask.constScanLine(y);
-				QRgb* dst = reinterpret_cast<QRgb*>(tint.scanLine(y));
-				for (int x = 0; x < m_mask.width(); ++x)
-					dst[x] = src[x] >= 128 ? qRgba(0, 160, 255, 70) : qRgba(0, 0, 0, 110);
-			}
-			p.drawImage(r, tint);
-		}
-		p.setPen(QPen(QColor(255, 90, 0), 2));
-		p.setBrush(QColor(255, 90, 0, 40));
-		if (settings.region == SuneerPopOut::Custom)
-		{
-			const QRectF c(toWidget(settings.custom.topLeft()), toWidget(settings.custom.bottomRight()));
-			if (settings.shape == SuneerPopOut::Ellipse) p.drawEllipse(c); else p.drawRect(c);
-		}
-		else
-		{
-			const double y = toWidget(QPointF(0, settings.lineY)).y();
-			p.setBrush(Qt::NoBrush);
-			p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
-			p.drawText(QPointF(r.left() + 6, y - 6), settings.region == SuneerPopOut::HeadOnly
-			           ? QObject::tr("Head only (automatic)") : QObject::tr("Drag the line"));
-		}
-	}
-	void mousePressEvent(QMouseEvent* e) override
-	{
-		m_press = toPixel(e->position());
-		m_dragging = true;
-		if (settings.region == SuneerPopOut::Custom)
-			settings.custom = QRectF(m_press, QSizeF(0, 0));
-		else
-		{
-			settings.region = SuneerPopOut::AboveLine;
-			settings.lineY = qBound(0.0, m_press.y(), double(m_picture.height()));
-		}
-		update();
-		if (changed) changed();
-	}
-	void mouseMoveEvent(QMouseEvent* e) override
-	{
-		if (!m_dragging) return;
-		const QPointF now = toPixel(e->position());
-		if (settings.region == SuneerPopOut::Custom)
-			settings.custom = QRectF(m_press, now).normalized().intersected(QRectF(QPointF(0, 0), QSizeF(m_picture.size())));
-		else
-			settings.lineY = qBound(0.0, now.y(), double(m_picture.height()));
-		update();
-		if (changed) changed();
-	}
-	void mouseReleaseEvent(QMouseEvent*) override { m_dragging = false; }
-
-private:
-	QImage m_picture, m_mask;
-	QPointF m_press;
-	bool m_dragging { false };
-};
 }
 
 // ------------------------------------------------------------- settings
@@ -636,9 +554,12 @@ bool SuneerPopOut::canRunOn(const PageItem* item)
 
 // ------------------------------------------------------------- apply
 
-PageItem* SuneerPopOut::apply(ScribusMainWindow* mw, PageItem* face, const Settings& settingsIn, QString* error)
+PageItem* SuneerPopOut::apply(ScribusMainWindow* mw, PageItem* faceIn, const Settings& settingsIn, QString* error)
 {
 	auto fail = [error](const QString& why) -> PageItem* { if (error) *error = why; return nullptr; };
+	// rembg may run below with a local event loop; the frame is held weakly
+	// and checked again afterwards.
+	QPointer<PageItem> face = faceIn;
 	if (!mw || !mw->doc || !face || !face->isImageFrame())
 		return fail(QObject::tr("Select the image frame with the letters first."));
 	ScribusDoc* doc = mw->doc;
@@ -650,10 +571,17 @@ PageItem* SuneerPopOut::apply(ScribusMainWindow* mw, PageItem* face, const Setti
 	if (settings.maskFile.isEmpty() || !QFileInfo::exists(settings.maskFile))
 		if (!ensureMask(mw, doc, face->Pfile, settings.model, settings.maskFile, error))
 			return nullptr;
+	if (!face || mw->doc != doc)
+		return fail(QObject::tr("The frame is gone."));
 	Mask mask;
 	QSize picture;
 	if (!loadMask(settings.maskFile, mask, picture))
 		return fail(QObject::tr("The mask file could not be read:\n%1").arg(settings.maskFile));
+	bool anyOn = false;
+	for (uchar v : std::as_const(mask.on))
+		if (v) { anyOn = true; break; }
+	if (!anyOn)
+		return fail(QObject::tr("rembg found no person in the picture (the mask is empty)."));
 	if (settings.region == HeadOnly || settings.lineY < 0.0)
 		settings.lineY = headLine(mask);
 	if (settings.region == Custom && settings.custom.isEmpty())
@@ -680,6 +608,14 @@ PageItem* SuneerPopOut::apply(ScribusMainWindow* mw, PageItem* face, const Setti
 		gone.addItem(oldPop);
 		doc->itemSelection_DeleteItem(&gone);
 	}
+	if (settings.setImage && settings.imageScale > 0.0)
+	{
+		// the picture placement the preview showed, inside the letters (undoable)
+		s_syncing = true;
+		face->setImageXYScale(settings.imageScale, settings.imageScale);
+		face->setImageXYOffset(settings.imageOffX, settings.imageOffY);
+		s_syncing = false;
+	}
 	const int z = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, face->xPos(), face->yPos(), 10, 10, 0.0,
 	                           CommonStrings::None, CommonStrings::None);
 	PageItem* popItem = doc->Items->at(z);
@@ -689,7 +625,14 @@ PageItem* SuneerPopOut::apply(ScribusMainWindow* mw, PageItem* face, const Setti
 	doc->loadPict(face->Pfile, popItem, false, false);
 	if (!popItem->imageIsAvailable)
 	{
-		if (transaction) { transaction.commit(); UndoManager::instance()->undo(1); }
+		{
+			UndoBlocker block;
+			Selection gone(doc, false);
+			gone.addItem(popItem);
+			doc->itemSelection_DeleteItem(&gone);
+		}
+		if (transaction)
+			transaction.cancel();
 		return fail(QObject::tr("The picture could not be loaded into the pop-out frame."));
 	}
 	popItem->setImageScalingMode(true, true);
@@ -787,6 +730,335 @@ void SuneerPopOut::runForSelection(ScribusMainWindow* mw)
 	runOn(mw, item);
 }
 
+
+// ------------------------------------------------------------- dialog
+
+namespace
+{
+// Everything the preview needs, as plain data: the worker thread sees only
+// copies of this, never a PageItem or a widget.
+struct Scene
+{
+	QSizeF frameSize;              // face frame, points
+	QPainterPath letters;          // face outline, frame coords
+	QColor backColor;              // invalid = none
+	QImage picture;                // downscaled copy
+	double previewScale { 1.0 };   // picture.width() / full picture width
+	QSize pictureSize;             // full picture, pixels
+	double imgScale { 1.0 };       // face image scale (points per pixel)
+	QPointF imgOffset;             // face image offset, pixels
+	QSize maskSize;                // working mask size
+	double maskScale { 1.0 };      // picture pixels per mask pixel
+};
+
+Mask maskFromImage(const QImage& img, double scale)
+{
+	Mask m;
+	m.w = img.width();
+	m.h = img.height();
+	m.scale = scale;
+	m.on.resize(m.w * m.h);
+	for (int y = 0; y < m.h; ++y)
+	{
+		const uchar* line = img.constScanLine(y);
+		for (int x = 0; x < m.w; ++x)
+			m.on[y * m.w + x] = line[x] >= 128 ? 1 : 0;
+	}
+	return m;
+}
+
+class CompositePreview : public QWidget
+{
+public:
+	enum Tool { ToolRegion = 0, ToolBrushAdd, ToolBrushErase, ToolImage };
+
+	CompositePreview(QWidget* parent) : QWidget(parent)
+	{
+		setMinimumSize(560, 420);
+		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+		setMouseTracking(true);
+		setFocusPolicy(Qt::WheelFocus);
+	}
+	Scene scene;
+	SuneerPopOut::Settings settings;      // lineY / custom in picture pixels
+	QImage mask;                          // working mask, Grayscale8, editable by the brush
+	QPainterPath subjectPixels;           // traced from mask, picture pixels
+	bool showOutlines { true };
+	bool showTint { true };
+	int tool { ToolRegion };
+	int brushRadius { 20 };               // picture pixels
+	std::function<void()> maskEdited;     // brush stroke finished / in progress
+	std::function<void()> settingsChanged;
+	std::function<void()> imageChanged;
+
+	void zoomFit()
+	{
+		const QRectF content = contentRect();
+		if (content.isEmpty()) return;
+		const double zx = (width() - 24) / content.width();
+		const double zy = (height() - 24) / content.height();
+		m_zoom = qMin(zx, zy);
+		m_pan = QPointF((width() - content.width() * m_zoom) / 2.0 - content.left() * m_zoom,
+		                (height() - content.height() * m_zoom) / 2.0 - content.top() * m_zoom);
+		update();
+	}
+	void zoom100()
+	{
+		const QRectF content = contentRect();
+		m_zoom = 1.0;
+		m_pan = QPointF((width() - content.width()) / 2.0 - content.left(), (height() - content.height()) / 2.0 - content.top());
+		update();
+	}
+	// Frame coords of the whole composite: frame plus whatever the pop-out adds.
+	QRectF contentRect() const
+	{
+		QRectF r(QPointF(0, 0), scene.frameSize);
+		const QPainterPath pop = popFrame();
+		if (!pop.isEmpty()) r |= pop.boundingRect();
+		return r;
+	}
+	QTransform pictureToFrame() const
+	{
+		QTransform t;
+		t.scale(scene.imgScale, scene.imgScale);
+		t.translate(scene.imgOffset.x(), scene.imgOffset.y());
+		return t;
+	}
+	QPainterPath popPixels() const
+	{
+		if (subjectPixels.isEmpty()) return QPainterPath();
+		QPainterPath p = subjectPixels.intersected(regionPath(settings, scene.pictureSize));
+		p.setFillRule(Qt::OddEvenFill);
+		return p;
+	}
+	QPainterPath popFrame() const { return pictureToFrame().map(popPixels()); }
+
+protected:
+	QTransform view() const { QTransform v; v.translate(m_pan.x(), m_pan.y()); v.scale(m_zoom, m_zoom); return v; }
+	QPointF toFrame(const QPointF& w) const { return view().inverted().map(w); }
+	QPointF toPixel(const QPointF& w) const { return pictureToFrame().inverted().map(toFrame(w)); }
+	QPointF pixelToWidget(const QPointF& p) const { return view().map(pictureToFrame().map(p)); }
+
+	void drawPicture(QPainter& p) const
+	{
+		QTransform t = pictureToFrame();
+		t.scale(1.0 / scene.previewScale, 1.0 / scene.previewScale);
+		p.save();
+		p.setTransform(t, true);
+		p.drawImage(QPointF(0, 0), scene.picture);
+		p.restore();
+	}
+	void paintEvent(QPaintEvent*) override
+	{
+		QPainter p(this);
+		p.fillRect(rect(), QColor(90, 90, 90));
+		p.setRenderHint(QPainter::Antialiasing);
+		p.setRenderHint(QPainter::SmoothPixmapTransform);
+		p.setTransform(view());
+		const QRectF frame(QPointF(0, 0), scene.frameSize);
+		// paper
+		p.fillRect(contentRect().adjusted(-20, -20, 20, 20), Qt::white);
+		if (scene.backColor.isValid())
+			p.fillRect(frame, scene.backColor);
+		// letters with the picture
+		p.save();
+		p.setClipPath(scene.letters);
+		drawPicture(p);
+		p.restore();
+		// pop-out on top
+		const QPainterPath pop = popFrame();
+		if (!pop.isEmpty())
+		{
+			p.save();
+			p.setClipPath(pop);
+			drawPicture(p);
+			p.restore();
+		}
+		// overlays
+		p.setBrush(Qt::NoBrush);
+		if (showOutlines)
+		{
+			QPen pen(QColor(0, 200, 255), 1.0 / m_zoom);
+			p.setPen(pen);
+			p.drawPath(scene.letters);
+			p.drawRect(frame);
+		}
+		if (showTint && !pop.isEmpty())
+			p.fillPath(pop, QColor(255, 120, 0, 60));
+		// person outline (what rembg found) faintly
+		if (showTint && !subjectPixels.isEmpty())
+		{
+			p.setPen(QPen(QColor(0, 120, 255, 160), 1.0 / m_zoom, Qt::DashLine));
+			p.drawPath(pictureToFrame().map(subjectPixels));
+		}
+		// region
+		p.setPen(QPen(QColor(255, 60, 0), 2.0 / m_zoom));
+		if (settings.region == SuneerPopOut::Custom)
+		{
+			const QRectF c = pictureToFrame().mapRect(settings.custom);
+			if (settings.shape == SuneerPopOut::Ellipse) p.drawEllipse(c); else p.drawRect(c);
+			p.setBrush(Qt::white);
+			const double h = 5.0 / m_zoom;
+			for (const QPointF& corner : { c.topLeft(), c.topRight(), c.bottomLeft(), c.bottomRight() })
+				p.drawRect(QRectF(corner.x() - h, corner.y() - h, 2 * h, 2 * h));
+			p.setBrush(Qt::NoBrush);
+		}
+		else
+		{
+			const double y = pictureToFrame().map(QPointF(0, settings.lineY)).y();
+			const QRectF cr = contentRect();
+			p.drawLine(QPointF(cr.left() - 10, y), QPointF(cr.right() + 10, y));
+		}
+		// brush cursor
+		if ((tool == ToolBrushAdd || tool == ToolBrushErase) && underMouse())
+		{
+			p.setPen(QPen(tool == ToolBrushAdd ? QColor(0, 220, 0) : QColor(255, 0, 0), 1.0 / m_zoom));
+			const double r = brushRadius * scene.imgScale;
+			p.drawEllipse(toFrame(m_mouse), r, r);
+		}
+	}
+	int hitHandle(const QPointF& w) const
+	{
+		if (settings.region != SuneerPopOut::Custom) return -1;
+		const QRectF c = settings.custom;
+		const QPointF corners[4] = { c.topLeft(), c.topRight(), c.bottomLeft(), c.bottomRight() };
+		for (int i = 0; i < 4; ++i)
+			if ((pixelToWidget(corners[i]) - w).manhattanLength() <= 9) return i;
+		return -1;
+	}
+	void paintBrush(const QPointF& pixel)
+	{
+		if (mask.isNull()) return;
+		QPainter mp(&mask);
+		mp.setRenderHint(QPainter::Antialiasing, false);
+		mp.setPen(Qt::NoPen);
+		mp.setBrush(tool == ToolBrushAdd ? Qt::white : Qt::black);
+		const double r = brushRadius / scene.maskScale;
+		mp.drawEllipse(pixel / scene.maskScale, r, r);
+	}
+	void mousePressEvent(QMouseEvent* e) override
+	{
+		m_mouse = e->position();
+		m_press = m_mouse;
+		m_dragging = true;
+		if (e->button() == Qt::MiddleButton) { m_drag = DragPan; m_panStart = m_pan; return; }
+		const QPointF pix = toPixel(m_mouse);
+		switch (tool)
+		{
+			case ToolImage:
+				m_drag = DragImage;
+				m_imgStart = scene.imgOffset;
+				break;
+			case ToolBrushAdd:
+			case ToolBrushErase:
+				m_drag = DragBrush;
+				paintBrush(pix);
+				update();
+				if (maskEdited) maskEdited();
+				break;
+			default:
+				if (settings.region == SuneerPopOut::Custom)
+				{
+					m_handle = hitHandle(m_mouse);
+					if (m_handle >= 0) { m_drag = DragResize; m_customStart = settings.custom; }
+					else if (settings.custom.contains(pix)) { m_drag = DragMove; m_customStart = settings.custom; }
+					else { m_drag = DragDraw; settings.custom = QRectF(pix, QSizeF(0, 0)); }
+				}
+				else
+				{
+					m_drag = DragLine;
+					settings.region = SuneerPopOut::AboveLine;
+					settings.lineY = qBound(0.0, pix.y(), double(scene.pictureSize.height()));
+					if (settingsChanged) settingsChanged();
+				}
+				break;
+		}
+		update();
+	}
+	void mouseMoveEvent(QMouseEvent* e) override
+	{
+		m_mouse = e->position();
+		if (!m_dragging) { if (tool == ToolBrushAdd || tool == ToolBrushErase) update(); return; }
+		const QPointF pix = toPixel(m_mouse);
+		const QPointF startPix = toPixel(m_press);
+		switch (m_drag)
+		{
+			case DragPan: m_pan = m_panStart + (m_mouse - m_press); break;
+			case DragImage:
+				scene.imgOffset = m_imgStart + (toFrame(m_mouse) - toFrame(m_press)) / scene.imgScale;
+				if (imageChanged) imageChanged();
+				break;
+			case DragBrush: paintBrush(pix); if (maskEdited) maskEdited(); break;
+			case DragLine:
+				settings.lineY = qBound(0.0, pix.y(), double(scene.pictureSize.height()));
+				if (settingsChanged) settingsChanged();
+				break;
+			case DragDraw:
+				settings.custom = QRectF(startPix, pix).normalized();
+				if (settingsChanged) settingsChanged();
+				break;
+			case DragMove:
+				settings.custom = m_customStart.translated(pix - startPix);
+				if (settingsChanged) settingsChanged();
+				break;
+			case DragResize:
+			{
+				QRectF c = m_customStart;
+				switch (m_handle) { case 0: c.setTopLeft(pix); break; case 1: c.setTopRight(pix); break;
+				                    case 2: c.setBottomLeft(pix); break; default: c.setBottomRight(pix); break; }
+				settings.custom = c.normalized();
+				if (settingsChanged) settingsChanged();
+				break;
+			}
+			default: break;
+		}
+		update();
+	}
+	void mouseReleaseEvent(QMouseEvent*) override
+	{
+		m_dragging = false;
+		if (m_drag == DragBrush && maskEdited) maskEdited();
+		m_drag = DragNone;
+	}
+	void wheelEvent(QWheelEvent* e) override
+	{
+		const double steps = e->angleDelta().y() / 120.0;
+		if (steps == 0.0) return;
+		if (tool == ToolImage)
+		{
+			// zoom the picture about the cursor, inside the letters and the pop-out alike
+			const QPointF pixUnder = toPixel(e->position());
+			const double factor = std::pow(1.1, steps);
+			scene.imgScale = qBound(0.01, scene.imgScale * factor, 100.0);
+			const QPointF frameUnder = toFrame(e->position());
+			// keep the picture point under the cursor where it is
+			scene.imgOffset = QPointF(frameUnder.x() / scene.imgScale - pixUnder.x(), frameUnder.y() / scene.imgScale - pixUnder.y());
+			if (imageChanged) imageChanged();
+		}
+		else
+		{
+			const QPointF before = toFrame(e->position());
+			m_zoom = qBound(0.05, m_zoom * std::pow(1.15, steps), 40.0);
+			const QPointF after = toFrame(e->position());
+			m_pan += (after - before) * m_zoom;
+		}
+		update();
+		e->accept();
+	}
+	void resizeEvent(QResizeEvent*) override { if (m_firstResize) { m_firstResize = false; zoomFit(); } }
+
+private:
+	enum Drag { DragNone, DragPan, DragImage, DragBrush, DragLine, DragDraw, DragMove, DragResize };
+	double m_zoom { 1.0 };
+	QPointF m_pan, m_panStart, m_mouse, m_press, m_imgStart;
+	QRectF m_customStart;
+	int m_handle { -1 };
+	bool m_dragging { false };
+	bool m_firstResize { true };
+	Drag m_drag { DragNone };
+};
+}
+
 void SuneerPopOut::runOn(ScribusMainWindow* mw, PageItem* faceIn)
 {
 	QPointer<PageItem> face = faceIn;
@@ -816,101 +1088,249 @@ void SuneerPopOut::runOn(ScribusMainWindow* mw, PageItem* faceIn)
 				QMessageBox::warning(mw, title, error);
 			return;
 		}
-	if (!face)
+	if (!face || mw->doc != doc)
 		return;
-	Mask mask;
-	QSize pictureSize;
-	if (!loadMask(s.maskFile, mask, pictureSize))
+
+	// ---- the scene: plain data copied out of the document
+	Scene scene;
+	scene.frameSize = QSizeF(face->width(), face->height());
+	scene.letters = face->PoLine.toQPainterPath(true);
+	scene.letters.setFillRule(face->fillRule ? Qt::OddEvenFill : Qt::WindingFill);
+	scene.imgScale = face->imageXScale();
+	scene.imgOffset = QPointF(face->imageXOffset(), face->imageYOffset());
+	{
+		const QString faceName = face->itemName();
+		const QString textName = faceName.endsWith(QLatin1String(" image")) ? faceName.left(faceName.length() - 6) : faceName;
+		if (PageItem* back = itemNamed(doc, textName + QStringLiteral(" poster back")))
+			if (back->fillColor() != CommonStrings::None && doc->PageColors.contains(back->fillColor()))
+				scene.backColor = ScColorEngine::getDisplayColor(doc->PageColors[back->fillColor()], doc);
+	}
+	QImage maskFull(s.maskFile);
+	if (maskFull.isNull())
 	{
 		QMessageBox::warning(mw, title, QObject::tr("The mask file could not be read:\n%1").arg(s.maskFile));
 		return;
 	}
-	const double autoLine = headLine(mask);
-	if (s.lineY < 0.0)
-		s.lineY = autoLine;
-	if (s.custom.isEmpty())
-		s.custom = QRectF(pictureSize.width() * 0.25, 0, pictureSize.width() * 0.5, pictureSize.height() * 0.45);
-
+	maskFull = maskFull.convertToFormat(QImage::Format_Grayscale8);
+	scene.pictureSize = maskFull.size();
 	QImage picture(face->Pfile);
 	if (picture.isNull())
-		picture = QImage(pictureSize, QImage::Format_RGB32), picture.fill(Qt::gray);
-	else if (picture.width() > 1200)
-		picture = picture.scaledToWidth(1200, Qt::SmoothTransformation);
-	QImage maskImg = QImage(s.maskFile).convertToFormat(QImage::Format_Grayscale8);
-	if (maskImg.size() != picture.size())
-		maskImg = maskImg.scaled(picture.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-	// preview works in picture pixels; the picture may be downscaled above
-	const double previewScale = double(picture.width()) / pictureSize.width();
+	{
+		picture = QImage(scene.pictureSize, QImage::Format_RGB32);
+		picture.fill(Qt::gray);
+	}
+	if (picture.size() != scene.pictureSize)
+		picture = picture.scaled(scene.pictureSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+	if (picture.width() > 1600)
+		picture = picture.scaledToWidth(1600, Qt::SmoothTransformation);
+	scene.picture = picture;
+	scene.previewScale = double(picture.width()) / scene.pictureSize.width();
+	// working mask (the brush paints here)
+	const int longest = qMax(maskFull.width(), maskFull.height());
+	QImage maskWork = longest > kMaskMax ? maskFull.scaled(qMax(1, qRound(maskFull.width() * double(kMaskMax) / longest)),
+	                                                        qMax(1, qRound(maskFull.height() * double(kMaskMax) / longest)),
+	                                                        Qt::IgnoreAspectRatio, Qt::SmoothTransformation) : maskFull;
+	maskWork = maskWork.convertToFormat(QImage::Format_Grayscale8);
+	scene.maskSize = maskWork.size();
+	scene.maskScale = double(scene.pictureSize.width()) / maskWork.width();
+	const Mask firstMask = maskFromImage(maskWork, scene.maskScale);
+	const double autoLine = headLine(firstMask);
+	if (s.lineY < 0.0) s.lineY = autoLine;
+	if (s.custom.isEmpty())
+		s.custom = QRectF(scene.pictureSize.width() * 0.25, 0, scene.pictureSize.width() * 0.5, scene.pictureSize.height() * 0.45);
 
+	// ---- dialog
 	QDialog dlg(mw);
 	dlg.setObjectName("suneerPopOutDialog");
 	dlg.setWindowTitle(title);
-	auto* grid = new QGridLayout(&dlg);
-	auto* preview = new PopPreview(picture, maskImg, &dlg);
+	dlg.setSizeGripEnabled(true);
+	dlg.resize(1100, 820);
+	auto* outer = new QVBoxLayout(&dlg);
+	auto* preview = new CompositePreview(&dlg);
+	preview->scene = scene;
 	preview->settings = s;
-	preview->settings.lineY = s.lineY * previewScale;
-	preview->settings.custom = QRectF(s.custom.topLeft() * previewScale, s.custom.size() * previewScale);
-	grid->addWidget(preview, 0, 0, 1, 4);
+	preview->mask = maskWork;
+	outer->addWidget(preview, 1);
+
+	// view buttons + overlay toggles
+	auto* viewRow = new QHBoxLayout();
+	auto* fitBtn = new QPushButton(QObject::tr("Zoom to fit"), &dlg);
+	auto* hundredBtn = new QPushButton(QObject::tr("100%"), &dlg);
+	auto* outlinesChk = new QCheckBox(QObject::tr("Show letter outlines"), &dlg);
+	outlinesChk->setChecked(true);
+	auto* tintChk = new QCheckBox(QObject::tr("Show subject mask"), &dlg);
+	tintChk->setChecked(true);
+	viewRow->addWidget(fitBtn);
+	viewRow->addWidget(hundredBtn);
+	viewRow->addSpacing(20);
+	viewRow->addWidget(outlinesChk);
+	viewRow->addWidget(tintChk);
+	viewRow->addStretch();
+	auto* status = new QLabel(&dlg);
+	viewRow->addWidget(status);
+	outer->addLayout(viewRow);
+
+	// region
+	auto* regionRow = new QHBoxLayout();
 	auto* headRb = new QRadioButton(QObject::tr("Head only (automatic)"), &dlg);
 	auto* lineRb = new QRadioButton(QObject::tr("Above a line (drag it)"), &dlg);
 	auto* customRb = new QRadioButton(QObject::tr("Custom:"), &dlg);
 	auto* shapeCombo = new QComboBox(&dlg);
 	shapeCombo->addItems({ QObject::tr("Rectangle"), QObject::tr("Ellipse") });
 	shapeCombo->setCurrentIndex(s.shape == Ellipse ? 1 : 0);
+	// Two exclusive groups: Qt would otherwise make every radio button of the
+	// dialog one group, and picking a tool would untick the region.
+	auto* regionGroup = new QButtonGroup(&dlg);
+	for (QRadioButton* rb : { headRb, lineRb, customRb })
+		regionGroup->addButton(rb);
 	(s.region == AboveLine ? lineRb : s.region == Custom ? customRb : headRb)->setChecked(true);
-	grid->addWidget(headRb, 1, 0);
-	grid->addWidget(lineRb, 1, 1);
-	grid->addWidget(customRb, 1, 2);
-	grid->addWidget(shapeCombo, 1, 3);
+	regionRow->addWidget(new QLabel(QObject::tr("In front:"), &dlg));
+	regionRow->addWidget(headRb);
+	regionRow->addWidget(lineRb);
+	regionRow->addWidget(customRb);
+	regionRow->addWidget(shapeCombo);
+	regionRow->addStretch();
+	outer->addLayout(regionRow);
+
+	// tools
+	auto* toolRow = new QHBoxLayout();
+	auto* toolRegionRb = new QRadioButton(QObject::tr("Adjust line / shape"), &dlg);
+	auto* toolAddRb = new QRadioButton(QObject::tr("Brush: add"), &dlg);
+	auto* toolEraseRb = new QRadioButton(QObject::tr("Brush: erase"), &dlg);
+	auto* toolImageRb = new QRadioButton(QObject::tr("Move / zoom picture (drag, wheel)"), &dlg);
+	auto* toolGroup = new QButtonGroup(&dlg);
+	for (QRadioButton* rb : { toolRegionRb, toolAddRb, toolEraseRb, toolImageRb })
+		toolGroup->addButton(rb);
+	toolRegionRb->setChecked(true);
+	auto* brushSize = new QSlider(Qt::Horizontal, &dlg);
+	brushSize->setRange(2, 200);
+	brushSize->setValue(20);
+	brushSize->setFixedWidth(140);
+	auto* zoomSlider = new QSlider(Qt::Horizontal, &dlg);
+	zoomSlider->setRange(10, 400);
+	zoomSlider->setValue(100);
+	zoomSlider->setFixedWidth(160);
+	zoomSlider->setToolTip(QObject::tr("Picture zoom, relative to now"));
+	toolRow->addWidget(new QLabel(QObject::tr("Tool:"), &dlg));
+	toolRow->addWidget(toolRegionRb);
+	toolRow->addWidget(toolAddRb);
+	toolRow->addWidget(toolEraseRb);
+	toolRow->addWidget(new QLabel(QObject::tr("size"), &dlg));
+	toolRow->addWidget(brushSize);
+	toolRow->addWidget(toolImageRb);
+	toolRow->addWidget(zoomSlider);
+	toolRow->addStretch();
+	outer->addLayout(toolRow);
+
 	auto* shadowChk = new QCheckBox(QObject::tr("Soft drop shadow under the pop-out (adds a soft mask to the PDF; not PDF/X-1a safe)"), &dlg);
 	shadowChk->setChecked(s.shadow);
-	grid->addWidget(shadowChk, 2, 0, 1, 4);
 	auto* groupChk = new QCheckBox(QObject::tr("Group background, letters and pop-out (Poster Stack and Text Effects then need the group opened first)"), &dlg);
 	groupChk->setChecked(s.group);
-	grid->addWidget(groupChk, 3, 0, 1, 4);
-	auto* note = new QLabel(QObject::tr("Blue: what rembg calls the person. Orange: the part that comes in front of the letters. "
-	                                    "Moving or zooming the picture inside the letters moves the pop-out with it."), &dlg);
-	note->setWordWrap(true);
-	grid->addWidget(note, 4, 0, 1, 4);
+	outer->addWidget(shadowChk);
+	outer->addWidget(groupChk);
 	auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-	grid->addWidget(buttons, 5, 0, 1, 4);
+	auto* resetMaskBtn = buttons->addButton(QObject::tr("Reset brush edits"), QDialogButtonBox::ResetRole);
+	outer->addWidget(buttons);
 	QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
 	QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	QObject::connect(fitBtn, &QPushButton::clicked, &dlg, [preview] { preview->zoomFit(); });
+	QObject::connect(hundredBtn, &QPushButton::clicked, &dlg, [preview] { preview->zoom100(); });
+	QObject::connect(outlinesChk, &QCheckBox::toggled, &dlg, [preview](bool on) { preview->showOutlines = on; preview->update(); });
+	QObject::connect(tintChk, &QCheckBox::toggled, &dlg, [preview](bool on) { preview->showTint = on; preview->update(); });
+	QObject::connect(brushSize, &QSlider::valueChanged, &dlg, [preview](int v) { preview->brushRadius = v; preview->update(); });
+
+	// ---- tracing off the GUI thread: the worker gets a copy of the mask image,
+	// returns polygons; the GUI applies the newest result only.
+	QFutureWatcher<QList<QVector<QPointF> > > watcher;
+	QTimer traceTimer;
+	traceTimer.setSingleShot(true);
+	traceTimer.setInterval(120);
+	int pendingTrace = 0;
+	bool traceAgain = false;
+	auto startTrace = [&]() {
+		if (watcher.isRunning()) { traceAgain = true; return; }
+		const QImage copy = preview->mask.copy();
+		const double scale = scene.maskScale;
+		status->setText(QObject::tr("Tracing..."));
+		++pendingTrace;
+		watcher.setFuture(QtConcurrent::run([copy, scale]() { return traceMask(maskFromImage(copy, scale)); }));
+	};
+	QObject::connect(&watcher, &QFutureWatcher<QList<QVector<QPointF> > >::finished, &dlg, [&]() {
+		preview->subjectPixels = pathFromLoops(watcher.result());
+		status->setText(preview->subjectPixels.isEmpty() ? QObject::tr("No person found in the mask.") : QString());
+		preview->update();
+		if (traceAgain) { traceAgain = false; startTrace(); }
+	});
+	QObject::connect(&traceTimer, &QTimer::timeout, &dlg, startTrace);
+	preview->maskEdited = [&]() { traceTimer.start(); };
+	preview->settingsChanged = [&]() {
+		if (preview->settings.region == AboveLine && !lineRb->isChecked()) lineRb->setChecked(true);
+	};
+	preview->imageChanged = [&]() {
+		const bool blocked = zoomSlider->blockSignals(true);
+		zoomSlider->setValue(qBound(10, qRound(preview->scene.imgScale / scene.imgScale * 100.0), 400));
+		zoomSlider->blockSignals(blocked);
+	};
+	QObject::connect(zoomSlider, &QSlider::valueChanged, &dlg, [&](int v) {
+		// zoom about the centre of the frame
+		const QPointF centre(scene.frameSize.width() / 2.0, scene.frameSize.height() / 2.0);
+		const QPointF pixUnder = preview->pictureToFrame().inverted().map(centre);
+		preview->scene.imgScale = scene.imgScale * v / 100.0;
+		preview->scene.imgOffset = QPointF(centre.x() / preview->scene.imgScale - pixUnder.x(), centre.y() / preview->scene.imgScale - pixUnder.y());
+		preview->update();
+	});
 	auto syncRadios = [&]() {
-		if (headRb->isChecked())
-		{
-			preview->settings.region = HeadOnly;
-			preview->settings.lineY = autoLine * previewScale;
-		}
-		else if (lineRb->isChecked())
-			preview->settings.region = AboveLine;
-		else
-			preview->settings.region = Custom;
+		if (headRb->isChecked()) { preview->settings.region = HeadOnly; preview->settings.lineY = headLine(maskFromImage(preview->mask, scene.maskScale)); }
+		else if (lineRb->isChecked()) preview->settings.region = AboveLine;
+		else preview->settings.region = Custom;
 		preview->settings.shape = shapeCombo->currentIndex() == 1 ? Ellipse : Rectangle;
 		preview->update();
 	};
 	for (QRadioButton* rb : { headRb, lineRb, customRb })
-		QObject::connect(rb, &QRadioButton::toggled, &dlg, [&](bool) { syncRadios(); });
+		QObject::connect(rb, &QRadioButton::toggled, &dlg, [&](bool on) { if (on) syncRadios(); });
 	QObject::connect(shapeCombo, qOverload<int>(&QComboBox::currentIndexChanged), &dlg, [&](int) { syncRadios(); });
-	preview->changed = [&]() {
-		// dragging the line switches the mode to "Above a line"
-		if (preview->settings.region == AboveLine && !lineRb->isChecked())
-			lineRb->setChecked(true);
+	auto syncTool = [&]() {
+		preview->tool = toolAddRb->isChecked() ? CompositePreview::ToolBrushAdd
+		              : toolEraseRb->isChecked() ? CompositePreview::ToolBrushErase
+		              : toolImageRb->isChecked() ? CompositePreview::ToolImage : CompositePreview::ToolRegion;
+		preview->setCursor(preview->tool == CompositePreview::ToolImage ? Qt::SizeAllCursor
+		                   : preview->tool == CompositePreview::ToolRegion ? Qt::ArrowCursor : Qt::CrossCursor);
+		preview->update();
 	};
-	if (dlg.exec() != QDialog::Accepted || !face)
+	for (QRadioButton* rb : { toolRegionRb, toolAddRb, toolEraseRb, toolImageRb })
+		QObject::connect(rb, &QRadioButton::toggled, &dlg, [&](bool on) { if (on) syncTool(); });
+	QObject::connect(resetMaskBtn, &QPushButton::clicked, &dlg, [&]() { preview->mask = maskWork; startTrace(); preview->update(); });
+	startTrace();
+
+	const int result = dlg.exec();
+	watcher.waitForFinished();
+	if (result != QDialog::Accepted || !face || mw->doc != doc)
 		return;
 
+	// ---- apply exactly what the preview shows
 	Settings v = preview->settings;
-	v.lineY = v.lineY / previewScale;
-	v.custom = QRectF(v.custom.topLeft() / previewScale, v.custom.size() / previewScale);
 	v.shadow = shadowChk->isChecked();
 	v.group = groupChk->isChecked();
-	v.maskFile = s.maskFile;
 	v.model = s.model;
+	v.maskFile = s.maskFile;
+	if (preview->mask != maskWork)
+	{
+		// brush edits: saved as a mask of their own, at the picture's size, so
+		// the applied path and a later reopening use the edited person shape
+		const QFileInfo fi(s.maskFile);
+		const QString edited = fi.absolutePath() + "/" + fi.completeBaseName() + QStringLiteral("_edit_%1.png").arg(QDateTime::currentSecsSinceEpoch());
+		QImage full = preview->mask.scaled(scene.pictureSize, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		if (full.save(edited))
+			v.maskFile = edited;
+	}
+	v.setImage = true;
+	v.imageScale = preview->scene.imgScale;
+	v.imageOffX = preview->scene.imgOffset.x();
+	v.imageOffY = preview->scene.imgOffset.y();
 	if (!apply(mw, face, v, &error))
 	{
 		QMessageBox::warning(mw, title, error);
 		return;
 	}
-	mw->setStatusBarInfoText(QObject::tr("Pop-out made: the part above the line is in front of the letters."));
+	mw->setStatusBarInfoText(QObject::tr("Pop-out made: the marked part is in front of the letters."));
 }

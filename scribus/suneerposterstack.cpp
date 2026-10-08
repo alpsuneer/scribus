@@ -419,7 +419,11 @@ PageItem* SuneerPosterStack::apply(ScribusMainWindow* mw, PageItem* textFrame, c
 
 	// The parked text shows the poster's words, so a later edit starts from them.
 	const QString joined = linesFor(settings).join(QChar(0x2029));
-	if (textFrame->itemText.plainText() != joined)
+	// plainText() gives the story with '\n' for paragraph ends; the story
+	// itself wants PARSEP, or the restored words show box glyphs.
+	QString oldWords = textFrame->itemText.plainText();
+	oldWords.replace(QChar('\r'), QChar(0x2029)).replace(QChar('\n'), QChar(0x2029));
+	if (oldWords != joined)
 	{
 		const ParagraphStyle keep = textFrame->itemText.defaultStyle();
 		textFrame->itemText.clear();
@@ -435,11 +439,21 @@ PageItem* SuneerPosterStack::apply(ScribusMainWindow* mw, PageItem* textFrame, c
 	PageItem* image = SuneerFillTextImage::apply(mw, textFrame, options, &fillError);
 	if (!image)
 	{
-		if (transaction)
+		// Never undo(1) from inside an open transaction: the undo stack is
+		// mid-transaction and the canvas redraw it triggers crashed (20:19
+		// crash). Fill Text already took its own frame back; put the words
+		// back by hand and drop the records.
+		if (oldWords != joined)
 		{
-			transaction.commit();
-			UndoManager::instance()->undo(1);
+			const ParagraphStyle keep = textFrame->itemText.defaultStyle();
+			textFrame->itemText.clear();
+			textFrame->itemText.insertChars(0, oldWords);
+			textFrame->itemText.setDefaultStyle(keep);
+			textFrame->invalidateLayout();
 		}
+		if (transaction)
+			transaction.cancel();
+		doc->regionsChanged()->update(QRectF());
 		return fail(fillError);
 	}
 
@@ -676,6 +690,10 @@ void SuneerPosterStack::runForSelection(ScribusMainWindow* mw)
 			const int activeLayer = doc->activeLayer();
 			parkLayer = doc->addLayer(SuneerFillTextImage::originalTextLayerName(), false);
 			doc->setActiveLayer(activeLayer);
+			// A layer without its "Send to Layer" action is a crash waiting in the
+			// context menu (scrLayersActions[id] hands back a null pointer).
+			mw->layerPalette->setDoc(doc);
+			mw->rebuildLayersList();
 		}
 		doc->setLayerPrintable(parkLayer, false);
 		doc->setLayerVisible(parkLayer, false);
