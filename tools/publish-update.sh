@@ -27,11 +27,11 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 BUILD="$ROOT/build"
 CONFIG="${HOME}/scribus-keys/release.conf"
-MODE=publish; CHANGELOG=(); EXTRA=(); NO_TAG=0; NO_HTTP=0; ROLLBACK_TO=""
+MODE=publish; CHANGELOG=(); NO_TAG=0; NO_HTTP=0; ROLLBACK_TO=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		-m) shift; CHANGELOG=(-m "${1:?-m needs a text}") ;;
-		--allow-dirty) EXTRA+=(--allow-dirty); NO_TAG=1 ;;
+		--allow-dirty) NO_TAG=1 ;;
 		--no-tag) NO_TAG=1 ;;
 		--no-http-check) NO_HTTP=1 ;;
 		--list) MODE=list ;;
@@ -131,8 +131,20 @@ fi
 
 # -------------------------------------------------- 1. build, sign (local) ---
 say "Build, package and sign on this laptop"
-tools/release.sh --dry-run "${EXTRA[@]}" "${CHANGELOG[@]}" || die "release.sh failed"
+# The clean-tree rule is enforced here; release.sh runs with --allow-dirty
+# because its dry run rewrites the shipped keyset / PDF presets (version
+# stamp) and would then refuse its own change. Those files are committed
+# below, exactly as a real release.sh run does.
+if [ $NO_TAG -eq 0 ]; then
+	DIRTY=$(git -c core.fileMode=false status --porcelain --untracked-files=no)
+	[ -z "$DIRTY" ] || { echo "$DIRTY" | head -20 | sed 's/^/   /'; die "uncommitted changes: commit first, or use --allow-dirty for a test build (no tag)"; }
+fi
+tools/release.sh --dry-run --allow-dirty "${CHANGELOG[@]}" || die "release.sh failed"
 VERSION=$(ls -t "$BUILD/release" | grep -E '^1\.[0-9]+\.[0-9]+-[0-9]{8}-[0-9]+$' | head -1)
+if [ $NO_TAG -eq 0 ] && [ -n "$(git -c core.fileMode=false status --porcelain -- resources/keysets resources/pdf-presets)" ]; then
+	git add -A resources/keysets resources/pdf-presets
+	git commit -q -m "suneer: keyset / office presets as shipped with $VERSION" && echo "   shipped keyset/presets committed: $(git rev-parse --short HEAD)"
+fi
 OUT="$BUILD/release/$VERSION"
 DEB_NAME="scribus_${VERSION}_amd64.deb"
 [ -f "$OUT/$DEB_NAME" ] && [ -f "$OUT/latest.json" ] || die "release.sh left no $DEB_NAME / latest.json in $OUT"
