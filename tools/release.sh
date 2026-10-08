@@ -23,7 +23,7 @@
 # Site settings are NOT in this repository (it is public). The config file is
 # a shell fragment, created interactively on the first real run:
 #
-#   UPDATE_BASE_URL=http://debian.local:8081               # what /etc/scribus/update.conf on the office PCs says
+#   UPDATE_BASE_URL=http://<server>:8095/scribus-updates   # what /etc/scribus/update.conf on the office PCs says
 #   UPDATE_API_KEY=                                        # empty for the LAN server; else the key the PCs send
 #   UPLOAD_METHOD=copy           # copy | scp | rsync | http-put
 #   UPLOAD_TARGET=/srv/scribus-updates                     # copy: local folder nginx serves; scp/rsync: user@host:/path/

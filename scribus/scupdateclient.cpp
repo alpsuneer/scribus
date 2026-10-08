@@ -17,6 +17,7 @@ for which a new license (GPL+exception) is in place.
 #include <QJsonParseError>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QCoreApplication>
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSettings>
@@ -179,6 +180,32 @@ QByteArray ScUpdateClient::releasePublicKey()
 #endif
 }
 
+
+// Plain words for the errors an office PC meets: a server that is off or
+// unreachable, or that did not answer in time. Qt's own texts ("Operation
+// canceled" for a timeout) say nothing a DTP operator can act on.
+static QString suneerPlainNetworkError(QNetworkReply* reply, const QUrl& url, int timeoutMs)
+{
+	const QString host = url.host() + (url.port() > 0 ? QStringLiteral(":%1").arg(url.port()) : QString());
+	switch (reply->error())
+	{
+		case QNetworkReply::OperationCanceledError:
+		case QNetworkReply::TimeoutError:
+			return QCoreApplication::translate("ScUpdateClient", "Update server %1 did not answer within %2 seconds. Is the server on and the network connected?")
+			       .arg(host).arg(qMax(1, timeoutMs / 1000));
+		case QNetworkReply::ConnectionRefusedError:
+			return QCoreApplication::translate("ScUpdateClient", "Update server %1 refused the connection (nothing is listening there).").arg(host);
+		case QNetworkReply::HostNotFoundError:
+			return QCoreApplication::translate("ScUpdateClient", "Update server %1 was not found (name or address wrong, or no network).").arg(host);
+		case QNetworkReply::RemoteHostClosedError:
+		case QNetworkReply::NetworkSessionFailedError:
+		case QNetworkReply::UnknownNetworkError:
+			return QCoreApplication::translate("ScUpdateClient", "Update server %1 is not reachable: %2").arg(host, reply->errorString());
+		default:
+			return reply->errorString();
+	}
+}
+
 QString ScUpdateClient::systemConfigPath()
 {
 	return QStringLiteral("/etc/scribus/update.conf");
@@ -240,6 +267,7 @@ void ScUpdateClient::checkForUpdate(const QString& baseUrl, const QString& apiKe
 	// timeoutMs (connection time included), never as a reply that hangs:
 	// the startup check relies on this.
 	request.setTransferTimeout(timeoutMs);
+	m_checkTimeoutMs = timeoutMs;
 	if (!apiKey.isEmpty())
 	{
 		request.setRawHeader("Authorization", "Bearer " + apiKey.toUtf8());
@@ -276,7 +304,7 @@ void ScUpdateClient::onCheckFinished()
 	}
 	if (reply->error() != QNetworkReply::NoError)
 	{
-		emit networkError(reply->errorString());
+		emit networkError(suneerPlainNetworkError(reply, m_checkUrl, m_checkTimeoutMs));
 		return;
 	}
 
@@ -406,9 +434,11 @@ void ScUpdateClient::onDownloadFinished()
 		}
 		if (failed)
 		{
-			QString message = reply->errorString();
+			QString message = suneerPlainNetworkError(reply, reply->url(), 0);
 			if (httpStatus == 401 || httpStatus == 403)
 				message = tr("Invalid API key while downloading the update.");
+			else if (httpStatus == 404)
+				message = tr("The update file is missing on the server (%1).").arg(reply->url().fileName());
 			emit downloadFailed(message);
 		}
 		return;

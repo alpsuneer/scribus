@@ -1,40 +1,31 @@
-# LAN update server (laptop)
+# Scribus update server (Debian host, 2026-10-08)
 
-nginx serves `/srv/scribus-updates` read-only on port 8081, nothing else:
+Office PCs get Scribus updates from the newsroom's Debian server:
 
-    sudo apt install nginx-light
-    sudo mkdir -p /srv/scribus-updates && sudo chown $USER /srv/scribus-updates
-    sudo cp tools/update-server/nginx-scribus-updates.conf /etc/nginx/sites-available/scribus-updates
-    sudo ln -sfn /etc/nginx/sites-available/scribus-updates /etc/nginx/sites-enabled/scribus-updates
-    sudo rm -f /etc/nginx/sites-enabled/default      # do not serve /var/www on port 80
-    sudo nginx -t && sudo systemctl reload nginx && sudo systemctl enable nginx
+    http://<server>:8095/scribus-updates/latest.json      (the address lives in ~/scribus-keys/release.conf, not here)
 
-Office PCs reach it as `http://<hostname>.local:8081` (avahi/mDNS) or by a
-fixed IP (DHCP reservation on the router). Build Scribus with
-`-DSCRIBUS_UPDATE_DEFAULT_URL=http://<hostname>.local:8081` so the .deb
-installs that URL into /etc/scribus/update.conf.
+- **Host nginx on port 8095** serves `/srv/scribus-updates` read-only
+  (`nginx-scribus-updates.conf` → `/etc/nginx/sites-available/scribus-updates`,
+  enabled; default site disabled). `latest.json` is `Cache-Control: no-store`;
+  directory listing off; everything else 404.
+- **Ports 80/443 and the docker containers on that server belong to the
+  newsroom workflow (production).** Never change `docker-compose-prd.yml`, its
+  nginx container, or the docker/nft rules.
+- **Upload**: rsync as the key-only account `scribusupd`, restricted with
+  rrsync to `/srv/scribus-updates` (no shell). `UPLOAD_TARGET=scribusupd@<server>:/`.
+- **Network**: office PCs (the office subnets) reach the server
+  only on 80, 443 and 8095. They have no curl: the updater is Qt code, the
+  install helper is Python.
 
-The release signing key (~/scribus-keys/release-key.pem) must never be under
-/srv/scribus-updates. `tools/release.sh` with `UPLOAD_METHOD=copy` copies the
-.deb and latest.json in and reads them back over HTTP.
+`tools/publish-update.sh` builds, signs (laptop only), uploads in a safe order
+(.deb, .sha256, .sig, then latest.json), keeps the last three releases, and
+reads everything back over HTTP as a PC would. `--list` shows the server,
+`--rollback <version>` re-signs latest.json for an older .deb still there.
+Site settings: `~/scribus-keys/release.conf` (not in the repo).
 
-# Dedicated update server that also pushes
+Checks on the server:  `systemctl status nginx`, `ss -ltnp | grep 8095`,
+`ls -l /srv/scribus-updates`, `tail /var/log/nginx/scribus-updates.access.log`.
 
-When a separate machine on the office LAN serves the updates and installs
-them on the PCs (`tools/push-update.sh`, there `scribus-push-update`):
-
-    tools/update-server/deploy-push-server.sh                 # on the release laptop; copies three files, no key
-    ssh -t <login>@<server> 'sudo bash ~/scribus-push-setup/setup-push-server.sh'
-
-Site settings come from `~/scribus-keys/push-update.conf` on the laptop
-(`SERVER`, `SUBNET`, `SKIP_HOSTS`, `UPDATE_BASE_URL`, `PC_SSH_USER`). Then, on
-the server: list the PCs in `/etc/scribus-push/pcs`, run
-`scribus-push-update --copy-keys` once, and `scribus-push-update --first <pc>`
-once per PC. After that `scribus-push-update --all` needs no password.
-
-`tools/release.sh` uploads with `UPLOAD_METHOD=rsync`,
-`UPLOAD_TARGET=<login>@<server>:/srv/scribus-updates/`, and
-`UPDATE_BASE_URL=http://<server address>:8081`; build with
-`-DSCRIBUS_UPDATE_DEFAULT_URL=<that URL> -DSCRIBUS_PUSH_USER=<account on the PCs>`.
-The release signing key stays on the laptop.
-
+The push machinery (`push-update.sh`, `setup-push-server.sh`,
+`deploy-push-server.sh`) is the older design where the server also installs on
+the PCs over SSH; it is not used with this server.

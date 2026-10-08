@@ -125,6 +125,7 @@ private:
 	QString m_downloadPath;
 	QString m_expectedSha256;
 	QUrl m_checkUrl;
+	int m_checkTimeoutMs { 15000 };
 	ScUpdateInfo m_lastInfo;
 	bool m_downloadCancelled {false};
 };
