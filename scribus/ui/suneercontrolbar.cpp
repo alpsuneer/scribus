@@ -1,4 +1,8 @@
 #include "suneercontrolbar.h"
+#include "scribusstructs.h"
+#include "ui/widgets/floatingwindow.h"
+#include "ui/colorpicker/colorpicker.h"
+#include "manager/widget_manager.h"
 #include <functional>
 #include <QCompleter>
 #include <QAbstractItemView>
@@ -1798,6 +1802,16 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_textColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onTextColorChanged);
 	connect(m_bgColorBtn,       &ColorButton::changed,  this, &SuneerControlBar::onBgColorChanged);
 	connect(m_lineColorBtn,     &ColorButton::changed,  this, &SuneerControlBar::onLineColorChanged);
+	// The colour popup is one shared window. Whoever opened it last gave it
+	// its list; our buttons re-read the CURRENT document's colours on every
+	// open (after ColorButton's own pressed handler) and on every colour-list
+	// change the main window announces (Edit > Colours, import, new document).
+	for (ColorButton* b : { m_textColorBtn, m_bgColorBtn, m_fillColorBtn, m_lineColorBtn, m_lineMaskBtn,
+	                        m_txtLineColorBtn, m_txtLineMaskBtn, m_imgFillColorBtn, m_imgLineColorBtn })
+		if (b)
+			connect(b, &QToolButton::pressed, this, [this, b]() { refreshColorPopup(b); });
+	if (m_scmw)
+		connect(m_scmw, &ScribusMainWindow::UpdateRequest, this, &SuneerControlBar::onMainWindowUpdateRequest, Qt::UniqueConnection);
 	connect(m_lineMaskBtn,        &ColorButton::changed,    this, &SuneerControlBar::onLineMaskChanged);
 	connect(m_txtLineColorBtn, &ColorButton::changed, this, &SuneerControlBar::onLineColorChanged);
 	connect(m_fillColorBtn, &ColorButton::changed, this, &SuneerControlBar::onFillColorChanged);
@@ -2037,6 +2051,8 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		m_lineMaskBtn->setDoc(doc);
 		if (m_txtLineColorBtn) m_txtLineColorBtn->setDoc(doc);
 		if (m_txtLineMaskBtn) m_txtLineMaskBtn->setDoc(doc);
+		if (m_imgFillColorBtn) m_imgFillColorBtn->setDoc(doc);
+		if (m_imgLineColorBtn) m_imgLineColorBtn->setDoc(doc);
 		if (m_outlineStrokeColorCombo)
 		{
 			m_outlineStrokeColorCombo->blockSignals(true);
@@ -2507,6 +2523,7 @@ void SuneerControlBar::updateFromSelection()
 
 	blockAllSignals(false);
 	m_updating = false;
+	showMixedColorState();
 }
 
 // ── Group editing ───────────────────────────────────────────────────────────
@@ -2626,15 +2643,13 @@ void SuneerControlBar::refreshAfterGroupChange()
 	}
 }
 
+// Everything the bar changes applies to EVERY selected item (as the
+// Properties palette does), not only the first one; in group mode to the
+// group's children.
 QList<PageItem*> SuneerControlBar::targetItems() const
 {
 	Selection* s = sel();
-	if (m_groupActive)
-		return s->items();
-	QList<PageItem*> one;
-	if (!s->isEmpty())
-		one.append(s->itemAt(0));
-	return one;
+	return s ? s->items() : QList<PageItem*>();
 }
 
 void SuneerControlBar::setSpinMixed(QAbstractSpinBox* sb)
@@ -4532,19 +4547,106 @@ void SuneerControlBar::onLineStyleNewClicked()
 	m_scmw->styleMgr()->show();
 }
 
+// Several items selected: a colour button shows the value only when every
+// item shares it; otherwise it goes blank (None) with a "Mixed" tooltip, and
+// the next choice applies to all of them.
+void SuneerControlBar::showMixedColorState()
+{
+	if (!m_doc || m_groupActive)
+		return;
+	Selection* s = sel();
+	if (!s || s->count() < 2)
+		return;
+	QString fill = s->itemAt(0)->fillColor(), line = s->itemAt(0)->lineColor();
+	double fillSh = s->itemAt(0)->fillShade(), lineSh = s->itemAt(0)->lineShade();
+	bool fillMixed = false, lineMixed = false;
+	for (int i = 1; i < s->count(); ++i)
+	{
+		PageItem* it = s->itemAt(i);
+		if (it->fillColor() != fill || it->fillShade() != fillSh) fillMixed = true;
+		if (it->lineColor() != line || it->lineShade() != lineSh) lineMixed = true;
+	}
+	const bool was = m_updating;
+	m_updating = true;
+	for (ColorButton* b : { m_fillColorBtn, m_imgFillColorBtn })
+		if (b)
+		{
+			if (fillMixed) { b->setColor(CommonStrings::tr_NoneColor); b->setToolTip(tr("Mixed fill colours in the selection - choosing one applies it to all %1 items").arg(s->count())); }
+			else { b->setColor(fill, fillSh); b->setToolTip(tr("Fill colour (all %1 selected items)").arg(s->count())); }
+			b->update();
+		}
+	for (ColorButton* b : { m_lineColorBtn, m_imgLineColorBtn, m_txtLineColorBtn })
+		if (b)
+		{
+			if (lineMixed) { b->setColor(CommonStrings::tr_NoneColor); b->setToolTip(tr("Mixed line colours in the selection - choosing one applies it to all %1 items").arg(s->count())); }
+			else { b->setColor(line, lineSh); b->setToolTip(tr("Line colour (all %1 selected items)").arg(s->count())); }
+			b->update();
+		}
+	m_updating = was;
+}
+
+// The shared colour picker window, when it is open for one of our buttons.
+ColorPicker* SuneerControlBar::openColorPicker(ColorButton* forButton)
+{
+	FloatingWindow* fw = WidgetManager::instance().colorPickerWindow();
+	ColorPicker* cp = fw ? qobject_cast<ColorPicker*>(fw->child()) : nullptr;
+	if (!cp || (forButton && cp->colorButton() != forButton))
+		return nullptr;
+	return cp;
+}
+
+void SuneerControlBar::refreshColorPopup(ColorButton* b)
+{
+	if (!m_doc || !b)
+		return;
+	b->setDoc(m_doc);
+	if (ColorPicker* cp = openColorPicker(b))
+	{
+		cp->setDoc(m_doc);                    // loadLists(): PageColors, gradients, patterns of THIS document
+		cp->setColorList(m_doc->PageColors);
+	}
+}
+
+void SuneerControlBar::onMainWindowUpdateRequest(int flags)
+{
+	if (!m_doc || !(flags & reqColorsUpdate))
+		return;
+	if (m_outlineStrokeColorCombo)
+	{
+		QSignalBlocker block(m_outlineStrokeColorCombo);
+		m_outlineStrokeColorCombo->setColors(m_doc->PageColors, true);
+	}
+	for (ColorButton* b : { m_textColorBtn, m_bgColorBtn, m_fillColorBtn, m_lineColorBtn, m_lineMaskBtn,
+	                        m_txtLineColorBtn, m_txtLineMaskBtn, m_imgFillColorBtn, m_imgLineColorBtn })
+		if (b && openColorPicker(b))
+			refreshColorPopup(b);
+}
+
+// One undo step for a colour/shade change over the whole selection. In group
+// mode SuneerGroupUndo already opened one; otherwise open our own.
+UndoTransaction SuneerControlBar::selectionTransaction(const QString& name)
+{
+	if (m_groupActive || !UndoManager::undoEnabled() || !m_doc)
+		return UndoTransaction();
+	PageItem* first = sel()->isEmpty() ? nullptr : sel()->itemAt(0);
+	return UndoManager::instance()->beginTransaction(sel()->count() > 1 ? Um::SelectionGroup : (first ? first->getUName() : Um::Selection),
+	                                                 sel()->count() > 1 ? Um::IGroup : (first ? first->getUPixmap() : Um::IGroup),
+	                                                 name, QString(), Um::IFill);
+}
+
 void SuneerControlBar::onLineColorChanged()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	for (PageItem* item : targetItems())
-	{
-		ColorButton* srcBtn = m_txtLineColorBtn && sender() == m_txtLineColorBtn ? m_txtLineColorBtn : m_lineColorBtn;
-		item->setLineColor(srcBtn->colorName());
-		item->setLineShade(100.0);
-		item->update();
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	ColorButton* srcBtn = m_txtLineColorBtn && sender() == m_txtLineColorBtn ? m_txtLineColorBtn : m_lineColorBtn;
+	// The document's own functions, over the whole selection (groups included
+	// the way the Properties palette does it), one undo step.
+	UndoTransaction tx = selectionTransaction(tr("Line colour"));
+	m_doc->itemSelection_SetItemPen(srcBtn->colorName(), tsel());
+	m_doc->itemSelection_SetItemPenShade(qRound(srcBtn->colorData().Shade), tsel());
+	if (tx)
+		tx.commit();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onLineWidthChanged(double val)
@@ -4643,13 +4745,11 @@ void SuneerControlBar::onLineOpacityChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	for (PageItem* item : targetItems())
-	{
-		item->setLineTransparency(1.0 - val / 100.0);
-		item->update();
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	UndoTransaction tx = selectionTransaction(tr("Line opacity"));
+	m_doc->itemSelection_SetItemLineTransparency(1.0 - val / 100.0, tsel());
+	if (tx)
+		tx.commit();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onLineStartArrowChanged(int idx)
@@ -4802,27 +4902,23 @@ void SuneerControlBar::onFillColorChanged()
 	ColorButton* btn = qobject_cast<ColorButton*>(sender());
 	if (!btn) btn = m_fillColorBtn;
 	if (!btn) return;
-	for (PageItem* item : targetItems())
-	{
-		item->setFillColor(btn->colorName());
-		item->setFillShade(btn->colorData().Shade);
-		item->update();
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	UndoTransaction tx = selectionTransaction(tr("Fill colour"));
+	m_doc->itemSelection_SetItemBrush(btn->colorName(), tsel());
+	m_doc->itemSelection_SetItemBrushShade(qRound(btn->colorData().Shade), tsel());
+	if (tx)
+		tx.commit();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onFillOpacityChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	for (PageItem* item : targetItems())
-	{
-		item->setFillTransparency(1.0 - val / 100.0);
-		item->update();
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	UndoTransaction tx = selectionTransaction(tr("Fill opacity"));
+	m_doc->itemSelection_SetItemFillTransparency(1.0 - val / 100.0, tsel());
+	if (tx)
+		tx.commit();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onImgLineStyleChanged(int idx)
@@ -4861,27 +4957,32 @@ void SuneerControlBar::onImgLineStyleAdd()
 void SuneerControlBar::onImgLineColorChanged()
 {
 	SuneerGroupUndo groupUndo(this);
-	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	ColorButton* btn = qobject_cast<ColorButton*>(sender());
-	if (!btn) btn = m_imgLineColorBtn;
-	if (!btn) return;
-	for (PageItem* item : targetItems())
-	{
-		item->setLineColor(btn->colorName());
-		item->setLineShade(btn->colorData().Shade);
-		item->update();
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-	}
+	if (m_updating || !m_doc || sel()->isEmpty() || !m_imgLineColorBtn) return;
+	UndoTransaction tx = selectionTransaction(tr("Line colour"));
+	m_doc->itemSelection_SetItemPen(m_imgLineColorBtn->colorName(), tsel());
+	m_doc->itemSelection_SetItemPenShade(qRound(m_imgLineColorBtn->colorData().Shade), tsel());
+	if (tx)
+		tx.commit();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 void SuneerControlBar::onImgWidthChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	PageItem* item = m_groupActive ? m_groupItem.data() : sel()->itemAt(0);
-	if (!item) return;
-	const double MM2PT = 2.8346;
+	// Every selected item (group mode: the group), one undo step for all.
+	QList<PageItem*> items = m_groupActive ? QList<PageItem*>{ m_groupItem.data() } : sel()->items();
+	UndoTransaction allTx;
+	if (items.size() > 1 && UndoManager::undoEnabled())
+		allTx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::Resize, QString(), Um::IResize);
+	for (PageItem* item : items)
+		if (item) imgWidthFor(item, val);
+	if (allTx)
+		allTx.commit();
+}
+
+void SuneerControlBar::imgWidthFor(PageItem* item, double val)
+{	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigW <= 0)
 	{
 		// Generic resize for shapes, polygons, lines etc. — scale the item's path
@@ -4954,9 +5055,19 @@ void SuneerControlBar::onImgHeightChanged(double val)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	PageItem* item = m_groupActive ? m_groupItem.data() : sel()->itemAt(0);
-	if (!item) return;
-	const double MM2PT = 2.8346;
+	// Every selected item (group mode: the group), one undo step for all.
+	QList<PageItem*> items = m_groupActive ? QList<PageItem*>{ m_groupItem.data() } : sel()->items();
+	UndoTransaction allTx;
+	if (items.size() > 1 && UndoManager::undoEnabled())
+		allTx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::Resize, QString(), Um::IResize);
+	for (PageItem* item : items)
+		if (item) imgHeightFor(item, val);
+	if (allTx)
+		allTx.commit();
+}
+
+void SuneerControlBar::imgHeightFor(PageItem* item, double val)
+{	const double MM2PT = 2.8346;
 	if (!item->isImageFrame() || item->OrigH <= 0)
 	{
 		// Generic resize for shapes, polygons, lines etc. — scale the item's path

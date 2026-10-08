@@ -178,6 +178,15 @@ private slots:
 	void onParagraphShadingReset();
 	// Line
 	void onLineColorChanged();
+	//! Main window UpdateRequest(int): reqColorsUpdate -> our colour widgets re-read doc->PageColors.
+	void onMainWindowUpdateRequest(int flags);
+	//! Give the shared colour popup THIS document's colour list (called on every open).
+	void refreshColorPopup(class ColorButton* b);
+	void showMixedColorState();
+	void imgWidthFor(PageItem* item, double val);
+	void imgHeightFor(PageItem* item, double val);
+	class ColorPicker* openColorPicker(class ColorButton* forButton);
+	class UndoTransaction selectionTransaction(const QString& name);
 	void onLineMaskChanged();
 	void onFillColorChanged();
 	void onImgLineColorChanged();
