@@ -561,9 +561,23 @@ void ContextMenu::createMenuItems_Selection()
 			QMap<int,int> layerMap;
 			for (ScLayers::iterator it = m_doc->Layers.begin(); it != m_doc->Layers.end(); ++it)
 				layerMap.insert((*it).Level, (*it).ID);
+			// A layer added by code that forgot rebuildLayersList() has no action
+			// yet; operator[] would hand back a null pointer and setEnabled()
+			// below would crash. Rebuild once, then skip whatever is still missing.
+			for (auto it = layerMap.constBegin(); it != layerMap.constEnd(); ++it)
+				if (!m_ScMW->scrLayersActions.contains(QString::number(it.value())) || !m_ScMW->scrLayersActions[QString::number(it.value())])
+				{
+					m_ScMW->rebuildLayersList();
+					break;
+				}
 			int i=layerMap.count()-1;
 			while (i>=0)
 			{
+				if (!m_ScMW->scrLayersActions.contains(QString::number(layerMap[i])) || !m_ScMW->scrLayersActions[QString::number(layerMap[i])])
+				{
+					--i;
+					continue;
+				}
 				if (m_doc->layerLocked(layerMap[i]))
 					m_ScMW->scrLayersActions[QString::number(layerMap[i])]->setEnabled(false);
 				else
