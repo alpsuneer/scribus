@@ -247,13 +247,27 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_newsList->setContextMenuPolicy(Qt::CustomContextMenu);
 	connect(m_newsList, &QListWidget::customContextMenuRequested, this, [this](const QPoint& p) {
 		QListWidgetItem* row = m_newsList->itemAt(p);
-		if (!row || !isPlacedRow(row))
+		if (!row)
 			return;
-		row->setSelected(true);
+		const int idx = row->data(Qt::UserRole).toInt();
+		if (idx < 0 || idx >= m_newsData.size())
+			return;
+		const QJsonObject news = m_newsData[idx].toObject();
+		const QString st = newsDtpStatus(news);
 		QMenu menu(this);
-		QAction* rel = menu.addAction(tr("Mark as unused"));
-		if (menu.exec(m_newsList->viewport()->mapToGlobal(p)) == rel)
-			onReleaseRows();
+		QAction* rel = st != "UNUSED" ? menu.addAction(tr("Mark as unused")) : nullptr;
+		QAction* bal = st != "BALANCED" ? menu.addAction(tr("Mark as balance (keep for later)")) : nullptr;
+		if (menu.isEmpty())
+			return;
+		QAction* chosen = menu.exec(m_newsList->viewport()->mapToGlobal(p));
+		if (chosen && chosen == rel)
+			markStories(QList<QJsonObject>() << news, unusedStatus());
+		else if (chosen && chosen == bal)
+		{
+			m_markingBalance = true;
+			markStories(QList<QJsonObject>() << news, "BALANCED");
+			m_markingBalance = false;
+		}
 	});
 
 	QSplitter* splitter = new QSplitter(Qt::Vertical, w);
@@ -280,15 +294,23 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_placeBtn->setStyleSheet("background:#2E7D32; color:white; font-weight:bold; padding:4px;");
 	m_placeBtn->setEnabled(false);
 	connect(m_placeBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onPlaceSelected);
-	btnRow->addWidget(m_placeBtn, 2);
-	// Next to Place: releases the TICKED used rows (they can be ticked but never placed).
+	btnRow->addWidget(m_placeBtn, 1);
+	// Second row under Place: the status actions for the TICKED rows.
+	QHBoxLayout* markRow = new QHBoxLayout();
 	m_releaseBtn = new QPushButton(tr("Mark unused"), w);
 	m_releaseBtn->setToolTip(tr("Mark every TICKED used (grey) story as unused on the server (available to everyone); optionally remove them from this page"));
 	m_releaseBtn->setStyleSheet("padding:4px;");
 	m_releaseBtn->setEnabled(false);
 	connect(m_releaseBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onMarkUnusedTicked);
-	btnRow->addWidget(m_releaseBtn, 1);
+	markRow->addWidget(m_releaseBtn, 1);
+	m_balanceBtn = new QPushButton(tr("Mark balance"), w);
+	m_balanceBtn->setToolTip(tr("Mark every TICKED free or used story as BALANCE on the server (kept for a later day, listed under Balanced News); optionally remove them from this page"));
+	m_balanceBtn->setStyleSheet("padding:4px;");
+	m_balanceBtn->setEnabled(false);
+	connect(m_balanceBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onMarkBalanceTicked);
+	markRow->addWidget(m_balanceBtn, 1);
 	vl->addLayout(btnRow);
+	vl->addLayout(markRow);
 
 	m_stack->addWidget(w);
 	m_stack->setCurrentIndex(0);
@@ -719,7 +741,7 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                               tr("Remove story: %1").arg(storyId), QString(), Um::IDelete);
 	QString err;
-	const bool marked = removeStoryFrames(item, &err);
+	const bool marked = removeStoryFrames(item, unusedStatus(), &err);
 	if (tx)
 		tx.commit();
 	m_doc->m_Selection->clear();
@@ -737,7 +759,7 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 // the story (text, photos, captions - found by the story-id attribute),
 // mark it unused on the server, record the mark for undo/redo. Returns the
 // server result; the frames are gone either way.
-bool SuneerNewsPanel::removeStoryFrames(PageItem* item, QString* error)
+bool SuneerNewsPanel::removeStoryFrames(PageItem* item, const QString& status, QString* error)
 {
 	const QString storyId = attr(item, "news.story");
 	const QString sid = attr(item, "news.serverId");
@@ -758,7 +780,7 @@ bool SuneerNewsPanel::removeStoryFrames(PageItem* item, QString* error)
 	m_removing = false;
 
 	QString err;
-	const bool marked = !sid.isEmpty() && !pageId.isEmpty() && markOnServer(QStringList() << sid, pageId, "BALANCED", &err);
+	const bool marked = !sid.isEmpty() && !pageId.isEmpty() && markOnServer(QStringList() << sid, pageId, status, &err);
 	if (!marked && err.isEmpty())
 		err = (sid.isEmpty() || pageId.isEmpty()) ? tr("the frames carry no story id / page id") : tr("server refused");
 	if (UndoManager::undoEnabled() && !sid.isEmpty())
@@ -769,10 +791,11 @@ bool SuneerNewsPanel::removeStoryFrames(PageItem* item, QString* error)
 		ss->set("SERVER_ID", sid);
 		ss->set("PAGE_ID", pageId);
 		ss->set("STORY", storyId);
+		ss->set("WANT", status);
 		UndoManager::instance()->action(this, ss);
 	}
 	if (marked)
-		setRowStatus(sid, "BALANCED");
+		setRowStatus(sid, status);
 	if (error) *error = err;
 	return marked;
 }
@@ -782,23 +805,50 @@ bool SuneerNewsPanel::removeStoryFrames(PageItem* item, QString* error)
 // them from the page too (one undo step for all). Each story is then marked
 // on the server exactly as the single "Mark as unused" does; a story the
 // server refuses stays used and its reason goes into the summary.
-void SuneerNewsPanel::onMarkUnusedTicked()
+static QList<QJsonObject> suneerTickedRows(QListWidget* list, const QJsonArray& data, std::function<bool(const QJsonObject&)> keep)
 {
 	QList<QJsonObject> rows;
-	for (int i = 0; i < m_newsList->count(); ++i)
+	for (int i = 0; i < list->count(); ++i)
 	{
-		const QListWidgetItem* row = m_newsList->item(i);
-		if (row->checkState() != Qt::Checked || !isPlacedRow(row))
+		const QListWidgetItem* row = list->item(i);
+		if (row->checkState() != Qt::Checked)
 			continue;
 		const int idx = row->data(Qt::UserRole).toInt();
-		if (idx >= 0 && idx < m_newsData.size())
-			rows << m_newsData[idx].toObject();
+		if (idx >= 0 && idx < data.size() && keep(data[idx].toObject()))
+			rows << data[idx].toObject();
 	}
+	return rows;
+}
+
+void SuneerNewsPanel::onMarkUnusedTicked()
+{
+	const QList<QJsonObject> rows = suneerTickedRows(m_newsList, m_newsData, [](const QJsonObject& n) { return newsDtpStatus(n) != "UNUSED"; });
+	if (rows.isEmpty()) { m_statusLabel->setText(tr("Tick one or more used or balance stories first")); return; }
+	markStories(rows, unusedStatus());
+}
+
+void SuneerNewsPanel::onMarkBalanceTicked()
+{
+	const QList<QJsonObject> rows = suneerTickedRows(m_newsList, m_newsData, [](const QJsonObject& n) { return newsDtpStatus(n) != "BALANCED"; });
+	if (rows.isEmpty()) { m_statusLabel->setText(tr("Tick one or more free or used stories first")); return; }
+	m_markingBalance = true;
+	markStories(rows, "BALANCED");
+	m_markingBalance = false;
+}
+
+// One confirmation that lists the headlines and, when some are still in
+// this document, offers to remove them from the page too (one undo step for
+// all). Each story is then marked on the server; a story the server refuses
+// keeps its status and its reason goes into the summary. Only the changed
+// rows are refreshed - no re-fetch, no document scan.
+void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString& status)
+{
 	if (rows.isEmpty())
-	{
-		m_statusLabel->setText(tr("Tick one or more used (grey) stories first"));
 		return;
-	}
+	// Wording: what the user asked for, not the wire value (today "unused" is
+	// still sent as BALANCED, see unusedStatus()).
+	const bool askedBalance = m_markingBalance;
+	const QString what = askedBalance ? tr("BALANCE (kept for a later day)") : tr("unused (available to everyone again)");
 	QStringList titles;
 	int inDocCount = 0;
 	for (const QJsonObject& n : rows)
@@ -810,8 +860,8 @@ void SuneerNewsPanel::onMarkUnusedTicked()
 	}
 	QMessageBox box(this);
 	box.setIcon(QMessageBox::Question);
-	box.setWindowTitle(tr("Mark unused"));
-	box.setText(tr("Mark these %n story(ies) as unused on the server (available to everyone again)?", "", rows.size()));
+	box.setWindowTitle(askedBalance ? tr("Mark balance") : tr("Mark unused"));
+	box.setText(tr("Mark these %n story(ies) as %1 on the server?", "", rows.size()).arg(what));
 	box.setInformativeText(titles.join("\n"));
 	QCheckBox* removeChk = nullptr;
 	if (inDocCount > 0)
@@ -820,7 +870,7 @@ void SuneerNewsPanel::onMarkUnusedTicked()
 		removeChk->setChecked(true);
 		box.setCheckBox(removeChk);
 	}
-	QPushButton* okBtn = box.addButton(tr("Mark unused"), QMessageBox::AcceptRole);
+	QPushButton* okBtn = box.addButton(askedBalance ? tr("Mark balance") : tr("Mark unused"), QMessageBox::AcceptRole);
 	box.addButton(QMessageBox::Cancel);
 	box.setDefaultButton(okBtn);
 	box.exec();
@@ -841,10 +891,10 @@ void SuneerNewsPanel::onMarkUnusedTicked()
 		bool ok = false;
 		PageItem* inDoc = removeToo ? findStoryItemInDoc(sid) : nullptr;
 		if (inDoc)
-			ok = removeStoryFrames(inDoc, &err);          // frames gone + server mark + undo record
-		else if (markOnServer(QStringList() << sid, m_fetchPageId, "BALANCED", &err))
+			ok = removeStoryFrames(inDoc, status, &err);   // frames gone + server mark + undo record
+		else if (markOnServer(QStringList() << sid, m_fetchPageId, status, &err))
 		{
-			setRowStatus(sid, "BALANCED");               // this row only, no re-fetch
+			setRowStatus(sid, status);                  // this row only, no re-fetch
 			ok = true;
 		}
 		if (ok)
@@ -868,17 +918,16 @@ void SuneerNewsPanel::onMarkUnusedTicked()
 		m_selectUsedChk->setChecked(false);
 		m_selectUsedChk->blockSignals(false);
 	}
-	const QString line = tr("Marked unused: %1").arg(released.size())
-		+ (failed.isEmpty() ? QString() : tr(", refused: %1").arg(failed.size()));
-	m_statusLabel->setText(line);
+	const QString done = askedBalance ? tr("Marked balance: %1") : tr("Marked unused: %1");
+	m_statusLabel->setText(done.arg(released.size()) + (failed.isEmpty() ? QString() : tr(", refused: %1").arg(failed.size())));
 	if (!failed.isEmpty())
 	{
-		QMessageBox::warning(this, tr("Mark unused"),
-			tr("%n story(ies) could not be marked unused and stay used:", "", failed.size()) + "\n\n" + failed.join("\n")
-			+ (released.isEmpty() ? QString() : "\n\n" + tr("Marked unused: %1").arg(released.join(", "))));
+		QMessageBox::warning(this, box.windowTitle(),
+			tr("%n story(ies) could not be marked and keep their status:", "", failed.size()) + "\n\n" + failed.join("\n")
+			+ (released.isEmpty() ? QString() : "\n\n" + done.arg(released.join(", "))));
 	}
 	else if (rows.size() > 1)
-		QMessageBox::information(this, tr("Mark unused"), tr("All %n stories are marked unused on the server.", "", rows.size())
+		QMessageBox::information(this, box.windowTitle(), tr("All %n stories are marked %1 on the server.", "", rows.size()).arg(askedBalance ? tr("balance") : tr("unused"))
 			+ (removeToo && inDocCount > 0 ? "\n" + tr("%n removed from the page (Undo brings them back and marks them used again).", "", inDocCount) : QString()));
 }
 
@@ -890,7 +939,7 @@ void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
 	const QString sid = ss->get("SERVER_ID");
 	const QString pageId = ss->get("PAGE_ID");
 	const QString story = ss->get("STORY");
-	const QString want = isUndo ? "USED" : "BALANCED";
+	const QString want = isUndo ? QStringLiteral("USED") : (ss->contains("WANT") ? ss->get("WANT") : QStringLiteral("BALANCED"));
 	QString err;
 	if (markOnServer(QStringList() << sid, pageId, want, &err))
 	{
@@ -932,10 +981,36 @@ void SuneerNewsPanel::releaseStory(PageItem* item)
 	        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
 		return;
 	QString err;
+	if (markOnServer(QStringList() << sid, pageId, unusedStatus(), &err))
+	{
+		setRowStatus(sid, unusedStatus());
+		m_statusLabel->setText(tr("Marked unused on the server: %1").arg(name));
+	}
+	else
+		m_statusLabel->setText(tr("Error: server refused (%1)").arg(err));
+}
+
+void SuneerNewsPanel::balanceStory(PageItem* item)
+{
+	if (!item)
+		return;
+	const QString sid = attr(item, "news.serverId");
+	const QString pageId = attr(item, "news.pageId");
+	if (sid.isEmpty() || pageId.isEmpty())
+	{
+		m_statusLabel->setText(tr("This story carries no server id / page id"));
+		return;
+	}
+	const QString name = attr(item, "news.story");
+	if (QMessageBox::question(this, tr("Mark as balance"),
+	        tr("Mark \"%1\" as BALANCE on the server (kept for a later day)?\n(The frames stay in the document.)").arg(name),
+	        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+		return;
+	QString err;
 	if (markOnServer(QStringList() << sid, pageId, "BALANCED", &err))
 	{
 		setRowStatus(sid, "BALANCED");
-		m_statusLabel->setText(tr("Marked unused on the server: %1").arg(name));
+		m_statusLabel->setText(tr("Marked balance on the server: %1").arg(name));
 	}
 	else
 		m_statusLabel->setText(tr("Error: server refused (%1)").arg(err));
@@ -1826,7 +1901,7 @@ void SuneerNewsPanel::onPlaceSelected()
 		QMessageBox::warning(this, tr("Error"), tr("No document open!"));
 		return;
 	}
-	QList<QJsonObject> stories;
+	QList<QJsonObject> stories, balance;
 	int usedSkipped = 0;
 	for (int i = 0; i < m_newsList->count(); i++)
 	{
@@ -1838,8 +1913,27 @@ void SuneerNewsPanel::onPlaceSelected()
 			continue;
 		}
 		int idx = m_newsList->item(i)->data(Qt::UserRole).toInt();
-		if (idx >= 0 && idx < m_newsData.size())
+		if (idx < 0 || idx >= m_newsData.size())
+			continue;
+		if (isBalanceRow(m_newsList->item(i)))
+			balance << m_newsData[idx].toObject();
+		else
 			stories << m_newsData[idx].toObject();
+	}
+	if (!balance.isEmpty())
+	{
+		// Asked once for the whole batch: a balance story is one kept for a later day.
+		QStringList t;
+		for (const QJsonObject& n : balance)
+			t << QStringLiteral("\u2022 ") + collapseSpaces(n["title"].toString()).left(60);
+		const int r = QMessageBox::question(this, tr("Balance story"),
+			tr("%n of the ticked stories is/are BALANCE stories (kept for later):", "", balance.size()) + "\n" + t.join("\n")
+			+ "\n\n" + tr("Place them now? They will be marked USED on the server."),
+			QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+		if (r == QMessageBox::Cancel)
+			return;
+		if (r == QMessageBox::Yes)
+			stories += balance;
 	}
 	if (stories.isEmpty())
 	{
@@ -2135,15 +2229,25 @@ QString SuneerNewsPanel::newsRefId(const QJsonObject& news)
 	return news["refId"].toString().trimmed();
 }
 
-bool SuneerNewsPanel::newsIsUsed(const QJsonObject& news)
+QString SuneerNewsPanel::newsDtpStatus(const QJsonObject& news)
 {
 	// /external/...: page.dtpStatus for the fetched page; layout routes: newsPages[].
+	QString s;
 	if (news["page"].isObject())
-		return news["page"].toObject()["dtpStatus"].toString() == "USED";
-	for (const QJsonValue& v : news["newsPages"].toArray())
-		if (v.toObject()["dtpStatus"].toString() == "USED")
-			return true;
-	return false;
+		s = news["page"].toObject()["dtpStatus"].toString().toUpper();
+	if (s.isEmpty())
+		for (const QJsonValue& v : news["newsPages"].toArray())
+		{
+			const QString ps = v.toObject()["dtpStatus"].toString().toUpper();
+			if (ps == "USED") { s = ps; break; }
+			if (ps == "BALANCED") s = ps;
+		}
+	return s.isEmpty() ? QStringLiteral("UNUSED") : s;
+}
+
+bool SuneerNewsPanel::newsIsUsed(const QJsonObject& news)
+{
+	return newsDtpStatus(news) == "USED";
 }
 
 QString SuneerNewsPanel::tagStoryItems(const QList<PageItem*>& items, const QString& title, const QString& pos, int imgCols, int cols, const QString& serverId)
@@ -2176,6 +2280,11 @@ bool SuneerNewsPanel::isPlacedRow(const QListWidgetItem* item) const
 	return item && item->data(Qt::UserRole + 2).toBool();
 }
 
+bool SuneerNewsPanel::isBalanceRow(const QListWidgetItem* item) const
+{
+	return item && item->data(Qt::UserRole + 4).toString() == "BALANCED";
+}
+
 PageItem* SuneerNewsPanel::findStoryItemInDoc(const QString& serverId) const
 {
 	if (!m_doc || serverId.isEmpty())
@@ -2201,37 +2310,45 @@ void SuneerNewsPanel::refreshPlacedMarks()
 			continue;
 		const QJsonObject news = m_newsData[idx].toObject();
 		const QString sid = newsServerId(news);
-		const bool placed = newsIsUsed(news);
+		const QString status = newsDtpStatus(news);          // USED / BALANCED / UNUSED
+		const bool placed = status == "USED";
 		const bool pending = m_pendingMarks.contains(sid);
-		const bool wasPlaced = row->data(Qt::UserRole + 2).toBool();
+		const QString wasStatus = row->data(Qt::UserRole + 4).toString();
 		row->setData(Qt::UserRole + 2, placed);
-		if (wasPlaced != placed)
+		row->setData(Qt::UserRole + 4, status);
+		if (!wasStatus.isEmpty() && wasStatus != status)
 			row->setCheckState(Qt::Unchecked);     // status flipped: a tick meant for the old state is dropped
 		const QString tip = row->data(Qt::UserRole + 3).toString();
+		const int imgCount = news["newsMedia"].toArray().size();
+		const QJsonObject pg = news["page"].toObject();
+		QString where = pg["name"].toString();
+		if (where.isEmpty() && pg["displayOrder"].isDouble())
+			where = tr("page %1").arg(pg["displayOrder"].toInt());
+		if (!pg["updatedAt"].toString().isEmpty())
+			where += (where.isEmpty() ? "" : ", ") + pg["updatedAt"].toString().left(16).replace('T', ' ');
+		if (!pg["dtpUser"].toString().isEmpty())
+			where += (where.isEmpty() ? "" : ", ") + pg["dtpUser"].toString();
+		const QString whereTxt = where.isEmpty() ? QString() : " (" + where + ")";
+		row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
 		if (placed)
 		{
 			row->setIcon(IconManager::instance().loadIcon("ok"));
 			row->setForeground(QBrush(QColor(140, 140, 140)));
-			const QJsonObject pg = news["page"].toObject();
-			QString where = pg["name"].toString();
-			if (where.isEmpty() && pg["displayOrder"].isDouble())
-				where = tr("page %1").arg(pg["displayOrder"].toInt());
-			if (!pg["updatedAt"].toString().isEmpty())
-				where += (where.isEmpty() ? "" : ", ") + pg["updatedAt"].toString().left(16).replace('T', ' ');
-			if (!pg["dtpUser"].toString().isEmpty())
-				where += (where.isEmpty() ? "" : ", ") + pg["dtpUser"].toString();
-			row->setToolTip(tr("Used (placed) - server status%1.\n"
-			                   "Tick it and press 'Mark unused' to release it; it cannot be placed again until then.")
-			                .arg(where.isEmpty() ? QString() : " (" + where + ")") + "\n" + tip);
-			row->setFlags(row->flags() | Qt::ItemIsUserCheckable);   // tickable - for releasing only
+			row->setToolTip(tr("USED - placed%1 (server status).\n"
+			                   "Tick it for 'Mark unused' or 'Mark balance'; it cannot be placed again until then.").arg(whereTxt) + "\n" + tip);
+		}
+		else if (status == "BALANCED")
+		{
+			row->setIcon(IconManager::instance().loadIcon("panel-bookmarks"));
+			row->setForeground(QBrush(QColor(150, 95, 0)));
+			row->setToolTip(tr("BALANCE - kept for later%1 (server status).\n"
+			                   "Tick it: 'Place Selected' asks once and then marks it used; 'Mark unused' releases it.").arg(whereTxt) + "\n" + tip);
 		}
 		else
 		{
-			const int imgCount = news["newsMedia"].toArray().size();
 			row->setIcon(imgCount > 0 ? photoIcon(imgCount) : QIcon());
 			row->setForeground(pending ? QBrush(QColor(180, 90, 0)) : QBrush());
-			row->setToolTip(pending ? tr("Placed here but NOT marked on the server yet - press Check to retry.") + "\n" + tip : tip);
-			row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
+			row->setToolTip((pending ? tr("Placed here but NOT marked on the server yet - press Check to retry.") : tr("FREE - not used yet (server status).")) + "\n" + tip);
 		}
 	}
 	updateTickButtons();
@@ -2241,18 +2358,24 @@ void SuneerNewsPanel::updateTickButtons()
 {
 	if (!m_newsList || !m_releaseBtn || !m_placeBtn)
 		return;
-	int freeTicked = 0, usedTicked = 0;
+	int freeT = 0, usedT = 0, balT = 0;
 	for (int i = 0; i < m_newsList->count(); ++i)
 	{
 		const QListWidgetItem* row = m_newsList->item(i);
 		if (row->checkState() != Qt::Checked)
 			continue;
-		if (isPlacedRow(row)) ++usedTicked; else ++freeTicked;
+		if (isPlacedRow(row)) ++usedT; else if (isBalanceRow(row)) ++balT; else ++freeT;
 	}
-	m_releaseBtn->setText(usedTicked > 0 ? tr("Mark unused (%1)").arg(usedTicked) : tr("Mark unused"));
-	m_releaseBtn->setEnabled(usedTicked > 0);
-	m_placeBtn->setText(freeTicked > 0 ? tr("Place Selected (%1)").arg(freeTicked) : tr("Place Selected"));
+	const int placeable = freeT + balT, releasable = usedT + balT, balanceable = freeT + usedT;
+	m_placeBtn->setText(placeable > 0 ? tr("Place Selected (%1)").arg(placeable) : tr("Place Selected"));
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
+	m_releaseBtn->setText(releasable > 0 ? tr("Mark unused (%1)").arg(releasable) : tr("Mark unused"));
+	m_releaseBtn->setEnabled(releasable > 0);
+	if (m_balanceBtn)
+	{
+		m_balanceBtn->setText(balanceable > 0 ? tr("Mark balance (%1)").arg(balanceable) : tr("Mark balance"));
+		m_balanceBtn->setEnabled(balanceable > 0);
+	}
 }
 
 // Photo and caption wrap the body text at the wrap gap on all four sides

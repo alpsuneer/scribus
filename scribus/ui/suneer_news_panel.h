@@ -223,6 +223,20 @@ private:
 	QPushButton* m_releaseBtn {nullptr};
 	QTimer* m_placedTimer {nullptr};           // unused (kept for ABI of this class only)
 	static bool newsIsUsed(const QJsonObject& news);
+	//! "USED", "BALANCED" or "UNUSED" (the server's DtpStatusEnum) for the fetched page.
+	static QString newsDtpStatus(const QJsonObject& news);
+	static bool newsIsBalance(const QJsonObject& news) { return newsDtpStatus(news) == "BALANCED"; }
+	//! What "Mark unused" sends. Needs the backend patch of 2026-10-08
+	//! (dtp-status accepts UNUSED); an older backend answers 400 and the
+	//! summary shows it. One place to change.
+	static QString unusedStatus() { return QStringLiteral("UNUSED"); }
+	//! Mark \a rows (news objects) as \a status on the server: one confirmation
+	//! listing the headlines, optional removal from this document (one undo
+	//! step), per-story result summary. Shared by the buttons and the menus.
+	void markStories(const QList<QJsonObject>& rows, const QString& status);
+	void onMarkBalanceTicked();
+	QPushButton* m_balanceBtn {nullptr};
+	bool isBalanceRow(const QListWidgetItem* item) const;
 	bool apiPatch(const QUrl& url, const QJsonObject& body, std::function<void(QNetworkReply*)> done, bool retried = false);
 	bool markOnServer(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error);
 	void markPlaced(const QList<QJsonObject>& placedStories);
@@ -235,11 +249,13 @@ private:
 	void updateTickButtons();
 	//! Deletes the story's frames and records the server mark for undo/redo.
 	//! Runs inside the caller's undo transaction; no question asked here.
-	bool removeStoryFrames(PageItem* item, QString* error);
+	bool removeStoryFrames(PageItem* item, const QString& status, QString* error);
 	QCheckBox*   m_selectUsedChk {nullptr};
 public:
 	//! "Mark as unused" (server dtpStatus BALANCED) for the story \a item belongs to; asks first.
 	void releaseStory(PageItem* item);
+	//! "Mark as balance" (server dtpStatus BALANCED, frames stay); asks first.
+	void balanceStory(PageItem* item);
 	//! "Remove story (mark unused)": deletes every item of the story (one undo
 	//! step) and marks it unused on the server; undo restores and re-marks used.
 	void removeStory(PageItem* item);
@@ -249,6 +265,7 @@ public:
 	void deleteKeyHint();
 	bool m_removing {false};
 	int  m_placeUsedSkipped {0};
+	bool m_markingBalance {false};   // markStories(): the caller asked for balance (wording), set by the menus
 	bool m_deleteHintShown {false};
 	void setRowStatus(const QString& serverId, const QString& dtpStatus);   // update one row, no re-fetch
 private:

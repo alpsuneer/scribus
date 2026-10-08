@@ -391,6 +391,8 @@ void ContextMenu::createMenuItems_Selection()
 			connect(rmAct, &QAction::triggered, panel, [panel, story]() { panel->removeStory(story); });
 			QAction* relAct = addAction(tr("Mark as unused on server (keep frames)"));
 			connect(relAct, &QAction::triggered, panel, [panel, story]() { panel->releaseStory(story); });
+			QAction* balAct = addAction(tr("Mark as balance on server (keep frames)"));
+			connect(balAct, &QAction::triggered, panel, [panel, story]() { panel->balanceStory(story); });
 			QMenu* posMenu = addMenu(tr("Photo position"));
 			for (const QString& key : SuneerNewsPanel::photoPositionKeys())
 			{
