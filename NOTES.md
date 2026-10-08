@@ -247,6 +247,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 
 | Feature | Key commits | Branch |
 |---|---|---|
+| Control bar colour popup / multi-selection — all colour buttons get the doc in `setDocument()`, `refreshColorPopup()` on every press (`ColorPicker::setDoc` + `setColorList(PageColors)`), `onMainWindowUpdateRequest(reqColorsUpdate)`, fill/line/opacity via `itemSelection_*` in `selectionTransaction()`, `showMixedColorState()`, `targetItems()` = whole selection, `imgWidthFor()/imgHeightFor()` per item. Verified by the user | `88910af` | feature/ctp-output |
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
@@ -1482,6 +1483,14 @@ to test, since a bad matrix could itself explain "no visible difference".
   its own undo step and Ctrl+Z reverted the paragraph styles but left the new
   width and column count. Every doc call that records undo (`sizeItem`,
   `createPageItem`, `autoFitFrameHeight`) has to sit inside the transaction.
+- **The colour popup is one shared window.** `WidgetManager::colorPickerWindow()` holds a
+  single `ColorPicker`; its list is whatever the last `ColorButton::updateColorPicker()` loaded
+  via `setDoc(m_doc)`. A button whose `m_doc` is null leaves the picker with the previous
+  (or default) list, which looked like "the document's colours are missing". Give every
+  button the document and re-read `PageColors` on each open.
+- **`targetItems()` was first-item-only outside group mode**, so every bar control that
+  looped over it silently ignored the rest of a multi-selection. Doc `itemSelection_*`
+  functions with a null custom selection act on the whole selection; prefer them.
 - **Design Style used to apply the named style as a value copy** (`applyStyle(pos, doc.get(sn))`):
   `ParagraphStyle::applyStyle` with a style that has a parent calls `setStyle()`, i.e. copies the
   style's values and inherit flags into the paragraph, and copies nothing the style inherits.

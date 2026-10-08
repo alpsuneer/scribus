@@ -1133,3 +1133,12 @@ scribus
 - Preferences → SR Menu → "Clear manual size/spacing when applying a Design Style" (default ON). Icon **Shift+click** → പഴയപടി (manual values നിലനിർത്തും).
 - Column Style → Design Style link, Design Style shortcuts: ഇതേ behaviour. Paragraph-style shortcuts വേറെ path (അവിടെ എല്ലാ char formatting-ഉം പോകും — മാറ്റിയിട്ടില്ല).
 - Commit `d3fc7bc`.
+
+### 62. Control bar Fill / Line popup — document colours, multi-selection
+- Fill / Line button-ന്റെ popup (swatch list + Shade) ഇപ്പോൾ എപ്പോഴും **തുറന്നിരിക്കുന്ന document-ന്റെ** colour list: document open/switch,
+  Edit > Colours, import, ഓരോ തവണ തുറക്കുമ്പോഴും refresh. പഴയ default set (None/Black/Registration/White) ഇനി കാണില്ല.
+- പല frames select ചെയ്താൽ: fill colour, shade, line colour, shade, opacity — **എല്ലാ** selected frames-ലും (Properties പോലെ), ഒരു undo.
+  Values വ്യത്യസ്തമെങ്കിൽ swatch blank + tooltip "Mixed …".
+- ഇതേ "ആദ്യ frame മാത്രം" bug ഉണ്ടായിരുന്നവ ശരിയാക്കി: Columns, Column gap, Line style/cap/join/dash/arrows, image line style, W/H.
+  (Gap, line width, text inset, corner radius, wrap, Auto-Fit — മുമ്പേ ശരി.)
+- Note: popup-ൽ colour click ഒരു undo, shade മാറ്റം വേറെ ഒരു undo (Properties-ലും അങ്ങനെ). Commit `88910af`.
