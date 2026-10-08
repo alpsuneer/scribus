@@ -13,6 +13,8 @@ for which a new license (GPL+exception) is in place.
 #include "prefsfile.h"
 #include "prefsmanager.h"
 
+#include "ui/ParagraphStylesPanel.h"
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -46,6 +48,10 @@ Prefs_Experimental::Prefs_Experimental(QWidget* parent, ScribusDoc* /*doc*/)
 	condenseRow->addStretch();
 	// Above the page's trailing spacer, right under the check boxes.
 	verticalLayout->insertLayout(qMax(0, verticalLayout->count() - 1), condenseRow);
+	// Design Style: clear the manual size/spacing (QSettings, read by the panel).
+	m_clearManualOnDesign = new QCheckBox(tr("Clear manual size/spacing when applying a Design Style (Shift+click the icon to keep them)"), this);
+	m_clearManualOnDesign->setToolTip(tr("Font size, scaling, tracking, baseline offset, line spacing, indents, alignment and drop caps set by hand go back to the style. Bold/italic, colours, underline and named character styles stay."));
+	verticalLayout->insertWidget(qMax(0, verticalLayout->count() - 1), m_clearManualOnDesign);
 
 	m_caption = tr("SR Menu");
 	m_icon = "pref-experimental";
@@ -68,6 +74,7 @@ void Prefs_Experimental::restoreDefaults(struct ApplicationPrefs *prefsData)
 	PrefsContext* condensePrefs = PrefsManager::instance().prefsFile->getContext("suneer_condense");
 	m_condenseMinScale->setValue(condensePrefs ? condensePrefs->getDouble("min_scale", 90.0) : 90.0);
 	m_condenseMinTracking->setValue(condensePrefs ? condensePrefs->getDouble("min_tracking", -2.0) : -2.0);
+	m_clearManualOnDesign->setChecked(ParagraphStylesPanel::clearManualOnDesign());
 }
 
 void Prefs_Experimental::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
@@ -80,5 +87,6 @@ void Prefs_Experimental::saveGuiToPrefs(struct ApplicationPrefs *prefsData) cons
 		condensePrefs->set("min_scale", m_condenseMinScale->value());
 		condensePrefs->set("min_tracking", m_condenseMinTracking->value());
 	}
+	ParagraphStylesPanel::setClearManualOnDesign(m_clearManualOnDesign->isChecked());
 }
 

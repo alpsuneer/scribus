@@ -1453,7 +1453,8 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 		double sImgH = dsCfg.value("imgHeight", 0.0).toDouble();
 		dsCfg.endArray();
 		connect(btn, &QPushButton::clicked, this, [this, styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH]() {
-			applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH);
+			const bool shift = QApplication::keyboardModifiers() & Qt::ShiftModifier;
+			applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH, shift ? 0 : -1);
 		});
 		m_iconsGrid->addWidget(btn, i/2, i%2);
 	}
@@ -2005,6 +2006,66 @@ namespace
 		}
 		text.applyStyle(pos, ps);
 	}
+
+	// What a Design Style must reset on each character run, and what it
+	// must leave alone:
+	//   CLEARED (back to the style): font size, horizontal/vertical scale,
+	//     tracking, word tracking, baseline offset, and the font when it is a
+	//     different FAMILY from the style's font.
+	//   KEPT: fill/stroke colour and shade, features (underline, strikethrough,
+	//     outline, shadow, superscript/subscript, small caps, all caps),
+	//     language, a named character style applied to the run (its parent),
+	//     and a font of the SAME family as the style's (Bold/Italic variants
+	//     are emphasis, not a size/spacing override). Everything else (font
+	//     features, hyphenation, background) is untouched.
+	void suneerClearManualCharFormatting(PageItem* item, StoryText& text, int pos, int pEnd, const ParagraphStyle& styleApplied)
+	{
+		const QString styleFamily = styleApplied.charStyle().font().family();
+		int i = pos;
+		while (i < pEnd)
+		{
+			const CharStyle& first = text.charStyle(i);
+			int j = i + 1;
+			while (j < pEnd && text.charStyle(j).equiv(first))
+				++j;
+			CharStyle cs(first);
+			CharStyle old(first);
+			cs.resetFontSize();
+			cs.resetScaleH();
+			cs.resetScaleV();
+			cs.resetTracking();
+			cs.resetWordTracking();
+			cs.resetBaselineOffset();
+			if (!cs.isInhFont() && (styleFamily.isEmpty() || cs.font().family() != styleFamily))
+				cs.resetFont();
+			if (!cs.equiv(old))
+			{
+				if (UndoManager::undoEnabled())
+				{
+					auto* is = new ScOldNewState<CharStyle>(Um::SetStyle);
+					is->set("SET_CHARSTYLE");
+					is->set("START", i);
+					is->set("LENGTH", j - i);
+					is->setStates(old, cs);
+					UndoManager::instance()->action(item, is);
+				}
+				text.setCharStyle(i, j - i, cs);
+			}
+			i = j;
+		}
+	}
+}
+
+bool ParagraphStylesPanel::clearManualOnDesign()
+{
+	QSettings cfg("Scribus", "SuneerDesignStyle");
+	return cfg.value("clearManualFormatting", true).toBool();
+}
+
+void ParagraphStylesPanel::setClearManualOnDesign(bool on)
+{
+	QSettings cfg("Scribus", "SuneerDesignStyle");
+	cfg.setValue("clearManualFormatting", on);
 }
 
 void ParagraphStylesPanel::applyChainFromStyle(const QString& startStyle)
@@ -2399,7 +2460,7 @@ void ParagraphStylesPanel::applyColumnConfig(int configIndex)
 	// Force redraw
 }
 
-bool ParagraphStylesPanel::applyDesignStyleByIndex(int index, bool withColumns)
+bool ParagraphStylesPanel::applyDesignStyleByIndex(int index, bool withColumns, int clearMode)
 {
 	if (!m_doc)
 		return false;
@@ -2420,7 +2481,7 @@ bool ParagraphStylesPanel::applyDesignStyleByIndex(int index, bool withColumns)
 	double sImgW = dsCfg.value("imgWidth", 0.0).toDouble();
 	double sImgH = dsCfg.value("imgHeight", 0.0).toDouble();
 	dsCfg.endArray();
-	applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH);
+	applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH, clearMode);
 	return true;
 }
 
@@ -3521,19 +3582,32 @@ void ParagraphStylesPanel::refreshDesignIcons()
         btn->setStyleSheet("QPushButton { border: 2px solid #ddd; border-radius: 4px; }"
                            "QPushButton:hover { border-color: #3498db; }");
         // Read the style at click time: the settings may change again before then.
-        connect(btn, &QPushButton::clicked, this, [this, i]() { applyDesignStyleByIndex(i, true); });
+        // Shift+click: apply without clearing the manual size/spacing (old behaviour).
+        connect(btn, &QPushButton::clicked, this, [this, i]() {
+            const bool shift = QApplication::keyboardModifiers() & Qt::ShiftModifier;
+            applyDesignStyleByIndex(i, true, shift ? 0 : -1);
+        });
         btn->show();
         m_iconsGrid->addWidget(btn, i/2, i%2);
     }
 	updateEnabledState();
 }
 
-void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX, double savedImgOffY, double savedImgW, double savedImgH)
+void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX, double savedImgOffY, double savedImgW, double savedImgH, int clearMode)
 {
     if (!m_doc || !m_mainWindow) return;
     PageItem* selItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
     PageItem_TextFrame* tf = selItem ? selItem->asTextFrame() : nullptr;
     if (!tf) { QMessageBox::warning(this, "Warning", "Select a text frame first!"); return; }
+    const bool clearManual = clearMode < 0 ? clearManualOnDesign() : (clearMode != 0);
+    // Scope: a text selection inside the frame (edit mode) limits the work to
+    // the paragraphs it touches; otherwise the whole story (all linked frames).
+    int scopeStart = 0, scopeEnd = tf->itemText.length();
+    if (m_doc->appMode == modeEdit && tf->itemText.hasSelection())
+    {
+        scopeStart = tf->itemText.startOfSelection();
+        scopeEnd   = tf->itemText.endOfSelection();
+    }
 
     // Re-entry guard: applyColumnConfig() applies a linked Design Style, and a
     // Design Style applies a column config. Whichever started, the other side
@@ -3557,12 +3631,29 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
         while (pEnd < len && tf->itemText.text(pEnd) != SpecialChars::PARSEP)
             pEnd++;
         const QString& sn = styles[paraIndex];
-        if (!sn.isEmpty() && m_doc->paragraphStyles().contains(sn)) {
+        const bool inScope = (pEnd >= scopeStart && pos <= scopeEnd);
+        if (!sn.isEmpty() && m_doc->paragraphStyles().contains(sn) && inScope) {
             const ParagraphStyle& ps = m_doc->paragraphStyles().get(sn);
             // Recorded, so Ctrl+Z reverts the styles (the bare applyStyle()
             // this used to call left no undo state).
             if (pos < len)
-                suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ps);
+            {
+                if (clearManual)
+                {
+                    // Apply the style as a reference (parent), exactly as
+                    // Scribus' own "apply paragraph style" does: the paragraph
+                    // inherits everything and keeps NO local paragraph values
+                    // (line spacing, indents, alignment, drop cap...). Then the
+                    // character runs lose their manual size/spacing values, but
+                    // keep emphasis (see suneerClearManualCharFormatting).
+                    ParagraphStyle ref;
+                    ref.setParent(sn);
+                    suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ref);
+                    suneerClearManualCharFormatting(tf, tf->itemText, pos, pEnd, ps);
+                }
+                else
+                    suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ps);
+            }
             // Insert column break after this paragraph if style matches colBreak
             // Insert column break if style matches
             if (!colBreak.isEmpty() && pEnd < len) {

@@ -66,7 +66,10 @@ public slots:
 	void colTabDelete();
 	void openDesignStyleSettings();
 	void refreshDesignIcons();
-	void applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX=0, double savedImgOffY=0, double savedImgW=0, double savedImgH=0);
+	//! Setting "Clear manual size/spacing when applying Design Style" (QSettings Scribus/SuneerDesignStyle, default on).
+	static bool clearManualOnDesign();
+	static void setClearManualOnDesign(bool on);
+	void applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX=0, double savedImgOffY=0, double savedImgW=0, double savedImgH=0, int clearMode = -1);
 	void applyColumnConfig(int configIndex);
 	void rebuildColumnShortcuts();
 	void syncCurrentStyle();
@@ -104,7 +107,8 @@ private:
 	//! \brief Apply Design Style number \a index from the SuneerDesignStyle
 	//! settings to the selected frame. \a withColumns false skips its own
 	//! "columns" config step (used when a column config is what applies it).
-	bool applyDesignStyleByIndex(int index, bool withColumns);
+	//! clearMode: -1 = the setting, 0 = keep manual formatting (Shift+click), 1 = clear.
+	bool applyDesignStyleByIndex(int index, bool withColumns, int clearMode = -1);
 	//! \brief Re-applies the search text and (if enabled) the template-styles-only
 	//! filter to the already-populated list. Call after any rebuild or after either
 	//! filter's state changes.
