@@ -1016,6 +1016,7 @@ identical to the pixel, mean pixel difference 1.3%.
 | Feature | Key commits | Branch |
 |---|---|---|
 | Load Span Columns / Next Style from 1.5.x documents | `9ab4870` | |
+| Save As Old Version — File menu, copy for 1.7.3 deb-3 / 1.6.x / 1.5.x via `FORMATID_SLA171EXPORT` / `SLA150EXPORT`, open doc untouched, change notes per target; 1.5 writer also emits `FullSpan`/`nxtStyle` for the office 1.5.6 build | `e077200` | feature/ctp-output |
 | Accept the legacy all-caps `LINESPMODE` spelling | `14c1cab` | |
 | Text-wrap gap offsets serialized in all three SLA formats | `4895488` | |
 | Per-side frame borders survive copy/paste and save | `f9026b9` | |
@@ -2159,6 +2160,12 @@ same day: **the server does the installs**, the laptop only releases.
   (`pageitem.cpp` ~2165: 72/imageXScale outside the checker profile's min/max dpi, with
   `showVerifierWarningsOnCanvas`). The orange LINK badge is ours (suneerimagelinks).
 - Not exercised: Custom shape, shadow, group, DBI preset, Print Preview, rotated faces, a real portrait.
+- 2026-10-08 (`0127cae`): dialog with live preview and a mask brush. The preview is rendered on a
+  worker thread from plain data (frame size, letters path, downscaled picture, mask) — never a
+  PageItem or widget. The picture placement shown in the preview is applied to the face
+  (`Settings::setImage/imageScale/imageOffX/Y`, not stored). A brush-edited mask is written as a
+  copy next to the cached one. rembg still runs with a local event loop: the frame is held in a
+  QPointer and re-checked afterwards.
 
 ## Poster Stack (2026-10-06)
 
@@ -2182,6 +2189,13 @@ same day: **the server does the installs**, the laptop only releases.
   rows / background colour / auto split in the GUI, rotated frames.
 - Harness traps: the process is `scribus.bin` (`pgrep -x scribus` finds nothing); File > Open must be
   used (shortcuts dead on Xvfb); the first Open after start tends to land in the New Document dialog.
+- **Never `UndoManager::undo(1)` inside an open transaction** (`0127cae`). Poster Stack holds an
+  outer transaction around Fill Text; on failure Fill Text used to commit and `undo(1)`, which undid
+  mid-transaction, corrupted the stack and crashed in the canvas redraw. Now the image is deleted
+  under UndoBlocker, the words put back by hand (`plainText()` gives '\n' at paragraph ends; the
+  story wants PARSEP U+2029 or the restored words show box glyphs) and the transaction cancelled.
+  Poster Stack also calls `layerPalette->setDoc()` + `rebuildLayersList()` for its new layer, and
+  the context menu rebuilds the layer actions before "Send to Layer" (`17fd5f0`).
 
 ## Text to Table: view jump and edit-mode leftovers (2026-10-06)
 

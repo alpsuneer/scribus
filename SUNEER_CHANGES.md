@@ -1052,3 +1052,22 @@ scribus
 - Style Manager → Character → Outline popup-ൽ "Grow outward" checkbox (control bar checkbox-ഉമായി sync).
 - **PDF bug**: embedded font-ൽ outward ignore ചെയ്തിരുന്നു; ഇപ്പോൾ PDF screen-ലെ പോലെ (stroke, പിന്നെ fill മുകളിൽ).
 - Test: `tests/suneer/roundtrip_outline_outward.sh <file.sla>`. Commit `e27845e`.
+
+### 53. Pop-out Subject — live preview dialog, mask brush; Poster Stack / Fill Text crash fix
+- Pop-out Subject dialog-ൽ ഇപ്പോൾ **live preview** (paper, അക്ഷരങ്ങളിലെ picture, മുകളിൽ pop-out).
+  Preview-ൽ picture നീക്കിയാലും zoom ചെയ്താലും അതേ placement face frame-ലും വരും.
+- rembg-യുടെ mask **brush** കൊണ്ട് തിരുത്താം (കൂട്ടാം/കുറയ്ക്കാം); തിരുത്തിയ mask copy ആയി cache-ൽ.
+- Poster Stack / Fill Text with Image fail ആകുമ്പോൾ ഉണ്ടായിരുന്ന crash (canvas redraw) മാറി:
+  വാക്കുകൾ തിരിച്ചിടുന്നു, transaction cancel; Poster Stack-ന്റെ പുതിയ layer-ന് "Send to Layer" ഉടൻ.
+- Commit `0127cae`.
+
+### 54. File > Save As Old Version...
+- Scribus 1.7.3 (office deb-3), 1.6.x, 1.5.x — ഇതിലൊന്നിന് തുറക്കാവുന്ന **copy** എഴുതുന്നു
+  (`<name>-1.7.3.sla` / `-1.6.sla` / `-1.5.sla`). തുറന്നിരിക്കുന്ന document അതേപടി.
+- 1.5/1.6 copy-യിൽ പഴയ Scribus-ൽ എന്ത് മാറും എന്ന് dialog-ൽ പറയും (text engine വേറെ, rules/shading
+  കാണില്ല, spanning headline office 1.5.6-ൽ മാത്രം). Office 1.5.6 വായിക്കുന്ന `FullSpan`/`nxtStyle`-ഉം എഴുതുന്നു.
+- Commit `e077200`.
+
+### 55. Context menu — "Send to Layer" crash fix
+- Code വഴി ഉണ്ടാക്കിയ layer-ന് action ഇല്ലാതിരുന്നാൽ right-click crash ആയിരുന്നു; ഇപ്പോൾ menu തുറക്കും മുമ്പ്
+  layer list rebuild. Commit `17fd5f0`.
