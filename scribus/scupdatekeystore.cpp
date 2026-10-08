@@ -53,6 +53,12 @@ void clearObfuscated()
 	settings.remove(kObfuscatedKey);
 }
 
+// Generic fallback entries live in their own file, one group per service.
+QString obfuscatedGroupKey(const QString& service, const QString& key)
+{
+	return service + QLatin1Char('/') + key;
+}
+
 } // namespace
 
 bool ScUpdateKeyStore::isSecureBackendAvailable()
@@ -125,4 +131,73 @@ void ScUpdateKeyStore::clear()
 	}
 #endif
 	clearObfuscated();
+}
+
+bool ScUpdateKeyStore::storeSecret(const QString& service, const QString& key, const QString& value)
+{
+#ifdef HAVE_QTKEYCHAIN
+	if (QKeychain::isAvailable())
+	{
+		QKeychain::WritePasswordJob job(service);
+		job.setAutoDelete(false);
+		job.setKey(key);
+		job.setTextData(value);
+		QEventLoop loop;
+		QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
+		job.start();
+		loop.exec();
+		if (job.error() == QKeychain::NoError)
+		{
+			QSettings settings("Faircode", "ScribusSecrets");
+			settings.remove(obfuscatedGroupKey(service, key));
+			return true;
+		}
+	}
+#endif
+	QSettings settings("Faircode", "ScribusSecrets");
+	settings.setValue(obfuscatedGroupKey(service, key), xorObfuscate(value.toUtf8()).toBase64());
+	return true;
+}
+
+QString ScUpdateKeyStore::loadSecret(const QString& service, const QString& key)
+{
+#ifdef HAVE_QTKEYCHAIN
+	if (QKeychain::isAvailable())
+	{
+		QKeychain::ReadPasswordJob job(service);
+		job.setAutoDelete(false);
+		job.setKey(key);
+		QEventLoop loop;
+		QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
+		job.start();
+		loop.exec();
+		if (job.error() == QKeychain::NoError)
+			return job.textData();
+		if (job.error() != QKeychain::EntryNotFound)
+			return QString();
+	}
+#endif
+	QSettings settings("Faircode", "ScribusSecrets");
+	QByteArray obfuscated = QByteArray::fromBase64(settings.value(obfuscatedGroupKey(service, key)).toByteArray());
+	if (obfuscated.isEmpty())
+		return QString();
+	return QString::fromUtf8(xorObfuscate(obfuscated));
+}
+
+void ScUpdateKeyStore::clearSecret(const QString& service, const QString& key)
+{
+#ifdef HAVE_QTKEYCHAIN
+	if (QKeychain::isAvailable())
+	{
+		QKeychain::DeletePasswordJob job(service);
+		job.setAutoDelete(false);
+		job.setKey(key);
+		QEventLoop loop;
+		QObject::connect(&job, &QKeychain::Job::finished, &loop, &QEventLoop::quit);
+		job.start();
+		loop.exec();
+	}
+#endif
+	QSettings settings("Faircode", "ScribusSecrets");
+	settings.remove(obfuscatedGroupKey(service, key));
 }

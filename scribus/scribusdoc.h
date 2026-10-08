@@ -842,6 +842,7 @@ public:
 	void restoreLevelUpOrDown(SimpleState* ss, bool isUndo);
 	void restoreLevelTopOrBottom(SimpleState* ss, bool isUndo);
 	void restoreGuideLock(SimpleState* ss, bool isUndo);
+	void restoreScratch(SimpleState* ss, bool isUndo);
 
 	/**
 	 * @brief Undo functions for marks / notes
@@ -980,6 +981,14 @@ public:
 	void GroupOnPage(PageItem *currItem);
 
 	void reformPages(bool moveObjects = true);
+	//! Change the pasteboard (scratch) left/right size as one undo step.
+	//! Pages are re-laid out and page items move with their page; items on
+	//! the pasteboard (OwnPage == -1) keep their absolute position.
+	void setScratchUndoable(double left, double right);
+	//! Items carrying the "news.wrapGap" attribute (points) wrap text at that
+	//! distance: the contour line is rebuilt as the frame rectangle grown by
+	//! the gap. Called after every resize so the gap stays exact.
+	void suneerRefreshWrapContour(PageItem* item);
 	/** @brief Refresh automatic guides once Margin struct has been properly configure by reformPages() */
 	void refreshGuides();
 

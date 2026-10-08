@@ -38,6 +38,7 @@
 #include "suneergroupedit.h"
 #include "suneertexteffects.h"
 #include "suneerpopout.h"
+#include "suneer_news_panel.h"
 #include "scribusview.h"
 #include "spellcheckfunctions.h"
 #include "textframespellchecker.h"
@@ -378,6 +379,32 @@ void ContextMenu::createMenuItems_Selection()
 		{
 			m_ScMW->scrActions["suneerTextToTable"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["suneerTextToTable"]);
+		}
+		// A story placed by the News Browser: re-arrange its photos in place.
+		if (selectedItemCount == 1 && SuneerNewsPanel::isNewsStory(currItem) && m_ScMW->m_suneerNewsPanel)
+		{
+			SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+			PageItem* story = currItem;
+			QAction* selAct = addAction(tr("Select whole story"));
+			connect(selAct, &QAction::triggered, panel, [panel, story]() { panel->selectWholeStory(story); });
+			QAction* rmAct = addAction(tr("Remove story (mark unused)"));
+			connect(rmAct, &QAction::triggered, panel, [panel, story]() { panel->removeStory(story); });
+			QAction* relAct = addAction(tr("Mark as unused on server (keep frames)"));
+			connect(relAct, &QAction::triggered, panel, [panel, story]() { panel->releaseStory(story); });
+			QMenu* posMenu = addMenu(tr("Photo position"));
+			for (const QString& key : SuneerNewsPanel::photoPositionKeys())
+			{
+				if (key == "none")
+					continue;
+				QAction* a = posMenu->addAction(SuneerNewsPanel::photoPositionLabel(key));
+				connect(a, &QAction::triggered, panel, [panel, story, key]() { panel->rearrangeStory(story, key, -1); });
+			}
+			QMenu* colMenu = addMenu(tr("Photo columns"));
+			for (int n = 1; n <= 6; ++n)
+			{
+				QAction* a = colMenu->addAction(QString::number(n));
+				connect(a, &QAction::triggered, panel, [panel, story, n]() { panel->rearrangeStory(story, QString(), n); });
+			}
 		}
 
 

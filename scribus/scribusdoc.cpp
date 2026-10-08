@@ -115,6 +115,7 @@ for which a new license (GPL+exception) is in place.
 #include "util_math.h"
 #include "util_printer.h"
 #include "util_text.h"
+#include "ui/suneer_news_panel.h"
 
 
 // static const bool FRAMESELECTION_EDITS_DEFAULTSTYLE = false;
@@ -1949,6 +1950,8 @@ void ScribusDoc::restore(UndoState* state, bool isUndo)
 		restoreGrouping(ss, !isUndo);
 	else if (ss->contains("GUIDE_LOCK"))
 		restoreGuideLock(ss, isUndo);
+	else if (ss->contains("SCRATCH_LEFT"))
+		restoreScratch(ss, isUndo);
 	else if (ss->contains("UP_LAYER"))
 	{
 		if (isUndo)
@@ -2149,6 +2152,60 @@ void ScribusDoc::restoreLevelTopOrBottom(SimpleState* ss, bool isUndo)
 		bringItemSelectionToFront();
 	else
 		sendItemSelectionToBack();
+}
+
+void ScribusDoc::setScratchUndoable(double left, double right)
+{
+	MarginStruct& scratch = m_docPrefsData.displayPrefs.scratch;
+	if (qFuzzyCompare(scratch.left(), left) && qFuzzyCompare(scratch.right(), right))
+		return;
+	if (UndoManager::undoEnabled())
+	{
+		auto* ss = new SimpleState(Um::ScratchSpace, QString(), Um::IDocument);
+		ss->set("SCRATCH_LEFT", left);
+		ss->set("SCRATCH_RIGHT", right);
+		ss->set("OLD_SCRATCH_LEFT", scratch.left());
+		ss->set("OLD_SCRATCH_RIGHT", scratch.right());
+		m_undoManager->action(this, ss);
+	}
+	scratch.setLeft(left);
+	scratch.setRight(right);
+	reformPages(true);
+	changed();
+	regionsChanged()->update(QRectF());
+}
+
+void ScribusDoc::suneerRefreshWrapContour(PageItem* item)
+{
+	if (!item)
+		return;
+	const QList<ObjectAttribute> attrs = item->getObjectAttributes(QStringLiteral("news.wrapGap"));
+	if (attrs.isEmpty())
+		return;
+	const double gap = attrs.first().value.toDouble();
+	const double w = item->width(), hgt = item->height();
+	if (gap < 0.0 || w <= 0.0 || hgt <= 0.0)
+		return;
+	// Rectangle path in the item's own coordinates, Scribus' 8-segment form.
+	const double x0 = -gap, y0 = -gap, x1 = w + gap, y1 = hgt + gap;
+	FPointArray cl;
+	cl.resize(0);
+	cl.addQuadPoint(x0, y0, x0, y0, x1, y0, x1, y0);
+	cl.addQuadPoint(x1, y0, x1, y0, x1, y1, x1, y1);
+	cl.addQuadPoint(x1, y1, x1, y1, x0, y1, x0, y1);
+	cl.addQuadPoint(x0, y1, x0, y1, x0, y0, x0, y0);
+	item->setContour(cl);
+	item->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+}
+
+void ScribusDoc::restoreScratch(SimpleState* ss, bool isUndo)
+{
+	MarginStruct& scratch = m_docPrefsData.displayPrefs.scratch;
+	scratch.setLeft(ss->getDouble(isUndo ? "OLD_SCRATCH_LEFT" : "SCRATCH_LEFT"));
+	scratch.setRight(ss->getDouble(isUndo ? "OLD_SCRATCH_RIGHT" : "SCRATCH_RIGHT"));
+	reformPages(true);
+	changed();
+	regionsChanged()->update(QRectF());
 }
 
 void ScribusDoc::restoreGuideLock(SimpleState* ss, bool isUndo)
@@ -12153,6 +12210,14 @@ void ScribusDoc::itemSelection_DeleteItem(Selection* customSelection, bool force
 	int selectedItemCount = itemSelection->count();
 	if (selectedItemCount == 0)
 		return;
+	// News Browser stories: a plain delete never touches the server; hint once.
+	if (m_ScMW && m_ScMW->m_suneerNewsPanel)
+		for (int i = 0; i < selectedItemCount; ++i)
+			if (!itemSelection->itemAt(i)->getObjectAttributes(QStringLiteral("news.serverId")).isEmpty())
+			{
+				m_ScMW->m_suneerNewsPanel->deleteKeyHint();
+				break;
+			}
 	QList<PageItem*> delItems;
 	QList<PageItem*> textInteractionItems;// text frames possibly interested in removal of selected items
 	PageItem *currItem;
