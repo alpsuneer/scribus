@@ -37,6 +37,7 @@ public:
 
 private slots:
 	void checkClicked();
+	void useDefaultClicked();
 	void clearKeyClicked();
 	void toggleKeyVisibility();
 	void saveToggled(bool checked);
@@ -49,7 +50,10 @@ private slots:
 
 private:
 	void setBusy(bool busy);
-	void persistSettings();
+	bool persistSettings();
+	//! The URL from the edit, validated; empty (with the inline error shown) when unusable.
+	QString validatedUrl(bool allowEmpty);
+	QString m_defaultUrl;
 	QString currentApiKey() const;
 
 	ScUpdateClient* m_client;
@@ -59,6 +63,8 @@ private:
 	QCheckBox* m_saveCheck { nullptr };
 	QPushButton* m_checkButton { nullptr };
 	QPushButton* m_clearKeyButton { nullptr };
+	QPushButton* m_useDefaultButton { nullptr };
+	QLabel* m_urlErrorLabel { nullptr };
 	QLabel* m_statusLabel { nullptr };
 };
 

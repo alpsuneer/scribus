@@ -228,6 +228,15 @@ private:
 	void markPlaced(const QList<QJsonObject>& placedStories);
 	void onCheck();
 	void onReleaseRows();
+	//! Bulk "Mark unused (N)": every ticked USED row, one confirmation, optional
+	//! removal from this document in one undo step, per-story result summary.
+	void onMarkUnusedTicked();
+	//! Enable Place / Mark unused according to what is ticked (free vs used).
+	void updateTickButtons();
+	//! Deletes the story's frames and records the server mark for undo/redo.
+	//! Runs inside the caller's undo transaction; no question asked here.
+	bool removeStoryFrames(PageItem* item, QString* error);
+	QCheckBox*   m_selectUsedChk {nullptr};
 public:
 	//! "Mark as unused" (server dtpStatus BALANCED) for the story \a item belongs to; asks first.
 	void releaseStory(PageItem* item);
@@ -239,6 +248,7 @@ public:
 	//! One-time hint when story frames are deleted with the plain Delete key.
 	void deleteKeyHint();
 	bool m_removing {false};
+	int  m_placeUsedSkipped {0};
 	bool m_deleteHintShown {false};
 	void setRowStatus(const QString& serverId, const QString& dtpStatus);   // update one row, no re-fetch
 private:

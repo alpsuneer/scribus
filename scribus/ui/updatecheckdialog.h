@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include "scupdateclient.h"
 
 #include <QDialog>
+#include <QPointer>
 #include <QString>
 
 class QLabel;
@@ -57,6 +58,7 @@ private slots:
 	void onNetworkError(const QString& message);
 	void updateClicked();
 	void settingsClicked();
+	void tryDefaultClicked();
 
 private:
 	void setResult(const QString& latest, const QString& status, const QString& changelog, bool canUpdate);
@@ -72,6 +74,11 @@ private:
 	QPushButton* m_updateButton { nullptr };
 	QPushButton* m_laterButton { nullptr };
 	QPushButton* m_settingsButton { nullptr };
+	QPushButton* m_tryDefaultButton { nullptr };
+	//! The one Update Settings dialog, parented and modal to this window.
+	QPointer<class UpdateSettingsDialog> m_settingsDialog;
+	QString m_source;       //!< "settings" or "conf" for the check in progress
+	QString m_checkedUrl;
 };
 
 #endif

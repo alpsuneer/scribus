@@ -229,14 +229,19 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_selectAllChk->setStyleSheet("font-size:11px; padding:2px;");
 	connect(m_selectAllChk, &QCheckBox::toggled, this, &SuneerNewsPanel::onSelectAll);
 	selRow->addWidget(m_selectAllChk, 1);
+	m_selectUsedChk = new QCheckBox(tr("Select all used"), w);
+	m_selectUsedChk->setStyleSheet("font-size:11px; padding:2px;");
+	m_selectUsedChk->setToolTip(tr("Tick every used (grey) story - for Mark unused, never for placing"));
+	connect(m_selectUsedChk, &QCheckBox::toggled, this, [this](bool on) {
+		for (int i = 0; i < m_newsList->count(); i++)
+			if (isPlacedRow(m_newsList->item(i)))
+				m_newsList->item(i)->setCheckState(on ? Qt::Checked : Qt::Unchecked);
+	});
+	selRow->addWidget(m_selectUsedChk, 1);
 	m_checkBtn = new QPushButton(im.loadIcon("reload"), tr("Check"), w);
 	m_checkBtn->setToolTip(tr("Re-read the placed status of this page from the server (and retry unsent marks)"));
 	connect(m_checkBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onCheck);
 	selRow->addWidget(m_checkBtn);
-	m_releaseBtn = new QPushButton(tr("Mark as unused"), w);
-	m_releaseBtn->setToolTip(tr("Mark the selected used story as unused on the server (available to everyone)"));
-	connect(m_releaseBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onReleaseRows);
-	selRow->addWidget(m_releaseBtn);
 	vl->addLayout(selRow);
 	// Right-click on a row: Release
 	m_newsList->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -265,6 +270,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_newsList->setTextElideMode(Qt::ElideNone);   // we elide ourselves, by grapheme
 	m_newsList->viewport()->installEventFilter(this);
 	connect(m_newsList, &QListWidget::itemClicked, this, &SuneerNewsPanel::onNewsItemClicked);
+	connect(m_newsList, &QListWidget::itemChanged, this, [this](QListWidgetItem*) { updateTickButtons(); });
 	connect(m_newsList, &QListWidget::itemDoubleClicked, this, &SuneerNewsPanel::onPlaceNews);
 	splitter->addWidget(m_newsList);
 	vl->addWidget(splitter, 1);
@@ -274,7 +280,14 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_placeBtn->setStyleSheet("background:#2E7D32; color:white; font-weight:bold; padding:4px;");
 	m_placeBtn->setEnabled(false);
 	connect(m_placeBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onPlaceSelected);
-	btnRow->addWidget(m_placeBtn);
+	btnRow->addWidget(m_placeBtn, 2);
+	// Next to Place: releases the TICKED used rows (they can be ticked but never placed).
+	m_releaseBtn = new QPushButton(tr("Mark unused"), w);
+	m_releaseBtn->setToolTip(tr("Mark every TICKED used (grey) story as unused on the server (available to everyone); optionally remove them from this page"));
+	m_releaseBtn->setStyleSheet("padding:4px;");
+	m_releaseBtn->setEnabled(false);
+	connect(m_releaseBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onMarkUnusedTicked);
+	btnRow->addWidget(m_releaseBtn, 1);
 	vl->addLayout(btnRow);
 
 	m_stack->addWidget(w);
@@ -582,13 +595,17 @@ void SuneerNewsPanel::markPlaced(const QList<QJsonObject>& placedStories)
 			n["page"] = pg;
 			m_newsData[i] = n;
 		}
-		m_statusLabel->setText(tr("Placed %1 and marked USED on the server").arg(ids.size()));
+		m_statusLabel->setText(tr("Placed %1 and marked USED on the server").arg(ids.size())
+			+ (m_placeUsedSkipped > 0 ? tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped) : QString()));
+		m_placeUsedSkipped = 0;
 	}
 	else
 	{
 		for (const QString& id : ids)
 			m_pendingMarks.insert(id);
-		m_statusLabel->setText(tr("Warning: placed, but NOT marked on server (%1). Press Check to retry.").arg(err));
+		m_statusLabel->setText(tr("Warning: placed, but NOT marked on server (%1). Press Check to retry.").arg(err)
+			+ (m_placeUsedSkipped > 0 ? tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped) : QString()));
+		m_placeUsedSkipped = 0;
 	}
 	refreshPlacedMarks();
 }
@@ -690,10 +707,7 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 	if (!m_doc || !isNewsStory(item))
 		return;
 	const QString storyId = attr(item, "news.story");
-	const QString sid = attr(item, "news.serverId");
-	const QString pageId = attr(item, "news.pageId");
-	const QList<PageItem*> items = storyItems(storyId);
-	if (items.isEmpty())
+	if (storyItems(storyId).isEmpty())
 		return;
 	if (QMessageBox::question(this, tr("Remove story"),
 	        tr("Remove '%1' from the page and mark it unused on the server?").arg(storyId),
@@ -704,6 +718,36 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 	if (UndoManager::undoEnabled())
 		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                               tr("Remove story: %1").arg(storyId), QString(), Um::IDelete);
+	QString err;
+	const bool marked = removeStoryFrames(item, &err);
+	if (tx)
+		tx.commit();
+	m_doc->m_Selection->clear();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	if (m_mw)
+		m_mw->emitUpdateRequest(0);
+	if (marked)
+		m_statusLabel->setText(tr("Removed from page and marked unused on the server: %1").arg(storyId));
+	else
+		m_statusLabel->setText(tr("Removed from page, but NOT marked unused on the server (%1) - use 'Mark unused' in News Browser later").arg(err));
+}
+
+// Shared by removeStory() and the bulk Mark unused: delete every item of
+// the story (text, photos, captions - found by the story-id attribute),
+// mark it unused on the server, record the mark for undo/redo. Returns the
+// server result; the frames are gone either way.
+bool SuneerNewsPanel::removeStoryFrames(PageItem* item, QString* error)
+{
+	const QString storyId = attr(item, "news.story");
+	const QString sid = attr(item, "news.serverId");
+	const QString pageId = attr(item, "news.pageId");
+	const QList<PageItem*> items = storyItems(storyId);
+	if (items.isEmpty())
+	{
+		if (error) *error = tr("no frames of this story in the document");
+		return false;
+	}
 	// Delete through the document's own selection, exactly like the Delete
 	// key does: the GUI observers are then told about the right items.
 	m_doc->m_Selection->clear();
@@ -715,6 +759,8 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 
 	QString err;
 	const bool marked = !sid.isEmpty() && !pageId.isEmpty() && markOnServer(QStringList() << sid, pageId, "BALANCED", &err);
+	if (!marked && err.isEmpty())
+		err = (sid.isEmpty() || pageId.isEmpty()) ? tr("the frames carry no story id / page id") : tr("server refused");
 	if (UndoManager::undoEnabled() && !sid.isEmpty())
 	{
 		// Replayed by restore(): undo -> USED again, redo -> BALANCED again.
@@ -725,20 +771,115 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 		ss->set("STORY", storyId);
 		UndoManager::instance()->action(this, ss);
 	}
+	if (marked)
+		setRowStatus(sid, "BALANCED");
+	if (error) *error = err;
+	return marked;
+}
+
+// "Mark unused (N)": every ticked used row. One confirmation that lists the
+// headlines and, when some are still in this document, offers to remove
+// them from the page too (one undo step for all). Each story is then marked
+// on the server exactly as the single "Mark as unused" does; a story the
+// server refuses stays used and its reason goes into the summary.
+void SuneerNewsPanel::onMarkUnusedTicked()
+{
+	QList<QJsonObject> rows;
+	for (int i = 0; i < m_newsList->count(); ++i)
+	{
+		const QListWidgetItem* row = m_newsList->item(i);
+		if (row->checkState() != Qt::Checked || !isPlacedRow(row))
+			continue;
+		const int idx = row->data(Qt::UserRole).toInt();
+		if (idx >= 0 && idx < m_newsData.size())
+			rows << m_newsData[idx].toObject();
+	}
+	if (rows.isEmpty())
+	{
+		m_statusLabel->setText(tr("Tick one or more used (grey) stories first"));
+		return;
+	}
+	QStringList titles;
+	int inDocCount = 0;
+	for (const QJsonObject& n : rows)
+	{
+		const QString t = collapseSpaces(n["title"].toString()).left(60);
+		const bool inDoc = m_doc && findStoryItemInDoc(newsServerId(n));
+		if (inDoc) ++inDocCount;
+		titles << QStringLiteral("\u2022 ") + (t.isEmpty() ? tr("(untitled)") : t) + (inDoc ? tr("  [in this document]") : QString());
+	}
+	QMessageBox box(this);
+	box.setIcon(QMessageBox::Question);
+	box.setWindowTitle(tr("Mark unused"));
+	box.setText(tr("Mark these %n story(ies) as unused on the server (available to everyone again)?", "", rows.size()));
+	box.setInformativeText(titles.join("\n"));
+	QCheckBox* removeChk = nullptr;
+	if (inDocCount > 0)
+	{
+		removeChk = new QCheckBox(tr("Also remove these %n story(ies) from the page (one undo step)", "", inDocCount), &box);
+		removeChk->setChecked(true);
+		box.setCheckBox(removeChk);
+	}
+	QPushButton* okBtn = box.addButton(tr("Mark unused"), QMessageBox::AcceptRole);
+	box.addButton(QMessageBox::Cancel);
+	box.setDefaultButton(okBtn);
+	box.exec();
+	if (box.clickedButton() != okBtn)
+		return;
+	const bool removeToo = removeChk && removeChk->isChecked() && m_doc;
+
+	UndoTransaction tx;
+	if (removeToo && UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                               tr("Remove %n story(ies)", "", inDocCount), QString(), Um::IDelete);
+	QStringList released, failed;
+	for (const QJsonObject& n : rows)
+	{
+		const QString sid = newsServerId(n);
+		const QString title = collapseSpaces(n["title"].toString()).left(40);
+		QString err;
+		bool ok = false;
+		PageItem* inDoc = removeToo ? findStoryItemInDoc(sid) : nullptr;
+		if (inDoc)
+			ok = removeStoryFrames(inDoc, &err);          // frames gone + server mark + undo record
+		else if (markOnServer(QStringList() << sid, m_fetchPageId, "BALANCED", &err))
+		{
+			setRowStatus(sid, "BALANCED");               // this row only, no re-fetch
+			ok = true;
+		}
+		if (ok)
+			released << title;
+		else
+			failed << tr("%1: %2").arg(title, err.isEmpty() ? tr("server refused") : err);
+	}
 	if (tx)
 		tx.commit();
-	m_doc->m_Selection->clear();
-	m_doc->changed();
-	m_doc->regionsChanged()->update(QRectF());
-	if (m_mw)
-		m_mw->emitUpdateRequest(0);
-	if (marked)
+	if (removeToo)
 	{
-		setRowStatus(sid, "BALANCED");
-		m_statusLabel->setText(tr("Removed from page and marked unused on the server: %1").arg(storyId));
+		m_doc->m_Selection->clear();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+		if (m_mw)
+			m_mw->emitUpdateRequest(0);
 	}
-	else
-		m_statusLabel->setText(tr("Removed from page, but NOT marked unused on the server (%1) - use 'Mark as unused' in News Browser later").arg(err));
+	if (m_selectUsedChk)
+	{
+		m_selectUsedChk->blockSignals(true);
+		m_selectUsedChk->setChecked(false);
+		m_selectUsedChk->blockSignals(false);
+	}
+	const QString line = tr("Marked unused: %1").arg(released.size())
+		+ (failed.isEmpty() ? QString() : tr(", refused: %1").arg(failed.size()));
+	m_statusLabel->setText(line);
+	if (!failed.isEmpty())
+	{
+		QMessageBox::warning(this, tr("Mark unused"),
+			tr("%n story(ies) could not be marked unused and stay used:", "", failed.size()) + "\n\n" + failed.join("\n")
+			+ (released.isEmpty() ? QString() : "\n\n" + tr("Marked unused: %1").arg(released.join(", "))));
+	}
+	else if (rows.size() > 1)
+		QMessageBox::information(this, tr("Mark unused"), tr("All %n stories are marked unused on the server.", "", rows.size())
+			+ (removeToo && inDocCount > 0 ? "\n" + tr("%n removed from the page (Undo brings them back and marks them used again).", "", inDocCount) : QString()));
 }
 
 void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
@@ -1686,19 +1827,28 @@ void SuneerNewsPanel::onPlaceSelected()
 		return;
 	}
 	QList<QJsonObject> stories;
+	int usedSkipped = 0;
 	for (int i = 0; i < m_newsList->count(); i++)
 	{
-		if (m_newsList->item(i)->checkState() != Qt::Checked || isPlacedRow(m_newsList->item(i)))
+		if (m_newsList->item(i)->checkState() != Qt::Checked)
 			continue;
+		if (isPlacedRow(m_newsList->item(i)))
+		{
+			++usedSkipped;                 // ticked for Mark unused, never placed again
+			continue;
+		}
 		int idx = m_newsList->item(i)->data(Qt::UserRole).toInt();
 		if (idx >= 0 && idx < m_newsData.size())
 			stories << m_newsData[idx].toObject();
 	}
 	if (stories.isEmpty())
 	{
-		m_statusLabel->setText(tr("Tick the stories to place"));
+		m_statusLabel->setText(usedSkipped > 0
+			? tr("Nothing to place: the %n ticked story(ies) is/are already used (use 'Mark unused' to release)", "", usedSkipped)
+			: tr("Tick the stories to place"));
 		return;
 	}
+	m_placeUsedSkipped = usedSkipped;
 	const QString target = settingsString("layout/placeTarget", "left");
 	if (target == "page")
 	{
@@ -2053,16 +2203,27 @@ void SuneerNewsPanel::refreshPlacedMarks()
 		const QString sid = newsServerId(news);
 		const bool placed = newsIsUsed(news);
 		const bool pending = m_pendingMarks.contains(sid);
+		const bool wasPlaced = row->data(Qt::UserRole + 2).toBool();
 		row->setData(Qt::UserRole + 2, placed);
+		if (wasPlaced != placed)
+			row->setCheckState(Qt::Unchecked);     // status flipped: a tick meant for the old state is dropped
 		const QString tip = row->data(Qt::UserRole + 3).toString();
 		if (placed)
 		{
 			row->setIcon(IconManager::instance().loadIcon("ok"));
 			row->setForeground(QBrush(QColor(140, 140, 140)));
-			row->setToolTip(tr("Placed (USED) on this page - server status.\n"
-			                   "Deleting the frames does not release it; use Release.") + "\n" + tip);
-			row->setCheckState(Qt::Unchecked);
-			row->setFlags(row->flags() & ~Qt::ItemIsUserCheckable);
+			const QJsonObject pg = news["page"].toObject();
+			QString where = pg["name"].toString();
+			if (where.isEmpty() && pg["displayOrder"].isDouble())
+				where = tr("page %1").arg(pg["displayOrder"].toInt());
+			if (!pg["updatedAt"].toString().isEmpty())
+				where += (where.isEmpty() ? "" : ", ") + pg["updatedAt"].toString().left(16).replace('T', ' ');
+			if (!pg["dtpUser"].toString().isEmpty())
+				where += (where.isEmpty() ? "" : ", ") + pg["dtpUser"].toString();
+			row->setToolTip(tr("Used (placed) - server status%1.\n"
+			                   "Tick it and press 'Mark unused' to release it; it cannot be placed again until then.")
+			                .arg(where.isEmpty() ? QString() : " (" + where + ")") + "\n" + tip);
+			row->setFlags(row->flags() | Qt::ItemIsUserCheckable);   // tickable - for releasing only
 		}
 		else
 		{
@@ -2073,6 +2234,25 @@ void SuneerNewsPanel::refreshPlacedMarks()
 			row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
 		}
 	}
+	updateTickButtons();
+}
+
+void SuneerNewsPanel::updateTickButtons()
+{
+	if (!m_newsList || !m_releaseBtn || !m_placeBtn)
+		return;
+	int freeTicked = 0, usedTicked = 0;
+	for (int i = 0; i < m_newsList->count(); ++i)
+	{
+		const QListWidgetItem* row = m_newsList->item(i);
+		if (row->checkState() != Qt::Checked)
+			continue;
+		if (isPlacedRow(row)) ++usedTicked; else ++freeTicked;
+	}
+	m_releaseBtn->setText(usedTicked > 0 ? tr("Mark unused (%1)").arg(usedTicked) : tr("Mark unused"));
+	m_releaseBtn->setEnabled(usedTicked > 0);
+	m_placeBtn->setText(freeTicked > 0 ? tr("Place Selected (%1)").arg(freeTicked) : tr("Place Selected"));
+	m_placeBtn->setEnabled(!m_newsData.isEmpty());
 }
 
 // Photo and caption wrap the body text at the wrap gap on all four sides

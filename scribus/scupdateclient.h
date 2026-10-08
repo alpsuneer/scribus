@@ -27,6 +27,8 @@ struct SCRIBUS_API ScUpdateSettings
 	QString apiKey;
 	//! "settings", "conf" or "" (nothing configured)
 	QString source;
+	//! Set when a saved user URL was ignored this time (why, in plain words).
+	QString ignoredUserUrl;
 };
 
 struct SCRIBUS_API ScUpdateInfo
@@ -90,6 +92,12 @@ public:
 	//! The effective server URL and key (see ScUpdateSettings). readKeyStore=false
 	//! skips the OS key store (it can block); the conf file key is still read.
 	static ScUpdateSettings effectiveSettings(bool readKeyStore = true);
+	//! One http(s) URL for the update server, or empty with \a why set: not a
+	//! URL, more than one word (a pasted command), no scheme, or a retired
+	//! server. The returned string is normalised (trimmed, no trailing slash).
+	static QString validateServerUrl(const QString& text, QString* why = nullptr);
+	//! Forget the URL a user saved in Update Settings (back to update.conf).
+	static void clearSavedServerUrl();
 
 
 	//! An empty apiKey sends no authentication headers. timeoutMs bounds the

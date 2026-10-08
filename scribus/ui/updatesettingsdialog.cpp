@@ -37,12 +37,35 @@ UpdateSettingsDialog::UpdateSettingsDialog(QWidget* parent)
 	auto* form = new QFormLayout();
 
 	m_urlEdit = new QLineEdit(this);
-	const ScUpdateSettings confDefault = ScUpdateClient::effectiveSettings(false);
+	// The system-wide address, read straight from the file (a saved user URL
+	// must not hide it here).
+	{
+		QSettings probe(kOrg, kApp);
+		const QString saved = probe.value(kUrlKey).toString();
+		probe.remove(kUrlKey);
+		m_defaultUrl = ScUpdateClient::effectiveSettings(false).url;
+		if (!saved.isEmpty())
+			probe.setValue(kUrlKey, saved);
+	}
 	// Empty here means "use /etc/scribus/update.conf"; show what that is.
-	m_urlEdit->setPlaceholderText(confDefault.source == QLatin1String("conf")
-		? tr("%1 (from %2)").arg(confDefault.url, ScUpdateClient::systemConfigPath())
-		: QStringLiteral("https://example.com/scribus"));
-	form->addRow(tr("Update Server URL:"), m_urlEdit);
+	m_urlEdit->setPlaceholderText(!m_defaultUrl.isEmpty()
+		? tr("%1 (default, from %2)").arg(m_defaultUrl, ScUpdateClient::systemConfigPath())
+		: QStringLiteral("http://server:8095/scribus-updates"));
+	m_urlEdit->setToolTip(tr("One address only, starting with http:// or https://. Leave empty to use the default from %1.").arg(ScUpdateClient::systemConfigPath()));
+	auto* urlRow = new QHBoxLayout();
+	urlRow->addWidget(m_urlEdit, 1);
+	m_useDefaultButton = new QPushButton(tr("Use default"), this);
+	m_useDefaultButton->setToolTip(tr("Forget the saved address and use %1").arg(m_defaultUrl.isEmpty() ? ScUpdateClient::systemConfigPath() : m_defaultUrl));
+	m_useDefaultButton->setEnabled(!m_defaultUrl.isEmpty());
+	m_useDefaultButton->setAutoDefault(false);   // Enter in the URL field means "check", not "forget"
+	urlRow->addWidget(m_useDefaultButton);
+	form->addRow(tr("Update Server URL:"), urlRow);
+	m_urlErrorLabel = new QLabel(this);
+	m_urlErrorLabel->setWordWrap(true);
+	m_urlErrorLabel->setStyleSheet(QStringLiteral("color: #b00020;"));
+	m_urlErrorLabel->setMinimumWidth(360);
+	m_urlErrorLabel->hide();
+	form->addRow(QString(), m_urlErrorLabel);
 
 	auto* keyRow = new QHBoxLayout();
 	m_keyEdit = new QLineEdit(this);
@@ -68,10 +91,13 @@ UpdateSettingsDialog::UpdateSettingsDialog(QWidget* parent)
 	m_checkButton = buttons->addButton(tr("Check for Updates"), QDialogButtonBox::ActionRole);
 	m_clearKeyButton = buttons->addButton(tr("Clear Saved Key"), QDialogButtonBox::ResetRole);
 	buttons->addButton(QDialogButtonBox::Close);
+	m_checkButton->setDefault(true);
 	layout->addWidget(buttons);
 
 	connect(m_checkButton, &QPushButton::clicked, this, &UpdateSettingsDialog::checkClicked);
 	connect(m_clearKeyButton, &QPushButton::clicked, this, &UpdateSettingsDialog::clearKeyClicked);
+	connect(m_useDefaultButton, &QPushButton::clicked, this, &UpdateSettingsDialog::useDefaultClicked);
+	connect(m_urlEdit, &QLineEdit::textEdited, this, [this]() { m_urlErrorLabel->hide(); });
 	connect(m_showKeyButton, &QToolButton::toggled, this, &UpdateSettingsDialog::toggleKeyVisibility);
 	connect(m_saveCheck, &QCheckBox::toggled, this, &UpdateSettingsDialog::saveToggled);
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -86,6 +112,16 @@ UpdateSettingsDialog::UpdateSettingsDialog(QWidget* parent)
 	const QString savedUrl = settings.value(kUrlKey).toString();
 	const QString savedKey = ScUpdateKeyStore::load();
 	m_urlEdit->setText(savedUrl);
+	if (!savedUrl.trimmed().isEmpty())
+	{
+		QString why;
+		if (ScUpdateClient::validateServerUrl(savedUrl, &why).isEmpty())
+		{
+			m_urlErrorLabel->setText(tr("The saved address is not used because %1. Correct it or click Use default.").arg(why));
+			m_urlErrorLabel->show();
+			adjustSize();
+		}
+	}
 	m_keyEdit->setText(savedKey);
 	m_saveCheck->setChecked(!savedUrl.isEmpty() || !savedKey.isEmpty());
 }
@@ -102,17 +138,59 @@ void UpdateSettingsDialog::setBusy(bool busy)
 	m_keyEdit->setEnabled(!busy);
 }
 
-void UpdateSettingsDialog::persistSettings()
+QString UpdateSettingsDialog::validatedUrl(bool allowEmpty)
 {
+	const QString text = m_urlEdit->text();
+	if (text.trimmed().isEmpty())
+	{
+		m_urlErrorLabel->hide();
+		return allowEmpty ? QString() : QString();
+	}
+	QString why;
+	const QString url = ScUpdateClient::validateServerUrl(text, &why);
+	if (url.isEmpty())
+	{
+		m_urlErrorLabel->setText(tr("This address cannot be used because %1.").arg(why));
+		m_urlErrorLabel->show();
+		adjustSize();                       // the dialog is already visible: make room for the row
+		return QString();
+	}
+	m_urlErrorLabel->hide();
+	if (url != text)
+		m_urlEdit->setText(url);
+	return url;
+}
+
+bool UpdateSettingsDialog::persistSettings()
+{
+	const QString url = validatedUrl(true);
+	if (url.isEmpty() && !m_urlEdit->text().trimmed().isEmpty())
+		return false;                       // invalid: shown inline, nothing saved
 	QSettings settings(kOrg, kApp);
-	settings.setValue(kUrlKey, m_urlEdit->text().trimmed());
+	if (url.isEmpty())
+		settings.remove(kUrlKey);           // empty = use update.conf
+	else
+		settings.setValue(kUrlKey, url);
 	ScUpdateKeyStore::store(currentApiKey());
+	return true;
+}
+
+void UpdateSettingsDialog::useDefaultClicked()
+{
+	ScUpdateClient::clearSavedServerUrl();
+	m_urlEdit->clear();
+	m_urlErrorLabel->hide();
+	m_statusLabel->setText(m_defaultUrl.isEmpty()
+		? tr("Saved address forgotten. %1 names no server.").arg(ScUpdateClient::systemConfigPath())
+		: tr("Saved address forgotten. Scribus now uses %1 (from %2).").arg(m_defaultUrl, ScUpdateClient::systemConfigPath()));
 }
 
 void UpdateSettingsDialog::checkClicked()
 {
-	QString url = m_urlEdit->text().trimmed();
+	QString url = validatedUrl(true);
 	QString key = currentApiKey();
+	if (url.isEmpty() && !m_urlEdit->text().trimmed().isEmpty())
+		return;                             // invalid: the inline error says why
 	if (url.isEmpty())
 	{
 		// Fall back to the system-wide file, key included.
@@ -123,12 +201,14 @@ void UpdateSettingsDialog::checkClicked()
 	}
 	if (url.isEmpty())
 	{
-		m_statusLabel->setText(tr("Enter the server URL (there is none in %1).").arg(ScUpdateClient::systemConfigPath()));
+		m_statusLabel->setText(tr("Enter the server address (there is none in %1).").arg(ScUpdateClient::systemConfigPath()));
 		return;
 	}
+	if (m_saveCheck->isChecked() && !persistSettings())
+		return;
 
 	setBusy(true);
-	m_statusLabel->setText(tr("Checking for updates…"));
+	m_statusLabel->setText(tr("Checking %1 ...").arg(url));
 	m_client->checkForUpdate(url, key);
 }
 
@@ -148,8 +228,8 @@ void UpdateSettingsDialog::toggleKeyVisibility()
 
 void UpdateSettingsDialog::saveToggled(bool checked)
 {
-	if (checked)
-		persistSettings();
+	if (checked && !persistSettings())
+		m_saveCheck->setChecked(false);
 }
 
 void UpdateSettingsDialog::onUpdateAvailable(const ScUpdateInfo& info)
@@ -183,7 +263,8 @@ void UpdateSettingsDialog::onUpdateAvailable(const ScUpdateInfo& info)
 void UpdateSettingsDialog::onUpToDate()
 {
 	setBusy(false);
-	m_statusLabel->setText(tr("You're on the latest version."));
+	const QString v = m_client->lastCheckedInfo().version;
+	m_statusLabel->setText(v.isEmpty() ? tr("You have the latest version.") : tr("You have the latest version (%1).").arg(v));
 	if (m_saveCheck->isChecked())
 		persistSettings();
 }
@@ -191,13 +272,13 @@ void UpdateSettingsDialog::onUpToDate()
 void UpdateSettingsDialog::onAuthError()
 {
 	setBusy(false);
-	m_statusLabel->setText(tr("Invalid API key — contact your administrator."));
+	m_statusLabel->setText(tr("The update server refused the API key. Ask the administrator."));
 }
 
 void UpdateSettingsDialog::onNotFoundError()
 {
 	setBusy(false);
-	m_statusLabel->setText(tr("Update server not found."));
+	m_statusLabel->setText(tr("Nothing was found at that address (no latest.json): the server answers, but the address is wrong."));
 }
 
 void UpdateSettingsDialog::onNetworkError(const QString& message)

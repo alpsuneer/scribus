@@ -18,6 +18,8 @@ for which a new license (GPL+exception) is in place.
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QCoreApplication>
+#include <QDebug>
+#include <QUrl>
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSettings>
@@ -211,18 +213,83 @@ QString ScUpdateClient::systemConfigPath()
 	return QStringLiteral("/etc/scribus/update.conf");
 }
 
+QString ScUpdateClient::validateServerUrl(const QString& text, QString* why)
+{
+	auto fail = [why](const QString& reason) { if (why) *why = reason; return QString(); };
+	QString t = text.trimmed();
+	if (t.isEmpty())
+		return fail(QCoreApplication::translate("ScUpdateClient", "no address"));
+	// A pasted shell command ("curl -sS http://...") or several words.
+	static const QRegularExpression spaces(QStringLiteral("\\s"));
+	if (t.contains(spaces))
+		return fail(QCoreApplication::translate("ScUpdateClient", "it contains spaces or extra words; enter only the address, like http://server:8095/scribus-updates"));
+	const QUrl url(t, QUrl::StrictMode);
+	if (!url.isValid() || url.host().isEmpty())
+		return fail(QCoreApplication::translate("ScUpdateClient", "it is not a valid address"));
+	const QString scheme = url.scheme().toLower();
+	if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+		return fail(QCoreApplication::translate("ScUpdateClient", "it must start with http:// or https://"));
+	if (!url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment())
+		return fail(QCoreApplication::translate("ScUpdateClient", "it must be a plain address without login, ? or #"));
+	// Retired servers. Expressed by host name and port, never by address, so
+	// this stays true for whatever the LAN numbering is:
+	//  - the mDNS name of the first laptop server, on any port;
+	//  - port 8081, which only the laptop and the first LAN server ever used;
+	//  - /scribus-updates on the default port 80, the short-lived path through
+	//    the workflow server's own web server (now port 8095).
+	const QString host = url.host().toLower();
+	const int port = url.port(scheme == QLatin1String("https") ? 443 : 80);
+	const QString path = url.path();
+	if (host == QLatin1String("scribus-updates.local") || host.endsWith(QLatin1String(".scribus-updates.local")))
+		return fail(QCoreApplication::translate("ScUpdateClient", "that server (scribus-updates.local) no longer exists"));
+	if (port == 8081)
+		return fail(QCoreApplication::translate("ScUpdateClient", "port 8081 belonged to the old update server, which no longer exists"));
+	if (port == 80 && scheme == QLatin1String("http") && path.startsWith(QLatin1String("/scribus-updates")))
+		return fail(QCoreApplication::translate("ScUpdateClient", "the update server moved to port 8095"));
+	while (t.endsWith('/'))
+		t.chop(1);
+	if (t.endsWith(QLatin1String("/latest.json")))
+		t.chop(12);
+	if (why)
+		why->clear();
+	return t;
+}
+
+void ScUpdateClient::clearSavedServerUrl()
+{
+	QSettings settings(QStringLiteral("Faircode"), QStringLiteral("ScribusUpdater"));
+	settings.remove(QStringLiteral("serverUrl"));
+}
+
 ScUpdateSettings ScUpdateClient::effectiveSettings(bool readKeyStore)
 {
 	ScUpdateSettings result;
-	// 1. What this user entered in Update Settings.
+	// 1. What this user entered in Update Settings - if it is usable. A broken
+	// or retired saved URL used to override update.conf forever ("Protocol ""
+	// is unknown" for a pasted "//host/latest.json"); now it is dropped and
+	// the system-wide file wins.
 	QSettings settings(QStringLiteral("Faircode"), QStringLiteral("ScribusUpdater"));
-	const QString userUrl = settings.value(QStringLiteral("serverUrl")).toString().trimmed();
-	if (!userUrl.isEmpty())
+	const QString rawUserUrl = settings.value(QStringLiteral("serverUrl")).toString();
+	if (!rawUserUrl.trimmed().isEmpty())
 	{
-		result.url = userUrl;
-		result.apiKey = readKeyStore ? ScUpdateKeyStore::load() : QString();
-		result.source = QStringLiteral("settings");
-		return result;
+		QString why;
+		const QString userUrl = validateServerUrl(rawUserUrl, &why);
+		if (!userUrl.isEmpty())
+		{
+			result.url = userUrl;
+			result.apiKey = readKeyStore ? ScUpdateKeyStore::load() : QString();
+			result.source = QStringLiteral("settings");
+			return result;
+		}
+		static bool warned = false;
+		if (!warned)
+		{
+			warned = true;
+			qWarning().noquote() << "Updater: ignoring the saved update server URL (" << why << "); using" << systemConfigPath();
+		}
+		settings.remove(QStringLiteral("serverUrl"));
+		result.ignoredUserUrl = QCoreApplication::translate("ScUpdateClient",
+			"The update server address saved in Settings was ignored because %1. The system-wide address from %2 is used instead.").arg(why, systemConfigPath());
 	}
 	// 2. The system-wide file (installed by the .deb / cmake --install).
 	QFile conf(systemConfigPath());

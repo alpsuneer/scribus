@@ -130,9 +130,33 @@ void UpdateAvailableDialog::onDownloadFinished(const QString& path)
 		m_progressDialog = nullptr;
 	}
 
+	// Say whose password the system prompt will want. pkexec asks for the
+	// password of an administrator account: this user's own if it is in the
+	// sudo group, otherwise the root (administrator) password of this PC.
+	auto isAdmin = []() {
+		const QString me = qEnvironmentVariable("USER");
+		QFile group(QStringLiteral("/etc/group"));
+		if (me.isEmpty() || !group.open(QIODevice::ReadOnly | QIODevice::Text))
+			return false;
+		QTextStream in(&group);
+		while (!in.atEnd())
+		{
+			const QString line = in.readLine();
+			if (line.startsWith(QLatin1String("sudo:")) || line.startsWith(QLatin1String("wheel:")) || line.startsWith(QLatin1String("admin:")))
+			{
+				const QStringList members = line.section(':', 3).split(',', Qt::SkipEmptyParts);
+				if (members.contains(me))
+					return true;
+			}
+		}
+		return false;
+	};
+	const QString who = isAdmin()
+		? tr("A system window will ask for YOUR password (your account is an administrator).")
+		: tr("A system window will ask for the ADMINISTRATOR (root) password of this PC, not your own login password. "
+		     "If you do not know it, click No and ask the person who set up this computer.");
 	const int ret = QMessageBox::question(this, tr("Install Update"),
-		tr("The update has been downloaded. Install it now?\n\n"
-		   "Scribus will ask for administrator permission via a system prompt (pkexec)."),
+		tr("The update was downloaded and its signature and checksum were verified. Install it now?\n\n%1").arg(who),
 		QMessageBox::Yes | QMessageBox::No);
 	if (ret != QMessageBox::Yes)
 	{
@@ -173,7 +197,7 @@ void UpdateAvailableDialog::installUpdate(const QString& path)
 	connect(m_installProcess, &QProcess::errorOccurred, this, &UpdateAvailableDialog::onInstallError);
 
 	m_progressDialog = new QProgressDialog(
-		tr("Installing update…\nEnter your password if prompted. Do not turn off the computer."), QString(), 0, 0, this);
+		tr("Installing update…\nEnter the password in the system window if it asks. Do not turn off the computer."), QString(), 0, 0, this);
 	// No Cancel: once pkexec hands over, dpkg must be allowed to finish.
 	// Dismissing the password prompt is the way to back out before that.
 	m_progressDialog->setCancelButton(nullptr);

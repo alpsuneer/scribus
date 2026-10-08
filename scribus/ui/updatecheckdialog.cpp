@@ -64,6 +64,9 @@ UpdateCheckDialog::UpdateCheckDialog(QWidget* parent, bool checkNow)
 
 	auto* buttons = new QDialogButtonBox(this);
 	m_settingsButton = buttons->addButton(tr("Settings..."), QDialogButtonBox::ResetRole);
+	m_tryDefaultButton = buttons->addButton(tr("Try the default server"), QDialogButtonBox::ActionRole);
+	m_tryDefaultButton->setToolTip(tr("Forget the address saved under Settings... and check the server named in %1").arg(ScUpdateClient::systemConfigPath()));
+	m_tryDefaultButton->hide();
 	m_updateButton = buttons->addButton(tr("Update"), QDialogButtonBox::AcceptRole);
 	m_laterButton = buttons->addButton(tr("Later"), QDialogButtonBox::RejectRole);
 	m_updateButton->setEnabled(false);
@@ -71,6 +74,7 @@ UpdateCheckDialog::UpdateCheckDialog(QWidget* parent, bool checkNow)
 
 	connect(m_updateButton, &QPushButton::clicked, this, &UpdateCheckDialog::updateClicked);
 	connect(m_settingsButton, &QPushButton::clicked, this, &UpdateCheckDialog::settingsClicked);
+	connect(m_tryDefaultButton, &QPushButton::clicked, this, &UpdateCheckDialog::tryDefaultClicked);
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
 	connect(m_client, &ScUpdateClient::updateAvailable, this, &UpdateCheckDialog::onUpdateAvailable);
@@ -90,6 +94,10 @@ void UpdateCheckDialog::setResult(const QString& latest, const QString& status, 
 	m_changelog->setPlainText(changelog);
 	m_updateButton->setEnabled(canUpdate);
 	m_settingsButton->setEnabled(true);
+	// A saved address that fails: offer the system-wide one in one click.
+	const bool failed = latest == QLatin1String("-");
+	m_tryDefaultButton->setVisible(failed && m_source == QLatin1String("settings")
+		&& !ScUpdateClient::effectiveSettings(false).url.isEmpty());
 	if (canUpdate)
 		m_updateButton->setDefault(true);
 	else
@@ -100,18 +108,22 @@ void UpdateCheckDialog::startCheck()
 {
 	const ScUpdateSettings s = ScUpdateClient::effectiveSettings();
 	m_apiKey = s.apiKey;
+	m_source = s.source;
+	m_checkedUrl = s.url;
+	m_tryDefaultButton->hide();
 	if (s.url.isEmpty())
 	{
 		setResult(QStringLiteral("-"),
-			tr("No update server is configured: %1 has no url line and nothing was entered under Settings...")
+			tr("No update server is set up: %1 has no url line and nothing valid was entered under Settings...")
 				.arg(ScUpdateClient::systemConfigPath()),
 			QString(), false);
 		return;
 	}
 	m_latestLabel->setText(QStringLiteral("-"));
-	m_statusLabel->setText(s.source == QLatin1String("conf")
-		? tr("Checking %1 (from %2)...").arg(s.url, ScUpdateClient::systemConfigPath())
-		: tr("Checking %1...").arg(s.url));
+	QString line = tr("Checking %1 ...").arg(s.url);
+	if (!s.ignoredUserUrl.isEmpty())
+		line = s.ignoredUserUrl + QLatin1Char('\n') + line;
+	m_statusLabel->setText(line);
 	m_changelog->clear();
 	m_updateButton->setEnabled(false);
 	m_settingsButton->setEnabled(false);
@@ -136,19 +148,18 @@ void UpdateCheckDialog::onUpdateAvailable(const ScUpdateInfo& info)
 void UpdateCheckDialog::onUpToDate()
 {
 	const ScUpdateInfo& info = m_client->lastCheckedInfo();
-	setResult(info.version.isEmpty() ? ScUpdateClient::localVersion() : info.version,
-		tr("You have the latest version."),
-		info.changelog, false);
+	const QString v = info.version.isEmpty() ? ScUpdateClient::localVersion() : info.version;
+	setResult(v, tr("You have the latest version (%1).").arg(v), info.changelog, false);
 }
 
 void UpdateCheckDialog::onAuthError()
 {
-	setResult(QStringLiteral("-"), tr("The update server refused the API key. Click Settings... or contact your administrator."), QString(), false);
+	setResult(QStringLiteral("-"), tr("The update server %1 refused the API key. Click Settings... or ask the administrator.").arg(m_checkedUrl), QString(), false);
 }
 
 void UpdateCheckDialog::onNotFoundError()
 {
-	setResult(QStringLiteral("-"), tr("The update server has no latest.json at the saved URL. Click Settings... to check the address."), QString(), false);
+	setResult(QStringLiteral("-"), tr("Nothing was found at %1/latest.json: the server is reachable but the update address is wrong. Click Settings... to check it.").arg(m_checkedUrl), QString(), false);
 }
 
 void UpdateCheckDialog::onNetworkError(const QString& message)
@@ -171,8 +182,27 @@ void UpdateCheckDialog::updateClicked()
 
 void UpdateCheckDialog::settingsClicked()
 {
-	UpdateSettingsDialog dia(this);
-	dia.exec();
+	// One instance, owned by and modal to this window, always brought to the
+	// front: on the office PCs it used to open behind this dialog, or a second
+	// copy opened while the first was still up, and the button "did nothing".
+	if (!m_settingsDialog)
+	{
+		m_settingsDialog = new UpdateSettingsDialog(this);
+		m_settingsDialog->setAttribute(Qt::WA_DeleteOnClose);
+		m_settingsDialog->setWindowModality(Qt::WindowModal);
+		connect(m_settingsDialog, &QDialog::finished, this, [this]() { startCheck(); });
+	}
+	m_settingsDialog->show();
+	const QRect me = frameGeometry();
+	m_settingsDialog->adjustSize();
+	m_settingsDialog->move(me.center() - m_settingsDialog->rect().center());
+	m_settingsDialog->raise();
+	m_settingsDialog->activateWindow();
+}
+
+void UpdateCheckDialog::tryDefaultClicked()
+{
+	ScUpdateClient::clearSavedServerUrl();
 	startCheck();
 }
 
