@@ -512,6 +512,8 @@ public slots:
 	void suneerFixOverflowFramesDoc();
 	//! \brief Make the selected overflowing text frames fit by narrowing the glyphs; the frames keep their size.
 	void suneerCondenseToFit();
+	//! \brief Write a copy of the document for an older Scribus; the open document is left alone.
+	void suneerSaveAsOldVersion();
 	//! \brief Lay this document out with the line breaks of Scribus 1.5/1.6 (on) or of this build (off).
 	void suneerSetOldLineBreaks(bool on);
 	//! \brief Suneer: open the two-page CTP imposition dialog

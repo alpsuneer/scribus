@@ -90,6 +90,10 @@ for which a new license (GPL+exception) is in place.
 #include <QTimer>
 #include <QTranslator>
 #include <QCheckBox>
+#include <cstring>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QTextBrowser>
 #include <QDialogButtonBox>
 #include <QGridLayout>
 #include <QWindow>
@@ -1315,6 +1319,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("fileClose", "File");
 	scrMenuMgr->addMenuItemString("fileSave", "File");
 	scrMenuMgr->addMenuItemString("fileSaveAs", "File");
+	scrMenuMgr->addMenuItemString("fileSaveAsOldVersion", "File");
 	scrMenuMgr->addMenuItemString("fileRevert", "File");
 	scrMenuMgr->addMenuItemString("fileCollect", "File");
 	scrMenuMgr->addMenuItemString("filePlace", "File");
@@ -2878,6 +2883,7 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 	scrActions["extrasFixOverflowFrames"]->setEnabled(HaveDoc);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(HaveDoc);
 	scrActions["extrasOldLineBreaks"]->setEnabled(HaveDoc);
+	scrActions["fileSaveAsOldVersion"]->setEnabled(HaveDoc);
 	if (!HaveDoc)
 		scrActions["extrasOldLineBreaks"]->setChecked(false);
 }
@@ -3026,6 +3032,7 @@ void ScribusMainWindow::newActWin(QMdiSubWindow *w)
 	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
 	scrActions["extrasOldLineBreaks"]->setEnabled(true);
+	scrActions["fileSaveAsOldVersion"]->setEnabled(true);
 	scrActions["extrasOldLineBreaks"]->setChecked(suneerDocUsesCharClusters(doc));
 	if (!doc->masterPageMode())
 		pagePalette->rebuild();
@@ -8908,6 +8915,7 @@ void ScribusMainWindow::slotDocSetup()
 	scrActions["extrasFixOverflowFrames"]->setEnabled(true);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(true);
 	scrActions["extrasOldLineBreaks"]->setEnabled(true);
+	scrActions["fileSaveAsOldVersion"]->setEnabled(true);
 	scrActions["extrasOldLineBreaks"]->setChecked(suneerDocUsesCharClusters(doc));
 	scrActions["viewToggleCMS"]->setChecked(doc->HasCMS);
 	scrActions["viewToggleWhiteSpaceMode"]->setChecked(doc->whiteSpaceModeEnabled);
@@ -11407,6 +11415,219 @@ void ScribusMainWindow::suneerCondenseToFit()
 	for (int i = 0; i < doc->m_Selection->count(); ++i)
 		candidates.append(doc->m_Selection->itemAt(i));
 	suneerCondenseFramesRun(candidates, tr("Condense to Fit"));
+}
+
+// ---------------------------------------------------------------------------
+// File > Save As Old Version...: write a copy of the open document that an
+// older Scribus in the office can open. The open document is not touched: not
+// its file name, not its modified state, not its network lock.
+//
+// Scribus 1.5.x and 1.6.x refuse a 1.7 file at the version check in the header.
+// The 1.5/1.6 writer still ships (scribus150format, also what Save As offers as
+// "Scribus 1.5.x-1.6.x Document"), so that target is that writer. Our own older
+// 1.7.3 builds read today's files as they are; that target is a plain copy.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	struct SuneerOldVersionTarget
+	{
+		QString label;
+		QString suffix;
+		uint    formatId;
+		bool    oldFormat;   //!< written by the 1.5/1.6 writer
+	};
+
+	QString suneerOldVersionNotes(ScribusDoc* doc, const SuneerOldVersionTarget& target)
+	{
+		int effectItems = 0;
+		int autoFitFrames = 0;
+		QList<PageItem*> all;
+		for (PageItem* item : std::as_const(doc->DocItems))
+		{
+			if (item->isGroup())
+				all += item->getAllChildren();
+			all.append(item);
+		}
+		for (PageItem* item : std::as_const(doc->MasterItems))
+		{
+			if (item->isGroup())
+				all += item->getAllChildren();
+			all.append(item);
+		}
+		for (PageItem* item : std::as_const(all))
+		{
+			if (item->autoFitText())
+				++autoFitFrames;
+			const ObjAttrVector* attributes = item->getObjectAttributes();
+			if (!attributes)
+				continue;
+			for (const ObjectAttribute& a : *attributes)
+			{
+				if (a.name.startsWith(QLatin1String("SuneerEmboss")))
+				{
+					++effectItems;
+					break;
+				}
+			}
+		}
+
+		QStringList kept, changed;
+		kept << QObject::tr("Pages, master pages, layers (with their print and lock settings), frames, linked text frames, text, styles, colours and image links are written as they are.");
+		kept << QObject::tr("Design Styles and Column Styles are settings of this PC, not part of the document: nothing to lose.");
+		kept << QObject::tr("Fill Text with Image results are ordinary image frames: they stay and show.");
+		if (effectItems > 0)
+			changed << QObject::tr("Text Effects (Bevel && Emboss): %1 item(s). The highlight and shadow pictures stay as ordinary images and frames. The older Scribus cannot change or remove the effect.").arg(effectItems);
+		else
+			kept << QObject::tr("Text Effects (Bevel && Emboss): none in this document.");
+		if (target.oldFormat)
+		{
+			changed << QObject::tr("The file is written in the Scribus 1.5/1.6 format. That Scribus lays text out with its own engine: lines can break in other places than here, so check every page for overflow.");
+			changed << QObject::tr("Not shown by Scribus 1.5/1.6 (the settings stay in the file, the older Scribus ignores them): paragraph rules above/below, paragraph shading, nested styles, image bullets, outward text outline, separate border lines per frame side, separate radius per corner.");
+			changed << QObject::tr("Headlines that span columns: the office build of 1.5.6 shows them; an official Scribus 1.5.x or 1.6.x puts the headline inside the first column.");
+			if (autoFitFrames > 0)
+				changed << QObject::tr("Auto Fit Text: %1 frame(s). The text keeps the size it has now; the older Scribus does not refit it.").arg(autoFitFrames);
+			changed << QObject::tr("Custom item attributes are kept as plain attributes.");
+		}
+		else
+		{
+			kept << QObject::tr("Same file format: this is a plain copy.");
+			if (suneerDocUsesCharClusters(doc))
+				changed << QObject::tr("This document uses Old Scribus Line Breaks. Builds before 5 October 2026 ignore that mark: lines can break in other places and frames can overflow.");
+			changed << QObject::tr("Builds before 5 October 2026 have no Condense to Fit, Text Effects or Fill Text with Image commands; what those commands made stays in the document.");
+		}
+
+		QString html = QString("<b>%1</b><ul>").arg(QObject::tr("Changed or lost in %1").arg(target.label));
+		for (const QString& line : std::as_const(changed))
+			html += QString("<li>%1</li>").arg(line);
+		html += QString("</ul><b>%1</b><ul>").arg(QObject::tr("Kept"));
+		for (const QString& line : std::as_const(kept))
+			html += QString("<li>%1</li>").arg(line);
+		html += "</ul>";
+		return html.replace("&&", "&amp;");
+	}
+}
+
+void ScribusMainWindow::suneerSaveAsOldVersion()
+{
+	if (!HaveDoc || !doc)
+		return;
+
+	// Only targets that were opened and compared in the real older programs.
+	const QList<SuneerOldVersionTarget> targets = {
+		{ tr("Scribus 1.7.3 (office deb-3)"), QStringLiteral("-1.7.3"), FORMATID_SLA171EXPORT, false },
+		{ tr("Scribus 1.6.x"),                QStringLiteral("-1.6"),   FORMATID_SLA150EXPORT, true  },
+		{ tr("Scribus 1.5.x"),                QStringLiteral("-1.5"),   FORMATID_SLA150EXPORT, true  },
+	};
+
+	const QString current = doc->hasName ? doc->documentFileName() : QString();
+	QString stem;
+	if (current.isEmpty())
+		stem = QDir::homePath() + "/" + doc->documentFileName();
+	else
+		stem = current;
+	for (const char* ext : { ".gz", ".sla", ".scd" })
+		if (stem.endsWith(QLatin1String(ext), Qt::CaseInsensitive))
+			stem.chop(int(strlen(ext)));
+
+	QDialog dlg(this);
+	dlg.setWindowTitle( tr("Save As Old Version"));
+	QVBoxLayout* lay = new QVBoxLayout(&dlg);
+	QHBoxLayout* targetRow = new QHBoxLayout();
+	targetRow->addWidget(new QLabel( tr("Save a copy for:"), &dlg));
+	QComboBox* targetBox = new QComboBox(&dlg);
+	for (const SuneerOldVersionTarget& t : targets)
+		targetBox->addItem(t.label);
+	targetRow->addWidget(targetBox, 1);
+	lay->addLayout(targetRow);
+	QHBoxLayout* fileRow = new QHBoxLayout();
+	fileRow->addWidget(new QLabel( tr("File:"), &dlg));
+	QLineEdit* fileEdit = new QLineEdit(&dlg);
+	fileRow->addWidget(fileEdit, 1);
+	QPushButton* browse = new QPushButton( tr("Browse..."), &dlg);
+	fileRow->addWidget(browse);
+	lay->addLayout(fileRow);
+	QTextBrowser* notes = new QTextBrowser(&dlg);
+	notes->setMinimumSize(620, 300);
+	lay->addWidget(notes, 1);
+	lay->addWidget(new QLabel( tr("The open document is not changed and keeps its own file name."), &dlg));
+	QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dlg);
+	lay->addWidget(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+	bool nameEdited = false;
+	auto refresh = [&] {
+		const SuneerOldVersionTarget& t = targets.at(targetBox->currentIndex());
+		if (!nameEdited)
+			fileEdit->setText(stem + t.suffix + ".sla");
+		notes->setHtml(suneerOldVersionNotes(doc, t));
+	};
+	connect(targetBox, &QComboBox::currentIndexChanged, &dlg, [&](int) { refresh(); });
+	connect(fileEdit, &QLineEdit::textEdited, &dlg, [&](const QString&) { nameEdited = true; });
+	connect(browse, &QPushButton::clicked, &dlg, [&] {
+		const QString chosen = QFileDialog::getSaveFileName(&dlg, tr("Save As Old Version"), fileEdit->text(),
+		                                                    tr("Scribus Documents (*.sla)"), nullptr, QFileDialog::DontConfirmOverwrite);
+		if (!chosen.isEmpty())
+		{
+			fileEdit->setText(chosen);
+			nameEdited = true;
+		}
+	});
+	refresh();
+
+	QString fileName;
+	while (true)
+	{
+		if (dlg.exec() != QDialog::Accepted)
+			return;
+		fileName = fileEdit->text().trimmed();
+		if (fileName.isEmpty())
+			continue;
+		if (!fileName.endsWith(".sla", Qt::CaseInsensitive))
+			fileName += ".sla";
+		// Never the open document itself, by any spelling of its path.
+		if (!current.isEmpty())
+		{
+			const QFileInfo a(fileName), b(current);
+			const QString ca = a.exists() ? a.canonicalFilePath() : a.absoluteFilePath();
+			const QString cb = b.exists() ? b.canonicalFilePath() : b.absoluteFilePath();
+			if (ca == cb)
+			{
+				ScMessageBox::warning(&dlg, CommonStrings::trWarning,
+					tr("That is the file of the open document. Choose another name: this command only writes a copy."));
+				continue;
+			}
+		}
+		if (QFile::exists(fileName) && !overwrite(this, fileName))
+			continue;
+		break;
+	}
+
+	const SuneerOldVersionTarget& target = targets.at(targetBox->currentIndex());
+	const bool wasModified = doc->isModified();
+	ScCore->fileWatcher->forceScan();
+	ScCore->fileWatcher->stop();
+	m_mainWindowStatusLabel->setText( tr("Saving..."));
+	mainWindowProgressBar->reset();
+	QString savedFileName;
+	FileLoader fl(fileName);
+	const bool ok = fl.saveFile(fileName, doc, &savedFileName, target.formatId);
+	mainWindowProgressBar->reset();
+	ScCore->fileWatcher->start();
+	if (doc->isModified() != wasModified)
+		doc->setModified(wasModified);
+
+	if (!ok)
+	{
+		m_mainWindowStatusLabel->setText("");
+		if (!savedFileName.isEmpty())
+			ScMessageBox::warning(this, CommonStrings::trWarning, tr("The copy was saved to a temporary file and could not be moved: \n%1").arg( QDir::toNativeSeparators(savedFileName) ));
+		else
+			ScMessageBox::warning(this, CommonStrings::trWarning, tr("Cannot write the file: \n%1").arg( QDir::toNativeSeparators(fileName) ));
+		return;
+	}
+	setStatusBarInfoText( tr("Copy for %1 saved: %2").arg(target.label, QDir::toNativeSeparators(fileName)));
 }
 
 // Extras > Old Scribus Line Breaks (This Document). On by itself for a file

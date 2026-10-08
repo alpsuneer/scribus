@@ -125,6 +125,8 @@ void ActionManager::initFileMenuActions()
 	scrActions->insert(name, new ScrAction("close", "close", "", defaultKey(name), mainWindow));
 	name = "fileSave";
 	scrActions->insert(name, new ScrAction("document-save", "document-save", "", defaultKey(name), mainWindow));
+	name = "fileSaveAsOldVersion";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "fileSaveAs";
 	scrActions->insert(name, new ScrAction("document-save-as", "document-save-as", "", defaultKey(name), mainWindow));
 	name = "fileRevert";
@@ -200,6 +202,7 @@ void ActionManager::initFileMenuActions()
 	connect( (*scrActions)["ViewPDFSeparations"], SIGNAL(triggered()), mainWindow, SLOT(viewPDFSeparations()) );
 	connect( (*scrActions)["fileSave"], SIGNAL(triggered()), mainWindow, SLOT(slotFileSave()) );
 	connect( (*scrActions)["fileSaveAs"], SIGNAL(triggered()), mainWindow, SLOT(slotFileSaveAs()) );
+	connect( (*scrActions)["fileSaveAsOldVersion"], SIGNAL(triggered()), mainWindow, SLOT(suneerSaveAsOldVersion()) );
 	connect( (*scrActions)["fileDocSetup150"], SIGNAL(triggered()), mainWindow, SLOT(slotDocSetup()) );
 	connect( (*scrActions)["filePreferences150"], SIGNAL(triggered()), mainWindow, SLOT(slotPrefsOrg()) );
 	connect( (*scrActions)["fileRevert"], SIGNAL(triggered()), mainWindow, SLOT(slotFileRevert()) );
@@ -1748,6 +1751,8 @@ void ActionManager::languageChange()
 	(*scrActions)["fileClose"]->setTexts( tr("&Close"));
 	(*scrActions)["fileSave"]->setTexts( tr("&Save"));
 	(*scrActions)["fileSaveAs"]->setTexts( tr("Save &As..."));
+	(*scrActions)["fileSaveAsOldVersion"]->setTexts( tr("Save As Old Version..."));
+	(*scrActions)["fileSaveAsOldVersion"]->setStatusTip( tr("Save a copy that an older Scribus can open; the open document is not changed"));
 	(*scrActions)["fileRevert"]->setTexts( tr("Re&vert to Saved"));
 	(*scrActions)["fileCollect"]->setTexts( tr("Collect for O&utput..."));
 	(*scrActions)["fileImportText"]->setTexts( tr("Get Text..."));
@@ -2260,6 +2265,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("fileClose", QKeySequence::Close);
 	defKeys.insert("fileSave", QKeySequence::Save);
 	defKeys.insert("fileSaveAs", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+	defKeys.insert("fileSaveAsOldVersion", QKeySequence());
 	defKeys.insert("fileImportText", QKeySequence());
 	defKeys.insert("fileImportImage", QKeySequence());
 	// Left unbound: Ctrl+D and Ctrl+Shift+D are already itemDuplicate and
@@ -2481,6 +2487,7 @@ void ActionManager::createDefaultMenus()
 		<< "fileClose"
 		<< "fileSave"
 		<< "fileSaveAs"
+		<< "fileSaveAsOldVersion"
 		<< "fileRevert"
 		<< "fileCollect"
 		<< "filePlace"

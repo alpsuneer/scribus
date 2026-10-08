@@ -917,10 +917,18 @@ void Scribus150Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 		docu.writeAttribute("KeepWithNext", style.keepWithNext());
 	if ( ! style.isInhKeepTogether())
 		docu.writeAttribute("KeepTogether", style.keepTogether());
+	// The office build of Scribus 1.5.6 reads these two under its own names
+	// (FullSpan, nxtStyle); stock 1.5.x/1.6.x ignores all four.
 	if ( ! style.isInhSpanColumns())
+	{
 		docu.writeAttribute("SpanColumns", style.spanColumns());
+		docu.writeAttribute("FullSpan", style.spanColumns() != 0 ? 1 : 0);
+	}
 	if ( ! style.nextStyle().isEmpty())
+	{
 		docu.writeAttribute("NextStyle", style.nextStyle());
+		docu.writeAttribute("nxtStyle", style.nextStyle());
+	}
 	if ( ! style.isInhBackgroundColor())
 		docu.writeAttribute("BCOLOR", style.backgroundColor());
 	if ( ! style.isInhBackgroundShade())
