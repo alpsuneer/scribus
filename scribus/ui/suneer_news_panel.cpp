@@ -49,6 +49,8 @@
 #include <QBrush>
 #include <QApplication>
 #include <QNetworkCookie>
+#include <QStyledItemDelegate>
+#include <QStyleOptionViewItem>
 #include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -66,6 +68,86 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <QVBoxLayout>
+
+// One row of the news list: [checkbox][icon][title ......][ TAG ]. The tag
+// (USD / UNUSD / BAL from the status role) sits in a fixed strip at the right
+// end and is always complete; only the title is elided, by grapheme clusters.
+// The item's text stays the plain title, so search, sorting and tooltips are
+// untouched. Nothing is painted outside the row rectangle.
+class SuneerNewsRowDelegate : public QStyledItemDelegate
+{
+public:
+	explicit SuneerNewsRowDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
+
+	static QString tagFor(const QString& status, QColor& color, bool dark)
+	{
+		if (status == "USED")     { color = dark ? QColor("#EF5350") : QColor("#D32F2F"); return QStringLiteral("USD"); }
+		if (status == "BALANCED") { color = dark ? QColor("#FFA726") : QColor("#E65100"); return QStringLiteral("BAL"); }
+		color = dark ? QColor("#66BB6A") : QColor("#2E7D32");
+		return QStringLiteral("UNUSD");
+	}
+
+	QFont tagFont(const QFont& base) const
+	{
+		QFont f(base);
+		f.setBold(true);
+		f.setPointSizeF(qMax(6.0, base.pointSizeF() * 0.78));
+		return f;
+	}
+
+	int tagStripWidth(const QFont& base) const
+	{
+		// Widest tag + padding, fixed for every row so the tags line up.
+		return QFontMetrics(tagFont(base)).horizontalAdvance(QStringLiteral("UNUSD")) + 14;
+	}
+
+	// The row never asks for more width than the view has: the title is
+	// elided to the space left, so there is no horizontal scrolling and the
+	// tag strip always lies inside the viewport.
+	QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+	{
+		QSize s = QStyledItemDelegate::sizeHint(option, index);
+		s.setWidth(1);
+		return s;
+	}
+
+	void paint(QPainter* p, const QStyleOptionViewItem& option, const QModelIndex& index) const override
+	{
+		QStyleOptionViewItem opt(option);
+		initStyleOption(&opt, index);
+		const int strip = tagStripWidth(opt.font);
+		// Title area: the row minus the tag strip. Elide the title to it.
+		QStyleOptionViewItem textOpt(opt);
+		textOpt.rect.setRight(opt.rect.right() - strip);
+		textOpt.textElideMode = Qt::ElideNone;
+		const QString full = index.data(Qt::UserRole + 1).toString().isEmpty() ? opt.text : index.data(Qt::UserRole + 1).toString();
+		QStyle* st = opt.widget ? opt.widget->style() : QApplication::style();
+		const QRect textRect = st->subElementRect(QStyle::SE_ItemViewItemText, &textOpt, opt.widget);
+		textOpt.text = SuneerNewsPanel::elideGraphemes(full, QFontMetrics(opt.font), qMax(0, textRect.width() - 4));
+		p->save();
+		p->setClipRect(opt.rect);
+		// Selection/hover background across the whole row, then the row content.
+		QStyleOptionViewItem bgOpt(opt);
+		bgOpt.text.clear();
+		bgOpt.icon = QIcon();
+		bgOpt.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+		st->drawPrimitive(QStyle::PE_PanelItemViewItem, &bgOpt, p, opt.widget);
+		textOpt.state &= ~QStyle::State_Selected;   // background already drawn
+		textOpt.backgroundBrush = Qt::NoBrush;
+		st->drawControl(QStyle::CE_ItemViewItem, &textOpt, p, opt.widget);
+		// The tag, right-aligned in its strip.
+		const QString status = index.data(Qt::UserRole + 4).toString();
+		const bool dark = opt.palette.color(QPalette::Base).lightness() < 128;
+		QColor col;
+		const QString tag = tagFor(status, col, dark);
+		p->setFont(tagFont(opt.font));
+		p->setPen(col);
+		QRect tagRect(opt.rect.right() - strip, opt.rect.top(), strip - 6, opt.rect.height());
+		p->drawText(tagRect, Qt::AlignRight | Qt::AlignVCenter, tag);
+		p->restore();
+	}
+};
+
 
 namespace {
 
@@ -286,6 +368,10 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		"QListWidget::item:hover { background:#F5F5F5; }"
 		"QToolTip { font-size:14px; padding:6px; }");
 	m_newsList->setIconSize(QSize(24, 24));
+	m_newsList->setItemDelegate(new SuneerNewsRowDelegate(m_newsList));
+	m_newsList->setTextElideMode(Qt::ElideNone);
+	m_newsList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	m_newsList->setResizeMode(QListView::Adjust);
 	m_newsList->setTextElideMode(Qt::ElideNone);   // we elide ourselves, by grapheme
 	m_newsList->viewport()->installEventFilter(this);
 	connect(m_newsList, &QListWidget::itemClicked, this, &SuneerNewsPanel::onNewsItemClicked);
@@ -1955,7 +2041,15 @@ void SuneerNewsPanel::showNewsList()
 	if (m_newsData.isEmpty())
 		m_statusLabel->setText(tr("No news for %1 on %2").arg(m_pageCombo->currentText(), m_fetchDate));
 	else
-		m_statusLabel->setText(tr("%1 news items - Ctrl+Click to multi-select").arg(m_newsData.size()));
+	{
+		int used = 0, unused = 0, bal = 0;
+		for (const QJsonValue& v : m_newsData)
+		{
+			const QString st = newsDtpStatus(v.toObject());
+			if (st == "USED") ++used; else if (st == "BALANCED") ++bal; else ++unused;
+		}
+		m_statusLabel->setText(tr("%n stories", "", m_newsData.size()) + QStringLiteral(" - %1 USD, %2 UNUSD, %3 BAL").arg(used).arg(unused).arg(bal));
+	}
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
 }
 
@@ -1991,16 +2085,16 @@ QIcon SuneerNewsPanel::photoIcon(int count)
 
 void SuneerNewsPanel::relabelNewsList()
 {
-	const QFontMetrics fm(m_newsList->font());
-	// checkbox + icon + paddings; the rest is text
-	const int reserved = 24 + 24 + 16;
-	const int width = m_newsList->viewport()->width() - reserved;
+	// The row delegate elides at paint time; the item text stays the full
+	// title (search, sorting, tooltips). A resize only needs a repaint.
 	for (int i = 0; i < m_newsList->count(); ++i)
 	{
 		QListWidgetItem* item = m_newsList->item(i);
 		const QString full = item->data(Qt::UserRole + 1).toString();
-		item->setText(elideGraphemes(full, fm, width));
+		if (item->text() != full)
+			item->setText(full);
 	}
+	m_newsList->viewport()->update();
 }
 
 bool SuneerNewsPanel::eventFilter(QObject* obj, QEvent* ev)
@@ -2638,14 +2732,14 @@ void SuneerNewsPanel::refreshPlacedMarks()
 		if (placed)
 		{
 			row->setIcon(IconManager::instance().loadIcon("ok"));
-			row->setForeground(QBrush(QColor(140, 140, 140)));
+			row->setForeground(QBrush());             // normal text; the USD tag says it
 			row->setToolTip(tr("USED - placed%1 (server status).\n"
 			                   "Tick it for 'Mark unused' or 'Mark balance'; it cannot be placed again until then.").arg(whereTxt) + "\n" + tip);
 		}
 		else if (status == "BALANCED")
 		{
 			row->setIcon(IconManager::instance().loadIcon("panel-bookmarks"));
-			row->setForeground(QBrush(QColor(150, 95, 0)));
+			row->setForeground(QBrush());             // normal text; the BAL tag says it
 			row->setToolTip(tr("BALANCE - kept for later%1 (server status).\n"
 			                   "Tick it: 'Place Selected' asks once and then marks it used; 'Mark unused' releases it.").arg(whereTxt) + "\n" + tip);
 		}

@@ -170,7 +170,9 @@ private:
 	bool eventFilter(QObject* obj, QEvent* ev) override;
 	static QString collapseSpaces(const QString& text);
 	static QIcon photoIcon(int count);   // theme picture icon, count badge when > 1
+public:
 	static QString elideGraphemes(const QString& text, const QFontMetrics& fm, int width);
+private:
 	void showPreview(const QJsonObject& news);
 	void fillTitleStyleCombo();
 
