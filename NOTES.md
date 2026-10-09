@@ -251,6 +251,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | SuneerControlBar — text/image/table control toolbar; live font preview, gap spins, border and padding controls | `17c7747`, `7520912`, `5270cfd` | |
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
+| News Browser row tags — `SuneerNewsRowDelegate` (QStyledItemDelegate): title elided by grapheme at paint time into the space left of a fixed tag strip, tag from `Qt::UserRole + 4`, `sizeHint` width 1 + horizontal scrollbar off so rows never exceed the viewport, paint clipped to the row; status counts in the status line. Verified by the user | `7dd888d` | feature/ctp-output |
 | News Browser fromStatus / place-to-used — `serverStatus()` fresh read (GET /news/:id, fallback page news list) before every `markOnServer()`, per-story `m_lastFrom`/`m_lastMarkError`, conflict reporting, `allowedTransition()` gating, `markPlaced()` per story with summary + `retryPendingMarks()` (Check, right-click), `recordPlaceUndo()` SUNEER_NEWS_PLACE states (PREV/MARKED) restored in `restore()`, api.log trail. Verified by the user | `dca3488` | feature/ctp-output |
 | News Browser status model — `newsDtpStatus()` Free/Used/Balance from the server enum, three-state rows (icons `ok` / `panel-bookmarks`), Mark unused sends UNUSED (`unusedStatus()`, one place), Mark balance (button, list and document context menus), balance stories placeable after one question, shared `markStories()` with WANT status in the undo record. Backend patch `~/Desktop/claude/backend-20261008-dtp-status-unused.patch` deployed 2026-10-08. Verified by the user | `5664da8` | feature/ctp-output |
 | News Browser bulk "Mark unused (N)" — used rows tickable for releasing only, "Select all used", Place Selected skips used ticks and says so, one confirmation with headlines + optional removal from the page in one undo transaction, per-story server result summary; `removeStory()` shares `removeStoryFrames()`. Verified by the user | `3494742` | feature/ctp-output |
@@ -1483,6 +1484,10 @@ to test, since a bad matrix could itself explain "no visible difference".
   its own undo step and Ctrl+Z reverted the paragraph styles but left the new
   width and column count. Every doc call that records undo (`sizeItem`,
   `createPageItem`, `autoFitFrameHeight`) has to sit inside the transaction.
+- **A QListWidget row with a long title grows the view sideways.** The default delegate's
+  sizeHint is the full text width; the view then scrolls horizontally and anything painted
+  at the row's right edge lands outside the viewport (looked like a "tag drawn over the
+  page"). Cap `sizeHint().width()` in the delegate and elide at paint time.
 - **The colour popup is one shared window.** `WidgetManager::colorPickerWindow()` holds a
   single `ColorPicker`; its list is whatever the last `ColorButton::updateColorPicker()` loaded
   via `setDoc(m_doc)`. A button whose `m_doc` is null leaves the picker with the previous

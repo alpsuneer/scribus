@@ -1142,3 +1142,11 @@ scribus
 - ഇതേ "ആദ്യ frame മാത്രം" bug ഉണ്ടായിരുന്നവ ശരിയാക്കി: Columns, Column gap, Line style/cap/join/dash/arrows, image line style, W/H.
   (Gap, line width, text inset, corner radius, wrap, Auto-Fit — മുമ്പേ ശരി.)
 - Note: popup-ൽ colour click ഒരു undo, shade മാറ്റം വേറെ ഒരു undo (Properties-ലും അങ്ങനെ). Commit `88910af`.
+
+### 63. News Browser list — USD / UNUSD / BAL tag, status counts
+- ഓരോ row-യുടെയും വലത്തെ അറ്റത്ത് ചെറിയ bold tag: **USD** (red) placed, **UNUSD** (green) free, **BAL** (orange) balance.
+  Panel ഇടുങ്ങിയാൽ തലക്കെട്ട് മാത്രം "…" ആകും; tag എപ്പോഴും മുഴുവൻ കാണാം. List-ന് പുറത്ത് ഒന്നും വരയ്ക്കില്ല.
+- Fetch കഴിഞ്ഞ് status line: "N stories - X USD, Y UNUSD, Z BAL". Client ഒരു story-യും hide ചെയ്യുന്നില്ല — server തരുന്നത് മുഴുവൻ.
+- Used/balance rows സാധാരണ text colour (tag status പറയും); icons, checkbox, tooltip, Select All — പഴയപടി. Place / Mark unused / Mark balance / Check
+  കഴിഞ്ഞ് ആ row-യുടെ tag ഉടൻ മാറും. Light/dark theme രണ്ടിലും colours.
+- Commit `7dd888d`.
