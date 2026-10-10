@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QApplication>
 #include <QStatusBar>
+#include "suneercursor.h"
 
 CanvasMode_SuneerCrop::CanvasMode_SuneerCrop(ScribusView* view)
     : CanvasMode(view), m_ScMW(view->m_ScMW)
@@ -86,6 +87,7 @@ void CanvasMode_SuneerCrop::deactivate(bool forGesture)
         if (m_ScMW->suneerControlBar())
             m_ScMW->suneerControlBar()->setCropModeActive(false);
     }
+    suneerCursorSettle(m_view, "crop mode end");
 }
 
 void CanvasMode_SuneerCrop::exitCropMode()
