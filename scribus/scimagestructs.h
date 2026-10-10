@@ -67,7 +67,10 @@ struct ImageEffect
 		//! Non-destructive eraser mask. Not a transform: effectParameters carry a
 		//! base64 PNG that each renderer composites itself. ScImage::applyEffect
 		//! must leave it alone - see scimageerasermask.h.
-		EF_ERASERMASK = 31
+		EF_ERASERMASK = 31,
+		//! Non-destructive edge feather: "<px> <direction>". A data carrier
+		//! like the eraser mask - each renderer composites it; see scimagefeather.h.
+		EF_FEATHER = 32
 	};
 
 	int effectCode;

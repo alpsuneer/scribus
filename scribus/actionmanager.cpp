@@ -1190,6 +1190,8 @@ void ActionManager::initExtrasMenuActions()
 	(*scrActions)[name]->setCheckable(true);
 	name = "extrasImposition";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasOptimizeImages";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasEmbedAllImages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasWarnLinkedImages";
@@ -1209,6 +1211,7 @@ void ActionManager::initExtrasMenuActions()
 	connect( (*scrActions)["extrasFixOverflowFramesDoc"], SIGNAL(triggered()), mainWindow, SLOT(suneerFixOverflowFramesDoc()) );
 	connect( (*scrActions)["extrasOldLineBreaks"], SIGNAL(toggled(bool)), mainWindow, SLOT(suneerSetOldLineBreaks(bool)) );
 	connect( (*scrActions)["extrasImposition"], SIGNAL(triggered()), mainWindow, SLOT(suneerOpenImposition()) );
+	connect( (*scrActions)["extrasOptimizeImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerOptimizeImages()) );
 }
 
 
@@ -2087,6 +2090,7 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasFixOverflowFramesDoc"]->setTexts( tr("Fix Overflowing Frames (Whole Document)"));
 	(*scrActions)["extrasOldLineBreaks"]->setTexts( tr("Old Scribus Line Breaks (This Document)"));
 	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
+	(*scrActions)["extrasOptimizeImages"]->setTexts( tr("Optimize Images..."));
 	(*scrActions)["extrasEmbedAllImages"]->setTexts( tr("Embed All Images"));
 	(*scrActions)["extrasWarnLinkedImages"]->setTexts( tr("Warn About Linked Images in This Document"));
 	(*scrActions)["extrasCheckDuplicateShortcuts"]->setTexts( tr("Check Duplicate Shortcuts..."));
@@ -2367,6 +2371,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("extrasFixOverflowFrames", QKeySequence());
 	defKeys.insert("extrasFixOverflowFramesDoc", QKeySequence());
 	defKeys.insert("extrasOldLineBreaks", QKeySequence());
+	defKeys.insert("extrasOptimizeImages", QKeySequence());
 	defKeys.insert("itemImageScaleUp", QKeySequence(Qt::CTRL | Qt::Key_Period));
 	defKeys.insert("itemImageScaleDown", QKeySequence(Qt::CTRL | Qt::Key_Comma));
 	defKeys.insert("toolsLayers", QKeySequence(Qt::Key_F6));
@@ -2803,6 +2808,7 @@ void ActionManager::createDefaultMenus()
 		<< "extrasFixOverflowFramesDoc"
 		<< "extrasOldLineBreaks"
 		<< "extrasImposition"
+		<< "extrasOptimizeImages"
 		<< "extrasEmbedAllImages"
 		<< "extrasWarnLinkedImages"
 		<< "extrasCheckDuplicateShortcuts"

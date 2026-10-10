@@ -28,6 +28,7 @@ for which a new license (GPL+exception) is in place.
 #include "scfonts.h"
 #include "scimage.h"
 #include "scimageerasermask.h"
+#include "scimagefeather.h"
 #include "scpage.h"
 #include "scpattern.h"
 #include "text/textlayoutpainter.h"
@@ -784,6 +785,13 @@ void ScPageOutput::drawItem_ImageFrame(PageItem_ImageFrame* item, ScPainterExBas
 				QImage eraserMask = ScEraserMask::maskOf(item->effectsInUse);
 				if (!eraserMask.isNull())
 					ScEraserMask::applyToAlpha(*scImg.qImagePtr(), eraserMask);
+				double featherPx = 0;
+				QString featherDir;
+				if (ScFeatherMask::paramsOf(item->effectsInUse, featherPx, featherDir))
+				{
+					const double scale = item->OrigW > 0 ? double(scImg.width()) / double(item->OrigW) : 1.0;
+					ScFeatherMask::applyToImage(*scImg.qImagePtr(), featherPx * scale, featherDir);
+				}
 			}
 
 			mode = imageMode;

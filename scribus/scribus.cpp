@@ -188,6 +188,8 @@ for which a new license (GPL+exception) is in place.
 #include "scribuscore.h"
 #include "scribusdoc.h"
 #include "suneerclusterlevel.h"
+#include "suneerimageresample.h"
+#include "ui/suneeroptimizeimagesdialog.h"
 #include "scribusview.h"
 #include "scribuswin.h"
 #include "selection.h"
@@ -1761,6 +1763,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFrames", "Extras");
 	scrMenuMgr->addMenuItemString("extrasFixOverflowFramesDoc", "Extras");
 	scrMenuMgr->addMenuItemString("extrasOldLineBreaks", "Extras");
+	scrMenuMgr->addMenuItemString("extrasOptimizeImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasUpdateDocument", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasImposition", "Extras");
@@ -2883,6 +2886,7 @@ void ScribusMainWindow::extrasMenuAboutToShow()
 	scrActions["extrasFixOverflowFrames"]->setEnabled(HaveDoc);
 	scrActions["extrasFixOverflowFramesDoc"]->setEnabled(HaveDoc);
 	scrActions["extrasOldLineBreaks"]->setEnabled(HaveDoc);
+	scrActions["extrasOptimizeImages"]->setEnabled(HaveDoc);
 	scrActions["fileSaveAsOldVersion"]->setEnabled(HaveDoc);
 	if (!HaveDoc)
 		scrActions["extrasOldLineBreaks"]->setChecked(false);
@@ -4735,6 +4739,9 @@ void ScribusMainWindow::slotGetClipboardImage()
 	currItem->isTempFile = true;
 	currItem->Pfile = fileName;
 	doc->loadPict(fileName, currItem, false, true);
+	// Suneer: optionally offer to resample a picture that is far too big
+	// for its frame (Image Size dialog preference).
+	SuneerImageResample::offerDownsampleAfterImport(doc, currItem, this);
 	// Call to showScaleAndOffset() is now very likely unnecessary
 	// due to mechanisms used to update properties in PP in 1.5.x+
 	//propertiesPalette->imagePal->showScaleAndOffset(currItem->imageXScale(), currItem->imageYScale(), currItem->imageXOffset(), currItem->imageYOffset());
@@ -11638,6 +11645,14 @@ void ScribusMainWindow::suneerSetOldLineBreaks(bool on)
 	if (!HaveDoc || !doc || suneerDocUsesCharClusters(doc) == on)
 		return;
 	suneerSetDocUsesCharClusters(doc, on);
+	if (!on)
+	{
+		// Frames pasted in from an old-line-breaks document carry their own
+		// mark; switching the document off is meant to be the last word.
+		const QList<PageItem*> all = doc->getAllItems(doc->DocItems) + doc->getAllItems(doc->MasterItems) + doc->getAllItems(doc->FrameItems.values());
+		for (PageItem* item : all)
+			suneerMarkItemCharClusters(item, false);
+	}
 	doc->invalidateAll();
 	doc->changed();
 	doc->regionsChanged()->update(QRectF());
@@ -11645,6 +11660,16 @@ void ScribusMainWindow::suneerSetOldLineBreaks(bool on)
 		view->DrawNew();
 	setStatusBarInfoText(on ? tr("This document now breaks lines like Scribus 1.5/1.6")
 	                        : tr("This document now breaks lines like pages made in this version"));
+}
+
+// Extras > Optimize Images...: every picture of the selection (or the
+// document) with its pixels, effective dpi and size; fit the big ones to
+// their frames at the target dpi. See suneerimageresample.h.
+void ScribusMainWindow::suneerOptimizeImages()
+{
+	if (!HaveDoc || !doc)
+		return;
+	SuneerOptimizeImagesDialog::openFor(doc, this);
 }
 
 void ScribusMainWindow::suneerOpenImposition()

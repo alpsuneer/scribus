@@ -518,6 +518,7 @@ public slots:
 	void suneerSetOldLineBreaks(bool on);
 	//! \brief Suneer: open the two-page CTP imposition dialog
 	void suneerOpenImposition();
+	void suneerOptimizeImages();
 	//! \brief Suneer: styled (formatting-preserving) copy of the current text-frame selection
 	void slotEditStyledCopy();
 	//! \brief Suneer: styled paste of the previously styled-copied text at the cursor

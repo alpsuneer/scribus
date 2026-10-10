@@ -32,6 +32,9 @@ for which a new license (GPL+exception) is in place.
 #include "ui/resizeimagedialog.h"
 #include "undomanager.h"
 #include "util.h"
+#include "suneerimageresample.h"
+#include <QComboBox>
+#include <QDoubleSpinBox>
 
 namespace
 {
@@ -54,20 +57,13 @@ void ResizeImageDialog::openForSelection(ScribusDoc* doc, QWidget* parent)
 	}
 	if (!item || !item->isImageFrame() || item->Pfile.isEmpty() || !item->imageIsAvailable)
 		return;
-
-	// Resample from the real file, not item->pixm (which can be a reduced
-	// preview depending on the document's preview settings).
-	QImage source(item->Pfile);
-	if (source.isNull())
-	{
-		QMessageBox::warning(parent, tr("Resize Image"),
-			tr("Could not read the image file:\n\"%1\"").arg(item->Pfile));
-		return;
-	}
-
-	ResizeImageDialog dlg(doc, item, source, parent);
+	ResizeImageDialog dlg(doc, item, QImage(), parent);
 	dlg.exec();
 }
+
+// Units for the size fields: inches, mm, cm (remembered).
+static double unitPerInch(int u) { return u == 1 ? 25.4 : u == 2 ? 2.54 : 1.0; }
+static QString unitSuffix(int u) { return u == 1 ? QStringLiteral(" mm") : u == 2 ? QStringLiteral(" cm") : QStringLiteral(" in"); }
 
 ResizeImageDialog::ResizeImageDialog(ScribusDoc* doc, PageItem* item, const QImage& source, QWidget* parent)
 	: QDialog(parent),
@@ -75,250 +71,237 @@ ResizeImageDialog::ResizeImageDialog(ScribusDoc* doc, PageItem* item, const QIma
 	  m_item(item),
 	  m_source(source)
 {
-	setWindowTitle(tr("Resize Image"));
-
-	// Effective print resolution: the image scale is points per original
-	// pixel, so 72/scale is the DPI this image actually prints at.
-	const double scaleX = item->imageXScale();
-	const double scaleY = item->imageYScale();
-	m_effDpiX = (scaleX > 0.0) ? 72.0 / scaleX : 72.0;
-	m_effDpiY = (scaleY > 0.0) ? 72.0 / scaleY : 72.0;
+	Q_UNUSED(source);
+	setWindowTitle(tr("Image Size"));
+	setMinimumWidth(520);
+	m_info = SuneerImageResample::probe(item);
+	m_effDpiX = SuneerImageResample::effectiveDpi(item, &m_effDpiY);
+	m_unit = SuneerImageResample::settingInt(QStringLiteral("sizeUnit"), 0);
 
 	auto* layout = new QVBoxLayout(this);
 
-	const qint64 fileSize = QFileInfo(item->Pfile).size();
-	QString dpiText = (qRound(m_effDpiX) == qRound(m_effDpiY))
-		? tr("%1 dpi").arg(qRound(m_effDpiX))
-		: tr("%1 x %2 dpi").arg(qRound(m_effDpiX)).arg(qRound(m_effDpiY));
-	auto* info = new QLabel(tr("Current: %1 x %2 px — %3 — effective %4 at the current frame size")
-		.arg(m_source.width()).arg(m_source.height())
-		.arg(humanSize(fileSize), dpiText), this);
-	info->setWordWrap(true);
-	layout->addWidget(info);
+	// ---- what the file is
+	auto* infoGroup = new QGroupBox(tr("Picture file"), this);
+	auto* ig = new QGridLayout(infoGroup);
+	auto addRow = [&](int row, const QString& label, QLabel*& value) {
+		ig->addWidget(new QLabel(label, infoGroup), row, 0);
+		value = new QLabel(infoGroup);
+		value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+		ig->addWidget(value, row, 1);
+	};
+	addRow(0, tr("Pixels:"), m_pixelsLabel);
+	addRow(1, tr("Stored resolution:"), m_storedDpiLabel);
+	addRow(2, tr("Size at that resolution:"), m_storedSizeLabel);
+	addRow(3, tr("On the page:"), m_placedLabel);
+	addRow(4, tr("Effective resolution:"), m_effDpiLabel);
+	addRow(5, tr("File:"), m_fileLabel);
+	auto* unitRow = new QHBoxLayout();
+	unitRow->addWidget(new QLabel(tr("Units:"), infoGroup));
+	m_unitCombo = new QComboBox(infoGroup);
+	m_unitCombo->addItems({ tr("inches"), tr("mm"), tr("cm") });
+	m_unitCombo->setCurrentIndex(qBound(0, m_unit, 2));
+	unitRow->addWidget(m_unitCombo);
+	unitRow->addStretch(1);
+	ig->addLayout(unitRow, 6, 0, 1, 2);
+	layout->addWidget(infoGroup);
 
-	auto* sizeGroup = new QGroupBox(tr("Target Size"), this);
+	// ---- resample
+	auto* sizeGroup = new QGroupBox(tr("Resample to"), this);
 	auto* grid = new QGridLayout(sizeGroup);
-
-	m_widthSpin = new QSpinBox(sizeGroup);
-	m_widthSpin->setRange(1, 100000);
-	m_widthSpin->setSuffix(tr(" px"));
-	m_widthSpin->setValue(m_source.width());
-	m_heightSpin = new QSpinBox(sizeGroup);
-	m_heightSpin->setRange(1, 100000);
-	m_heightSpin->setSuffix(tr(" px"));
-	m_heightSpin->setValue(m_source.height());
-	m_lockAspect = new QCheckBox(tr("Lock aspect ratio"), sizeGroup);
+	m_widthSpin = new QDoubleSpinBox(sizeGroup);
+	m_widthSpin->setRange(0.01, 10000);
+	m_widthSpin->setDecimals(3);
+	m_heightSpin = new QDoubleSpinBox(sizeGroup);
+	m_heightSpin->setRange(0.01, 10000);
+	m_heightSpin->setDecimals(3);
+	m_resSpin = new QSpinBox(sizeGroup);
+	m_resSpin->setRange(10, 2400);
+	m_resSpin->setSuffix(tr(" dpi"));
+	m_lockAspect = new QCheckBox(tr("Constrain proportions"), sizeGroup);
 	m_lockAspect->setChecked(true);
-
+	m_allowEnlarge = new QCheckBox(tr("Allow enlarge"), sizeGroup);
+	m_allowEnlarge->setToolTip(tr("Off: the picture is only ever made smaller"));
 	grid->addWidget(new QLabel(tr("Width:"), sizeGroup), 0, 0);
 	grid->addWidget(m_widthSpin, 0, 1);
 	grid->addWidget(new QLabel(tr("Height:"), sizeGroup), 0, 2);
 	grid->addWidget(m_heightSpin, 0, 3);
-	grid->addWidget(m_lockAspect, 1, 1, 1, 3);
+	grid->addWidget(new QLabel(tr("Resolution:"), sizeGroup), 1, 0);
+	grid->addWidget(m_resSpin, 1, 1);
+	grid->addWidget(m_lockAspect, 1, 2, 1, 2);
+	grid->addWidget(m_allowEnlarge, 2, 2, 1, 2);
+	m_resultLine = new QLabel(sizeGroup);
+	m_resultLine->setWordWrap(true);
+	grid->addWidget(m_resultLine, 2, 0, 1, 2);
 
-	// The one-click path: make the file exactly what this frame needs at N dpi.
+	// The one-click path: exactly what this frame needs at N dpi.
 	auto* fitRow = new QHBoxLayout();
 	fitRow->addWidget(new QLabel(tr("Fit to frame @"), sizeGroup));
 	m_dpiSpin = new QSpinBox(sizeGroup);
 	m_dpiSpin->setRange(72, 1200);
-	m_dpiSpin->setValue(240);
+	m_dpiSpin->setValue(SuneerImageResample::settingInt(QStringLiteral("fitDpi"), 300));
 	m_dpiSpin->setSuffix(tr(" dpi"));
 	fitRow->addWidget(m_dpiSpin);
-	auto* preset240 = new QPushButton(tr("240"), sizeGroup);
-	auto* preset300 = new QPushButton(tr("300"), sizeGroup);
-	preset240->setFixedWidth(48);
-	preset300->setFixedWidth(48);
-	fitRow->addWidget(preset240);
-	fitRow->addWidget(preset300);
-	auto* fitBtn = new QPushButton(tr("Fit"), sizeGroup);
+	auto* fitBtn = new QPushButton(tr("Fit to frame"), sizeGroup);
 	fitRow->addWidget(fitBtn);
 	fitRow->addStretch(1);
-	grid->addLayout(fitRow, 2, 0, 1, 4);
-
+	fitRow->addWidget(new QLabel(tr("JPEG quality:"), sizeGroup));
+	m_qualitySpin = new QSpinBox(sizeGroup);
+	m_qualitySpin->setRange(50, 100);
+	m_qualitySpin->setValue(SuneerImageResample::settingInt(QStringLiteral("jpegQuality"), 92));
+	fitRow->addWidget(m_qualitySpin);
+	grid->addLayout(fitRow, 3, 0, 1, 4);
 	layout->addWidget(sizeGroup);
 
-	m_resultLine = new QLabel(this);
-	m_resultLine->setWordWrap(true);
-	layout->addWidget(m_resultLine);
+	m_offerOnImport = new QCheckBox(tr("On image import, offer to downsample when the picture is above 400 dpi on the page"), this);
+	m_offerOnImport->setChecked(QSettings(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools")).value(QStringLiteral("offerOnImport"), false).toBool());
+	layout->addWidget(m_offerOnImport);
+
+	auto* toolLine = new QLabel(SuneerImageResample::magickAvailable()
+		? tr("Resampling with ImageMagick (keeps colour mode, ICC profile, EXIF). Output: %1").arg(outputFolderText())
+		: tr("ImageMagick not found: RGB pictures only, via Qt. Output: %1").arg(outputFolderText()), this);
+	toolLine->setWordWrap(true);
+	toolLine->setStyleSheet("color: gray; font-size: 11px;");
+	layout->addWidget(toolLine);
 
 	auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-	buttons->button(QDialogButtonBox::Ok)->setText(tr("Resize"));
+	buttons->button(QDialogButtonBox::Ok)->setText(tr("Apply"));
 	layout->addWidget(buttons);
 
-	connect(m_widthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]{ syncLinked(true); });
-	connect(m_heightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]{ syncLinked(false); });
-	// Editing the DPI directly re-fits the pixel fields live, same as the
-	// presets and the Fit button.
-	connect(m_dpiSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]{ fitToFrameDpi(); });
-	connect(preset240, &QPushButton::clicked, this, [this]{ m_dpiSpin->setValue(240); fitToFrameDpi(); });
-	connect(preset300, &QPushButton::clicked, this, [this]{ m_dpiSpin->setValue(300); fitToFrameDpi(); });
+	connect(m_unitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int u) {
+		m_unit = u;
+		SuneerImageResample::setSetting(QStringLiteral("sizeUnit"), u);
+		refreshInfo();
+		setFromPixels(m_targetW, m_targetH, m_targetDpi);
+	});
+	connect(m_widthSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this]{ syncLinked(true); });
+	connect(m_heightSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this]{ syncLinked(false); });
+	connect(m_resSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]{ syncLinked(true); });
+	connect(m_dpiSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v) { SuneerImageResample::setSetting(QStringLiteral("fitDpi"), v); });
+	connect(m_qualitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v) { SuneerImageResample::setSetting(QStringLiteral("jpegQuality"), v); });
+	connect(m_offerOnImport, &QCheckBox::toggled, this, [](bool on) { SuneerImageResample::setSetting(QStringLiteral("offerOnImport"), on); });
 	connect(fitBtn, &QPushButton::clicked, this, [this]{ fitToFrameDpi(); });
 	connect(buttons, &QDialogButtonBox::accepted, this, [this]{ doResize(); });
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-	// Default to the one-click answer so plain OK already does the right thing.
-	fitToFrameDpi();
+	refreshInfo();
+	fitToFrameDpi();   // the usual answer is already in the fields
+}
+
+QString ResizeImageDialog::outputFolderText() const
+{
+	if (m_doc && m_doc->hasName)
+	{
+		const QFileInfo df(m_doc->documentFileName());
+		return df.completeBaseName() + QStringLiteral("_images/");
+	}
+	return tr("beside the picture (document not saved yet)");
+}
+
+void ResizeImageDialog::refreshInfo()
+{
+	const double upi = unitPerInch(m_unit);
+	const QString su = unitSuffix(m_unit);
+	m_pixelsLabel->setText(tr("%1 x %2 px").arg(m_info.width).arg(m_info.height));
+	m_storedDpiLabel->setText(tr("%1 x %2 dpi (from the file)").arg(qRound(m_info.dpiX)).arg(qRound(m_info.dpiY)));
+	m_storedSizeLabel->setText(QStringLiteral("%1 x %2%3").arg(m_info.width / m_info.dpiX * upi, 0, 'f', 2).arg(m_info.height / m_info.dpiY * upi, 0, 'f', 2).arg(su));
+	// Placed size of the whole picture on the page (points -> inches).
+	const double placedWin = m_item->OrigW * m_item->imageXScale() / 72.0;
+	const double placedHin = m_item->OrigH * m_item->imageYScale() / 72.0;
+	m_placedLabel->setText(tr("%1 x %2%3 (frame %4 x %5%3)").arg(placedWin * upi, 0, 'f', 2).arg(placedHin * upi, 0, 'f', 2).arg(su)
+	                       .arg(m_item->width() / 72.0 * upi, 0, 'f', 2).arg(m_item->height() / 72.0 * upi, 0, 'f', 2));
+	const double eff = qMin(m_effDpiX, m_effDpiY);
+	m_effDpiLabel->setText(tr("<b>%1 dpi</b> - %2 (%3 x %4)").arg(qRound(eff)).arg(SuneerImageResample::dpiWord(eff)).arg(qRound(m_effDpiX)).arg(qRound(m_effDpiY)));
+	m_effDpiLabel->setStyleSheet(QStringLiteral("color: %1;").arg(SuneerImageResample::dpiColor(eff).name()));
+	m_fileLabel->setText(tr("%1, %2, %3, alpha: %4%5\n%6")
+		.arg(QLocale().formattedDataSize(m_info.bytes, 1), m_info.format, m_info.colorMode, m_info.alpha ? tr("yes") : tr("no"),
+		     m_info.hasProfile ? tr(", ICC: %1").arg(m_info.profileName.isEmpty() ? tr("embedded") : m_info.profileName) : QString(),
+		     QFileInfo(m_item->Pfile).fileName()));
+	m_fileLabel->setToolTip(m_item->Pfile);
+}
+
+// The three fields describe one picture: size (units) x resolution = pixels.
+void ResizeImageDialog::setFromPixels(int w, int h, double dpi)
+{
+	m_syncing = true;
+	m_targetW = qMax(1, w);
+	m_targetH = qMax(1, h);
+	m_targetDpi = qMax(10.0, dpi);
+	const double upi = unitPerInch(m_unit);
+	m_widthSpin->setSuffix(unitSuffix(m_unit));
+	m_heightSpin->setSuffix(unitSuffix(m_unit));
+	m_widthSpin->setValue(m_targetW / m_targetDpi * upi);
+	m_heightSpin->setValue(m_targetH / m_targetDpi * upi);
+	m_resSpin->setValue(qRound(m_targetDpi));
+	m_syncing = false;
+	updateResultLine();
 }
 
 void ResizeImageDialog::fitToFrameDpi()
 {
-	const double dpi = m_dpiSpin->value();
-	m_syncing = true;
-	m_widthSpin->setValue(qMax(1, qRound(m_source.width() * dpi / m_effDpiX)));
-	m_heightSpin->setValue(qMax(1, qRound(m_source.height() * dpi / m_effDpiY)));
-	m_syncing = false;
-	updateResultLine();
+	int w, h;
+	SuneerImageResample::fitPixels(m_item, m_dpiSpin->value(), w, h);
+	setFromPixels(w, h, m_dpiSpin->value());
 }
 
 void ResizeImageDialog::syncLinked(bool fromWidth)
 {
 	if (m_syncing)
 		return;
-	if (m_lockAspect->isChecked())
+	const double upi = unitPerInch(m_unit);
+	const double dpi = m_resSpin->value();
+	double win = m_widthSpin->value() / upi;
+	double hin = m_heightSpin->value() / upi;
+	if (m_lockAspect->isChecked() && m_info.width > 0 && m_info.height > 0)
 	{
-		m_syncing = true;
+		const double aspect = double(m_info.height) / m_info.width;
 		if (fromWidth)
-			m_heightSpin->setValue(qMax(1, qRound(double(m_widthSpin->value()) * m_source.height() / m_source.width())));
+			hin = win * aspect;
 		else
-			m_widthSpin->setValue(qMax(1, qRound(double(m_heightSpin->value()) * m_source.width() / m_source.height())));
-		m_syncing = false;
+			win = hin / aspect;
 	}
-	updateResultLine();
+	setFromPixels(qRound(win * dpi), qRound(hin * dpi), dpi);
 }
 
 void ResizeImageDialog::updateResultLine()
 {
-	const int newW = m_widthSpin->value();
-	const int newH = m_heightSpin->value();
-	const int resultDpi = qRound(m_effDpiX * newW / m_source.width());
-	m_resultLine->setText(tr("%1 x %2 (%3) → %4 x %5 @ %6 dpi effective")
-		.arg(m_source.width()).arg(m_source.height())
-		.arg(humanSize(QFileInfo(m_item->Pfile).size()))
-		.arg(newW).arg(newH).arg(resultDpi));
+	const double pixRatio = double(m_targetW) * m_targetH / qMax(1.0, double(m_info.width) * m_info.height);
+	const qint64 est = qint64(m_info.bytes * pixRatio);
+	const bool enlarge = m_targetW > m_info.width || m_targetH > m_info.height;
+	m_resultLine->setText(tr("Result: %1 x %2 px, about %3%4")
+		.arg(m_targetW).arg(m_targetH).arg(QLocale().formattedDataSize(est, 1))
+		.arg(enlarge ? tr(" - ENLARGES the picture") : QString()));
+	m_resultLine->setStyleSheet(enlarge ? QStringLiteral("color: #c00;") : QString());
+}
+
+void ResizeImageDialog::doResize()
+{
+	SuneerImageResample::Options opt;
+	opt.jpegQuality = m_qualitySpin->value();
+	opt.allowEnlarge = m_allowEnlarge->isChecked();
+	opt.parent = this;
+	QString summary, outPath;
+	const QString error = SuneerImageResample::resample(m_doc, m_item, m_targetW, m_targetH, opt, &summary, &outPath);
+	if (!error.isEmpty())
+	{
+		if (error != tr("cancelled"))
+			QMessageBox::warning(this, windowTitle(), tr("Could not resample the picture.\n\n%1").arg(error));
+		return;
+	}
+	if (ScCore->primaryMainWindow())
+		ScCore->primaryMainWindow()->statusBar()->showMessage(tr("%1 - saved as %2, original untouched").arg(summary, QFileInfo(outPath).fileName()), 10000);
+	accept();
 }
 
 QString ResizeImageDialog::resampleImageFile(ScribusDoc* doc, PageItem* item, const QImage& source,
                                              int newW, int newH, double effDpiX, double effDpiY,
                                              QString* summary, QString* outPathOut)
 {
-	if (!doc || !item || source.isNull() || newW < 1 || newH < 1)
-		return tr("nothing to resample");
-
-	QImage out = source.scaled(newW, newH, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-
-	// Bake the new effective DPI into the file so a redo (or a fresh placement
-	// of this file) loads at the print size the resample was made for.
-	const double rx = double(source.width()) / newW;
-	const double ry = double(source.height()) / newH;
-	out.setDotsPerMeterX(qRound((effDpiX / rx) / 0.0254));
-	out.setDotsPerMeterY(qRound((effDpiY / ry) / 0.0254));
-
-	const QFileInfo fi(item->Pfile);
-	QString suffix = fi.suffix().toLower();
-	static const QStringList knownSuffixes { "jpg", "jpeg", "png", "tif", "tiff", "bmp" };
-	if (!knownSuffixes.contains(suffix))
-		suffix = QStringLiteral("jpg");
-
-	// An embedded ("inline") image lives in a session temp file that the .sla
-	// saver base64-embeds on save. Resizing such a frame must stay embedded:
-	// write the resized image to a fresh temp file and re-set the inline flags
-	// after the relink, so the next save embeds the small data instead of
-	// either keeping the big original or silently linking into /tmp.
-	const bool wasInline = item->isInlineImage && item->isTempFile;
-	QString outPath;
-	if (wasInline)
-	{
-		QTemporaryFile tempFile(QDir::tempPath() + "/scribus_temp_XXXXXX." + suffix);
-		if (!tempFile.open())
-			return tr("could not create a temporary file for the embedded image");
-		outPath = getLongPathName(tempFile.fileName());
-		tempFile.setAutoRemove(false);
-		tempFile.close();
-	}
-	else
-	{
-		// name_resized.ext beside the source; never overwrite anything, and
-		// don't restack a tag the chain already carries.
-		outPath = derivedImagePath(item->Pfile, QStringLiteral("_resized"), suffix);
-	}
-
-	const bool isJpeg = (suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg"));
-	const QString writeError = writeImageToFile(out, outPath, isJpeg ? 92 : -1);
-	if (!writeError.isEmpty())
-		return writeError;
-
-	// Relink the frame; loadImage() records a GET_IMAGE undo state. The scale
-	// and offset setters record their own states on top of it, so wrap it all
-	// in one transaction — a single Ctrl+Z points the frame back at the
-	// original file with its old scale/offset. The image scale is points per
-	// pixel, offsets are pixels, so scaling the pixels by 1/r means scale * r
-	// and offset / r keeps the frame visually identical.
-	UndoTransaction transaction;
-	if (UndoManager::undoEnabled())
-		transaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IImageFrame, Um::GetImage, QString(), Um::IGetImage);
-	const double oldScaleX = item->imageXScale();
-	const double oldScaleY = item->imageYScale();
-	const double oldOffX = item->imageXOffset();
-	const double oldOffY = item->imageYOffset();
-	// loadPict() deletes the frame's old temp file before relinking. Keep it:
-	// the GET_IMAGE undo state points at it, so undo must still find the
-	// original data (a stray session temp file is the price of a working undo).
-	if (wasInline)
-		item->isTempFile = false;
-	doc->loadPict(outPath, item, false, true);
-	if (wasInline)
-	{
-		// Stay embedded, now backed by the resized temp file. Undo/redo keep
-		// these flags, so both states save as embedded data of the right file.
-		item->isInlineImage = true;
-		item->isTempFile = true;
-	}
-	item->setImageXYScale(oldScaleX * rx, oldScaleY * ry);
-	item->setImageXYOffset(oldOffX / rx, oldOffY / ry);
-	// updateClip() ends in updateGradientVectors(), which records its own
-	// "Change gradient position" state; committing only after it keeps that
-	// inside this transaction instead of burying it on top.
-	item->updateClip();
-	item->update();
-	if (transaction)
-		transaction.commit();
-	doc->changed();
-	doc->regionsChanged()->update(QRectF());
-
-	if (summary)
-		*summary = tr("%1 x %2 (%3) → %4 x %5 (%6) @ %7 dpi")
-			.arg(source.width()).arg(source.height())
-			.arg(humanSize(fi.size()))
-			.arg(newW).arg(newH)
-			.arg(humanSize(QFileInfo(outPath).size()))
-			.arg(qRound(effDpiX / rx));
-	if (outPathOut)
-		*outPathOut = outPath;
-	return QString();
-}
-
-void ResizeImageDialog::doResize()
-{
-	const int newW = m_widthSpin->value();
-	const int newH = m_heightSpin->value();
-	if (newW == m_source.width() && newH == m_source.height())
-	{
-		QMessageBox::information(this, windowTitle(), tr("The image is already this size — nothing to do."));
-		return;
-	}
-
-	QString summary, outPath;
-	const QString error = resampleImageFile(m_doc, m_item, m_source, newW, newH, m_effDpiX, m_effDpiY, &summary, &outPath);
-	if (!error.isEmpty())
-	{
-		QMessageBox::warning(this, windowTitle(),
-			tr("Could not write the resized image.\n\n%1").arg(error));
-		return;
-	}
-
-	QMessageBox::information(this, windowTitle(),
-		tr("%1\n\nSaved as \"%2\" and relinked. The original file is untouched.").arg(summary, outPath));
-	accept();
+	// Kept for the toolbar DPI field and the canvas Auto-DPI path: same pipeline.
+	Q_UNUSED(source); Q_UNUSED(effDpiX); Q_UNUSED(effDpiY);
+	SuneerImageResample::Options opt;
+	opt.jpegQuality = SuneerImageResample::settingInt(QStringLiteral("jpegQuality"), 92);
+	opt.parent = ScCore->primaryMainWindow();
+	return SuneerImageResample::resample(doc, item, newW, newH, opt, summary, outPathOut);
 }
 
 // ── ImageDpiField ────────────────────────────────────────────────────────────
@@ -512,7 +495,7 @@ void ResizeImageDialog::maybeAutoResample(ScribusDoc* doc, bool reportWhenSkippe
 	QSettings cfg(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools"));
 	if (!cfg.value(QStringLiteral("autoDpiEnabled"), false).toBool())
 		return;
-	const int target = qBound(72, cfg.value(QStringLiteral("autoDpiTarget"), 300).toInt(), 1200);
+	const int target = qBound(72, cfg.value(QStringLiteral("autoDpiTarget"), 300).toInt(), 2400);
 
 	// These are silent from the gesture (a drag on a text frame must not natter),
 	// but the toggle path says why nothing happened — otherwise ticking the box
@@ -534,33 +517,31 @@ void ResizeImageDialog::maybeAutoResample(ScribusDoc* doc, bool reportWhenSkippe
 		return;
 	}
 
-	// Downsample only, and only when clearly above target: the 25% margin
-	// keeps small nudge-resizes from degrading the image repeatedly.
+	// Resample to the target whenever the frame's picture is not at it
+	// (5% margin against nudge-resizes). Always from the original file, so
+	// enlarging the frame again gets pixels back - up to the original's
+	// count unless enlarging is allowed.
 	const double effDpiX = 72.0 / item->imageXScale();
-	const double effDpiY = 72.0 / item->imageYScale();
-	if (effDpiX <= target * 1.25)
+	if (qAbs(effDpiX - target) <= target * 0.05)
 	{
-		reportSkip(tr("Auto-DPI: image is already at or below %1 dpi (currently %2 dpi)")
-			.arg(target).arg(qRound(effDpiX)));
+		reportSkip(tr("Auto-DPI: image is already at %1 dpi").arg(target));
 		return;
 	}
-
-	QImage source(item->Pfile);
-	if (source.isNull())
+	int newW = 0, newH = 0;
+	SuneerImageResample::fitPixels(item, target, newW, newH);
+	const SuneerImageResample::Info orig = SuneerImageResample::probeFile(SuneerImageResample::originalPathOf(item));
+	const bool allowEnlarge = SuneerImageResample::settingInt(QStringLiteral("allowEnlarge"), 0) != 0;
+	if (orig.ok && !allowEnlarge && (newW > orig.width || newH > orig.height))
 	{
-		reportSkip(tr("Auto-DPI: could not read \"%1\"").arg(item->Pfile));
-		return;
+		newW = orig.width;
+		newH = orig.height;   // the most the original has
 	}
-	const int newW = qMax(1, qRound(source.width() * target / effDpiX));
-	const int newH = qMax(1, qRound(source.height() * target / effDpiY));
-	if (newW >= source.width() || newH >= source.height())
-	{
-		reportSkip(tr("Auto-DPI: nothing to downsample"));
-		return;
-	}
-
+	SuneerImageResample::Options opt;
+	opt.jpegQuality = SuneerImageResample::settingInt(QStringLiteral("jpegQuality"), 92);
+	opt.allowEnlarge = allowEnlarge;
+	opt.parent = mainWin;
 	QString summary;
-	const QString error = resampleImageFile(doc, item, source, newW, newH, effDpiX, effDpiY, &summary);
+	const QString error = SuneerImageResample::resample(doc, item, newW, newH, opt, &summary);
 	if (!mainWin)
 		return;
 	if (!error.isEmpty())

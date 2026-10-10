@@ -2,6 +2,7 @@
 #define SUNEERCONTROLBAR_H
 
 #include <QToolBar>
+#include "ui/suneerbgremovedialog.h"
 #include <QWidget>
 #include <QLabel>
 #include <QDoubleSpinBox>
@@ -126,6 +127,9 @@ private slots:
 	void onImgCropResize();
 	void onDocChangedForCaption();
 	void onImgRemoveBackground();
+	void applyBgResult(PageItem* item, const QImage& result, const SuneerBgRemoveDialog::State& st, const QString& sourcePath, const QList<PageItem*>& helperShapes);
+	void resetBgToOriginal(PageItem* item);
+	static QImage loadImageFile(PageItem* item, const QString& path, QString* error);
 	void onImgDrawContour();
 	void onEmbedInSLA();
 	void onEmbedLink();
@@ -155,6 +159,14 @@ private slots:
 	void onAutoContour();
 	void applyCornerRadius();
 	void applyFeather();
+	//! \name Image edge feather (non-destructive EF_FEATHER effect)
+	//@{
+	void loadFeatherPopup();          // spin/direction from the selected image's stored feather
+	void previewFeather();            // live canvas preview while the popup is open
+	void revertFeatherPreview();      // popup closed without Apply
+	double featherPxFor(const PageItem* item) const;   // spin (mm) -> full-resolution image pixels
+	QString featherDirection() const;
+	//@}
 	void onImgEdgeFeather();
 	void onTextEdgeFeather();
 	void onTextFrameBox();
@@ -415,6 +427,8 @@ public:
 	bool            m_borderDocWasModified {false};
 	bool            m_borderPopupLoading   {false};
 	QWidget*        m_featherPopup         {nullptr};
+	bool            m_featherApplied       {false};   // Apply pressed before the popup hid
+	bool            m_featherLoading       {false};   // loadFeatherPopup() is setting widgets
 	QDoubleSpinBox* m_featherSpin          {nullptr};
 	QToolButton*    m_featherAllBtn        {nullptr};
 	QToolButton*    m_featherTopBtn        {nullptr};
@@ -447,6 +461,7 @@ public:
 	ColorButton*    m_imgLineColorBtn      {nullptr};
 	QDoubleSpinBox* m_fillOpacitySpin      {nullptr};
 	QDoubleSpinBox* m_imgLineOpacitySpin   {nullptr};
+	class SuneerImageSizeBar* m_imageSizeBar {nullptr};
 	QDoubleSpinBox* m_imgWidthSpin         {nullptr};
 	QDoubleSpinBox* m_imgHeightSpin        {nullptr};
 	QComboBox*      m_imgLineStyleCombo    {nullptr};

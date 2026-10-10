@@ -13,8 +13,11 @@ for which a new license (GPL+exception) is in place.
 #include <QWidget>
 
 #include "scribusapi.h"
+#include "suneerimageresample.h"
 
 class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
 class PageItem;
@@ -65,22 +68,34 @@ public:
 
 private:
 	ResizeImageDialog(ScribusDoc* doc, PageItem* item, const QImage& source, QWidget* parent);
-
 	void fitToFrameDpi();
 	void syncLinked(bool fromWidth);
 	void updateResultLine();
 	void doResize();
+	void refreshInfo();
+	void setFromPixels(int w, int h, double dpi);
+	QString outputFolderText() const;
 
 	ScribusDoc* m_doc { nullptr };
 	PageItem* m_item { nullptr };
 	QImage m_source;
+	SuneerImageResample::Info m_info;
 	double m_effDpiX { 72.0 };
 	double m_effDpiY { 72.0 };
-
-	QSpinBox* m_widthSpin { nullptr };
-	QSpinBox* m_heightSpin { nullptr };
+	int m_unit { 0 };
+	int m_targetW { 0 };
+	int m_targetH { 0 };
+	double m_targetDpi { 300.0 };
+	QLabel *m_pixelsLabel { nullptr }, *m_storedDpiLabel { nullptr }, *m_storedSizeLabel { nullptr }, *m_placedLabel { nullptr }, *m_effDpiLabel { nullptr }, *m_fileLabel { nullptr };
+	QComboBox* m_unitCombo { nullptr };
+	QDoubleSpinBox* m_widthSpin { nullptr };
+	QDoubleSpinBox* m_heightSpin { nullptr };
+	QSpinBox* m_resSpin { nullptr };
 	QCheckBox* m_lockAspect { nullptr };
+	QCheckBox* m_allowEnlarge { nullptr };
+	QCheckBox* m_offerOnImport { nullptr };
 	QSpinBox* m_dpiSpin { nullptr };
+	QSpinBox* m_qualitySpin { nullptr };
 	QLabel* m_resultLine { nullptr };
 	bool m_syncing { false };
 };

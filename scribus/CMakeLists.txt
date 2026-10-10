@@ -166,6 +166,9 @@ if(HAVE_OSG)
 		suneerpopout.cpp
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
+		ui/suneerbgremovedialog.cpp
+		ui/suneeroptimizeimagesdialog.cpp
+		ui/suneerimagesizebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
@@ -220,6 +223,10 @@ if(HAVE_OSG)
 		ai/openaitextservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp
+		scimagefeather.cpp
+		suneerbgremove.cpp
+		suneerimageresample.cpp
+		suneercursor.cpp
 		util_contour.cpp
 		util_inpaint.cpp
 		scupdateclient.cpp
@@ -264,6 +271,9 @@ else()
 		suneerpopout.cpp
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
+		ui/suneerbgremovedialog.cpp
+		ui/suneeroptimizeimagesdialog.cpp
+		ui/suneerimagesizebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
@@ -318,6 +328,10 @@ else()
 		ai/openaitextservice.cpp
 		ai/openrouterinpaintservice.cpp
 		scimageerasermask.cpp
+		scimagefeather.cpp
+		suneerbgremove.cpp
+		suneerimageresample.cpp
+		suneercursor.cpp
 		util_contour.cpp
 		util_inpaint.cpp
 		scupdateclient.cpp

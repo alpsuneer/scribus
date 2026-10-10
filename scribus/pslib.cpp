@@ -57,6 +57,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribuscore.h"
 #include "selection.h"
 #include "scimageerasermask.h"
+#include "scimagefeather.h"
 #include "scpattern.h"
 #include "scstreamfilter_ascii85.h"
 #include "scstreamfilter_flate.h"
@@ -1508,9 +1509,16 @@ namespace
 		if (!item || item->pixm.imgInfo.type == ImageType7)
 			return;
 		QImage mask = ScEraserMask::maskOf(item->effectsInUse);
-		if (mask.isNull())
-			return;
-		ScEraserMask::mergeIntoAlphaBytes(maskArray, mask, image.width(), image.height());
+		if (!mask.isNull())
+			ScEraserMask::mergeIntoAlphaBytes(maskArray, mask, image.width(), image.height());
+		// Edge feather, from whatever alpha is left after the eraser.
+		double featherPx = 0;
+		QString featherDir;
+		if (ScFeatherMask::paramsOf(item->effectsInUse, featherPx, featherDir))
+		{
+			const double scale = item->OrigW > 0 ? double(image.width()) / double(item->OrigW) : 1.0;
+			ScFeatherMask::mergeIntoAlphaBytes(maskArray, image.width(), image.height(), featherPx * scale, featherDir);
+		}
 	}
 }
 

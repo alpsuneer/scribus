@@ -12,6 +12,9 @@
 #include "prefscontext.h"
 #include "prefsfile.h"
 #include "undomanager.h"
+#include "undostate.h"
+#include "pageitem_imageframe.h"
+#include "scimagefeather.h"
 #include "scribus.h"
 #include "appmodes.h"
 #include "ui/nodeeditpalette.h"
@@ -78,6 +81,16 @@
 #include <QToolButton>
 #include "util_printer.h"
 #include "suneerimagelinks.h"
+#include "suneerbgremove.h"
+#include "ui/suneerbgremovedialog.h"
+#include "ui/suneerimagesizebar.h"
+#include "suneercursor.h"
+#include "scimageerasermask.h"
+#include "cmsettings.h"
+#include "prefsmanager.h"
+#include <QProgressDialog>
+#include <QEventLoop>
+#include <QDialogButtonBox>
 #include "suneertexteffects.h"
 #include "scribuswin.h"
 #include <QMdiArea>
@@ -541,40 +554,11 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	QWidget* sizeSep = makeSep();
 	row1->addWidget(sizeSep); m_imageWidgets << sizeSep;
 
-	// Width: external label + framed spinbox (label outside keeps the box uncluttered)
-	{ auto* wl = makeLabel("W:", "Image Width"); row1->addWidget(wl); m_imageWidgets << wl; }
-	m_imgWidthSpin = new QDoubleSpinBox();
-	m_imgWidthSpin->setRange(0, 10000);
-	m_imgWidthSpin->setDecimals(2);
-	m_imgWidthSpin->setSuffix(" mm");
-	m_imgWidthSpin->setFixedWidth(95);
-	m_imgWidthSpin->setToolTip("Image Width");
-	row1->addWidget(m_imgWidthSpin);
-	m_imageWidgets << m_imgWidthSpin;
-
-	// wide gap between W and H so they read as clearly separate fields
-	QWidget* hwSpacer = new QWidget(this);
-	hwSpacer->setFixedWidth(16);
-	row1->addWidget(hwSpacer);
-	m_imageWidgets << hwSpacer;
-
-	// Height: external label + framed spinbox
-	{ auto* hl = makeLabel("H:", "Image Height"); row1->addWidget(hl); m_imageWidgets << hl; }
-	m_imgHeightSpin = new QDoubleSpinBox();
-	m_imgHeightSpin->setRange(0, 10000);
-	m_imgHeightSpin->setDecimals(2);
-	m_imgHeightSpin->setSuffix(" mm");
-	m_imgHeightSpin->setFixedWidth(95);
-	m_imgHeightSpin->setToolTip("Image Height");
-	row1->addWidget(m_imgHeightSpin);
-	m_imageWidgets << m_imgHeightSpin;
-
-	// Effective print DPI of the selected image; typing a value + Enter
-	// resamples the file to it at the current frame size (self-contained
-	// widget — see ImageDpiField).
-	ImageDpiField* imgDpiField = new ImageDpiField(this);
-	row1->addWidget(imgDpiField);
-	m_imageWidgets << imgDpiField;
+	// Image Size fields: placed W / H (cm, mm, in), chain, dpi, pixel size
+	// and file size; Enter resamples the picture (see SuneerImageSizeBar).
+	m_imageSizeBar = new SuneerImageSizeBar(this);
+	row1->addWidget(m_imageSizeBar);
+	m_imageWidgets << m_imageSizeBar;
 
 	// wide gap before the Fill section
 	QWidget* hwEndSpacer = new QWidget(this);
@@ -1360,6 +1344,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	addIR2(m_featherBtn);
 	// Feather popup
 	m_featherPopup = new QWidget(this, Qt::Popup);
+	m_featherPopup->installEventFilter(this);   // Hide without Apply reverts the live preview
 	m_featherPopup->setWindowTitle("Edge Feather");
 	QVBoxLayout* featherVlay = new QVBoxLayout(m_featherPopup);
 	featherVlay->setContentsMargins(10,10,10,10);
@@ -1397,6 +1382,10 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	QPushButton* featherApplyBtn = new QPushButton("Apply", m_featherPopup);
 	featherVlay->addWidget(featherApplyBtn);
 	connect(featherApplyBtn, &QPushButton::clicked, this, &SuneerControlBar::applyFeather);
+	// Image frames: the value and the direction preview live on the canvas.
+	connect(m_featherSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) { previewFeather(); });
+	for (QToolButton* b : { m_featherAllBtn, m_featherTopBtn, m_featherBottomBtn, m_featherLeftBtn, m_featherRightBtn })
+		connect(b, &QToolButton::clicked, this, [this]() { previewFeather(); });
 	row2->addStretch();
 
 
@@ -1645,6 +1634,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_featherBtn, &QToolButton::clicked, this, [this](){
 		QPoint pos = m_featherBtn->mapToGlobal(QPoint(0, m_featherBtn->height()));
 		m_featherPopup->move(pos);
+		loadFeatherPopup();
 		m_featherPopup->show();
 	});
 	connect(m_cornerRadiusSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val){
@@ -1711,10 +1701,12 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		doc->regionsChanged()->update(QRectF());
 		doc->changed();
 	});
-	connect(m_imgWidthSpin,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-		this, &SuneerControlBar::onImgWidthChanged);
-	connect(m_imgHeightSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-		this, &SuneerControlBar::onImgHeightChanged);
+	if (m_imgWidthSpin)
+		connect(m_imgWidthSpin,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+			this, &SuneerControlBar::onImgWidthChanged);
+	if (m_imgHeightSpin)
+		connect(m_imgHeightSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+			this, &SuneerControlBar::onImgHeightChanged);
 	connect(m_imgLineStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
 		this, &SuneerControlBar::onImgLineStyleChanged);
 	connect(m_imgLineStyleEditBtn, &QToolButton::clicked, this, &SuneerControlBar::onImgLineStyleEdit);
@@ -1751,8 +1743,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		PageItem* item = sel()->itemAt(0);
 		if (item->isTextFrame())
 			onTextEdgeFeather();
-		else if (item->isImageFrame())
-			onImgEdgeFeather();
+		// Image frames: the popup above previews and applies the
+		// non-destructive feather effect (onImgEdgeFeather() wrote a new file
+		// with a frame-edge fade, which a Remove Background cut-out never shows).
 	});
 	connect(m_imgDrawContourBtn, &QToolButton::clicked, this, &SuneerControlBar::onImgDrawContour);
 	connect(m_imgContourEditBtn, &QToolButton::toggled, this, &SuneerControlBar::onImgContourEditToggle);
@@ -2915,6 +2908,14 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 	// transaction has to be sealed.
 	if (m_shadingPopup && obj == m_shadingPopup && ev->type() == QEvent::Hide)
 		endParagraphShadingTransaction();
+	// The feather popup previews on the canvas; closing it without Apply
+	// (Escape, click outside) puts the stored feather back.
+	if (m_featherPopup && obj == m_featherPopup && ev->type() == QEvent::Hide)
+	{
+		if (!m_featherApplied)
+			revertFeatherPreview();
+		m_featherApplied = false;
+	}
 	// While focus is parked in the control bar, Esc abandons the excursion and
 	// Enter commits it — both hand the caret back to the frame. Tab is left
 	// alone so Qt's own focus chain walks the bar (see the setTabOrder block in
@@ -3758,173 +3759,324 @@ void SuneerControlBar::onImgContourEditToggle(bool checked)
 	if (mw->view) { mw->view->DrawNew(); mw->view->update(); }
 }
 
+// Full-resolution picture at \a path, read through Scribus's own loaders (so
+// TIFF/PSD and friends do not come in as the frame's low-res preview).
+QImage SuneerControlBar::loadImageFile(PageItem* item, const QString& path, QString* error)
+{
+	auto fail = [error](const QString& m) { if (error) *error = m; return QImage(); };
+	if (path.isEmpty() || !QFileInfo::exists(path))
+		return fail(tr("The picture file is missing:\n%1").arg(path));
+	ScImage img;
+	CMSettings cms(item->doc(), item->ImageProfile, static_cast<eRenderIntent>(item->ImageIntent));
+	cms.setUseEmbeddedProfile(item->UseEmbedded);
+	cms.allowSoftProofing(false);
+	bool realCMYK = false;
+	if (!img.loadPicture(path, item->pixm.imgInfo.actualPageNumber, cms, ScImage::RGBData,
+	                     PrefsManager::instance().gsResolution(), &realCMYK, true))
+		return fail(tr("Scribus could not read the picture:\n%1").arg(path));
+	QImage out = img.qImage();
+	if (out.isNull())
+		return fail(tr("The picture has no pixels:\n%1").arg(path));
+	const ImageInfoRecord& info = img.imgInfo;
+	if (info.xres > 0 && info.yres > 0)
+	{
+		out.setDotsPerMeterX(qRound(info.xres / 0.0254));
+		out.setDotsPerMeterY(qRound(info.yres / 0.0254));
+	}
+	return out;
+}
+
+// A new output name beside the picture: "_rembg", then "_rembg2", ... so the
+// file the frame shows now (which Undo points back to) is never overwritten.
+static QString freshDerivedPath(const QString& source, const QString& tag)
+{
+	for (int n = 1; n < 1000; ++n)
+	{
+		const QString candidate = derivedImagePath(source, n == 1 ? tag : tag + QString::number(n), "png");
+		if (!QFileInfo::exists(candidate))
+			return candidate;
+	}
+	return derivedImagePath(source, tag, "png");
+}
+
+// Write \a result as the frame's picture, inside one undo step together with
+// the contour, the text flow and the removal of the helper shapes. The
+// selection, mode, brush and raw cut-out are kept as item attributes.
+void SuneerControlBar::applyBgResult(PageItem* item, const QImage& result, const SuneerBgRemoveDialog::State& st,
+                                     const QString& sourcePath, const QList<PageItem*>& helperShapes)
+{
+	using namespace SuneerBgRemove;
+	const QString outputPath = freshDerivedPath(sourcePath, "_rembg");
+	QImage toSave = result.convertToFormat(QImage::Format_ARGB32);
+	const int dpiX = item->pixm.imgInfo.xres > 0 ? item->pixm.imgInfo.xres : 72;
+	const int dpiY = item->pixm.imgInfo.yres > 0 ? item->pixm.imgInfo.yres : 72;
+	toSave.setDotsPerMeterX(qRound(dpiX / 0.0254));
+	toSave.setDotsPerMeterY(qRound(dpiY / 0.0254));
+	if (!toSave.save(outputPath, "PNG"))
+	{
+		QMessageBox::warning(this, tr("Remove Background"), tr("Could not write:\n%1").arg(outputPath));
+		return;
+	}
+	noteFeatherFile(m_doc, outputPath);
+	QString cutPath;
+	if (!st.cut.isNull())
+	{
+		cutPath = freshDerivedPath(sourcePath, "_rembgcut");
+		st.cut.save(cutPath, "PNG");
+		noteFeatherFile(m_doc, cutPath);
+	}
+	const QString inputPath = item->Pfile;
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(), tr("Remove Background"), QString(), Um::IGetImage);
+	const bool wasEmbedded = item->isImageInline();
+	if (wasEmbedded)
+	{
+		noteFeatherFile(m_doc, inputPath);
+		item->isTempFile = false;
+	}
+	if (!m_doc->loadPict(outputPath, item, false, true))
+	{
+		if (tx)
+			tx.cancel();
+		UndoManager::instance()->setUndoEnabled(false);
+		m_doc->loadPict(inputPath, item, false, true);
+		item->isInlineImage = wasEmbedded;
+		item->isTempFile = wasEmbedded;
+		UndoManager::instance()->setUndoEnabled(true);
+		QMessageBox::warning(this, tr("Remove Background"), tr("Could not load the new picture:\n%1").arg(outputPath));
+		return;
+	}
+	updateCaptionFrame(item);
+	if (wasEmbedded)
+	{
+		item->isInlineImage = true;
+		item->isTempFile = true;
+	}
+	else
+		SuneerImageLinks::embedPlaced(m_doc, item);
+	if (item->OrigW > 0 && item->OrigH > 0)
+	{
+		double scale = qMin(item->width() / (double)item->OrigW, item->height() / (double)item->OrigH);
+		item->setImageXYScale(scale, scale);
+		item->setImageXYOffset((item->width() - item->OrigW * scale) / 2.0, (item->height() - item->OrigH * scale) / 2.0);
+	}
+	item->update();
+	// What made this result, for "Reset to original" and for reopening.
+	setAttr(item, AttrSource, sourcePath);
+	setAttr(item, AttrMode, modeName(st.mode));
+	setAttr(item, AttrSelection, encodePath(st.selection));
+	setAttr(item, AttrBrush, st.brush.isNull() ? QString() : ScEraserMask::encode(st.brush));
+	setAttr(item, AttrCut, cutPath);
+	setAttr(item, AttrCutRect, st.cutRect.isNull() ? QString() : QStringLiteral("%1,%2,%3,%4").arg(st.cutRect.x()).arg(st.cutRect.y()).arg(st.cutRect.width()).arg(st.cutRect.height()));
+	setAttr(item, AttrModel, st.model);
+	setAttr(item, AttrFeather, QString::number(st.feather));
+	// Helper shapes drawn on the canvas go away; the frame stays selected.
+	if (!helperShapes.isEmpty())
+	{
+		Selection shapeSel(this, false);
+		shapeSel.addItems(helperShapes);
+		m_doc->itemSelection_DeleteItem(&shapeSel);
+		m_doc->m_Selection->clear();
+		m_doc->m_Selection->addItem(item);
+	}
+	onAutoContour();
+	onTextFlowContour();
+	if (tx)
+		tx.commit();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	if (m_scmw)
+		m_scmw->setStatusBarInfoText(tr("Background removed (%1) - saved as %2").arg(modeName(st.mode), QFileInfo(outputPath).fileName()));
+}
+
+void SuneerControlBar::resetBgToOriginal(PageItem* item)
+{
+	using namespace SuneerBgRemove;
+	const QString sourcePath = attr(item, AttrSource);
+	if (sourcePath.isEmpty() || !QFileInfo::exists(sourcePath))
+	{
+		QMessageBox::warning(this, tr("Reset to original"), tr("The original picture is not known or no longer exists:\n%1").arg(sourcePath));
+		return;
+	}
+	const QString inputPath = item->Pfile;
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(), tr("Reset to original picture"), QString(), Um::IGetImage);
+	const bool wasEmbedded = item->isImageInline();
+	if (wasEmbedded)
+		item->isTempFile = false;
+	if (!m_doc->loadPict(sourcePath, item, false, true))
+	{
+		if (tx)
+			tx.cancel();
+		item->isTempFile = wasEmbedded;
+		QMessageBox::warning(this, tr("Reset to original"), tr("Could not load:\n%1").arg(sourcePath));
+		return;
+	}
+	updateCaptionFrame(item);
+	clearAttrs(item);
+	item->setTextFlowMode(PageItem::TextFlowDisabled);
+	item->update();
+	if (tx)
+		tx.commit();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	if (m_scmw)
+		m_scmw->setStatusBarInfoText(tr("Original picture restored"));
+}
+
+// BG button. Selection = one image frame, optionally plus closed shapes drawn
+// over it: the shapes are the part to work on (their union), and vanish
+// after Apply. Only the frame selected: the Remove Background dialog.
 void SuneerControlBar::onImgRemoveBackground()
 {
+	using namespace SuneerBgRemove;
 	if (!m_doc || sel()->isEmpty()) return;
-	PageItem* item = sel()->itemAt(0);
-	if (item->Pfile.isEmpty()) {
-		QMessageBox::warning(this, "Remove Background", "No image loaded in this frame.");
+	// Whatever way this returns (applied, cancelled, failed), the canvas
+	// cursor is put right afterwards.
+	struct SettleAtEnd { ScribusView* v; ~SettleAtEnd() { suneerCursorSettle(v, "BG remove end"); } } settle { m_doc->view() };
+	PageItem* frame = nullptr;
+	QList<PageItem*> shapes;
+	for (int i = 0; i < sel()->count(); ++i)
+	{
+		PageItem* it = sel()->itemAt(i);
+		if (!it) continue;
+		if (it->isImageFrame() && !frame)
+			frame = it;
+		else if (it->isPolygon() || it->isPolyLine() || it->isSpiral() || it->isArc() || it->isRegularPolygon())
+			shapes << it;
+	}
+	if (!frame)
+	{
+		QMessageBox::warning(this, tr("Remove Background"), tr("Select an image frame (plus, optionally, shapes drawn over it)."));
 		return;
 	}
-	const QString rembgBlocked = featherBlockReason(m_doc, item);
-	if (!rembgBlocked.isEmpty()) {
-		QMessageBox::warning(this, "Remove Background", rembgBlocked);
+	if (frame->Pfile.isEmpty())
+	{
+		QMessageBox::warning(this, tr("Remove Background"), tr("No image loaded in this frame."));
 		return;
 	}
+	const QString blocked = featherBlockReason(m_doc, frame);
+	if (!blocked.isEmpty())
+	{
+		QMessageBox::warning(this, tr("Remove Background"), blocked);
+		return;
+	}
+	// The picture before any removal is what everything is computed from.
+	QString sourcePath = attr(frame, AttrSource);
+	const bool hasOriginal = !sourcePath.isEmpty() && QFileInfo::exists(sourcePath) && sourcePath != frame->Pfile;
+	if (!hasOriginal)
+		sourcePath = frame->Pfile;
+	QString err;
+	QImage source = loadImageFile(frame, sourcePath, &err);
+	if (source.isNull())
+	{
+		QMessageBox::warning(this, tr("Remove Background"), err);
+		return;
+	}
+	// Earlier state kept on the frame.
+	SuneerBgRemoveDialog::State st;
+	st.mode = modeFromName(attr(frame, AttrMode));
+	st.selection = decodePath(attr(frame, AttrSelection));
+	st.brush = ScEraserMask::decode(attr(frame, AttrBrush));
+	if (!st.brush.isNull())
+		st.brush = st.brush.convertToFormat(QImage::Format_Grayscale8);
+	if (!attr(frame, AttrModel).isEmpty())
+		st.model = attr(frame, AttrModel);
+	st.feather = attr(frame, AttrFeather).toInt();
+	const QString cutPath = attr(frame, AttrCut);
+	const QStringList cr = attr(frame, AttrCutRect).split(',');
+	if (!cutPath.isEmpty() && QFileInfo::exists(cutPath) && cr.size() == 4)
+	{
+		st.cut = QImage(cutPath).convertToFormat(QImage::Format_ARGB32);
+		st.cutRect = QRect(cr[0].toInt(), cr[1].toInt(), cr[2].toInt(), cr[3].toInt());
+		if (st.cut.size() != st.cutRect.size())
+			st.cut = QImage();
+	}
 
-	// Model selection dialog
-	QDialog dlg(this);
-	dlg.setWindowTitle("Remove Background");
-	dlg.setFixedWidth(300);
-	QVBoxLayout* vl = new QVBoxLayout(&dlg);
-
-	QLabel* lbl = new QLabel("Select AI Model:", &dlg);
-	QFont f = lbl->font(); f.setBold(true); lbl->setFont(f);
-	vl->addWidget(lbl);
-
-	QComboBox* modelCombo = new QComboBox(&dlg);
-	modelCombo->addItem("u2net_human_seg  — Portrait / Human (Best)", "u2net_human_seg");
-	modelCombo->addItem("u2net            — General Objects",          "u2net");
-	modelCombo->addItem("isnet-general-use — High Detail Edges",       "isnet-general-use");
-	modelCombo->addItem("silueta          — Silhouette / Fast",        "silueta");
-	modelCombo->setCurrentIndex(0);
-	vl->addWidget(modelCombo);
-
-	// Feather option
-	vl->addWidget(new QLabel("Edge Feather (px):"));
-	QSpinBox* featherSpin = new QSpinBox(&dlg);
-	featherSpin->setRange(0, 50);
-	featherSpin->setValue(0);
-	featherSpin->setSuffix(" px");
-	featherSpin->setToolTip("Blur edges after background removal (0 = no feather)");
-	vl->addWidget(featherSpin);
-	vl->addSpacing(8);
-	QDialogButtonBox* btns = new QDialogButtonBox(
-		QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-	connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-	connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-	vl->addWidget(btns);
-
-	if (dlg.exec() != QDialog::Accepted) return;
-
-	QString modelName  = modelCombo->currentData().toString();
-	int featherPx = featherSpin->value();
-	QString inputPath  = item->Pfile;
-	QString outputPath = derivedImagePath(inputPath, "_rembg", "png");
-
-	// Carry the frame's resolution into the PNG. PIL writes a pHYs chunk only
-	// when handed dpi=, so saving bare made every background-removed image come
-	// back at Qt's 96 dpi default — and a later crop then faithfully kept 96.
-	int rembgDpiX = item->pixm.imgInfo.xres > 0 ? item->pixm.imgInfo.xres : 72;
-	int rembgDpiY = item->pixm.imgInfo.yres > 0 ? item->pixm.imgInfo.yres : 72;
-
-	QString script = QString(
-		"from rembg import remove, new_session\n"
-		"from PIL import Image\n"
-		"import numpy as np\n"
-		"session = new_session('%3')\n"
-		"img = Image.open(r'%1').convert('RGBA')\n"
-		"result = remove(img, session=session, alpha_matting=True, alpha_matting_foreground_threshold=240, alpha_matting_background_threshold=10, alpha_matting_erode_size=10)\n"
-		"import PIL.ImageFilter as _IF\n"
-		"if %4 > 0:\n"
-		"    r,g,b,a = result.split()\n"
-		"    a = a.filter(_IF.GaussianBlur(radius=%4))\n"
-		"    result = __import__('PIL.Image', fromlist=['Image']).merge('RGBA',(r,g,b,a))\n"
-		"result.save(r'%2', dpi=(%5, %6))\n"
-	).arg(inputPath).arg(outputPath).arg(modelName).arg(featherPx).arg(rembgDpiX).arg(rembgDpiY);
-
-	QApplication::setOverrideCursor(Qt::WaitCursor);
-
-	QProcess proc;
-	proc.start("python3", QStringList() << "-c" << script);
-	proc.waitForFinished(120000); // 2 min timeout
-
-	QApplication::restoreOverrideCursor();
-
-	QString stdOut = QString::fromLocal8Bit(proc.readAllStandardOutput());
-	QString stdErr = QString::fromLocal8Bit(proc.readAllStandardError());
-
-	if (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0 && QFileInfo::exists(outputPath)) {
-		noteFeatherFile(m_doc, outputPath);
-		// One undo step: the picture, its scale, the embedding, the contour
-		// and the text flow.
-		UndoTransaction rembgTransaction;
-		if (UndoManager::undoEnabled())
-			rembgTransaction = UndoManager::instance()->beginTransaction(item->getUName(), item->getUPixmap(),
-			                                                             tr("Remove Background"), QString(), Um::IGetImage);
-		// loadPict() deletes the temp copy of an embedded picture. Undo has to
-		// find it again, so drop the flag first. Pfile must still be the OLD
-		// picture here: loadImage() records it as the picture Undo goes back to.
-		const bool wasEmbedded = item->isImageInline();
-		if (wasEmbedded) {
-			noteFeatherFile(m_doc, inputPath);
-			item->isTempFile = false;
-		}
-		if (!m_doc->loadPict(outputPath, item, false, true)) {
-			if (rembgTransaction)
-				rembgTransaction.cancel();
-			UndoManager::instance()->setUndoEnabled(false);
-			m_doc->loadPict(inputPath, item, false, true);
-			item->isInlineImage = wasEmbedded;
-			item->isTempFile = wasEmbedded;
-			UndoManager::instance()->setUndoEnabled(true);
-			QMessageBox::warning(this, "rembg Error", "Could not load the new image:\n" + outputPath);
+	if (!shapes.isEmpty())
+	{
+		// A) shapes on the canvas are the selection.
+		const QPainterPath path = shapesToImagePath(frame, shapes);
+		if (path.isEmpty() || !path.intersects(QRectF(QPointF(0, 0), QSizeF(source.size()))))
+		{
+			QMessageBox::warning(this, tr("Remove Background"), tr("The selected shape does not lie over the picture."));
 			return;
 		}
-		updateCaptionFrame(item);
-		if (wasEmbedded) {
-			// The output of an embedded picture is a scribus_temp_ file next to
-			// the old temp copy: it is the embedded data now (see onImgEdgeFeather()).
-			item->isInlineImage = true;
-			item->isTempFile = true;
+		QDialog dlg(this);
+		dlg.setWindowTitle(tr("Remove Background - selected part"));
+		auto* vl = new QVBoxLayout(&dlg);
+		vl->addWidget(new QLabel(tr("%n shape(s) mark the part to work on.", "", shapes.size()), &dlg));
+		auto* inside = new QRadioButton(tr("Only inside selection (outside stays as it is)"), &dlg);
+		auto* keep = new QRadioButton(tr("Keep selected subject only (outside becomes transparent)"), &dlg);
+		(st.mode == SuneerBgRemove::Mode::KeepSubject ? keep : inside)->setChecked(true);
+		vl->addWidget(inside); vl->addWidget(keep);
+		auto* modelCombo = new QComboBox(&dlg);
+		modelCombo->addItem("u2net_human_seg - Portrait / Human", "u2net_human_seg");
+		modelCombo->addItem("u2net - General objects", "u2net");
+		modelCombo->addItem("isnet-general-use - High detail edges", "isnet-general-use");
+		modelCombo->addItem("silueta - Silhouette / fast", "silueta");
+		const int mi = modelCombo->findData(st.model);
+		modelCombo->setCurrentIndex(mi < 0 ? 0 : mi);
+		vl->addWidget(new QLabel(tr("AI model:"), &dlg)); vl->addWidget(modelCombo);
+		auto* featherSpin = new QSpinBox(&dlg);
+		featherSpin->setRange(0, 50); featherSpin->setValue(st.feather); featherSpin->setSuffix(" px");
+		vl->addWidget(new QLabel(tr("Edge feather (px):"), &dlg)); vl->addWidget(featherSpin);
+		auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+		connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+		connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+		vl->addWidget(bb);
+		if (dlg.exec() != QDialog::Accepted)
+			return;
+		st.mode = keep->isChecked() ? SuneerBgRemove::Mode::KeepSubject : SuneerBgRemove::Mode::Inside;
+		st.model = modelCombo->currentData().toString();
+		st.feather = featherSpin->value();
+		st.selection = path;
+		st.brush = QImage();
+		const QImage selMask = maskFromPath(path, source.size());
+		const QRect region = regionFor(selMask, st.mode, source.size());
+		// rembg in a child process; a progress window with Cancel keeps the UI alive.
+		QProgressDialog progress(tr("Removing the background of %1 x %2 pixels...").arg(region.width()).arg(region.height()), tr("Cancel"), 0, 0, this);
+		progress.setWindowTitle(tr("Remove Background"));
+		progress.setWindowModality(Qt::WindowModal);
+		progress.setMinimumDuration(0);
+		SuneerBgRemover remover;
+		QEventLoop loop;
+		QImage cut; QString failure;
+		connect(&remover, &SuneerBgRemover::finished, &loop, [&](const QImage& img) { cut = img; loop.quit(); });
+		connect(&remover, &SuneerBgRemover::failed, &loop, [&](const QString& e) { failure = e; loop.quit(); });
+		connect(&progress, &QProgressDialog::canceled, &loop, [&]() { remover.cancel(); failure = tr("cancelled"); loop.quit(); });
+		remover.start(source, region, st.model, st.feather);
+		progress.show();
+		loop.exec();
+		progress.close();
+		if (cut.isNull())
+		{
+			if (failure != tr("cancelled"))
+				QMessageBox::warning(this, tr("Remove Background"), failure.isEmpty() ? tr("No result.") : failure);
+			return;
 		}
-		else
-			SuneerImageLinks::embedPlaced(m_doc, item);
-		// Auto fit image to frame
-		if (item->OrigW > 0 && item->OrigH > 0) {
-			double scaleX = item->width()  / (double)item->OrigW;
-			double scaleY = item->height() / (double)item->OrigH;
-			double scale  = qMin(scaleX, scaleY);
-			item->setImageXYScale(scale, scale);
-			item->setImageXYOffset(
-				(item->width()  - item->OrigW * scale) / 2.0,
-				(item->height() - item->OrigH * scale) / 2.0);
-		}
-		item->update();
-		// Auto contour + text flow, inside the same undo step
-		onAutoContour();
-		onTextFlowContour();
-		if (rembgTransaction)
-			rembgTransaction.commit();
-		m_doc->changed();
-		// Enable contour editing mode
-		QTimer::singleShot(400, this, [this]() {
-			if (!m_doc) return;
-			m_doc->regionsChanged()->update(QRectF());
-			// Enable Contour Line Editing Mode
-			ScribusMainWindow* mw = ScCore->primaryMainWindow();
-			if (mw) {
-				// Switch to node edit mode
-				mw->setAppModeByToggle(true, modeEditClip);
-				// Set contour line mode directly
-				m_doc->nodeEdit.setIsContourLine(true);
-					// Show node palette
-				if (mw->nodePalette)
-					mw->nodePalette->show();
-				// Force canvas redraw
-				m_doc->regionsChanged()->update(QRectF());
-				m_doc->changed();
-				if (mw->view) {
-					mw->view->DrawNew();
-					mw->view->update();
-				}
-			}
-		});
-		QMessageBox::information(this, "Done", "Background removed + Contour detected!\nSaved: " + outputPath);
-	} else {
-		QString msg = stdErr.isEmpty() ? stdOut : stdErr;
-		QMessageBox::warning(this, "rembg Error", msg.isEmpty() ? "Unknown error\nExit: " + QString::number(proc.exitCode()) : msg);
+		st.cut = cut;
+		st.cutRect = region;
+		const QImage result = compose(source, cut, region, selMask, st.mode, QImage());
+		applyBgResult(frame, result, st, sourcePath, shapes);
+		return;
 	}
+
+	// B) the dialog.
+	SuneerBgRemoveDialog dlg(source, st, hasOriginal, this);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+	if (dlg.resetRequested())
+	{
+		resetBgToOriginal(frame);
+		return;
+	}
+	const QImage result = dlg.result();
+	if (result.isNull())
+		return;
+	applyBgResult(frame, result, dlg.state(), sourcePath, QList<PageItem*>());
 }
 
 void SuneerControlBar::onPadReset()
@@ -4174,6 +4326,7 @@ void SuneerControlBar::onAutoContour()
 	PageItem* item = sel()->itemAt(0);
 	if (!item->isImageFrame() || !item->imageIsAvailable) return;
 	if (item->Pfile.isEmpty()) return;
+	auto* frame = item->asImageFrame();
 
 	// One undo step (it nests inside Remove Background's).
 	UndoTransaction contourTransaction;
@@ -4195,32 +4348,35 @@ void SuneerControlBar::onAutoContour()
 			(item->height() - item->OrigH * scale) / 2.0);
 	}
 
-	FPointArray contour = SuneerAlphaWrap::createContour(
-		item->Pfile,
-		item->width(),
-		item->height(),
-		item->imageXScale(),
-		item->imageYScale(),
-		item->imageXOffset(),
-		item->imageYOffset()
-	);
-
+	// Traced natively from the alpha channel and tied to the image: the frame
+	// re-maps it itself when it is resized or the image moves or scales
+	// (PageItem_ImageFrame::suneerSyncAutoContour). The old OpenCV tracer is
+	// the fallback for a picture the native path cannot read.
+	const FPointArray before = item->ContourLine.copy();
+	FPointArray contour = frame->suneerTracedContour();
+	bool native = !contour.isEmpty();
+	if (!native)
+		contour = SuneerAlphaWrap::createContour(item->Pfile, item->width(), item->height(),
+		                                         item->imageXScale(), item->imageYScale(),
+		                                         item->imageXOffset(), item->imageYOffset());
 	if (contour.size() < 3)
 	{
 		if (contourTransaction)
 			contourTransaction.commit();
 		return;
 	}
-
 	if (UndoManager::undoEnabled())
 	{
 		// handled in PageItem::restore
 		auto* state = new ScOldNewState<FPointArray>(Um::EditContourLine, QString(), Um::IBorder);
 		state->set("SUNEER_CONTOUR");
-		state->setStates(item->ContourLine, contour);
+		state->setStates(before, contour);
 		UndoManager::instance()->action(item, state);
 	}
 	item->ContourLine = contour;
+	item->ClipEdited = true;
+	frame->suneerSetAutoContour(true);
+	frame->suneerAcceptContour();
 	item->setTextFlowMode(PageItem::TextFlowUsesContourLine);
 	if (contourTransaction)
 		contourTransaction.commit();
@@ -4467,9 +4623,11 @@ void SuneerControlBar::onImgCropResize()
     resized.setDotsPerMeterY(qRound(srcDpiY / 0.0254));
 
     // Save to PNG (reliable metadata preservation for both alpha and DPI)
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    bool saveOk = resized.save(outputPath, "PNG");
-    QApplication::restoreOverrideCursor();
+    bool saveOk;
+    {
+        SuneerCursorGuard wait(Qt::WaitCursor);
+        saveOk = resized.save(outputPath, "PNG");
+    }
 
     // Debug: verify output path and file existence
     QFileInfo checkFi(outputPath);
@@ -5194,6 +5352,7 @@ void SuneerControlBar::applyFeather()
 {
 	ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
 	if (!doc) return;
+	m_featherApplied = true;      // the Hide that follows must not revert the preview
 	m_featherPopup->hide();
 	// Locked frames and frames on a locked layer stay as they are.
 	QList<PageItem*> targets;
@@ -5215,6 +5374,7 @@ void SuneerControlBar::applyFeather()
 		return;
 	}
 	// One undo step for the whole Apply, whatever number of frames it changes.
+	m_featherApplied = true;
 	SuneerGroupUndo groupUndo(this);
 	groupUndo.actionName = tr("Edge Feather/Blur");
 	UndoTransaction featherTransaction;
@@ -5225,6 +5385,48 @@ void SuneerControlBar::applyFeather()
 			tr("Edge Feather/Blur"), QString(), Um::IGroup);
 	double unitRatio = doc->unitRatio();
 	double blurPts = m_featherSpin->value() / unitRatio;
+
+	// Image frames: store the feather as an EF_FEATHER effect entry. It is
+	// drawn by the renderers from the image's own alpha (so a Remove
+	// Background cut-out fades along the subject's outline), saved with the
+	// document, and the same in PDF and print. Nothing is reloaded.
+	const QString dir = featherDirection();
+	for (int i = targets.size() - 1; i >= 0; --i)
+	{
+		PageItem* item = targets.at(i);
+		auto* frame = item->asImageFrame();
+		if (!frame)
+			continue;
+		targets.removeAt(i);
+		const double px = featherPxFor(item);
+		ScImageEffectList oldEffects(item->effectsInUse);
+		ScImageEffectList newEffects(item->effectsInUse);
+		ScFeatherMask::set(newEffects, px, dir);
+		frame->clearLiveFeather();
+		if (newEffects == oldEffects)
+		{
+			item->update();
+			continue;
+		}
+		item->effectsInUse = newEffects;
+		if (UndoManager::undoEnabled())
+		{
+			auto* state = new ScOldNewState<ScImageEffectList>(Um::ImageEffects, "", item->getUPixmap());
+			state->set("APPLY_IMAGE_EFFECTS");
+			state->setStates(oldEffects, newEffects);
+			UndoManager::instance()->action(item, state);
+		}
+		item->update();
+		doc->setRedrawBounding(item);
+	}
+	if (targets.isEmpty())
+	{
+		if (featherTransaction)
+			featherTransaction.commit();
+		doc->regionsChanged()->update(QRect());
+		doc->changed();
+		return;
+	}
 
 	// Direction → offset
 	double ox = 0.0, oy = 0.0;
@@ -5253,6 +5455,91 @@ void SuneerControlBar::applyFeather()
 		featherTransaction.commit();
 	doc->regionsChanged()->update(QRect());
 	doc->changed();
+	suneerCursorSettle(doc->view(), "feather apply end");
+}
+
+// ---- Image edge feather popup helpers -------------------------------------
+
+QString SuneerControlBar::featherDirection() const
+{
+	if (m_featherTopBtn && m_featherTopBtn->isChecked())       return QStringLiteral("top");
+	if (m_featherBottomBtn && m_featherBottomBtn->isChecked()) return QStringLiteral("bottom");
+	if (m_featherLeftBtn && m_featherLeftBtn->isChecked())     return QStringLiteral("left");
+	if (m_featherRightBtn && m_featherRightBtn->isChecked())   return QStringLiteral("right");
+	return QStringLiteral("all");
+}
+
+// The spin box is in mm on the page; the effect stores full-resolution image
+// pixels so PDF and print fade by the same width whatever the preview size.
+double SuneerControlBar::featherPxFor(const PageItem* item) const
+{
+	if (!item || !m_featherSpin)
+		return 0;
+	const double pts = m_featherSpin->value() * 72.0 / 25.4;
+	const double scale = item->imageXScale() > 0 ? item->imageXScale() : 1.0;   // points per image pixel
+	return pts / scale;
+}
+
+void SuneerControlBar::loadFeatherPopup()
+{
+	m_featherApplied = false;
+	if (!m_doc || sel()->isEmpty() || !m_featherSpin)
+		return;
+	const PageItem* item = sel()->itemAt(0);
+	if (!item || !item->isImageFrame())
+		return;
+	double px = 0;
+	QString dir;
+	if (!ScFeatherMask::paramsOf(item->effectsInUse, px, dir))
+		return;
+	m_featherLoading = true;
+	const double mm = px * (item->imageXScale() > 0 ? item->imageXScale() : 1.0) * 25.4 / 72.0;
+	m_featherSpin->setValue(mm);
+	m_featherAllBtn->setChecked(dir == "all");
+	m_featherTopBtn->setChecked(dir == "top");
+	m_featherBottomBtn->setChecked(dir == "bottom");
+	m_featherLeftBtn->setChecked(dir == "left");
+	m_featherRightBtn->setChecked(dir == "right");
+	m_featherLoading = false;
+}
+
+void SuneerControlBar::previewFeather()
+{
+	if (m_featherLoading || !m_doc || !m_featherPopup || !m_featherPopup->isVisible())
+		return;
+	const QString dir = featherDirection();
+	bool any = false;
+	for (int i = 0; i < sel()->count(); ++i)
+	{
+		PageItem* item = sel()->itemAt(i);
+		auto* frame = item ? item->asImageFrame() : nullptr;
+		if (!frame || !featherBlockReason(m_doc, item).isEmpty())
+			continue;
+		frame->setLiveFeather(featherPxFor(item), dir);
+		item->update();
+		any = true;
+	}
+	if (any)
+		m_doc->regionsChanged()->update(QRect());
+}
+
+void SuneerControlBar::revertFeatherPreview()
+{
+	if (!m_doc)
+		return;
+	bool any = false;
+	for (int i = 0; i < sel()->count(); ++i)
+	{
+		PageItem* item = sel()->itemAt(i);
+		auto* frame = item ? item->asImageFrame() : nullptr;
+		if (!frame)
+			continue;
+		frame->clearLiveFeather();
+		item->update();
+		any = true;
+	}
+	if (any)
+		m_doc->regionsChanged()->update(QRect());
 }
 
 void SuneerControlBar::onImgEdgeFeather()
@@ -5336,11 +5623,12 @@ void SuneerControlBar::onImgEdgeFeather()
 		"result.save(r'%4', dpi=(%5, %6))\n"
 	).arg(inputPath).arg(featherPx).arg(direction).arg(outputPath).arg(featherDpiX).arg(featherDpiY);
 
-	QApplication::setOverrideCursor(Qt::WaitCursor);
 	QProcess proc;
-	proc.start("python3", QStringList() << "-c" << script);
-	proc.waitForFinished(60000);
-	QApplication::restoreOverrideCursor();
+	{
+		SuneerCursorGuard wait(Qt::WaitCursor);
+		proc.start("python3", QStringList() << "-c" << script);
+		proc.waitForFinished(60000);
+	}
 
 	if (proc.exitStatus() == QProcess::NormalExit && proc.exitCode() == 0 && QFileInfo::exists(outputPath)) {
 		noteFeatherFile(m_doc, outputPath);
@@ -5492,11 +5780,12 @@ void SuneerControlBar::onTextEdgeFeather()
 		"result.save(r'%1')\n"
 	).arg(outputPath).arg(featherPx).arg(direction);
 
-	QApplication::setOverrideCursor(Qt::WaitCursor);
 	QProcess proc;
-	proc.start("python3", QStringList() << "-c" << script);
-	proc.waitForFinished(60000);
-	QApplication::restoreOverrideCursor();
+	{
+		SuneerCursorGuard wait(Qt::WaitCursor);
+		proc.start("python3", QStringList() << "-c" << script);
+		proc.waitForFinished(60000);
+	}
 
 	if (proc.exitCode() != 0) {
 		QString err = QString::fromLocal8Bit(proc.readAllStandardError());

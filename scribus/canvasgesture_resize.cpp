@@ -257,9 +257,8 @@ void ResizeGesture::mouseReleaseEvent(QMouseEvent *m)
 		// Optional Auto-DPI: after a real shrink of an image frame, resample
 		// the image file down to the configured target resolution. Runs before
 		// m_transaction commits so frame-resize + resample undo as one step.
-		// Shrink-only test here; all other guards live in maybeAutoResample.
-		if (m_bounds != m_mousePressBounds
-			&& (m_bounds.width() < m_mousePressBounds.width() || m_bounds.height() < m_mousePressBounds.height()))
+		// Any size change; the guards live in maybeAutoResample.
+		if (m_bounds != m_mousePressBounds)
 			ResizeImageDialog::maybeAutoResample(m_doc);
 	}
 	if (m_transaction.isStarted())

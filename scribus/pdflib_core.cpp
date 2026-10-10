@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
 
 #include "scconfig.h"
 #include "scimageerasermask.h"
+#include "scimagefeather.h"
 
 #if defined(_MSC_VER) && !defined(_USE_MATH_DEFINES)
 #define _USE_MATH_DEFINES
@@ -11236,6 +11237,17 @@ bool PDFLibCore::PDF_Image(PageItem* item, const QString& fn, double sx, double 
 						ScEraserMask::mergeIntoAlphaBytes(im2, eraserMask, origWidth, origHeight);
 					else
 						ScEraserMask::mergeIntoPdfImageMask(im2, eraserMask, origWidth, origHeight);
+					alphaM = !im2.isEmpty();
+				}
+				// Edge feather: multiplied into the 8-bit soft mask, built from
+				// the alpha the file (and the eraser) left. A 1-bit stencil
+				// cannot carry a fade, so it is skipped there (as for the eraser).
+				double featherPx = 0;
+				QString featherDir;
+				if (Options.supportsTransparency() && ScFeatherMask::paramsOf(item->effectsInUse, featherPx, featherDir))
+				{
+					const double scale = item->OrigW > 0 ? double(origWidth) / double(item->OrigW) : 1.0;
+					ScFeatherMask::mergeIntoAlphaBytes(im2, origWidth, origHeight, featherPx * scale, featherDir);
 					alphaM = !im2.isEmpty();
 				}
 			}
