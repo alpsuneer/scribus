@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "suneer_news_panel.h"
 
 #include "commonstrings.h"
@@ -312,12 +313,28 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_selectAllChk->setStyleSheet("font-size:11px; padding:2px;");
 	connect(m_selectAllChk, &QCheckBox::toggled, this, &SuneerNewsPanel::onSelectAll);
 	selRow->addWidget(m_selectAllChk, 1);
+	m_filterCombo = new QComboBox(w);
+	m_filterCombo->addItem(tr("Show: all"), "ALL");
+	m_filterCombo->addItem(tr("Show: USD"), "USED");
+	m_filterCombo->addItem(tr("Show: UNUSD"), "UNUSED");
+	m_filterCombo->addItem(tr("Show: BAL"), "BALANCED");
+	m_filterCombo->setToolTip(tr("Which stories the list shows (local filter, no new fetch). Select All, Place and Mark act on the visible rows only."));
+	{
+		QSettings cfg("Faircode", "ScribusNews");
+		const int idx = m_filterCombo->findData(cfg.value("list/filter", "ALL").toString());
+		m_filterCombo->setCurrentIndex(idx < 0 ? 0 : idx);
+	}
+	connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+		QSettings cfg("Faircode", "ScribusNews");
+		cfg.setValue("list/filter", m_filterCombo->currentData().toString());
+		applyListFilter(true);
+	});
 	m_selectUsedChk = new QCheckBox(tr("Select all used"), w);
 	m_selectUsedChk->setStyleSheet("font-size:11px; padding:2px;");
 	m_selectUsedChk->setToolTip(tr("Tick every used (grey) story - for Mark unused, never for placing"));
 	connect(m_selectUsedChk, &QCheckBox::toggled, this, [this](bool on) {
 		for (int i = 0; i < m_newsList->count(); i++)
-			if (isPlacedRow(m_newsList->item(i)))
+			if (isPlacedRow(m_newsList->item(i)) && !m_newsList->item(i)->isHidden())
 				m_newsList->item(i)->setCheckState(on ? Qt::Checked : Qt::Unchecked);
 	});
 	selRow->addWidget(m_selectUsedChk, 1);
@@ -325,7 +342,17 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_checkBtn->setToolTip(tr("Re-read the placed status of this page from the server (and retry unsent marks)"));
 	connect(m_checkBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onCheck);
 	selRow->addWidget(m_checkBtn);
+	// Own row: the filter plus the whole-page counts, so the selection row
+	// above keeps its width (a wider row pushes the list's right edge, and the
+	// tags with it, out of the dock).
+	QHBoxLayout* filterRow = new QHBoxLayout();
+	filterRow->addWidget(m_filterCombo);
+	m_countLabel = new QLabel(w);
+	m_countLabel->setStyleSheet("font-size:11px;");
+	m_countLabel->setWordWrap(true);
+	filterRow->addWidget(m_countLabel, 1);
 	vl->addLayout(selRow);
+	vl->addLayout(filterRow);
 	// Right-click on a row: Release
 	m_newsList->setContextMenuPolicy(Qt::CustomContextMenu);
 	connect(m_newsList, &QListWidget::customContextMenuRequested, this, [this](const QPoint& p) {
@@ -1161,7 +1188,7 @@ static QList<QJsonObject> suneerTickedRows(QListWidget* list, const QJsonArray& 
 	for (int i = 0; i < list->count(); ++i)
 	{
 		const QListWidgetItem* row = list->item(i);
-		if (row->checkState() != Qt::Checked)
+		if (row->checkState() != Qt::Checked || row->isHidden())
 			continue;
 		const int idx = row->data(Qt::UserRole).toInt();
 		if (idx >= 0 && idx < data.size() && keep(data[idx].toObject()))
@@ -1520,6 +1547,16 @@ void SuneerNewsPanel::parseUser(const QJsonObject& user)
 			continue;
 		seen.insert(id);
 		m_allowedEditions << qMakePair(id, ed["name"].toString());
+		// The user's edition GROUP id is what /news/layout/pages wants.
+		const QString gid = eg["id"].toString();
+		if (!gid.isEmpty())
+		{
+			m_editionGroupIds[id] = gid;
+			if (!ed["shortName"].toString().isEmpty())
+				m_editionGroupIds[ed["shortName"].toString()] = gid;
+			if (!ed["name"].toString().isEmpty())
+				m_editionGroupIds[ed["name"].toString()] = gid;
+		}
 	}
 	m_userInfoLoaded = true;
 }
@@ -1824,6 +1861,10 @@ void SuneerNewsPanel::onFetchStatic()
 			const QString sn = ed["shortName"].toString();
 			m_editionCombo->addItem(QStringLiteral("%1 - %2").arg(sn, ed["name"].toString()), sn);
 			m_allowedShortNames.insert(sn);
+			// The login reply names editions by id only; the short name is
+			// what the combo carries, so key the user's edition group by it too.
+			if (m_editionGroupIds.contains(ed["id"].toString()))
+				m_editionGroupIds[sn] = m_editionGroupIds[ed["id"].toString()];
 		}
 		const int unmatched = m_allowedEditions.size() - matched.size();
 		m_statusLabel->setText(unmatched > 0
@@ -1846,6 +1887,8 @@ void SuneerNewsPanel::onFetchStatic()
 				continue;
 			m_editionCombo->addItem(QStringLiteral("%1 - %2").arg(sn, allowed.second), sn);
 			m_allowedShortNames.insert(sn);
+			if (m_editionGroupIds.contains(allowed.first))
+				m_editionGroupIds[sn] = m_editionGroupIds[allowed.first];
 		}
 		if (m_editionCombo->count() == 0)
 		{
@@ -1887,18 +1930,41 @@ void SuneerNewsPanel::onFetchPages()
 	}
 	m_statusLabel->setText(tr("Loading pages for %1 ...").arg(m_lastEdition));
 	apiGet(QUrl(apiUrl("/external/edition-pages/" + m_lastEdition)), [this](QNetworkReply* reply) {
+		QString extErr;
 		if (reply->error() != QNetworkReply::NoError)
-		{
-			m_statusLabel->setText(tr("Error: ") + tr("Pages for %1: %2").arg(m_lastEdition, describeError(reply)));
-			return;
-		}
-		const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+			extErr = describeError(reply);
+		const QJsonObject o = extErr.isEmpty() ? QJsonDocument::fromJson(reply->readAll()).object() : QJsonObject();
 		m_pages = o["data"].toArray();
 		if (m_pages.isEmpty())
 		{
-			// The route answers HTTP 200 with success:false for an unknown edition.
+			// The public pages route is gone or empty (the deployed server
+			// answers 404 for it since 2026-10-09): the Layout page's own
+			// authenticated list of this edition's pages for the chosen date.
+			const QString gid = editionGroupIdFor(m_lastEdition);
+			if (!m_accessToken.isEmpty() && !gid.isEmpty())
+			{
+				QUrl pu(apiUrl("/news/layout/pages"));
+				QUrlQuery pq;
+				pq.addQueryItem("publishDate", m_dateEdit->date().toString("yyyy-MM-dd"));
+				pq.addQueryItem("editionGroup", gid);
+				pu.setQuery(pq);
+				QString perr;
+				apiGet(pu, [&](QNetworkReply* r2) {
+					if (r2->error() != QNetworkReply::NoError || httpStatus(r2) < 200 || httpStatus(r2) >= 300)
+					{
+						perr = describeError(r2);
+						return;
+					}
+					const QJsonValue d = QJsonDocument::fromJson(r2->readAll()).object()["data"];
+					m_pages = d.isArray() ? d.toArray() : d.toObject()["pages"].toArray();
+				});
+				apiLog(QStringLiteral("GET /news/layout/pages (fallback) -> %1 pages%2").arg(m_pages.size()).arg(perr.isEmpty() ? QString() : " (" + perr + ")"));
+			}
+		}
+		if (m_pages.isEmpty())
+		{
 			const QString msg = o["error"].toObject()["message"].toString();
-			m_statusLabel->setText(tr("Warning: No pages for edition %1%2").arg(m_lastEdition, msg.isEmpty() ? QString() : ": " + msg));
+			m_statusLabel->setText(tr("Warning: No pages for edition %1%2").arg(m_lastEdition, (extErr.isEmpty() ? msg : extErr).isEmpty() ? QString() : ": " + (extErr.isEmpty() ? msg : extErr)));
 			return;
 		}
 		QList<QJsonObject> pages;
@@ -1953,22 +2019,262 @@ void SuneerNewsPanel::onFetchNews()
 	m_newsData = QJsonArray();
 	m_placeBtn->setEnabled(false);
 	m_fetchBtn->setEnabled(false);
+	// Two sources, merged by story id:
+	//  1. /external/edition-pages/:page/news (no login) - the deployed server
+	//     appears to hand out only stories not yet placed, and its media
+	//     entries carry captions;
+	//  2. /news/layout?publishDate&pageId (login) - the Layout page's own list:
+	//     EVERY status, with page.dtpStatus and the page name. Authoritative
+	//     for the status; paged, so all pages are read.
+	QJsonArray external, layout;
+	QString extErr, layErr;
 	QUrl url(apiUrl("/external/edition-pages/" + m_fetchPageId + "/news"));
 	QUrlQuery q;
 	q.addQueryItem("publishDate", m_fetchDate);
 	url.setQuery(q);
-	apiGet(url, [this](QNetworkReply* reply) {
+	apiGet(url, [&](QNetworkReply* reply) {
 		if (reply->error() != QNetworkReply::NoError)
 		{
-			m_statusLabel->setText(tr("Error: ") + tr("News: %1").arg(describeError(reply)));
+			extErr = describeError(reply);
 			return;
 		}
 		const QJsonValue data = QJsonDocument::fromJson(reply->readAll()).object()["data"];
-		// The /external route answers data[]; a newer shape would be data.newses[].
-		m_newsData = data.isArray() ? data.toArray() : data.toObject()["newses"].toArray();
-		showNewsList();
+		external = data.isArray() ? data.toArray() : data.toObject()["newses"].toArray();
 	});
+	int layoutTotal = -1, layCode = 0;
+	if (!m_accessToken.isEmpty())
+	{
+		for (int pageNo = 1; pageNo <= 50; ++pageNo)
+		{
+			QUrl lu(apiUrl("/news/layout"));
+			QUrlQuery lq;
+			lq.addQueryItem("publishDate", m_fetchDate);
+			lq.addQueryItem("pageId", m_fetchPageId);
+			lq.addQueryItem("page", QString::number(pageNo));
+			lq.addQueryItem("pageSize", "100");
+			lu.setQuery(lq);
+			int got = 0;
+			bool ok = false;
+			apiGet(lu, [&](QNetworkReply* reply) {
+				layCode = httpStatus(reply);
+				if (reply->error() != QNetworkReply::NoError || layCode < 200 || layCode >= 300)
+				{
+					layErr = describeError(reply);
+					return;
+				}
+				ok = true;
+				const QJsonObject d = QJsonDocument::fromJson(reply->readAll()).object()["data"].toObject();
+				const QJsonArray arr = d["newses"].toArray();
+				layoutTotal = d["totalNewses"].toInt(-1);
+				for (const QJsonValue& v : arr)
+					layout.append(v);
+				got = arr.size();
+			});
+			if (!ok || got == 0 || (layoutTotal >= 0 && layout.size() >= layoutTotal))
+				break;
+		}
+		apiLog(QStringLiteral("GET /news/layout?publishDate=%2&pageId=..%1&page=..&pageSize=100 -> HTTP %5, %3 stories (total %6)%4").arg(m_fetchPageId.right(6), m_fetchDate).arg(layout.size()).arg(layErr.isEmpty() ? QString() : " (" + layErr + ")").arg(layCode).arg(layoutTotal));
+	}
+	//  3. /news/used?publishDate&editionPage&editionGroup (login) - the web
+	//     app's "Used News" page: stories whose entry for THIS page is USED;
+	//  4. /news/balanced?publishDate&editionGroup (login) - its "Balanced
+	//     News" page: stories balanced on every page (edition-wide, no page).
+	//     Both want the user's edition GROUP id (from /users/me) and give only
+	//     id/refId/title/reporter/createdAt(/newsPages) - no body text.
+	QJsonArray usedList, balList;
+	QString usedErr, balErr;
+	int usedCode = 0, balCode = 0;
+	const QString groupId = editionGroupIdFor(m_lastEdition);
+	m_fetchNote.clear();
+	if (m_accessToken.isEmpty())
+	{
+		m_fetchNote = tr("Used: log in to see used stories");
+		apiLog(QStringLiteral("GET /news/used, /news/balanced skipped: not logged in"));
+	}
+	else if (groupId.isEmpty())
+	{
+		usedErr = balErr = tr("no edition group id for %1 in the login reply").arg(m_lastEdition);
+		m_fetchNote = tr("Used: %1").arg(usedErr);
+		apiLog(QStringLiteral("GET /news/used, /news/balanced skipped: %1 (known: %2)").arg(usedErr, QStringList(m_editionGroupIds.keys()).join(',')));
+	}
+	else
+	{
+		auto pagedList = [&](const QString& path, const QString& listKey, const QString& totalKey, bool withPage, QJsonArray& out, QString& err, int& lastCode) {
+			int total = -1;
+			QStringList keys, top;
+			for (int pageNo = 1; pageNo <= 50; ++pageNo)
+			{
+				QUrl u(apiUrl(path));
+				QUrlQuery uq;
+				uq.addQueryItem("page", QString::number(pageNo));
+				uq.addQueryItem("pageSize", "100");
+				uq.addQueryItem("search", "");
+				uq.addQueryItem("publishDate", m_fetchDate);
+				if (withPage)
+					uq.addQueryItem("editionPage", m_fetchPageId);
+				uq.addQueryItem("editionGroup", groupId);
+				u.setQuery(uq);
+				int got = 0;
+				bool ok = false;
+				apiGet(u, [&](QNetworkReply* reply) {
+					lastCode = httpStatus(reply);
+					if (reply->error() != QNetworkReply::NoError || lastCode < 200 || lastCode >= 300)
+					{
+						err = describeError(reply);
+						return;
+					}
+					ok = true;
+					const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+					if (top.isEmpty())
+						top = root.keys() + (root["data"].isObject() ? QStringList{"data:" + root["data"].toObject().keys().join('/')} : QStringList());
+					const QJsonObject d = root["data"].toObject();
+					const QJsonArray arr = d[listKey].toArray();
+					total = d[totalKey].toInt(-1);
+					for (const QJsonValue& v : arr)
+						out.append(v);
+					got = arr.size();
+					if (keys.isEmpty() && !arr.isEmpty())
+						keys = arr.first().toObject().keys();
+				});
+				if (!ok || got == 0 || (total >= 0 && out.size() >= total))
+					break;
+			}
+			apiLog(QStringLiteral("GET %1?page=..&pageSize=100&search=&publishDate=%2&editionPage=%3&editionGroup=..%4 -> HTTP %5, %6 stories (total %7)%8%9%10")
+			       .arg(path, m_fetchDate, withPage ? ".." + m_fetchPageId.right(6) : QString(), groupId.right(6)).arg(lastCode).arg(out.size()).arg(total)
+			       .arg(top.isEmpty() ? QString() : " keys: " + top.join(','), keys.isEmpty() ? QString() : " item fields: " + keys.join(','), err.isEmpty() ? QString() : " (" + err + ")"));
+		};
+		pagedList("/news/used", "usedNews", "totalUsedNews", true, usedList, usedErr, usedCode);
+		pagedList("/news/balanced", "balancedNews", "totalBalancedNews", false, balList, balErr, balCode);
+		auto note = [&](const QString& what, int code, const QString& e, const QString& path) {
+			if (e.isEmpty())
+				return QString();
+			if (code == 401 || code == 403)
+				return tr("%1: HTTP %2 - log in").arg(what).arg(code);
+			if (code == 404)
+				return tr("%1: HTTP 404 %2").arg(what, path);
+			if (code == 0)
+				return tr("%1: network error %2").arg(what, QUrl(m_apiHost).host());
+			return tr("%1: HTTP %2 %3").arg(what).arg(code).arg(e);
+		};
+		QStringList notes;
+		const QString un = note(tr("Used"), usedCode, usedErr, "/news/used");
+		const QString bn = note(tr("Balance"), balCode, balErr, "/news/balanced");
+		if (!un.isEmpty()) notes << un;
+		if (!bn.isEmpty()) notes << bn;
+		m_fetchNote = notes.join(QStringLiteral(" · "));
+	}
+	apiLog(QStringLiteral("GET /external/edition-pages/..%1/news date %2 -> %3 stories%4").arg(m_fetchPageId.right(6), m_fetchDate).arg(external.size()).arg(extErr.isEmpty() ? QString() : " (" + extErr + ")"));
+	if (!extErr.isEmpty() && layout.isEmpty() && usedList.isEmpty() && balList.isEmpty())
+	{
+		m_statusLabel->setText(tr("Error: ") + tr("News: %1").arg(extErr));
+		m_fetchBtn->setEnabled(true);
+		return;
+	}
+	// Merge: external entries first (richer media), then the layout entries
+	// not seen yet; the layout entry's status/page wins when both exist.
+	QJsonArray merged;
+	QHash<QString, int> index;
+	for (const QJsonValue& v : external)
+	{
+		const QString id = newsServerId(v.toObject());
+		if (id.isEmpty() || index.contains(id))
+			continue;
+		index[id] = merged.size();
+		merged.append(v);
+	}
+	for (const QJsonValue& v : layout)
+	{
+		const QJsonObject ln = v.toObject();
+		const QString id = newsServerId(ln);
+		if (id.isEmpty())
+			continue;
+		if (index.contains(id))
+		{
+			QJsonObject n = merged[index[id]].toObject();
+			if (ln["page"].isObject())
+				n["page"] = ln["page"];
+			if (!ln["dateline"].toString().isEmpty() && n["dateline"].toString().isEmpty())
+				n["dateline"] = ln["dateline"];
+			merged[index[id]] = n;
+		}
+		else
+		{
+			index[id] = merged.size();
+			merged.append(ln);
+		}
+	}
+	// The web app's own Used / Balanced lists: their verdict wins. A story
+	// only they know gets a minimal entry (title, reporter, page) tagged
+	// with where it came from; it carries no body, so it previews as such.
+	auto fold = [&](const QJsonArray& list, const QString& status, const QString& source) {
+		for (const QJsonValue& v : list)
+		{
+			const QJsonObject e = v.toObject();
+			const QString id = newsServerId(e);
+			if (id.isEmpty())
+				continue;
+			QJsonObject n = index.contains(id) ? merged[index[id]].toObject() : e;
+			QJsonObject pg = n["page"].toObject();
+			if (status == "USED" || pg["dtpStatus"].toString().toUpper() != "USED")
+			{
+				pg["dtpStatus"] = status;
+				if (status == "USED")
+				{
+					if (pg["id"].toString().isEmpty())
+						pg["id"] = m_fetchPageId;
+					if (pg["name"].toString().isEmpty())
+						pg["name"] = m_lastPage;
+				}
+			}
+			n["page"] = pg;
+			n["_source"] = source;
+			if (!index.contains(id))
+			{
+				index[id] = merged.size();
+				merged.append(n);
+			}
+			else
+				merged[index[id]] = n;
+		}
+	};
+	fold(usedList, "USED", "used");
+	fold(balList, "BALANCED", "balanced");
+	m_newsData = merged;
+	m_fetchSources = QStringLiteral("%1 ext%2 + %3 layout%4 + %5 used%6 + %7 bal%8")
+	                 .arg(external.size()).arg(extErr.isEmpty() ? QString() : "(err)")
+	                 .arg(layout.size()).arg(layErr.isEmpty() ? QString() : "(err)")
+	                 .arg(usedList.size()).arg(usedErr.isEmpty() ? QString() : "(err)")
+	                 .arg(balList.size()).arg(balErr.isEmpty() ? QString() : "(err)");
+	showNewsList();          // status line: counts + m_fetchNote (applyListFilter)
+	if (m_newsData.isEmpty() && !m_fetchNote.isEmpty())
+		m_statusLabel->setText(m_statusLabel->text() + QStringLiteral(" · ") + m_fetchNote);
 	m_fetchBtn->setEnabled(true);
+}
+
+// The user's edition GROUP id (what /news/used, /news/balanced and
+// /news/layout/pages want) for the edition the combo names: by short name,
+// by the edition id the public list gives that short name, or by name.
+QString SuneerNewsPanel::editionGroupIdFor(const QString& edition) const
+{
+	if (edition.isEmpty())
+		return QString();
+	if (m_editionGroupIds.contains(edition))
+		return m_editionGroupIds.value(edition);
+	for (const QJsonValue& v : m_editions)
+	{
+		const QJsonObject ed = v.toObject();
+		if (ed["shortName"].toString().compare(edition, Qt::CaseInsensitive) == 0)
+		{
+			if (m_editionGroupIds.contains(ed["id"].toString()))
+				return m_editionGroupIds.value(ed["id"].toString());
+			if (m_editionGroupIds.contains(ed["name"].toString()))
+				return m_editionGroupIds.value(ed["name"].toString());
+		}
+	}
+	for (auto it = m_editionGroupIds.constBegin(); it != m_editionGroupIds.constEnd(); ++it)
+		if (it.key().compare(edition, Qt::CaseInsensitive) == 0 || it.key().startsWith(edition, Qt::CaseInsensitive))
+			return it.value();
+	return QString();
 }
 
 QString SuneerNewsPanel::collapseSpaces(const QString& text)
@@ -2027,6 +2333,18 @@ void SuneerNewsPanel::showNewsList()
 			tip << tr("Text only");
 		if (!news["refId"].toString().isEmpty())
 			tip << news["refId"].toString();
+		if (!news["_source"].toString().isEmpty())
+		{
+			// Came from the web app's Used/Balanced list: name the reporter
+			// and the filing time; the list carries no body text.
+			const QJsonObject by = news["createdBy"].toObject();
+			const QString who = (by["firstName"].toString() + " " + by["lastName"].toString()).trimmed();
+			if (!who.isEmpty())
+				tip << tr("Reporter: %1").arg(who);
+			if (!news["createdAt"].toString().isEmpty())
+				tip << tr("Filed: %1").arg(news["createdAt"].toString().left(16).replace('T', ' '));
+			tip << (news["_source"].toString() == "used" ? tr("From the server's Used list") : tr("From the server's Balanced list"));
+		}
 		item->setToolTip(tip.join("\n"));
 		item->setData(Qt::UserRole + 3, tip.join("\n"));
 		item->setData(Qt::UserRole, i);
@@ -2041,15 +2359,7 @@ void SuneerNewsPanel::showNewsList()
 	if (m_newsData.isEmpty())
 		m_statusLabel->setText(tr("No news for %1 on %2").arg(m_pageCombo->currentText(), m_fetchDate));
 	else
-	{
-		int used = 0, unused = 0, bal = 0;
-		for (const QJsonValue& v : m_newsData)
-		{
-			const QString st = newsDtpStatus(v.toObject());
-			if (st == "USED") ++used; else if (st == "BALANCED") ++bal; else ++unused;
-		}
-		m_statusLabel->setText(tr("%n stories", "", m_newsData.size()) + QStringLiteral(" - %1 USD, %2 UNUSD, %3 BAL").arg(used).arg(unused).arg(bal));
-	}
+		applyListFilter(true);     // "N stories - X USD, Y UNUSD, Z BAL (showing: f)" or "No f stories (N total) - change Show:"
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
 }
 
@@ -2134,7 +2444,12 @@ void SuneerNewsPanel::onNewsItemClicked(QListWidgetItem* item)
 void SuneerNewsPanel::onSelectAll(bool checked)
 {
 	for (int i = 0; i < m_newsList->count(); i++)
-		m_newsList->item(i)->setCheckState(checked && !isPlacedRow(m_newsList->item(i)) ? Qt::Checked : Qt::Unchecked);
+	{
+		QListWidgetItem* row = m_newsList->item(i);
+		if (row->isHidden())
+			continue;                       // filter: only what is shown
+		row->setCheckState(checked && !isPlacedRow(row) && !isBalanceRow(row) ? Qt::Checked : Qt::Unchecked);
+	}
 }
 
 QString SuneerNewsPanel::newsCaption(const QJsonObject& news)
@@ -2303,7 +2618,7 @@ void SuneerNewsPanel::onPlaceSelected()
 	int usedSkipped = 0;
 	for (int i = 0; i < m_newsList->count(); i++)
 	{
-		if (m_newsList->item(i)->checkState() != Qt::Checked)
+		if (m_newsList->item(i)->checkState() != Qt::Checked || m_newsList->item(i)->isHidden())
 			continue;
 		if (isPlacedRow(m_newsList->item(i)))
 		{
@@ -2340,6 +2655,46 @@ void SuneerNewsPanel::onPlaceSelected()
 			: tr("Tick the stories to place"));
 		return;
 	}
+	// A story known only from the server's Used/Balanced list has no body:
+	// fetch the full record (GET /news/:id, with media) before placing it.
+	for (QJsonObject& n : stories)
+	{
+		if (n["_source"].toString().isEmpty() || n.contains("content") || n.contains("newsMedia"))
+			continue;
+		const QString id = newsServerId(n);
+		QJsonObject full;
+		QString err;
+		int code = 0;
+		apiGet(QUrl(apiUrl("/news/" + id)), [&](QNetworkReply* reply) {
+			code = httpStatus(reply);
+			if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300)
+			{
+				err = describeError(reply);
+				return;
+			}
+			const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+			full = root["data"].isObject() ? root["data"].toObject() : root;
+			if (full["news"].isObject())
+				full = full["news"].toObject();
+		});
+		apiLog(QStringLiteral("GET /news/%1 (full story before placing) -> HTTP %2%3").arg(id.right(6)).arg(code).arg(err.isEmpty() ? QString() : " (" + err + ")"));
+		if (full.isEmpty())
+		{
+			QMessageBox::warning(this, tr("Story not loaded"),
+				tr("'%1' could not be read from the server, so it was not placed:\n%2").arg(collapseSpaces(n["title"].toString()).left(60), err));
+			n = QJsonObject();
+			continue;
+		}
+		for (auto it = full.begin(); it != full.end(); ++it)
+			if (it.key() != "page")
+				n[it.key()] = it.value();
+		for (int i = 0; i < m_newsData.size(); ++i)
+			if (newsServerId(m_newsData[i].toObject()) == id)
+				m_newsData[i] = n;
+	}
+	stories.erase(std::remove_if(stories.begin(), stories.end(), [](const QJsonObject& n) { return n.isEmpty(); }), stories.end());
+	if (stories.isEmpty())
+		return;
 	m_placeUsedSkipped = usedSkipped;
 	const QString target = settingsString("layout/placeTarget", "left");
 	if (target == "page")
@@ -2750,6 +3105,52 @@ void SuneerNewsPanel::refreshPlacedMarks()
 			row->setToolTip((pending ? tr("Placed here but NOT marked on the server yet - press Check to retry.") : tr("FREE - not used yet (server status).")) + "\n" + tip);
 		}
 	}
+	applyListFilter();
+}
+
+QString SuneerNewsPanel::listFilter() const
+{
+	return m_filterCombo ? m_filterCombo->currentData().toString() : QStringLiteral("ALL");
+}
+
+// Local filter over the fetched list: rows whose status does not match are
+// hidden (no new request). The counts are for the whole page, filter or not.
+void SuneerNewsPanel::applyListFilter(bool setStatusLine)
+{
+	if (!m_newsList)
+		return;
+	const QString f = listFilter();
+	int used = 0, unused = 0, bal = 0, shown = 0;
+	for (int i = 0; i < m_newsList->count(); ++i)
+	{
+		QListWidgetItem* row = m_newsList->item(i);
+		const QString st = row->data(Qt::UserRole + 4).toString();
+		if (st == "USED") ++used; else if (st == "BALANCED") ++bal; else ++unused;
+		const bool hide = (f != "ALL") && (st != f);
+		if (row->isHidden() != hide)
+		{
+			row->setHidden(hide);
+			if (hide)
+				row->setCheckState(Qt::Unchecked);   // never act on what is not shown
+		}
+		if (!hide) ++shown;
+	}
+	const QString showing = f == "ALL" ? tr("all") : f == "USED" ? QStringLiteral("USD") : f == "BALANCED" ? QStringLiteral("BAL") : QStringLiteral("UNUSD");
+	// The status line describes the WHOLE page; it is rewritten only when
+	// the filter changes or a fetch just finished, so other messages
+	// (marks, placing) are not wiped by a routine refresh.
+	const QString noteSuffix = m_fetchNote.isEmpty() ? QString() : QStringLiteral(" · ") + m_fetchNote;
+	if (m_newsList->count() > 0 && shown == 0 && f != "ALL")
+		m_statusLabel->setText(tr("No %1 stories (%n total) - change Show:", "", m_newsList->count()).arg(showing) + noteSuffix);
+	else if (setStatusLine && m_newsList->count() > 0)
+		m_statusLabel->setText(tr("Unused %1 · Used %2 · Balance %3").arg(unused).arg(used).arg(bal)
+		                       + (f == "ALL" ? QString() : tr(" · showing: %1").arg(showing)) + noteSuffix);
+	if (m_countLabel)
+	{
+		m_countLabel->setText(m_newsList->count() == 0 ? QString()
+			: tr("%n stories", "", m_newsList->count()) + QStringLiteral(" - %1 USD, %2 UNUSD, %3 BAL").arg(used).arg(unused).arg(bal)
+			  + tr(" (showing: %1, %2)").arg(showing).arg(shown));
+	}
 	updateTickButtons();
 }
 
@@ -2762,7 +3163,7 @@ void SuneerNewsPanel::updateTickButtons()
 	for (int i = 0; i < m_newsList->count(); ++i)
 	{
 		const QListWidgetItem* row = m_newsList->item(i);
-		if (row->checkState() != Qt::Checked)
+		if (row->checkState() != Qt::Checked || row->isHidden())
 			continue;
 		++ticked;
 		const QString st = row->data(Qt::UserRole + 4).toString();

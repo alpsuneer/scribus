@@ -139,6 +139,10 @@ private:
 
 	// ---- allowed editions (from user.editionGroups; memory only) ---------
 	QList<QPair<QString, QString>> m_allowedEditions;   // (edition id, name)
+	QHash<QString, QString> m_editionGroupIds;           // edition id / short name / name -> user edition group id
+	QString m_fetchSources;                              // "N ext + M layout" of the last fetch (status/report)
+	QString m_fetchNote;                                 // "Used: HTTP 401 - log in" etc., shown after the counts
+	QString editionGroupIdFor(const QString& edition) const;
 	QSet<QString> m_allowedShortNames;                  // filled when matched with the static list
 	bool m_userInfoLoaded {false};
 	QString m_clientIp;     // what the server saw at login / profile
@@ -277,6 +281,10 @@ private:
 	//! Runs inside the caller's undo transaction; no question asked here.
 	bool removeStoryFrames(PageItem* item, const QString& status, QString* error);
 	QCheckBox*   m_selectUsedChk {nullptr};
+	QComboBox*   m_filterCombo {nullptr};     // Show: all / USD / UNUSD / BAL (local, remembered)
+	QLabel*      m_countLabel {nullptr};      // whole-page counts + what is shown
+	QString listFilter() const;
+	void applyListFilter(bool setStatusLine = false);
 public:
 	//! "Mark as unused" (server dtpStatus BALANCED) for the story \a item belongs to; asks first.
 	void releaseStory(PageItem* item);
