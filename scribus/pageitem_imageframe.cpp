@@ -44,6 +44,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpage.h"
 #include "scpaths.h"
 #include "scimageerasermask.h"
+#include "scimagefeather.h"
 #include "scpainter.h"
 #include "scribusstructs.h"
 #include "scribuscore.h"
@@ -568,10 +569,45 @@ void PageItem_ImageFrame::clearLiveEraserMask()
 	m_eraserCompositeKey.clear();
 }
 
+bool PageItem_ImageFrame::featherParams(double& px, QString& direction) const
+{
+	if (m_liveFeatherSet)
+	{
+		px = m_liveFeatherPx;
+		direction = m_liveFeatherDir;
+		return px > 0;
+	}
+	return ScFeatherMask::paramsOf(effectsInUse, px, direction);
+}
+
+bool PageItem_ImageFrame::hasFeather() const
+{
+	double px; QString dir;
+	return featherParams(px, dir);
+}
+
+void PageItem_ImageFrame::setLiveFeather(double px, const QString& direction)
+{
+	m_liveFeatherSet = true;
+	m_liveFeatherPx = px;
+	m_liveFeatherDir = direction;
+	m_eraserCompositeKey.clear();
+}
+
+void PageItem_ImageFrame::clearLiveFeather()
+{
+	m_liveFeatherSet = false;
+	m_liveFeatherPx = 0;
+	m_eraserCompositeKey.clear();
+}
+
 QImage* PageItem_ImageFrame::imageForDraw()
 {
 	QImage* base = pixm.qImagePtr();
-	if (!hasEraserMask() || base == nullptr || base->isNull())
+	double featherPx = 0;
+	QString featherDir;
+	const bool feather = featherParams(featherPx, featherDir);
+	if ((!hasEraserMask() && !feather) || base == nullptr || base->isNull())
 	{
 		// Release the composite as soon as the erasure is gone: for a full-page
 		// newspaper photo it is the same size as the pixmap itself.
@@ -589,6 +625,8 @@ QImage* PageItem_ImageFrame::imageForDraw()
 	QString maskId = m_liveEraserMaskSet
 		? QString("live:%1").arg(m_liveEraserMask.cacheKey())
 		: QString("saved:%1").arg(ScEraserMask::digest(ScEraserMask::paramsOf(effectsInUse)));
+	if (feather)
+		maskId += QString("/feather:%1:%2:%3").arg(featherPx).arg(featherDir).arg(m_liveFeatherSet ? "live" : "saved");
 	QString key = QString("%1/%2x%3/%4")
 		.arg(base->cacheKey())
 		.arg(base->width())
@@ -598,13 +636,21 @@ QImage* PageItem_ImageFrame::imageForDraw()
 	if (key != m_eraserCompositeKey || m_eraserComposite.isNull())
 	{
 		QImage mask = eraserMask();
-		if (mask.isNull())
+		if (mask.isNull() && !feather)
 			return base;
 		m_eraserComposite = *base;
 		// Detach before the in-place alpha write: a shallow copy would erase
 		// the cached pixmap itself, and that copy is shared with the loader.
 		m_eraserComposite.detach();
-		ScEraserMask::applyToAlpha(m_eraserComposite, mask);
+		if (!mask.isNull())
+			ScEraserMask::applyToAlpha(m_eraserComposite, mask);
+		if (feather)
+		{
+			// The amount is in full-resolution pixels; the pixmap may be a
+			// lower-resolution preview. Computed once per key, not per paint.
+			const double scale = OrigW > 0 ? double(base->width()) / double(OrigW) : 1.0;
+			ScFeatherMask::applyToImage(m_eraserComposite, featherPx * scale, featherDir);
+		}
 		m_eraserCompositeKey = key;
 	}
 	return &m_eraserComposite;
@@ -679,6 +725,181 @@ QImage PageItem_ImageFrame::contourSourceMask() const
 	// A format that merely has an alpha channel but uses none of it is not a
 	// cut-out; treat it as "nothing to trace" so the caller can say so.
 	return sawTransparency ? alpha : QImage();
+}
+
+// ---- contour tied to the image --------------------------------------------
+
+static const char* const kAutoContourAttr = "SuneerAutoContour";
+
+bool PageItem_ImageFrame::suneerAutoContour() const
+{
+	const QList<ObjectAttribute> list = getObjectAttributes(QString::fromLatin1(kAutoContourAttr));
+	return !list.isEmpty() && list.first().value == QLatin1String("1");
+}
+
+void PageItem_ImageFrame::suneerSetAutoContour(bool on)
+{
+	ObjAttrVector attrs = *getObjectAttributes();
+	for (int i = attrs.count() - 1; i >= 0; --i)
+		if (attrs.at(i).name == QLatin1String(kAutoContourAttr))
+			attrs.removeAt(i);
+	if (on)
+	{
+		ObjectAttribute a;
+		a.name = QString::fromLatin1(kAutoContourAttr);
+		a.type = QStringLiteral("string");
+		a.value = QStringLiteral("1");
+		attrs.append(a);
+	}
+	setObjectAttributes(&attrs);
+}
+
+void PageItem_ImageFrame::suneerInvalidateContourCache()
+{
+	m_contourCacheValid = false;
+	m_contourRings.clear();
+	m_contourChecked = false;
+}
+
+FPointArray PageItem_ImageFrame::contourFromRings(const QList<ScContour::Ring>& rings, const QSize& maskSize) const
+{
+	FPointArray result;
+	if (rings.isEmpty() || maskSize.isEmpty())
+		return result;
+	const QTransform toLocal = maskPixelToLocal(maskSize);
+	result.svgInit();
+	for (const ScContour::Ring& ring : rings)
+	{
+		if (ring.points.size() < 3)
+			continue;
+		QPolygonF mapped = toLocal.map(ring.points);
+		result.svgMoveTo(mapped[0].x(), mapped[0].y());
+		for (int i = 1; i < mapped.size(); ++i)
+			result.svgLineTo(mapped[i].x(), mapped[i].y());
+		result.svgClosePath();
+	}
+	if (result.size() < 4)
+		return FPointArray();
+	// Clip to the frame: only what is inside the frame is drawn.
+	QPainterPath framePath = PoLine.toQPainterPath(true);
+	QPainterPath contourPath = result.toQPainterPath(true);
+	if (!framePath.isEmpty() && !framePath.contains(contourPath.boundingRect()))
+	{
+		QPainterPath clipped = contourPath.intersected(framePath);
+		if (clipped.isEmpty())
+			return FPointArray();
+		FPointArray clippedArray;
+		clippedArray.svgInit();
+		clippedArray.fromQPainterPath(clipped, true);
+		if (clippedArray.size() >= 4)
+			result = clippedArray;
+	}
+	return result;
+}
+
+FPointArray PageItem_ImageFrame::suneerTracedContour()
+{
+	if (!imageIsAvailable || Pfile.isEmpty())
+		return FPointArray();
+	const qint64 key = pixm.qImage().cacheKey();
+	if (!m_contourCacheValid || key != m_contourCacheKey)
+	{
+		m_contourRings.clear();
+		m_contourMaskSize = QSize();
+		const QImage mask = contourSourceMask();
+		if (!mask.isNull())
+		{
+			// Same reading as the old tracer: alpha above 10 is subject; the
+			// simplification scales with the mask so a big picture does not
+			// come back with thousands of nodes.
+			const double tol = qMax(1.0, qMax(mask.width(), mask.height()) / 500.0);
+			m_contourRings = ScContour::detect(mask, 11, tol, ScContour::Mode::LargestOnly);
+			m_contourMaskSize = mask.size();
+		}
+		m_contourCacheKey = key;
+		m_contourCacheValid = true;
+	}
+	return contourFromRings(m_contourRings, m_contourMaskSize);
+}
+
+static double suneerPathOverlap(const FPointArray& a, const FPointArray& b)
+{
+	const QPainterPath pa = a.toQPainterPath(true), pb = b.toQPainterPath(true);
+	const QRectF ra = pa.boundingRect(), rb = pb.boundingRect();
+	if (ra.isEmpty() || rb.isEmpty())
+		return 0.0;
+	// Cheap area proxy: bounding boxes. Good enough to tell "this is the
+	// traced outline" from "the user drew something else".
+	const QRectF inter = ra.intersected(rb);
+	const double ai = inter.width() * inter.height();
+	const double au = ra.width() * ra.height() + rb.width() * rb.height() - ai;
+	return au > 0 ? ai / au : 0.0;
+}
+
+void PageItem_ImageFrame::suneerSyncAutoContour(bool regenerate)
+{
+	if (!m_Doc || m_Doc->isLoading() || !imageIsAvailable || Pfile.isEmpty())
+		return;
+	if (!regenerate && textFlowMode() != TextFlowUsesContourLine)
+		return;
+	const QTransform xform = imagePixelToLocal();
+	bool isAuto = suneerAutoContour();
+	if (!m_contourChecked && !isAuto && !regenerate)
+	{
+		// A frame from before this fix: a contour that is not the frame
+		// outline and matches the traced one is an auto contour.
+		m_contourChecked = true;
+		if (!ContourLine.isEmpty() && !(ContourLine == PoLine))
+		{
+			const FPointArray traced = suneerTracedContour();
+			if (!traced.isEmpty() && suneerPathOverlap(traced, ContourLine) > 0.8)
+			{
+				suneerSetAutoContour(true);
+				isAuto = true;
+			}
+		}
+		if (!isAuto)
+		{
+			// A hand-made contour: remember the transform it belongs to and
+			// move it along with later image changes.
+			m_lastAutoContour = ContourLine.copy();
+			m_contourXform = xform;
+			m_contourXformValid = true;
+			ClipEdited = true;
+			return;
+		}
+	}
+	m_contourChecked = true;
+	const bool handEdited = m_contourXformValid && !m_lastAutoContour.isEmpty() && !(ContourLine == m_lastAutoContour);
+	if (regenerate || (isAuto && !handEdited))
+	{
+		const FPointArray traced = suneerTracedContour();
+		if (!traced.isEmpty())
+		{
+			ContourLine = traced;
+			if (regenerate)
+				suneerSetAutoContour(true);
+		}
+	}
+	else if (m_contourXformValid)
+	{
+		// The user's contour follows the image by the same change.
+		const QTransform delta = m_contourXform.inverted() * xform;
+		if (!delta.isIdentity())
+			ContourLine.map(delta);
+	}
+	m_lastAutoContour = ContourLine.copy();
+	m_contourXform = xform;
+	m_contourXformValid = true;
+	ClipEdited = true;
+}
+
+void PageItem_ImageFrame::suneerAcceptContour()
+{
+	m_lastAutoContour = ContourLine.copy();
+	m_contourXform = imagePixelToLocal();
+	m_contourXformValid = true;
+	m_contourChecked = true;
 }
 
 bool PageItem_ImageFrame::canDetectContour() const

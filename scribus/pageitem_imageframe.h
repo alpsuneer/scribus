@@ -76,6 +76,16 @@ public:
 	void clearLiveEraserMask();
 	//@}
 
+	//! \name Non-destructive edge feather (ImageEffect::EF_FEATHER)
+	//@{
+	//! Feather in force: the live preview when one is running, else the stored one.
+	bool featherParams(double& px, QString& direction) const;
+	bool hasFeather() const;
+	//! Preview a feather on canvas without storing it (popup spin box).
+	void setLiveFeather(double px, const QString& direction);
+	void clearLiveFeather();
+	//@}
+
 	//! \name Image coordinate mapping
 	//! One definition of where the image sits inside the frame, shared by
 	//! everything that has to go between pixels and page geometry. It mirrors
@@ -112,6 +122,31 @@ public:
 	                                  ScContour::Mode mode, QString* message = nullptr) const;
 	//@}
 
+	//! \name Contour tied to the image (Suneer)
+	//! A cut-out's wrap contour follows the IMAGE: the alpha outline is traced
+	//! once into mask pixels and re-mapped through the current image transform
+	//! whenever the frame size, image scale/offset/rotation or the picture
+	//! changes, then clipped to the frame. A contour the user edited by hand is
+	//! transformed by the same change instead of being regenerated. The frame
+	//! says which it is with the item attribute SuneerAutoContour=1.
+	//@{
+	bool suneerAutoContour() const;
+	void suneerSetAutoContour(bool on);
+	/*! \brief Bring the contour in line with the current image transform.
+	    \param regenerate  retrace and replace even a hand-edited contour. */
+	void suneerSyncAutoContour(bool regenerate = false);
+	//! The picture changed: forget the traced outline.
+	void suneerInvalidateContourCache();
+	//! The auto contour at the current transform, without touching the item.
+	FPointArray suneerTracedContour();
+	//! The contour now on the item is the one to follow from here (after an
+	//! undo/redo that set it), not a hand edit.
+	void suneerAcceptContour();
+	//! True when the contour follows the image (auto, or a hand-made one
+	//! already being carried along).
+	bool suneerContourTracked() const { return m_contourXformValid || suneerAutoContour(); }
+	//@}
+
 protected:
 	void DrawObj_Item(ScPainter *p, const QRectF& e) override;
 
@@ -125,7 +160,25 @@ private:
 	QImage m_liveEraserMask;
 	bool m_liveEraserMaskSet {false};
 
-	//! pixm with the eraser mask multiplied into its alpha channel.
+	//! Traced alpha outline in mask pixels (see suneerSyncAutoContour()).
+	QList<ScContour::Ring> m_contourRings;
+	QSize m_contourMaskSize;
+	qint64 m_contourCacheKey { -1 };
+	bool m_contourCacheValid { false };
+	//! What the last sync produced and the image transform it was made for,
+	//! so a later hand edit can be told apart and transformed instead.
+	FPointArray m_lastAutoContour;
+	QTransform m_contourXform;
+	bool m_contourXformValid { false };
+	bool m_contourChecked { false };
+	FPointArray contourFromRings(const QList<ScContour::Ring>& rings, const QSize& maskSize) const;
+
+	//! Transient feather preview; never saved. See setLiveFeather().
+	bool m_liveFeatherSet {false};
+	double m_liveFeatherPx {0.0};
+	QString m_liveFeatherDir;
+
+	//! pixm with the eraser mask and the feather multiplied into its alpha channel.
 	QImage m_eraserComposite;
 	//! Identity of what m_eraserComposite was built from, so a stale composite
 	//! is never drawn after the image is reloaded or the mask edited.

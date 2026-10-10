@@ -5,6 +5,10 @@
 #include "selection.h"
 #include "fpointarray.h"
 #include "canvas.h"
+#include "suneercursor.h"
+#include "pageitem_imageframe.h"
+#include "undomanager.h"
+#include "undostate.h"
 #include <QMouseEvent>
 #include <QPainter>
 #include <QCursor>
@@ -16,8 +20,10 @@ SuneerContourMode::SuneerContourMode(ScribusView* view)
 
 void SuneerContourMode::activate(bool fromGesture)
 {
-    // Pen/knife cursor
-    m_canvas->setCursor(QCursor(Qt::PointingHandCursor));
+    // Pen/knife cursor - on the VIEW, like every other canvas mode. A cursor
+    // set on the Canvas widget itself would outlive this mode and hide the
+    // resize/move cursors the normal mode puts on the view.
+    m_view->setCursor(QCursor(Qt::PointingHandCursor));
     m_poly.resize(0);
     m_drawing = false;
     // Get target image item
@@ -28,7 +34,9 @@ void SuneerContourMode::activate(bool fromGesture)
 
 void SuneerContourMode::deactivate(bool forGesture)
 {
-    m_canvas->setCursor(QCursor(Qt::ArrowCursor));
+    m_view->setCursor(QCursor(Qt::ArrowCursor));
+    if (!forGesture)
+        suneerCursorSettle(m_view, "contour draw end");
 }
 
 void SuneerContourMode::keyPressEvent(QKeyEvent *e)
@@ -87,9 +95,33 @@ void SuneerContourMode::mouseReleaseEvent(QMouseEvent *m)
         FPoint first = m_poly.point(0);
         m_poly.addQuadPoint(first.x(), first.y(), first.x(), first.y(),
                             first.x(), first.y(), first.x(), first.y());
-        // Set as ContourLine
+        // Set as ContourLine: user data, one undo step, and from now on
+        // the contour follows the picture (hand-made, never regenerated).
+        const FPointArray before = m_targetItem->ContourLine.copy();
+        const int oldFlow = m_targetItem->textFlowMode();
+        UndoTransaction tx;
+        if (UndoManager::undoEnabled())
+            tx = UndoManager::instance()->beginTransaction(m_targetItem->getUName(), m_targetItem->getUPixmap(), tr("Draw Contour"), QString(), Um::IBorder);
         m_targetItem->ContourLine = m_poly.copy();
+        m_targetItem->ClipEdited = true;
+        if (auto* frame = m_targetItem->asImageFrame())
+        {
+            frame->suneerSetAutoContour(false);
+            frame->suneerAcceptContour();
+        }
         m_targetItem->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+        if (UndoManager::undoEnabled())
+        {
+            auto* state = new ScOldNewState<FPointArray>(Um::EditContourLine, QString(), Um::IBorder);
+            state->set("SUNEER_CONTOUR");
+            state->set("DETECT_CONTOUR_FLOW", true);
+            state->set("DETECT_CONTOUR_FLOW_OLD", oldFlow);
+            state->set("DETECT_CONTOUR_FLOW_NEW", int(PageItem::TextFlowUsesContourLine));
+            state->setStates(before, m_targetItem->ContourLine);
+            UndoManager::instance()->action(m_targetItem, state);
+        }
+        if (tx)
+            tx.commit();
         m_targetItem->update();
         m_doc->changed();
         m_doc->regionsChanged()->update(QRectF());

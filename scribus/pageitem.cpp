@@ -914,6 +914,8 @@ void PageItem::setImageXYScale(double newImageXScale, double newImageYScale)
 		oldLocalScY = m_imageYScale;
 		return;
 	}
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -925,6 +927,8 @@ void PageItem::setImageXOffset(double newImageXOffset)
 		oldLocalX = m_imageXOffset;
 		return;
 	}
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -936,6 +940,8 @@ void PageItem::setImageYOffset(double newImageYOffset)
 		oldLocalY = m_imageYOffset;
 		return;
 	}
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -949,6 +955,8 @@ void PageItem::setImageXYOffset(double newImageXOffset, double newImageYOffset)
 		oldLocalY = m_imageYOffset;
 		return;
 	}
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -962,6 +970,8 @@ void PageItem::moveImageXYOffsetBy(double dX, double dY)
 		m_imageYOffset += dY;
 	if (m_Doc->isLoading())
 		return;
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -980,6 +990,8 @@ void PageItem::setImageRotation(double newRotation)
 	m_imageRotation = newRotation;
 	if (m_Doc->isLoading())
 		return;
+	if (isImageFrame())
+		asImageFrame()->suneerSyncAutoContour();
 	checkChanges();
 }
 
@@ -8404,6 +8416,8 @@ void PageItem::restoreDetectedContourLine(SimpleState *state, bool isUndo)
 	}
 	ContourLine = isUndo ? is->getOldState() : is->getNewState();
 	ClipEdited = true;
+	if (isImageFrame())
+		asImageFrame()->suneerAcceptContour();
 	if (state->contains("DETECT_CONTOUR_FLOW"))
 	{
 		int oldMode = state->getInt("DETECT_CONTOUR_FLOW_OLD");
@@ -10392,6 +10406,13 @@ QRegion PageItem::textInteractionRegion(double xOffset, double yOffset) const
 		QList<uint> Segs;
 		QPolygon Clip2 = flattenPath(ContourLine, Segs);
 		res = QRegion(pp.map(Clip2));
+		// Suneer: an image frame's contour is tied to the picture and may
+		// reach beyond the frame after a shrink; only the part inside the
+		// frame is visible, so only that part pushes text. The stored
+		// contour itself is left whole, so enlarging the frame again gets
+		// it all back.
+		if (isImageFrame() && !Clip.isEmpty())
+			res = res.intersected(QRegion(pp.map(Clip)));
 	}
 	else
 	{
@@ -10578,6 +10599,9 @@ bool PageItem::loadImage(const QString& filename, const bool reload, const int g
 	double xres = pixm.imgInfo.xres;
 	double yres = pixm.imgInfo.yres;
 	imageIsAvailable = true;
+	// Suneer: a new picture means a new alpha outline for the wrap contour.
+	if (isImageFrame())
+		asImageFrame()->suneerInvalidateContourCache();
 		
 	if (Pfile != filename)
 	{
@@ -11023,6 +11047,9 @@ void PageItem::adjustPictScale()
 		cl.scale(m_imageXScale, m_imageYScale);
 		imageClip.map(cl);
 	}
+	// Suneer: Adjust Image to Frame moved/scaled the picture; the contour follows.
+	if (isImageFrame() && !m_Doc->isLoading())
+		asImageFrame()->suneerSyncAutoContour();
 }
 
 void PageItem::setExternalFile(const QString& filename, const QString& baseDir)
@@ -11530,7 +11557,13 @@ void PageItem::updateClip(bool updateWelded)
 				GrMaskEndY = gr3.point(1).y();
 				GrMaskFocalX = gr3.point(2).x();
 				GrMaskFocalY = gr3.point(2).y();
-				ContourLine.map(ma);
+				// Suneer: an image frame's contour belongs to the image, not
+				// the frame: it is re-mapped from the image transform instead
+				// of being stretched with the frame.
+				if (isImageFrame() && (asImageFrame()->suneerContourTracked() || textFlowUsesContourLine()))
+					asImageFrame()->suneerSyncAutoContour();   // decides auto / hand-made on first sight
+				else
+					ContourLine.map(ma);
 				if (FrameType > 2)
 				{
 					PoLine.map(ma);
@@ -11579,7 +11612,12 @@ void PageItem::updateClip(bool updateWelded)
 			}
 			OldB2 = width();
 			OldH2 = height();
-			if ((FrameType < 3) && (!ClipEdited))
+			// Suneer: a contour that text wraps around is user data (drawn
+			// with DC, traced from the picture, or edited by hand); it is
+			// never thrown away for the frame rectangle just because the
+			// frame was never marked ClipEdited.
+			const bool keepContour = isImageFrame() && (textFlowUsesContourLine() || asImageFrame()->suneerContourTracked());
+			if ((FrameType < 3) && (!ClipEdited) && !keepContour)
 				ContourLine = PoLine.copy();
 		}
 		else

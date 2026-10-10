@@ -43,6 +43,7 @@
 #include "spellcheckfunctions.h"
 #include "textframespellchecker.h"
 #include "undomanager.h"
+#include "undostate.h"
 
 
 ContextMenu::ContextMenu(Selection & sel, ScribusMainWindow *actionsParent, ScribusDoc* doc, QWidget * parent) :
@@ -450,6 +451,38 @@ void ContextMenu::createMenuItems_Selection()
 		}
 		if (m_actionList.contains("editEditWithImageEditor"))
 			menuImage->addAction(m_ScMW->scrActions["editEditWithImageEditor"]);
+		if (selectedItemCount == 1 && currItem->isImageFrame() && currItem->imageIsAvailable)
+		{
+			// Suneer: retrace the wrap contour from the picture's alpha, replacing
+			// a hand-edited one (an untouched auto contour already follows the image).
+			QAction* regenAct = menuImage->addAction(tr("Regenerate contour from image"));
+			QPointer<PageItem_ImageFrame> regenFrame = currItem->asImageFrame();
+			ScribusDoc* regenDoc = m_doc;
+			connect(regenAct, &QAction::triggered, m_ScMW, [regenFrame, regenDoc]() {
+				if (!regenFrame || !regenDoc)
+					return;
+				PageItem* item = regenFrame.data();
+				const FPointArray before = item->ContourLine.copy();
+				const int oldFlow = item->textFlowMode();
+				regenFrame->suneerSyncAutoContour(true);
+				if (item->ContourLine == before && oldFlow == PageItem::TextFlowUsesContourLine)
+					return;
+				item->setTextFlowMode(PageItem::TextFlowUsesContourLine);
+				if (UndoManager::undoEnabled())
+				{
+					auto* state = new ScOldNewState<FPointArray>(Um::EditContourLine, QString(), Um::IBorder);
+					state->set("SUNEER_CONTOUR");
+					state->set("DETECT_CONTOUR_FLOW", true);
+					state->set("DETECT_CONTOUR_FLOW_OLD", oldFlow);
+					state->set("DETECT_CONTOUR_FLOW_NEW", int(PageItem::TextFlowUsesContourLine));
+					state->setStates(before, item->ContourLine);
+					UndoManager::instance()->action(item, state);
+				}
+				item->update();
+				regenDoc->changed();
+				regenDoc->regionsChanged()->update(QRectF());
+			});
+		}
 		if (selectedItemCount == 1 && currItem->isImageFrame())
 		{
 			if (currItem->imageIsAvailable)
