@@ -8988,6 +8988,27 @@ bool Scribus171Format::loadPage(const QString & fileName, int pageNumber, bool M
 	return true;
 }
 
+// "<name> (pasted)", or "(pasted 2)", "(pasted 3)"... when that name is
+// taken by a style that is not equal to the incoming one. An equal one is
+// reused, so pasting the same frame twice makes one copy, not two.
+template<class STYLE>
+static QString pastedStyleName(const StyleSet<STYLE>& docStyles, const STYLE& incoming)
+{
+	const QString base = incoming.name() + QStringLiteral(" (pasted");
+	for (int n = 1; n < 1000; ++n)
+	{
+		const QString candidate = base + (n == 1 ? QStringLiteral(")") : QStringLiteral(" %1)").arg(n));
+		const STYLE* existing = docStyles.getPointer(candidate);
+		if (!existing)
+			return candidate;
+		STYLE probe(incoming);
+		probe.setName(candidate);
+		if (probe.equiv(*existing))
+			return candidate;
+	}
+	return docStyles.getUniqueCopyName(incoming.name());
+}
+
 void Scribus171Format::getStyle(ParagraphStyle& style, ScXmlStreamReader& reader, StyleSet<ParagraphStyle> *tempStyles, ScribusDoc* doc, bool equiv)
 {
 	bool  found(false);
@@ -9006,13 +9027,25 @@ void Scribus171Format::getStyle(ParagraphStyle& style, ScXmlStreamReader& reader
 		found = style.equiv(*foundStyle);
 		if (found)
 			return;
-		// Pasting: the target document already has a style by this name, so
-		// the pasted text uses it as it is, whatever the source defined.
 		if (m_keepExistingStyles)
-			return;
-		QString newName = docParagraphStyles.getUniqueCopyName(style.name());
-		parStyleMap[style.name()] = newName;
-		style.setName(newName);
+		{
+			// Pasting: the target has a style by this name with a DIFFERENT
+			// definition. Taking the target's silently changes the pasted
+			// text's look (tabs, size, scaling...), so the incoming one comes
+			// in as "<name> (pasted)", reused when an equal one is already
+			// there. The target's own styles are never touched.
+			const QString pastedName = pastedStyleName(docParagraphStyles, style);
+			parStyleMap[style.name()] = pastedName;
+			if (docParagraphStyles.contains(pastedName))
+				return;
+			style.setName(pastedName);
+		}
+		else
+		{
+			QString newName = docParagraphStyles.getUniqueCopyName(style.name());
+			parStyleMap[style.name()] = newName;
+			style.setName(newName);
+		}
 	}
 
 	// Pasting a name the target does not have creates that style under its
@@ -9057,13 +9090,22 @@ void Scribus171Format::getStyle(CharStyle& style, ScXmlStreamReader& reader, Sty
 		found = style.equiv(*foundStyle);
 		if (found)
 			return;
-		// Pasting: the target document already has a style by this name, so
-		// the pasted text uses it as it is, whatever the source defined.
 		if (m_keepExistingStyles)
-			return;
-		QString newName = docCharStyles.getUniqueCopyName(style.name());
-		parStyleMap[style.name()] = newName;
-		style.setName(newName);
+		{
+			// As for paragraph styles: a clashing, different definition
+			// comes in as "<name> (pasted)".
+			const QString pastedName = pastedStyleName(docCharStyles, style);
+			charStyleMap[style.name()] = pastedName;
+			if (docCharStyles.contains(pastedName))
+				return;
+			style.setName(pastedName);
+		}
+		else
+		{
+			QString newName = docCharStyles.getUniqueCopyName(style.name());
+			charStyleMap[style.name()] = newName;   // was parStyleMap: a char style never maps into the paragraph table
+			style.setName(newName);
+		}
 	}
 
 	// Pasting a name the target does not have creates that style under its

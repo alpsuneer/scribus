@@ -371,7 +371,7 @@ ShapedText TextShaper::shape(int fromPos, int toPos)
 		hb_buffer_set_script(hbBuffer, hbScript);
 		hb_buffer_set_language(hbBuffer, hbLanguage);
 		// A document from an older Scribus keeps its line breaks: see suneerclusterlevel.h
-		const bool charClusters = suneerDocUsesCharClusters(m_context ? m_context->getDoc() : nullptr);
+		const bool charClusters = suneerItemUsesCharClusters(m_context ? m_context->getFrame() : nullptr);
 		hb_buffer_set_cluster_level(hbBuffer, charClusters ? HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS
 		                                                   : HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
 

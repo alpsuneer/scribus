@@ -3,6 +3,7 @@
 
 #include <QVariant>
 
+#include "pageitem.h"
 #include "scribusdoc.h"
 
 // How HarfBuzz groups characters into glyph clusters, per document.
@@ -31,6 +32,48 @@ inline void suneerSetDocUsesCharClusters(ScribusDoc* doc, bool on)
 {
 	if (doc)
 		doc->setProperty("suneerCharClusters", on ? QVariant(true) : QVariant());
+}
+
+// The same behaviour carried by ONE frame: a text frame copied out of a
+// document that breaks lines the old way is marked with the item attribute
+// SuneerClusterLevel=chars (written by saveElements, so the clipboard, a
+// second window and the Scrapbook all carry it), and keeps its line breaks
+// wherever it is pasted, with no dependence on the target document's flag.
+inline bool suneerItemMarkedCharClusters(const PageItem* item)
+{
+	if (!item)
+		return false;
+	const QList<ObjectAttribute> attrs = item->getObjectAttributes(QStringLiteral("SuneerClusterLevel"));
+	for (const ObjectAttribute& attr : attrs)
+		if (attr.value == QLatin1String("chars"))
+			return true;
+	return false;
+}
+
+inline bool suneerItemUsesCharClusters(const PageItem* item)
+{
+	if (!item)
+		return false;
+	return suneerDocUsesCharClusters(item->doc()) || suneerItemMarkedCharClusters(item);
+}
+
+inline void suneerMarkItemCharClusters(PageItem* item, bool on)
+{
+	if (!item)
+		return;
+	ObjAttrVector attrs = *item->getObjectAttributes();
+	for (int i = attrs.count() - 1; i >= 0; --i)
+		if (attrs.at(i).name == QLatin1String("SuneerClusterLevel"))
+			attrs.removeAt(i);
+	if (on)
+	{
+		ObjectAttribute attr;
+		attr.name = QStringLiteral("SuneerClusterLevel");
+		attr.type = QStringLiteral("string");
+		attr.value = QStringLiteral("chars");
+		attrs.append(attr);
+	}
+	item->setObjectAttributes(&attrs);
 }
 
 #endif

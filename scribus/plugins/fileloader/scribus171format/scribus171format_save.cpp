@@ -40,6 +40,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpattern.h"
 #include "scribusdoc.h"
 #include "suneerclusterlevel.h"
+#include <QScopedValueRollback>
 #include "scribusview.h"
 #include "scxmlstreamwriter.h"
 #include "textnote.h"
@@ -51,6 +52,7 @@ for which a new license (GPL+exception) is in place.
 
 QString Scribus171Format::saveElements(double xp, double yp, double wp, double hp, Selection* selection, QByteArray &prevData)
 {
+	QScopedValueRollback<bool> markCharClusters(m_markCharClusters, suneerDocUsesCharClusters(m_Doc));
 	ResourceCollection lists;
 	QList<PageItem*> emG;
 	QList<PageItem*> emF;
@@ -2727,6 +2729,19 @@ void Scribus171Format::WriteObjects(ScribusDoc *doc, ScXmlStreamWriter& docu, co
 
 		//CB PageItemAttributes
 		ObjAttrVector *attributes = item->getObjectAttributes();
+		ObjAttrVector marked;
+		if (m_markCharClusters && item->isTextFrame() && !suneerItemMarkedCharClusters(item))
+		{
+			// Copied out of an old-line-breaks document: the frame carries
+			// the behaviour itself (see suneerclusterlevel.h).
+			marked = *attributes;
+			ObjectAttribute attr;
+			attr.name = QStringLiteral("SuneerClusterLevel");
+			attr.type = QStringLiteral("string");
+			attr.value = QStringLiteral("chars");
+			marked.append(attr);
+			attributes = &marked;
+		}
 		if (attributes->count() > 0)
 		{
 			docu.writeStartElement("PageItemAttributes");

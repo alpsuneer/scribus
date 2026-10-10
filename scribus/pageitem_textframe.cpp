@@ -1569,7 +1569,7 @@ void PageItem_TextFrame::layout()
 			double textDist[4];
 			current.preciseEnd = suneerNeedsInsetShape(this, textDist);
 		}
-		current.stockLineEnd = suneerDocUsesCharClusters(m_Doc);
+		current.stockLineEnd = suneerItemUsesCharClusters(this);
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();

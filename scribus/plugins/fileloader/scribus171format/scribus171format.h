@@ -236,6 +236,9 @@ class PLUGIN_API Scribus171Format : public LoadSavePlugin
 		// character style whose name the target document already has uses the
 		// target's style instead of arriving as a "Name (2)" copy.
 		bool m_keepExistingStyles { false };
+		// saveElements(): a text frame of a document that breaks lines the old
+		// way is written with SuneerClusterLevel=chars so the paste keeps them.
+		bool m_markCharClusters { false };
 		
 		QMap<int, int> itemRemap;
 		QMap<int, int> itemNext;
