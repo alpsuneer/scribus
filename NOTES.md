@@ -46,6 +46,7 @@ Branch column = where the work was introduced. Unmarked features came from
 | Legacy-overflow prompt when an older file is opened | `d5a69ff` | legacy-overflow-prompt |
 | Condense to Fit — overflowing stories are narrowed (horizontal scale in 0.5% steps, then tracking) and the frame is never resized; option in the Legacy Document prompt (default), Item menu, right-click, control bar `→T←`; limits in Preferences > SR Menu (90%, -2%); one undo step. Verified by the user | `git log -S suneerCondenseStoryToFit` | feature/ctp-output |
 | Old Scribus line breaks per document — a 1.5.x/1.6.x file keeps HarfBuzz character clusters and the stock 0.25 pt line-end search; saved as `Document SuneerClusterLevel="chars"`; Extras > Old Scribus Line Breaks (This Document) for pages already re-saved here. Verified by the user | `git log -- scribus/suneerclusterlevel.h` | feature/ctp-output |
+| Paste keeps the look — `Scribus171Format::getStyle()` with `m_keepExistingStyles`: a clashing, non-equivalent style becomes `<name> (pasted)` (`pastedStyleName<>()`, reused when equal; the char-style map bug `parStyleMap` → `charStyleMap` fixed); `saveElements()` writes `SuneerClusterLevel=chars` as an item attribute on text frames of an old-line-breaks document, shaper/text frame read `suneerItemUsesCharClusters()` (doc flag OR frame mark), Extras toggle off strips the marks. Verified by the user | `aa3f7e0` | feature/ctp-output |
 | Nested styles (InDesign-style, layout-time char overlay) | `4e80b33` | |
 | Paragraph rules — rule above / rule below, 28 style attrs, one render hook shared by canvas/PDF/PS/XPS/SVG | `e471a0f` | |
 | Paragraph shading — per-paragraph background band, 10 attrs | `a4fadee` | |
@@ -252,6 +253,7 @@ note above them in `scribus.cpp` / `contextmenu.cpp`.
 | Proof Print button on the control bar | `a537c5a` | print-proof |
 | News Browser v2 — current workflow API (`/external/edition-pages/<shortName>`, news per page/date; editions from public `initial-data/static` filtered by `user.editionGroups`), login with QtKeychain session (`org.scribus.news`), one request builder with Bearer + refresh-and-retry, server-side placed state via `PATCH /news/dtp-status` (USED / BALANCED = "unused"; Check, Mark as unused, Remove story with undo re-mark), reference layout (one story frame + separate photo + welded caption, 2 mm wrap offsets, photo position/columns, story-id attributes, Select whole story), pasteboard story spike with undoable scratch widening (`ScribusDoc::setScratchUndoable`), per-user picture cache. Verified by the user | `04c6eee` | feature/ctp-output |
 | News Browser row tags — `SuneerNewsRowDelegate` (QStyledItemDelegate): title elided by grapheme at paint time into the space left of a fixed tag strip, tag from `Qt::UserRole + 4`, `sizeHint` width 1 + horizontal scrollbar off so rows never exceed the viewport, paint clipped to the row; status counts in the status line. Verified by the user | `7dd888d` | feature/ctp-output |
+| News Browser used/balance sources — Fetch merges `/external/.../news`, authenticated `/news/layout`, `/news/used?editionPage&editionGroup` and `/news/balanced?editionGroup` by story id (`fold()`); edition group id = login `editionGroups[].id`, mapped from the short name through the public edition list (`editionGroupIdFor()`); balance-only entries hydrated from `GET /news/:id` before placing; Show: filter (`applyListFilter(bool setStatusLine)` owns the status line only on fetch/filter change); `m_fetchNote` carries HTTP 401/404/network errors. Verified by the user | `7251c12` | feature/ctp-output |
 | News Browser fromStatus / place-to-used — `serverStatus()` fresh read (GET /news/:id, fallback page news list) before every `markOnServer()`, per-story `m_lastFrom`/`m_lastMarkError`, conflict reporting, `allowedTransition()` gating, `markPlaced()` per story with summary + `retryPendingMarks()` (Check, right-click), `recordPlaceUndo()` SUNEER_NEWS_PLACE states (PREV/MARKED) restored in `restore()`, api.log trail. Verified by the user | `dca3488` | feature/ctp-output |
 | News Browser status model — `newsDtpStatus()` Free/Used/Balance from the server enum, three-state rows (icons `ok` / `panel-bookmarks`), Mark unused sends UNUSED (`unusedStatus()`, one place), Mark balance (button, list and document context menus), balance stories placeable after one question, shared `markStories()` with WANT status in the undo record. Backend patch `~/Desktop/claude/backend-20261008-dtp-status-unused.patch` deployed 2026-10-08. Verified by the user | `5664da8` | feature/ctp-output |
 | News Browser bulk "Mark unused (N)" — used rows tickable for releasing only, "Select all used", Place Selected skips used ticks and says so, one confirmation with headlines + optional removal from the page in one undo transaction, per-story server result summary; `removeStory()` shares `removeStoryFrames()`. Verified by the user | `3494742` | feature/ctp-output |
@@ -369,6 +371,11 @@ the narrow `ScribusDoc::itemSelection_ResetParagraphShading()`. Note also that
 | Sources under version control + build wiring | `c58f023`, `f7012a5` | |
 | Effect stack, filter dialogs, undo, tools, options bar, async SAM encode, cached previews | `6e0ce60`, `b92dde5`, `ae4def5`, `fc3ba7d` | |
 | Resize Image (resample to what the frame needs), visible self-exiting crop mode, image write error reporting | `b082928`, `9f77571`, `6c93954` | |
+| Contour follows the image — `PageItem_ImageFrame::suneerSyncAutoContour()`: rings traced once (`ScContour::detect`, threshold 11) in mask pixels, re-mapped via `maskPixelToLocal()` and clipped to `PoLine` on `updateClip()`, image scale/offset/rotation setters, `adjustPictScale()`, `loadImage()` (cache invalidated); item attribute `SuneerAutoContour=1`, old files adopt it (bbox overlap > 0.8); hand-made contour transformed by the image-transform delta, never regenerated; `updateClip()` no longer resets a wrap contour to `PoLine` for image frames; `textInteractionRegion()` intersects with the frame at flow time; DC mode sets ClipEdited + one undo; context menu Regenerate. Verified by the user | `dea85a1` | feature/ctp-output |
+| Edge Feather effect — `ImageEffect::EF_FEATHER = 32` ("px direction"), data carrier like the eraser mask: `ScFeatherMask::maskFor()` (cut-out: erode + 3-pass box blur, or one-side ramp from the alpha bounding box; opaque: frame-edge ramp) multiplied into canvas composite (`imageForDraw()` cache key), PDF soft mask, PS mask, GDI path; popup live via `setLiveFeather()`, Apply = `ScOldNewState<ScImageEffectList>` "APPLY_IMAGE_EFFECTS". Verified by the user | `198b415` | feature/ctp-output |
+| BG remove on a selected part — `SuneerBgRemove` (modes Whole/Inside/KeepSubject, `compose()`, selection path ↔ attributes, `shapesToImagePath()` via `imagePixelToLocal().inverted()`), `SuneerBgRemover` (async rembg QProcess), `SuneerBgRemoveDialog` (Rect/Lasso, brushes, QUndoStack, Reset); attributes `SuneerBgSource/Mode/Selection/Brush/Cut/CutRect/Model/Feather`; outputs `_rembg`, `_rembg2…` never overwritten. Verified by the user | `198b415` | feature/ctp-output |
+| Image Size — `SuneerImageResample` (probe, `originalPathOf()` via `SuneerImgOriginal`, ImageMagick `-filter Lanczos/Mitchell/Catrom/Point` + luminance-only `-unsharp` for Sharper, `-density`, output `<doc>_images/<name>_<W>x<H>_<dpi>dpi.<ext>`, relink with scale×r / offset÷r / feather÷r / `suneerAcceptContour()`, one undo), `SuneerImageSizeBar` toolbar (units, chain, dpi colour, Resample on/off, quality, sharpen, Allow enlarge, Auto = `autoDpiTarget`; Resample OFF = scale 72/dpi + `sizeItem`), `ResizeImageDialog` rewrite, `SuneerOptimizeImagesDialog` (Extras), import offer in `slotGetContent`. Verified by the user | `198b415` | feature/ctp-output |
+| Canvas cursor guard — `SuneerCursorGuard` RAII, `suneerCursorSettle()` (pops stuck overrides, `unsetCursor()` on the canvas widget, replays MouseMove), `SCRIBUS_DEBUG_CURSOR`. Verified by the user | `cb2c6e4` | feature/ctp-output |
 | Embed in SLA (Base64) actually embeds | `7f610b8` | |
 
 ### Image eraser (non-destructive, on-canvas)
@@ -2489,3 +2496,58 @@ Code: `ui/suneercontrolbar.cpp` - `onImgEdgeFeather()` (image frame: PIL writes 
   Ctrl+Z / Ctrl+Shift+Z keys (the Undo / Redo actions were triggered), the Print Preview picture
   (window opened, pane empty in Xvfb), the real printer, "always embed" switched off, master pages,
   a .sla.gz document, a frame copied to a second open document, Cancel while PIL runs.
+
+## Wrap contour vs. frame resize, DC contour reset (2026-10-10)
+
+- **Trap:** `PageItem::updateClip()` scales `ContourLine` by `width/OldB2, height/OldH2` with the
+  frame and then, for `FrameType < 3 && !ClipEdited`, replaces it with `PoLine`. The DC contour mode
+  never set `ClipEdited`, so every resize turned the drawn contour into the frame rectangle (text
+  wrapped at the box). The first fix (auto contour only) missed it because the AC/BG path sets
+  `ClipEdited = true`. Image frames now keep a wrap contour in `updateClip()` whenever the flow mode
+  is contour or the frame tracks one; DC sets `ClipEdited`.
+- The contour is frame-local points. `imagePixelToLocal()` (offset, scale, rotation, flip) is the
+  one mapping; `maskPixelToLocal(size)` for a low-res mask. A relink after resample changes the pixel
+  grid without moving anything: call `suneerAcceptContour()` there or the delta transform scales a
+  hand-made contour by the resample ratio.
+- `textInteractionRegion()` clips an image frame's contour region to the frame; the stored contour
+  stays whole so enlarging restores it.
+- Evidence tooling: `~/Desktop/claude/contour-test/parse.py` prints contour bbox/nodes/flow per
+  frame from a saved .sla; scripter `sizeObject`/`setImageScale`/`setImageOffset` drive the paths
+  headlessly.
+
+## Paste: style clash and old line breaks (2026-10-09)
+
+- `loadElements()` (paste, scrapbook, second window) runs `getStyle()` with
+  `m_keepExistingStyles = true` (commit 6fefc68 wanted no "Name (2)" copies). A same-named style
+  with a different definition silently took the target's definition - tabs, size, scaling gone.
+  Now `<name> (pasted)`, reused when equal; equal definitions still share the target style.
+  Parent/CParent of pasted styles are remapped through `parStyleMap`/`charStyleMap` already.
+- A brand-new document differs from an old page by `Document SuneerClusterLevel="chars"` (and only
+  by that for layout): same styles pasted, different breaks at the soft hyphens. The mark now
+  travels as an item attribute on copied text frames (`saveElements()` only, so saving a document
+  does not stamp every frame). `suneerSetOldLineBreaks(false)` strips frame marks.
+- The clipboard payload is `application/x-scribus-elem`; read it from X with PyQt6
+  (`QApplication.clipboard().mimeData()`), not xclip (not installed).
+
+## Canvas cursor: child-widget cursor hides the view's (2026-10-11)
+
+- Every canvas mode sets cursors on the view (`m_view->setCursor`). The Canvas is
+  `view->widget()`, a child: once anything calls `m_canvas->setCursor()`, the child's cursor wins
+  for good and the resize/move cursors vanish. Only the DC mode did that. Never set a cursor on
+  the Canvas widget; `suneerCursorSettle()` removes one if it appears (`WA_SetCursor`).
+- Override cursors: use `SuneerCursorGuard`; the crop / eraser / removal-mask modes keep their
+  guarded enter/leave pushes. The X cursor can be fingerprinted from outside with XFixes
+  (`~/Desktop/claude/cursor-test/cursorname.py`): resize vs move vs arrow have distinct image hashes.
+- Harness trap: `import -window <id>` on a window that is closing can leave the X server grabbed
+  (Xvfb :99 wedged once); capture the root window instead.
+
+## Image Size / resample (2026-10-10)
+
+- Toolbar W/H used to be the FRAME size in mm; the DPI field clamped at 1200. The bar now shows the
+  picture's placed size and effective dpi; every resample reads the original (`SuneerImgOriginal`)
+  so repeated changes do not compound.
+- `Options.targetDpi` names/densities the output for the dpi the caller will set afterwards;
+  without it the name carries the effective dpi of the current scale.
+- ImageMagick preserves profile/EXIF/colorspace by default; `-channel RGB -unsharp` would sharpen
+  alpha-free but not luminance-only - the Lab L channel route is used for RGB.
+- The toolbar row is full at 1600 px: the live result line goes to the status bar + field tooltips.

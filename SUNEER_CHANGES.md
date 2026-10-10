@@ -1150,3 +1150,58 @@ scribus
 - Used/balance rows സാധാരണ text colour (tag status പറയും); icons, checkbox, tooltip, Select All — പഴയപടി. Place / Mark unused / Mark balance / Check
   കഴിഞ്ഞ് ആ row-യുടെ tag ഉടൻ മാറും. Light/dark theme രണ്ടിലും colours.
 - Commit `7dd888d`.
+
+### 64. News Browser — used / balance stories list-ൽ, Show: filter
+- Server-ന്റെ public route (`/external/edition-pages/<page>/news`) unplaced stories മാത്രമേ തരൂ. ഇപ്പോൾ Fetch web app-ന്റെ "Used News" / "Balanced News"
+  page-കൾ ഉപയോഗിക്കുന്ന അതേ API (`/news/used`, `/news/balanced`, login-ന്റെ edition group id) + `/news/layout` കൂടി വിളിച്ച് story id കൊണ്ട് merge.
+  Used story-ക്ക് USD, page name/reporter tooltip-ൽ; balance-only story place ചെയ്യുമ്പോൾ full text ആദ്യം server-ൽ നിന്ന് എടുക്കും.
+- **Show:** all / USD / UNUSD / BAL filter (പഴയപടി ഓർക്കും); hidden rows-ൽ Place/Mark ഒന്നും ചെയ്യില്ല.
+- Status line page മുഴുവന്റെ കണക്ക്: "Unused N · Used N · Balance N (· showing: USD)"; filter എല്ലാം മറച്ചാൽ "No USD stories (N total) - change Show:";
+  login ഇല്ലെങ്കിൽ "Used: log in to see used stories"; HTTP 401/404/network error-കൾ status line-ൽ (silent ഇല്ല). `api.log`-ൽ ഓരോ call-ന്റെയും
+  HTTP code, count, reply field names (token/id ഇല്ല).
+- Office PC-യിൽ API host `http://<server>/api` (port 80) ആയും ഉപയോഗിക്കാം. Commit `7251c12`.
+
+### 65. Paste — pasted text അതേപടി ("(pasted)" styles, old line breaks)
+- Target document-ൽ അതേ പേരിൽ **വ്യത്യസ്ത** paragraph/character style ഉണ്ടെങ്കിൽ pasted text ഇനി target-ന്റെ style silently എടുക്കില്ല:
+  incoming style "**<name> (pasted)**" ആയി വരും (തുല്യ definition ഉള്ള copy ഉണ്ടെങ്കിൽ reuse). Target-ന്റെ styles ഒരിക്കലും മാറില്ല; definition തുല്യമെങ്കിൽ target style തന്നെ.
+- 1.5/1.6-ൽ നിന്ന് വന്ന (Old Scribus Line Breaks) document-ൽ നിന്ന് copy ചെയ്ത text frame ആ behaviour frame-ൽ തന്നെ കൊണ്ടുപോകും
+  (clipboard, രണ്ടാം window, Scrapbook) → പുതിയ document-ൽ paste ചെയ്താലും അതേ line breaks, overflow ഇല്ല. Extras → Old Scribus Line Breaks off ചെയ്താൽ
+  ആ document-ലെ frame mark-കളും പോകും. Commit `aa3f7e0`.
+
+### 66. Contour wrap image-നോടൊപ്പം — BG auto contour, DC contour resize-ൽ നഷ്ടപ്പെടില്ല
+- BG/AC-യുടെ auto contour image-ന്റെ alpha-യിൽ നിന്ന് ഒരു തവണ trace ചെയ്ത് frame resize, image scale/offset, rotate, Adjust image to frame, picture മാറ്റം
+  എന്നിവയിലെല്ലാം image-ന്റെ ഇപ്പോഴത്തെ സ്ഥാനത്തേക്ക് re-map ചെയ്യും; frame-ൽ clip. പഴയ file-കളിലെ BG contour-ഉം ആദ്യ മാറ്റത്തിൽ ഇത് ഏറ്റെടുക്കും.
+- **DC** (കൈകൊണ്ട് വരച്ച) contour ഒരിക്കലും overwrite/reset ആകില്ല: resize-ൽ frame rectangle ആകുന്ന പഴയ bug (ClipEdited) ശരിയാക്കി; image-നൊപ്പം നീങ്ങും/scale ആകും;
+  shrink ചെയ്താൽ frame-ന് അകത്തെ ഭാഗം മാത്രം text തള്ളും, enlarge-ൽ മുഴുവൻ തിരികെ. DC-യും ഒറ്റ undo ("Draw Contour").
+- Right-click → **Regenerate contour from image** (DC contour-ന് പകരം alpha-യിൽ നിന്ന് വീണ്ടും). Text flow mode മാറില്ല. Commit `dea85a1`.
+
+### 67. Edge Feather — live effect, cut-out edge, side option
+- Image-ന്റെ 🌫 Feather ഇനി file എഴുതുന്ന tool അല്ല; **non-destructive effect**: popup-ൽ amount/side മാറ്റുമ്പോൾ canvas-ൽ live, Apply ഒറ്റ undo, SLA-യിൽ save,
+  PDF/print ഒരേപോലെ. BG കഴിഞ്ഞ (transparent) image-ൽ ആളുടെ **outline** soft ആകും (All); Top/Bottom/Left/Right → subject-ന്റെ യഥാർത്ഥ edge-ൽ നിന്ന് ആ side മാത്രം.
+  Opaque image-ൽ പഴയ frame-edge feather. Amount image px-ൽ store; cache ഉണ്ട്. Commit `198b415`.
+
+### 68. BG remove — photo-യുടെ തിരഞ്ഞെടുത്ത ഭാഗത്ത്
+- **Shape:** image frame-ന് മുകളിൽ rectangle/ellipse/polygon/bezier/freehand വരച്ച് frame + shape(കൾ) select → BG → mode (Only inside / Keep subject only),
+  model, feather → rembg background-ൽ (progress, Cancel) → apply, shape-കൾ delete, ഒറ്റ undo.
+- **Dialog** (frame മാത്രം select ചെയ്താൽ): preview (zoom/pan), Rect / Lasso, Add/Subtract, Whole / Only inside / Keep subject, Run, Erase / Restore brushes (size, softness),
+  dialog-ൽ Undo/Redo, **Reset to original**, Apply.
+- Original file തൊടില്ല; result `<name>_rembg.png`, `_rembg2…`; selection/mode/brush/raw cut frame attributes-ൽ (reopen → അതേ state); contour/feather/effects പഴയപടി.
+  Commit `198b415`.
+
+### 69. Image Size — toolbar bar, dialog, Optimize Images
+- Toolbar: `[cm▾] W [⚭] H  DPI  Resamp. [quality] [sharpen%] [↑] Auto  pixels/size`. W/H = picture-യുടെ page-ലെ വലുപ്പം (cm/mm/in ഓർക്കും), DPI colour
+  (red <150, orange <200, green 200–400, blue >400). Enter/focus-out-ൽ apply.
+  - **Resamp. ON:** W/H മാറ്റിയാൽ dpi അതേപടി, pixels = size × dpi, picture resample, frame-ഉം ആ size; DPI മാറ്റിയാൽ size അതേപടി, pixels മാറും.
+  - **Resamp. OFF:** pixels മാറില്ല, file ഇല്ല; DPI → size (6000 px @72 = 211.67 cm, 300 dpi → 50.80 cm); size → dpi.
+  - Quality: Auto (ചെറുതാക്കുമ്പോൾ Bicubic Sharper, വലുതാക്കുമ്പോൾ Smoother) / Sharper / Smoother / Bicubic / Nearest; Sharpen % luminance-ൽ മാത്രം (alpha അല്ല).
+    ↑ = Allow enlarge (default off; status bar warning). Auto = mouse resize-ന് ശേഷം ഈ dpi-യിലേക്ക് resample.
+  - Typing ചെയ്യുമ്പോൾ status bar-ൽ live: result px, dpi, ~MB (orange ⚠ original-ൽ കൂടുതലായാൽ).
+- എല്ലാ resample-ഉം **original file-ൽ നിന്ന്** (`SuneerImgOriginal` attribute), output `<doc>_images/<name>_<W>x<H>_<dpi>dpi.<ext>` (overwrite ഇല്ല),
+  ImageMagick → JPEG Q92, PNG alpha, CMYK/Gray, ICC, EXIF അതേപടി; page look അതേപടി (scale/offset); feather/contour ഒപ്പം; ഒറ്റ undo.
+- **RS** button → Image Size dialog (file info: px, stored dpi, inch size, effective dpi colour, MB/format/mode/alpha/ICC; Fit to frame @ dpi; JPEG quality; import offer).
+- **Extras → Optimize Images…**: selected/whole document pictures list (px, dpi colour, MB), target dpi, tick above target, Apply (progress, ഒറ്റ undo), MB before → after.
+  Commit `198b415`.
+
+### 70. Cursor — crop/BG/DC-ന് ശേഷം resize/move cursor പോകുന്ന bug
+- DC contour mode canvas widget-ൽ തന്നെ cursor set ചെയ്തിരുന്നത് (Arrow) പിന്നീട് എല്ലാ resize/move cursor-ഉം മറയ്ക്കുമായിരുന്നു — ശരിയാക്കി. Override cursor-കൾ RAII guard-ൽ;
+  BG/crop/feather/resample/DC കഴിഞ്ഞാൽ cursor ഉടൻ ശരിയാകും; stuck override ഉണ്ടെങ്കിൽ clear. Debug: `SCRIBUS_DEBUG_CURSOR=1 scribus`. Commit `cb2c6e4`.
