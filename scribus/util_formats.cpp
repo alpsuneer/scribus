@@ -421,6 +421,8 @@ QString getImageType(const QString& filename)
 		ret = "xpm";
 	else if ((buf[0] == 'V') && (buf[1] == 'C') && (buf[2] == 'L') && (buf[3] == 'M') && (buf[4] == 'T') && (buf[5] == 'F'))
 		ret = "svm";
+	else if ((buf[0] == 'R') && (buf[1] == 'I') && (buf[2] == 'F') && (buf[3] == 'F') && (buf[8] == 'W') && (buf[9] == 'E') && (buf[10] == 'B') && (buf[11] == 'P'))
+		ret = "webp";
 	f.close();
 
 	return ret;

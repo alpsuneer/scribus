@@ -159,6 +159,8 @@ if(HAVE_OSG)
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/suneer_news_obit.cpp
+		ui/suneer_obit_model.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp
@@ -265,6 +267,8 @@ else()
 		ui/suneercontrolbar.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
+		ui/suneer_news_obit.cpp
+		ui/suneer_obit_model.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp

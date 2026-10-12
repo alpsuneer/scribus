@@ -1,0 +1,291 @@
+#include "suneer_obit_model.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QProcess>
+
+#include "prefsmanager.h"
+#include "scpaths.h"
+
+QString SuneerObitModel::filePath()
+{
+	QString base = PrefsManager::instance().preferencesLocation();
+	if (base.isEmpty())
+		base = QDir::homePath() + QStringLiteral("/.config/scribus");
+	while (base.endsWith('/'))
+		base.chop(1);
+	return base + QStringLiteral("/layout-models/obituary.json");
+}
+
+QJsonObject SuneerObitModel::toJson() const
+{
+	QJsonObject grid{
+		{"columns", gridColumns}, {"gapMm", gridGapMm}, {"contentTopMm", contentTopMm},
+		{"obitColumns", QJsonArray{obitFirstCol, obitLastCol}},
+		{"newsColumns", QJsonArray{newsFirstCol, newsLastCol}}};
+	QJsonObject module{
+		{"photoMm", photoMm}, {"gapMm", moduleGapMm}, {"textTopDistPt", textTopDistPt},
+		{"photoFill", photoFill},
+		{"photoFillCMYK", QJsonArray{photoFillCMYK[0], photoFillCMYK[1], photoFillCMYK[2], photoFillCMYK[3]}}};
+	QJsonObject styles{
+		{"name", styleName}, {"place", stylePlace}, {"body", styleBody},
+		{"nameNoPic", styleNameNoPic}, {"placeNoPic", stylePlaceNoPic}, {"bodyNoPic", styleBodyNoPic}};
+	QJsonArray heads;
+	for (const HeadRule& r : newsHeadlines)
+		heads << QJsonObject{{"maxChars", r.maxChars}, {"style", r.style}};
+	QJsonObject news{
+		{"textColumns", newsTextColumns}, {"colGapMm", newsColGapMm}, {"gapMm", newsGapMm},
+		{"headlineStyles", heads}, {"dateline", newsDateline}, {"firstBody", newsFirstBody}, {"body", newsBody}};
+	QJsonObject classify{{"titleMaxWords", titleMaxWords}, {"titleMaxChars", titleMaxChars}, {"bodyMaxChars", bodyMaxChars}};
+	QJsonObject photo{
+		{"sizePx", photoPx}, {"quality", photoQuality}, {"background", photoBackground},
+		{"model", rembgModel}, {"eyeY", eyeY}, {"faceH", faceH}, {"flagColor", flagColor}};
+	return QJsonObject{
+		{"name", "Obituary"}, {"version", 1},
+		{"_comment", "Obituary layout model of the Scribus News Browser. Sizes in mm unless the key says Pt/Px. Measured from Page-15_ObitKRN.sla."},
+		{"grid", grid}, {"module", module}, {"styles", styles}, {"news", news}, {"classify", classify}, {"photo", photo}};
+}
+
+void SuneerObitModel::fromJson(const QJsonObject& o)
+{
+	auto num = [](const QJsonObject& ob, const char* k, double def) { return ob.contains(QLatin1String(k)) ? ob[QLatin1String(k)].toDouble(def) : def; };
+	auto str = [](const QJsonObject& ob, const char* k, const QString& def) { const QString v = ob[QLatin1String(k)].toString(); return v.isEmpty() ? def : v; };
+	const QJsonObject grid = o["grid"].toObject();
+	gridColumns  = qBound(1, int(num(grid, "columns", gridColumns)), 30);
+	gridGapMm    = num(grid, "gapMm", gridGapMm);
+	contentTopMm = num(grid, "contentTopMm", contentTopMm);
+	if (grid["obitColumns"].toArray().size() == 2)
+	{
+		obitFirstCol = grid["obitColumns"].toArray()[0].toInt(obitFirstCol);
+		obitLastCol  = grid["obitColumns"].toArray()[1].toInt(obitLastCol);
+	}
+	if (grid["newsColumns"].toArray().size() == 2)
+	{
+		newsFirstCol = grid["newsColumns"].toArray()[0].toInt(newsFirstCol);
+		newsLastCol  = grid["newsColumns"].toArray()[1].toInt(newsLastCol);
+	}
+	const QJsonObject module = o["module"].toObject();
+	photoMm       = num(module, "photoMm", photoMm);
+	moduleGapMm   = num(module, "gapMm", moduleGapMm);
+	textTopDistPt = num(module, "textTopDistPt", textTopDistPt);
+	photoFill     = str(module, "photoFill", photoFill);
+	if (module["photoFillCMYK"].toArray().size() == 4)
+		for (int i = 0; i < 4; ++i)
+			photoFillCMYK[i] = qBound(0, module["photoFillCMYK"].toArray()[i].toInt(), 100);
+	const QJsonObject styles = o["styles"].toObject();
+	styleName       = str(styles, "name", styleName);
+	stylePlace      = str(styles, "place", stylePlace);
+	styleBody       = str(styles, "body", styleBody);
+	styleNameNoPic  = str(styles, "nameNoPic", styleNameNoPic);
+	stylePlaceNoPic = str(styles, "placeNoPic", stylePlaceNoPic);
+	styleBodyNoPic  = str(styles, "bodyNoPic", styleBodyNoPic);
+	const QJsonObject news = o["news"].toObject();
+	newsTextColumns = qBound(1, int(num(news, "textColumns", newsTextColumns)), 6);
+	newsColGapMm    = num(news, "colGapMm", newsColGapMm);
+	newsGapMm       = num(news, "gapMm", newsGapMm);
+	if (!news["headlineStyles"].toArray().isEmpty())
+	{
+		newsHeadlines.clear();
+		for (const QJsonValue& v : news["headlineStyles"].toArray())
+			newsHeadlines << HeadRule{v.toObject()["maxChars"].toInt(9999), v.toObject()["style"].toString()};
+	}
+	newsDateline  = str(news, "dateline", newsDateline);
+	newsFirstBody = str(news, "firstBody", newsFirstBody);
+	newsBody      = str(news, "body", newsBody);
+	const QJsonObject classify = o["classify"].toObject();
+	titleMaxWords = int(num(classify, "titleMaxWords", titleMaxWords));
+	titleMaxChars = int(num(classify, "titleMaxChars", titleMaxChars));
+	bodyMaxChars  = int(num(classify, "bodyMaxChars", bodyMaxChars));
+	const QJsonObject photo = o["photo"].toObject();
+	photoPx         = qBound(100, int(num(photo, "sizePx", photoPx)), 4000);
+	photoQuality    = qBound(50, int(num(photo, "quality", photoQuality)), 100);
+	photoBackground = str(photo, "background", photoBackground);
+	rembgModel      = str(photo, "model", rembgModel);
+	eyeY            = qBound(0.2, num(photo, "eyeY", eyeY), 0.6);
+	faceH           = qBound(0.2, num(photo, "faceH", faceH), 0.9);
+	flagColor       = str(photo, "flagColor", flagColor);
+}
+
+SuneerObitModel SuneerObitModel::load(QString* note)
+{
+	SuneerObitModel m;
+	const QString path = filePath();
+	QFile f(path);
+	if (!f.exists())
+	{
+		QString err;
+		if (m.save(&err) && note)
+			*note = QStringLiteral("written with defaults: ") + path;
+		else if (note)
+			*note = err;
+		return m;
+	}
+	if (!f.open(QIODevice::ReadOnly))
+	{
+		if (note)
+			*note = QStringLiteral("cannot read ") + path;
+		return m;
+	}
+	QJsonParseError pe;
+	const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+	if (pe.error != QJsonParseError::NoError || !doc.isObject())
+	{
+		if (note)
+			*note = QStringLiteral("%1: %2 (defaults used)").arg(path, pe.errorString());
+		return m;
+	}
+	m.fromJson(doc.object());
+	return m;
+}
+
+bool SuneerObitModel::save(QString* error) const
+{
+	const QString path = filePath();
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	QFile f(path);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		if (error)
+			*error = QStringLiteral("cannot write ") + path;
+		return false;
+	}
+	f.write(QJsonDocument(toJson()).toJson(QJsonDocument::Indented));
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+
+SuneerObitPhotoWorker::SuneerObitPhotoWorker(QObject* parent) : QObject(parent)
+{
+}
+
+SuneerObitPhotoWorker::~SuneerObitPhotoWorker()
+{
+	cancel();
+}
+
+QString SuneerObitPhotoWorker::scriptPath()
+{
+	QStringList candidates;
+	candidates << ScPaths::instance().shareDir() + QStringLiteral("obit/suneer_obit_photo.py");
+	candidates << QCoreApplication::applicationDirPath() + QStringLiteral("/../../resources/obit/suneer_obit_photo.py");
+	candidates << QCoreApplication::applicationDirPath() + QStringLiteral("/../resources/obit/suneer_obit_photo.py");
+	for (const QString& c : candidates)
+		if (QFileInfo::exists(c))
+			return QFileInfo(c).absoluteFilePath();
+	return candidates.first();
+}
+
+bool SuneerObitPhotoWorker::running() const
+{
+	return m_proc && m_proc->state() != QProcess::NotRunning;
+}
+
+void SuneerObitPhotoWorker::cancel()
+{
+	if (m_proc)
+	{
+		m_proc->disconnect(this);
+		if (m_proc->state() != QProcess::NotRunning)
+		{
+			m_proc->kill();
+			m_proc->waitForFinished(2000);
+		}
+		m_proc->deleteLater();
+		m_proc = nullptr;
+	}
+}
+
+bool SuneerObitPhotoWorker::start(const QList<Item>& items, const SuneerObitModel& model, const QColor& background, const QString& workDir, QString* why)
+{
+	cancel();
+	m_results.clear();
+	m_stderr.clear();
+	m_done = false;
+	const QString script = scriptPath();
+	if (!QFileInfo::exists(script))
+	{
+		if (why)
+			*why = QStringLiteral("photo script not installed: ") + script;
+		return false;
+	}
+	QDir().mkpath(workDir);
+	QJsonArray arr;
+	for (const Item& it : items)
+		arr << QJsonObject{{"id", it.id}, {"src", it.src}, {"out", it.out}};
+	QJsonObject job{
+		{"size", model.photoPx}, {"quality", model.photoQuality},
+		{"bg", QJsonArray{background.red(), background.green(), background.blue()}},
+		{"model", model.rembgModel}, {"eyeY", model.eyeY}, {"faceH", model.faceH},
+		{"matting", false}, {"items", arr}};
+	m_jobFile = workDir + QStringLiteral("/obit-photos.job.json");
+	QFile jf(m_jobFile);
+	if (!jf.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	{
+		if (why)
+			*why = QStringLiteral("cannot write ") + m_jobFile;
+		return false;
+	}
+	jf.write(QJsonDocument(job).toJson(QJsonDocument::Compact));
+	jf.close();
+
+	m_proc = new QProcess(this);
+	m_proc->setProgram(QStringLiteral("python3"));
+	m_proc->setArguments({QStringLiteral("-u"), script, QStringLiteral("--jobs"), m_jobFile});
+	m_proc->setProcessChannelMode(QProcess::SeparateChannels);
+	connect(m_proc, &QProcess::readyReadStandardOutput, this, &SuneerObitPhotoWorker::readOutput);
+	connect(m_proc, &QProcess::readyReadStandardError, this, [this]() { m_stderr += QString::fromUtf8(m_proc->readAllStandardError()); });
+	connect(m_proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [this](int code, QProcess::ExitStatus st) {
+		readOutput();
+		const bool ok = (st == QProcess::NormalExit && code == 0 && m_done);
+		QString err;
+		if (!ok)
+		{
+			err = QStringLiteral("photo worker exit %1").arg(code);
+			const QString tail = m_stderr.trimmed().section('\n', -3);
+			if (!tail.isEmpty())
+				err += QStringLiteral(": ") + tail;
+		}
+		emit finished(ok, err);
+	});
+	connect(m_proc, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+		if (m_proc && m_proc->state() == QProcess::NotRunning && !m_done)
+			emit finished(false, QStringLiteral("python3 could not be started: ") + m_proc->errorString());
+	});
+	m_proc->start();
+	return true;
+}
+
+void SuneerObitPhotoWorker::readOutput()
+{
+	if (!m_proc)
+		return;
+	while (m_proc->canReadLine())
+	{
+		const QString line = QString::fromUtf8(m_proc->readLine()).trimmed();
+		if (line == QLatin1String("DONE"))
+		{
+			m_done = true;
+			continue;
+		}
+		if (!line.startsWith(QLatin1String("PROGRESS ")))
+			continue;
+		// PROGRESS {"i":..,"n":..,"id":..,"status":..,"out":..,"message":..}
+		const QJsonObject o = QJsonDocument::fromJson(line.mid(9).toUtf8()).object();
+		if (o.isEmpty())
+			continue;
+		Result r;
+		r.id = o["id"].toString();
+		r.status = o["status"].toString();
+		r.out = o["out"].toString();
+		r.message = o["message"].toString();
+		if (r.status == QLatin1String("cached"))      // the sidecar's own status (ok / noface)
+			r.status = r.message.isEmpty() ? QStringLiteral("ok") : r.message;
+		m_results << r;
+		emit progress(o["i"].toInt(), o["n"].toInt(), r.id, r.status, r.message);
+	}
+}

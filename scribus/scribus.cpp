@@ -950,8 +950,14 @@ void ScribusMainWindow::initPalettes()
 		if (m_suneerNewsPanel && paragraphStylesPanelTabs)
 			paragraphStylesPanelTabs->showExtraTab(m_suneerNewsPanel->widget());
 	});
+	scrActions["toolsNewsPanelSettings"]->setCheckable(false);
+	connect(scrActions["toolsNewsPanelSettings"], &QAction::triggered, this, [this]() {
+		if (m_suneerNewsPanel)
+			m_suneerNewsPanel->onSettings();
+	});
 	if (!PrefsManager::instance().appPrefs.experimentalFeaturePrefs.newsBrowserEnabled) {
 		scrActions["toolsNewsPanel"]->setVisible(false);
+		scrActions["toolsNewsPanelSettings"]->setVisible(false);
 	}
 	paragraphStylesPanelTabs->setMainWindow(this);
 	CDockWidget* stylesDock = new CDockWidget(tr("Paragraph Styles"), this);
@@ -1826,6 +1832,7 @@ void ScribusMainWindow::addDefaultWindowMenuItems()
 	scrMenuMgr->addMenuItemString("toolsContent", "Windows");
 	scrMenuMgr->addMenuItemString("toolsParagraphStyles", "Windows");
 	scrMenuMgr->addMenuItemString("toolsNewsPanel", "Windows");
+	scrMenuMgr->addMenuItemString("toolsNewsPanelSettings", "Windows");
 	scrMenuMgr->addMenuItemString("toolsActionHistory", "Windows");
 	scrMenuMgr->addMenuItemString("toolsAlignDistribute", "Windows");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Windows");
@@ -10502,6 +10509,8 @@ void ScribusMainWindow::suneerSetNewsBrowserTabVisible(bool visible)
 		return;
 	if (scrActions.contains("toolsNewsPanel") && scrActions["toolsNewsPanel"])
 		scrActions["toolsNewsPanel"]->setVisible(visible);
+	if (scrActions.contains("toolsNewsPanelSettings") && scrActions["toolsNewsPanelSettings"])
+		scrActions["toolsNewsPanelSettings"]->setVisible(visible);
 	if (visible)
 	{
 		newsInner->show();

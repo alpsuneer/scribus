@@ -934,6 +934,8 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="toolsNewsPanel";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="toolsNewsPanelSettings";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerApplyChain";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerAutoFitHeight";
@@ -1998,6 +2000,7 @@ void ActionManager::languageChange()
 	(*scrActions)["toolsContent"]->setTexts( tr("Content Properties"));
 	(*scrActions)["toolsParagraphStyles"]->setTexts( tr("Paragraph Styles"));
 	(*scrActions)["toolsNewsPanel"]->setTexts( tr("News Browser"));
+	(*scrActions)["toolsNewsPanelSettings"]->setTexts( tr("News Browser Settings..."));
 	(*scrActions)["suneerApplyChain"]->setTexts( tr("Apply Chain Style"));
 	(*scrActions)["suneerAutoFitHeight"]->setTexts( tr("Auto Fit Frame Height"));
 	(*scrActions)["suneerAutoFitText"]->setTexts( tr("Auto Fit Text to Frame"));
@@ -2354,6 +2357,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsContent", QKeySequence(Qt::Key_F3));
 	defKeys.insert("toolsParagraphStyles", QKeySequence(Qt::Key_F8));
 	defKeys.insert("toolsNewsPanel", QKeySequence());
+	defKeys.insert("toolsNewsPanelSettings", QKeySequence());
 	defKeys.insert("suneerApplyChain", QKeySequence());
 	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
 	defKeys.insert("itemFitCaptionFrame", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_H));

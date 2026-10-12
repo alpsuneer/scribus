@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "suneer_news_panel.h"
+#include "suneer_obit_model.h"
 
 #include "commonstrings.h"
 #include "hyphenator.h"
@@ -9,6 +10,7 @@
 #include "scpage.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "sccolor.h"
 #include "scupdatekeystore.h"
 #include "selection.h"
 #include "scribusview.h"
@@ -35,6 +37,11 @@
 #include <QEventLoop>
 #include <QFontMetrics>
 #include <QImageReader>
+#include <QBuffer>
+#include <QProcess>
+#include <QImageWriter>
+#include <QFontMetricsF>
+#include <QTemporaryFile>
 #include <QTextBoundaryFinder>
 #include <QFile>
 #include <QFileInfo>
@@ -160,6 +167,7 @@ const QString kKeyDevice     = QStringLiteral("deviceId");
 const QString kKeyUserName   = QStringLiteral("userName");
 // Short names seen on the server on 2026-10-07; used only when the public
 // edition list cannot be loaded.
+const QString kDefaultApiHost = QStringLiteral("http://10.199.100.133:3011");
 const QString kDefaultShortNames = QStringLiteral(
 	"TVM,KOL,ALP,KTM,CHN,TCR,PKD,MLP,CLT,KNR,GULF,FTR,WKD,KLV,CNTRL,PTA,WYD,IDK,DELHI,KSD");
 
@@ -185,21 +193,61 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_nam = new QNetworkAccessManager(this);
 	loadConfig();
 
-	m_stack = new QStackedWidget(this);
+	// Outer widget: a header that is ALWAYS shown (title, server, help,
+	// reload, settings) above the locked/unlocked stack. The gear used to live
+	// on the logged-in page only, so a wrong server address — which makes the
+	// login fail — left no way to open the settings and fix it.
+	QWidget* outer = new QWidget(this);
+	QVBoxLayout* outerVl = new QVBoxLayout(outer);
+	outerVl->setSpacing(2);
+	outerVl->setContentsMargins(4, 4, 4, 0);
+	IconManager& im = IconManager::instance();
+	{
+		QHBoxLayout* topBar = new QHBoxLayout();
+		topBar->setSpacing(4);
+		QLabel* title = new QLabel("<b>Faircode News Browser</b>", outer);
+		title->setStyleSheet("color:#1565C0;");
+		// The title may be clipped when the docker is narrow; the buttons are
+		// fixed-size and never are.
+		title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+		title->setMinimumWidth(40);
+		QToolButton* helpBtn = FaircodeHelpViewer::makeHelpButton(outer, tr("How to use the News Browser"));
+		connect(helpBtn, &QToolButton::clicked, outer, [outer]() {
+			FaircodeHelpViewer::showTopic(outer, QStringLiteral("news-browser"));
+		});
+		m_refreshBtn = new QPushButton(im.loadIcon("reload"), QString(), outer);
+		m_refreshBtn->setFixedWidth(30);
+		m_refreshBtn->setToolTip(tr("Reload editions and pages"));
+		connect(m_refreshBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onRefresh);
+		m_settingsBtn = new QPushButton(im.loadIcon("document-properties"), QString(), outer);
+		m_settingsBtn->setFixedWidth(30);
+		m_settingsBtn->setToolTip(tr("News Browser settings"));
+		connect(m_settingsBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onSettings);
+		topBar->addWidget(title, 1);
+		topBar->addWidget(helpBtn, 0);
+		topBar->addWidget(m_refreshBtn, 0);
+		topBar->addWidget(m_settingsBtn, 0);
+		outerVl->addLayout(topBar);
+		m_hostLabel = new QLabel(outer);
+		m_hostLabel->setStyleSheet("color:#888; font-size:10px;");
+		m_hostLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+		outerVl->addWidget(m_hostLabel);
+		updateHostLabel();
+	}
+
+	m_stack = new QStackedWidget(outer);
+	outerVl->addWidget(m_stack, 1);
 
 	// Page 0: locked. Nothing but a message and the Login button.
 	QWidget* lockW = new QWidget(m_stack);
 	QVBoxLayout* lockVl = new QVBoxLayout(lockW);
 	lockVl->setContentsMargins(8, 16, 8, 8);
-	QLabel* lockTitle = new QLabel("<b>Faircode News Browser</b>", lockW);
-	lockTitle->setStyleSheet("color:#1565C0;");
 	m_lockLabel = new QLabel(tr("Log in to the workflow server to browse news."), lockW);
 	m_lockLabel->setWordWrap(true);
 	m_lockLabel->setStyleSheet("color:#666;");
 	m_loginBtn = new QPushButton(tr("Login"), lockW);
 	m_loginBtn->setStyleSheet("background:#1565C0; color:white; font-weight:bold; padding:6px;");
 	connect(m_loginBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onLogin);
-	lockVl->addWidget(lockTitle);
 	lockVl->addWidget(m_lockLabel);
 	lockVl->addWidget(m_loginBtn);
 	lockVl->addStretch();
@@ -211,29 +259,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	vl->setSpacing(4);
 	vl->setContentsMargins(4, 4, 4, 4);
 
-	// Top bar: title, help, refresh, settings
-	QHBoxLayout* topBar = new QHBoxLayout();
-	IconManager& im = IconManager::instance();
-	m_settingsBtn = new QPushButton(im.loadIcon("document-properties"), QString(), w);
-	m_settingsBtn->setFixedWidth(30);
-	m_settingsBtn->setToolTip(tr("Settings (server, layout, styles)"));
-	connect(m_settingsBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onSettings);
-	m_refreshBtn = new QPushButton(im.loadIcon("reload"), QString(), w);
-	m_refreshBtn->setFixedWidth(30);
-	m_refreshBtn->setToolTip(tr("Reload editions and pages"));
-	connect(m_refreshBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onRefresh);
-	QToolButton* helpBtn = FaircodeHelpViewer::makeHelpButton(w, tr("How to use the News Browser"));
-	connect(helpBtn, &QToolButton::clicked, w, [w]() {
-		FaircodeHelpViewer::showTopic(w, QStringLiteral("news-browser"));
-	});
-	QLabel* title = new QLabel("<b>Faircode News Browser</b>", w);
-	title->setStyleSheet("color:#1565C0;");
-	topBar->addWidget(title);
-	topBar->addWidget(helpBtn);
-	topBar->addStretch();
-	topBar->addWidget(m_refreshBtn);
-	topBar->addWidget(m_settingsBtn);
-	vl->addLayout(topBar);
+	// (title / help / reload / settings live in the always-visible header above)
 
 	// User row
 	QHBoxLayout* userRow = new QHBoxLayout();
@@ -256,6 +282,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	// Page
 	vl->addWidget(new QLabel(tr("Page:"), w));
 	m_pageCombo = new QComboBox(w);
+	connect(m_pageCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) { preselectLayoutModel(); });
 	vl->addWidget(m_pageCombo);
 
 	// Date
@@ -279,17 +306,17 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	QHBoxLayout* photoRow = new QHBoxLayout();
 	photoRow->addWidget(new QLabel(tr("Photo:"), w));
 	m_photoPosCmb = new QComboBox(w);
-	for (const QString& key : photoPositionKeys())
+	for (const QString& key : placePhotoPositionKeys())
 		m_photoPosCmb->addItem(photoPositionLabel(key), key);
 	{
-		const QString def = settingsString("layout/imagePosition", "right");
-		const QString last = settingsString("layout/imagePositionPanel", def);
+		const QString def = settingsString("layout/photoPosition", "right");
+		const QString last = settingsString("layout/photoPositionPanel", def);
 		int pi = m_photoPosCmb->findData(last);
 		m_photoPosCmb->setCurrentIndex(pi >= 0 ? pi : 0);
 	}
 	connect(m_photoPosCmb, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
 		QSettings s("Faircode", "ScribusNews");
-		s.setValue("layout/imagePositionPanel", m_photoPosCmb->currentData().toString());
+		s.setValue("layout/photoPositionPanel", m_photoPosCmb->currentData().toString());
 	});
 	photoRow->addWidget(m_photoPosCmb, 1);
 	vl->addLayout(photoRow);
@@ -408,6 +435,17 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	vl->addWidget(splitter, 1);
 
 	QHBoxLayout* btnRow = new QHBoxLayout();
+	// Layout model: how Place Selected arranges the ticked stories.
+	m_layoutModelCmb = new QComboBox(w);
+	m_layoutModelCmb->setToolTip(tr("Layout model for Place Selected: Normal (story + photo frames) or Obituary (photo + text modules in a masonry over the obit columns, short news in the last columns). Remembered per page type; an OBIT page starts with Obituary."));
+	fillLayoutModelCombo();
+	connect(m_layoutModelCmb, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+		QSettings cfg("Faircode", "ScribusNews");
+		QString k = layoutModelKey().trimmed();
+		k.replace('/', '_');
+		cfg.setValue(QStringLiteral("layoutModel/") + (k.isEmpty() ? QStringLiteral("_default") : k), m_layoutModelCmb->currentData().toString());
+	});
+	btnRow->addWidget(m_layoutModelCmb, 1);
 	m_placeBtn = new QPushButton(im.loadIcon("tool-insert-text-frame"), tr("Place Selected"), w);
 	m_placeBtn->setStyleSheet("background:#2E7D32; color:white; font-weight:bold; padding:4px;");
 	m_placeBtn->setEnabled(false);
@@ -432,7 +470,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 
 	m_stack->addWidget(w);
 	m_stack->setCurrentIndex(0);
-	setWidget(m_stack);
+	setWidget(outer);
 	setMinimumWidth(240);
 
 	// The keychain is touched after main-window construction so a keyring
@@ -510,7 +548,7 @@ void SuneerNewsPanel::loadConfig()
 				m_apiHost += QStringLiteral(":%1").arg(u.port());
 		}
 		if (m_apiHost.isEmpty() || m_apiHost.contains("localhost"))
-			m_apiHost = QStringLiteral("http://10.199.100.133:3011");
+			m_apiHost = kDefaultApiHost;
 		s.setValue("apiHost", m_apiHost);
 		s.remove("apiUrl");
 		s.remove("imageBase");   // was always the dead localhost:9000
@@ -1503,6 +1541,8 @@ void SuneerNewsPanel::captureRefreshCookie(QNetworkReply* reply)
 void SuneerNewsPanel::setLocked(bool locked)
 {
 	m_stack->setCurrentIndex(locked ? 0 : 1);
+	if (m_refreshBtn)
+		m_refreshBtn->setEnabled(!locked);
 	if (!locked)
 	{
 		m_userLabel->setText(m_userName.isEmpty() ? tr("Logged in") : tr("Logged in as %1").arg(m_userName));
@@ -1974,12 +2014,21 @@ void SuneerNewsPanel::onFetchPages()
 			return a["displayOrder"].toInt() < b["displayOrder"].toInt();
 		});
 		m_pageCombo->blockSignals(true);
+		m_pageTypes.clear();
 		for (const QJsonObject& pg : pages)
+		{
 			m_pageCombo->addItem(pg["name"].toString(), pg["id"].toString());
+			QString type = pg["pageType"].toString();
+			if (type.isEmpty())
+				type = pg["type"].toString();
+			if (!type.isEmpty())
+				m_pageTypes[pg["id"].toString()] = type;
+		}
 		int idx = m_lastPage.isEmpty() ? -1 : m_pageCombo->findText(m_lastPage);
 		if (idx >= 0)
 			m_pageCombo->setCurrentIndex(idx);
 		m_pageCombo->blockSignals(false);
+		preselectLayoutModel();
 		m_statusLabel->setText(tr("%1: %2 pages").arg(m_lastEdition).arg(pages.size()));
 	});
 }
@@ -2195,6 +2244,8 @@ void SuneerNewsPanel::onFetchNews()
 				n["page"] = ln["page"];
 			if (!ln["dateline"].toString().isEmpty() && n["dateline"].toString().isEmpty())
 				n["dateline"] = ln["dateline"];
+			if (mergeMedia(n, ln))
+				apiLog(QStringLiteral("story ..%1: pictures taken from /news/layout (%2); the /external entry had none").arg(id.right(6)).arg(mediaList(n).size()));
 			merged[index[id]] = n;
 		}
 		else
@@ -2214,6 +2265,8 @@ void SuneerNewsPanel::onFetchNews()
 			if (id.isEmpty())
 				continue;
 			QJsonObject n = index.contains(id) ? merged[index[id]].toObject() : e;
+			if (index.contains(id) && mergeMedia(n, e))
+				apiLog(QStringLiteral("story ..%1: pictures taken from /news/%2 (%3)").arg(id.right(6), source).arg(mediaList(n).size()));
 			QJsonObject pg = n["page"].toObject();
 			if (status == "USED" || pg["dtpStatus"].toString().toUpper() != "USED")
 			{
@@ -2239,6 +2292,27 @@ void SuneerNewsPanel::onFetchNews()
 	};
 	fold(usedList, "USED", "used");
 	fold(balList, "BALANCED", "balanced");
+	{
+		int withPic = 0, rawOnly = 0;
+		for (const QJsonValue& v : merged)
+		{
+			const QJsonObject n = v.toObject();
+			if (!mediaList(n).isEmpty())
+				++withPic;
+			else if (!n["newsMedia"].toArray().isEmpty())
+				++rawOnly;   // newsMedia present but without any usable URL
+		}
+		apiLog(QStringLiteral("list: %1 stories, %2 with pictures, %3 with newsMedia entries lacking a fileUrl").arg(merged.size()).arg(withPic).arg(rawOnly));
+		for (const QJsonValue& v : merged)
+		{
+			const QJsonObject n = v.toObject();
+			const QJsonArray ml = mediaList(n);
+			if (!ml.isEmpty())
+				apiLog(QStringLiteral("  ..%1 \"%2\": %3 picture(s), first %4").arg(newsServerId(n).right(6), collapseSpaces(n["title"].toString()).left(30)).arg(ml.size()).arg(QUrl(ml.first().toObject()["media"].toObject()["fileUrl"].toString()).path()));
+			else if (!n["newsMedia"].toArray().isEmpty())
+				apiLog(QStringLiteral("  ..%1 \"%2\": newsMedia[0] keys %3 - no URL found").arg(newsServerId(n).right(6), collapseSpaces(n["title"].toString()).left(30), n["newsMedia"].toArray().first().toObject().keys().join(',')));
+		}
+	}
 	m_newsData = merged;
 	m_fetchSources = QStringLiteral("%1 ext%2 + %3 layout%4 + %5 used%6 + %7 bal%8")
 	                 .arg(external.size()).arg(extErr.isEmpty() ? QString() : "(err)")
@@ -2312,7 +2386,7 @@ void SuneerNewsPanel::showNewsList()
 		const QString title  = collapseSpaces(news["title"].toString());
 		const QString kicker = collapseSpaces(news["kicker"].toString());
 		const QString byline = collapseSpaces(news["byline"].toString());
-		const int imgCount   = news["newsMedia"].toArray().size();
+		const int imgCount   = mediaList(news).size();
 		const bool hasImg    = imgCount > 0;
 		QString label = title.isEmpty() ? kicker : title;
 		if (label.isEmpty())
@@ -2454,7 +2528,7 @@ void SuneerNewsPanel::onSelectAll(bool checked)
 
 QString SuneerNewsPanel::newsCaption(const QJsonObject& news)
 {
-	const QJsonArray media = news["newsMedia"].toArray();
+	const QJsonArray media = mediaList(news);
 	if (!media.isEmpty())
 	{
 		const QJsonObject m0 = media[0].toObject();
@@ -2522,9 +2596,7 @@ void SuneerNewsPanel::showPreview(const QJsonObject& news)
 	const QString byline   = news["byline"].toString();
 	const QString dateline = news["dateline"].toString();
 	const QString highlights = newsHighlights(news);
-	const QString caption  = newsCaption(news);
 	const QStringList paras = contentToParagraphs(news["content"].toString());
-	const bool hasImg = !news["newsMedia"].toArray().isEmpty();
 	QString html;
 	if (!kicker.isEmpty())
 		html += QStringLiteral("<span style='color:#E65100; font-size:26px; font-weight:bold;'>%1</span><br>").arg(kicker.toHtmlEscaped());
@@ -2533,9 +2605,6 @@ void SuneerNewsPanel::showPreview(const QJsonObject& news)
 		html += QStringLiteral("<br><span style='font-size:24px; color:#333;'>%1</span>").arg(highlights.toHtmlEscaped().replace("\n", "<br>"));
 	if (!byline.isEmpty())
 		html += QStringLiteral("<br><span style='color:#666; font-size:24px;'>%1</span>").arg(byline.toHtmlEscaped());
-	if (hasImg)
-		html += QStringLiteral("<br><span style='color:#1565C0; font-size:24px;'>%1</span>")
-		        .arg(caption.isEmpty() ? tr("Has image") : tr("Image: %1").arg(caption.toHtmlEscaped()));
 	html += "<br><br>";
 	for (int i = 0; i < paras.size(); ++i)
 	{
@@ -2548,6 +2617,66 @@ void SuneerNewsPanel::showPreview(const QJsonObject& news)
 	dlg.setWindowTitle(title);
 	dlg.setMinimumSize(900, 700);
 	QVBoxLayout* vl = new QVBoxLayout(&dlg);
+
+	// ---- photos: every media entry, thumbnails first, loaded one after the
+	// other through downloadImage() (the same cache, token and format
+	// sniffing as Place) once the dialog is on screen.
+	const QJsonArray media = mediaList(news);
+	struct Cell
+	{
+		QToolButton* btn {nullptr};
+		QLabel* info {nullptr};
+		QString fileUrl, thumbUrl, caption, localFull;
+	};
+	QList<Cell*> cells;
+	if (media.isEmpty())
+	{
+		QLabel* none = new QLabel(tr("No photo"), &dlg);
+		none->setStyleSheet("color:#888; font-size:18px; padding:4px;");
+		vl->addWidget(none);
+	}
+	else
+	{
+		QScrollArea* sa = new QScrollArea(&dlg);
+		sa->setWidgetResizable(true);
+		sa->setFixedHeight(250);
+		sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+		QWidget* bar = new QWidget(sa);
+		QHBoxLayout* hb = new QHBoxLayout(bar);
+		hb->setAlignment(Qt::AlignLeft);
+		for (int i = 0; i < media.size(); ++i)
+		{
+			const QJsonObject m = media[i].toObject();
+			const QJsonObject md = m["media"].toObject();
+			Cell* c = new Cell;
+			c->fileUrl = md["fileUrl"].toString().trimmed();
+			c->thumbUrl = md["thumbUrl"].toString().trimmed();
+			c->caption = collapseSpaces(m["caption"].toString());
+			if (c->caption.isEmpty())
+				c->caption = collapseSpaces(md["caption"].toString());
+			QWidget* cellW = new QWidget(bar);
+			QVBoxLayout* cv = new QVBoxLayout(cellW);
+			cv->setContentsMargins(2, 2, 2, 2);
+			c->btn = new QToolButton(cellW);
+			c->btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+			c->btn->setIconSize(QSize(160, 160));
+			c->btn->setFixedSize(176, 190);
+			c->btn->setText(tr("loading..."));
+			c->btn->setToolTip(c->fileUrl);
+			c->info = new QLabel(cellW);
+			c->info->setWordWrap(true);
+			c->info->setFixedWidth(176);
+			c->info->setStyleSheet("font-size:12px; color:#333;");
+			c->info->setText(c->caption);
+			cv->addWidget(c->btn);
+			cv->addWidget(c->info);
+			hb->addWidget(cellW);
+			cells << c;
+		}
+		sa->setWidget(bar);
+		vl->addWidget(sa);
+	}
+
 	QTextEdit* te = new QTextEdit(&dlg);
 	te->setReadOnly(true);
 	te->setHtml(html);
@@ -2555,7 +2684,122 @@ void SuneerNewsPanel::showPreview(const QJsonObject& news)
 	QPushButton* closeBtn = new QPushButton(tr("Close"), &dlg);
 	connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
 	vl->addWidget(closeBtn);
+
+	bool closing = false;
+	auto showFull = [&dlg, &closing](const QString& path, const QString& caption) {
+		if (closing)
+			return;
+		QImageReader rd(path);
+		rd.setAutoTransform(true);
+		const QImage img = rd.read();
+		if (img.isNull())
+		{
+			QMessageBox::warning(&dlg, tr("Image"), tr("Not an image: %1\n%2").arg(path, rd.errorString()));
+			return;
+		}
+		QDialog big(&dlg);
+		big.setWindowTitle(caption.isEmpty() ? QFileInfo(path).fileName() : caption);
+		QVBoxLayout* bl = new QVBoxLayout(&big);
+		QScrollArea* bsa = new QScrollArea(&big);
+		QLabel* pic = new QLabel(bsa);
+		const QSize avail = dlg.screen() ? dlg.screen()->availableSize() * 0.85 : QSize(1200, 800);
+		pic->setPixmap(QPixmap::fromImage(img.size().width() > avail.width() || img.size().height() > avail.height()
+			? img.scaled(avail, Qt::KeepAspectRatio, Qt::SmoothTransformation) : img));
+		bsa->setWidget(pic);
+		bsa->setWidgetResizable(true);
+		bl->addWidget(bsa);
+		QLabel* dim = new QLabel(tr("%1 x %2 px - %3").arg(img.width()).arg(img.height()).arg(path), &big);
+		dim->setWordWrap(true);
+		bl->addWidget(dim);
+		QPushButton* ok = new QPushButton(tr("Close"), &big);
+		connect(ok, &QPushButton::clicked, &big, &QDialog::accept);
+		bl->addWidget(ok);
+		big.resize(avail.width() * 0.9, avail.height());
+		big.exec();
+	};
+	auto setFailed = [](Cell* c, const QString& why) {
+		c->btn->setIcon(QIcon());
+		c->btn->setText(why);
+		c->btn->setStyleSheet("QToolButton { background:#D32F2F; color:white; border:2px solid #B71C1C; padding:4px; }");
+		c->btn->setToolTip(c->fileUrl + "\n" + why);
+	};
+	for (Cell* c : cells)
+	{
+		connect(c->btn, &QToolButton::clicked, &dlg, [this, c, &showFull, &setFailed, &closing]() {
+			if (closing)
+				return;
+			if (c->localFull.isEmpty())
+			{
+				QString why;
+				c->localFull = downloadImage(c->fileUrl, &why);
+				if (c->localFull.isEmpty())
+				{
+					setFailed(c, why);
+					return;
+				}
+			}
+			showFull(c->localFull, c->caption);
+		});
+	}
+	// Sequential loader: thumbnail (thumbUrl, else the file) for the button,
+	// then the full file for its pixel size - which also warms the cache
+	// that Place uses, so both see the same picture.
+	int next = 0;
+	std::function<void()> loadNext;
+	loadNext = [&]() {
+		if (closing || next >= cells.size())
+			return;
+		Cell* c = cells[next++];
+		const QString thumbSrc = c->thumbUrl.isEmpty() ? c->fileUrl : c->thumbUrl;
+		QString why;
+		QString local = downloadImage(thumbSrc, &why);
+		if (closing)
+			return;
+		if (local.isEmpty() && !c->thumbUrl.isEmpty())
+			local = downloadImage(c->fileUrl, &why);   // no thumbnail: the picture itself
+		if (closing)
+			return;
+		if (local.isEmpty())
+			setFailed(c, why);
+		else
+		{
+			QImageReader rd(local);
+			rd.setAutoTransform(true);
+			const QImage img = rd.read();
+			if (img.isNull())
+				setFailed(c, tr("not an image: %1").arg(rd.errorString().isEmpty() ? sniffImageFormat(QByteArray()) : rd.errorString()));
+			else
+			{
+				c->btn->setIcon(QIcon(QPixmap::fromImage(img.scaled(QSize(160, 160), Qt::KeepAspectRatio, Qt::SmoothTransformation))));
+				c->btn->setText(QString());
+				c->btn->setStyleSheet(QString());
+			}
+		}
+		// The full picture: pixel size under the thumbnail.
+		QString why2;
+		const QString full = downloadImage(c->fileUrl, &why2);
+		if (closing)
+			return;
+		if (full.isEmpty())
+			c->info->setText(QStringLiteral("%1<br><span style='color:#D32F2F;'>%2</span>").arg(c->caption.toHtmlEscaped(), tr("image: %1").arg(why2).toHtmlEscaped()));
+		else
+		{
+			c->localFull = full;
+			QImageReader rd(full);
+			rd.setAutoTransform(true);
+			const QSize sz = rd.size();
+			if (sz.isValid())
+				c->info->setText(QStringLiteral("%1<br><span style='color:#555;'>%2 x %3 px</span>").arg(c->caption.toHtmlEscaped()).arg(sz.width()).arg(sz.height()));
+			else
+				c->info->setText(QStringLiteral("%1<br><span style='color:#D32F2F;'>%2</span>").arg(c->caption.toHtmlEscaped(), tr("not an image: %1").arg(rd.errorString()).toHtmlEscaped()));
+		}
+		QTimer::singleShot(0, &dlg, loadNext);
+	};
+	if (!cells.isEmpty())
+		QTimer::singleShot(0, &dlg, loadNext);
 	dlg.exec();
+	closing = true;
+	qDeleteAll(cells);
 }
 
 // ============================================================================
@@ -2660,7 +2904,10 @@ void SuneerNewsPanel::onPlaceSelected()
 	for (QJsonObject& n : stories)
 	{
 		if (n["_source"].toString().isEmpty() || n.contains("content") || n.contains("newsMedia"))
+		{
+			fetchMediaIfMissing(n);
 			continue;
+		}
 		const QString id = newsServerId(n);
 		QJsonObject full;
 		QString err;
@@ -2688,6 +2935,7 @@ void SuneerNewsPanel::onPlaceSelected()
 		for (auto it = full.begin(); it != full.end(); ++it)
 			if (it.key() != "page")
 				n[it.key()] = it.value();
+		fetchMediaIfMissing(n);
 		for (int i = 0; i < m_newsData.size(); ++i)
 			if (newsServerId(m_newsData[i].toObject()) == id)
 				m_newsData[i] = n;
@@ -2696,6 +2944,11 @@ void SuneerNewsPanel::onPlaceSelected()
 	if (stories.isEmpty())
 		return;
 	m_placeUsedSkipped = usedSkipped;
+	if (m_layoutModelCmb && m_layoutModelCmb->currentData().toString() == QLatin1String("obituary"))
+	{
+		placeObituaries(stories);
+		return;
+	}
 	const QString target = settingsString("layout/placeTarget", "left");
 	if (target == "page")
 	{
@@ -2723,47 +2976,41 @@ void SuneerNewsPanel::onPlaceSelected()
 	markPlaced(stories);
 }
 
-int SuneerNewsPanel::storyColumns(const QJsonObject& news) const
+// House default until Auto Layout: 4 grid columns for the story, 3 for the
+// photo, photo at the right. The server's noOfColumns / imageColumns are
+// ignored on purpose (Auto Layout will decide later).
+int SuneerNewsPanel::storyColumns(const QJsonObject& /*news*/) const
 {
 	QSettings cfg("Faircode", "ScribusNews");
-	int cols = news["noOfColumns"].toInt();
-	if (cols <= 0)
-		cols = cfg.value("layout/columns", 4).toInt();
-	return cols <= 0 ? 4 : cols;
+	const int cols = cfg.value("layout/storyColumns", 4).toInt();
+	return qBound(1, cols, 8);
 }
 
+// Width of a story or photo that spans \a cols columns of the page grid.
+// The grid is the page's automatic column guides when it has them; else
+// Settings (house grid: 8 columns of 34.25 mm with an 8 mm gutter on the
+// 330 mm type area). \a colGapPt is the gutter between grid columns.
 void SuneerNewsPanel::storyGeometry(int cols, double& totalW, double& colGapPt) const
 {
 	const double usableW = m_doc->pageWidth() - m_doc->margins()->left() - m_doc->margins()->right();
-	QSettings cfgCol("Scribus", "SuneerColumnConfig");
-	int numConfigs = cfgCol.beginReadArray("configs");
-	double colGapMm = 4.0;
-	bool useGuideGap = false;
-	for (int ci = 0; ci < numConfigs; ++ci)
-	{
-		cfgCol.setArrayIndex(ci);
-		if (cfgCol.value("columnNumber", 0).toInt() == cols)
-		{
-			colGapMm    = cfgCol.value("columnGutter", 4.0).toDouble();
-			useGuideGap = cfgCol.value("useGuideGap", false).toBool();
-			break;
-		}
-	}
-	cfgCol.endArray();
-	double guideGapPt = 0;
-	int guideColCount = 0;
+	QSettings cfg("Faircode", "ScribusNews");
+	int gridCols = cfg.value("layout/gridColumns", 8).toInt();
+	double gutterPt = cfg.value("layout/gridGutterMm", 8.0).toDouble() * kMmToPt;
 	if (ScPage* curPage = m_doc->currentPage())
 	{
-		guideColCount = curPage->guides.verticalAutoCount();
-		guideGapPt    = curPage->guides.verticalAutoGap();
+		const int guideCount = curPage->guides.verticalAutoCount();
+		if (guideCount > 0)
+		{
+			gridCols = guideCount + 1;
+			if (curPage->guides.verticalAutoGap() > 0)
+				gutterPt = curPage->guides.verticalAutoGap();
+		}
 	}
-	colGapPt = useGuideGap ? colGapMm * kMmToPt : (guideGapPt > 0 ? guideGapPt : colGapMm * kMmToPt);
-	double singleColW;
-	if (guideColCount > 0)
-		singleColW = (usableW - colGapPt * guideColCount) / (guideColCount + 1);
-	else
-		singleColW = (usableW - colGapPt * (cols - 1)) / cols;
-	totalW = singleColW * cols + colGapPt * (cols - 1);
+	gridCols = qMax(1, gridCols);
+	cols = qBound(1, cols, gridCols);
+	colGapPt = gutterPt;
+	const double singleColW = (usableW - gutterPt * (gridCols - 1)) / gridCols;
+	totalW = singleColW * cols + gutterPt * (cols - 1);
 }
 
 
@@ -2910,8 +3157,20 @@ void SuneerNewsPanel::placeOnPasteboard(const QList<QJsonObject>& stories, bool 
 			if (m_doc->Items->at(i)->OwnPage == -1)
 				pasteboardItems << m_doc->Items->at(i);
 		m_doc->setScratchUndoable(sc->left() + delta, sc->right());
+		// moveItem() drags the welded partners along (a photo and its
+		// caption are welded), so a pair must move only once: moved as
+		// its own item AND again as the partner's weld, the photo landed
+		// a whole pasteboard-width to the right of its story - "text
+		// placed, picture gone". Same rule as ScribusDoc::moveGroup().
+		QList<PageItem*> movedByWeld;
 		for (PageItem* it : pasteboardItems)
+		{
+			if (movedByWeld.contains(it))
+				continue;
+			if (it->isWelded())
+				movedByWeld.append(it->itemsWeldedTo());
 			m_doc->moveItem(delta, 0, it);
+		}
 		stack.translate(delta, 0);
 	}
 	else if (rightSide && stack.right() > rowRight + sc->right())
@@ -3073,7 +3332,7 @@ void SuneerNewsPanel::refreshPlacedMarks()
 		if (!wasStatus.isEmpty() && wasStatus != status)
 			row->setCheckState(Qt::Unchecked);     // status flipped: a tick meant for the old state is dropped
 		const QString tip = row->data(Qt::UserRole + 3).toString();
-		const int imgCount = news["newsMedia"].toArray().size();
+		const int imgCount = mediaList(news).size();
 		const QJsonObject pg = news["page"].toObject();
 		QString where = pg["name"].toString();
 		if (where.isEmpty() && pg["displayOrder"].isDouble())
@@ -3220,6 +3479,7 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	const double colW = (totalW - (cols - 1) * colGap) / cols;
 	QSettings cfg("Faircode", "ScribusNews");
 	const double defaultImgH = cfg.value("image/height", 60.0).toDouble() * kMmToPt;
+	const double maxImgH = cfg.value("layout/photoMaxHeightMm", 100.0).toDouble() * kMmToPt;
 	const double gap = qMax(0.0, cfg.value("layout/wrapGapMm", 2.0).toDouble()) * kMmToPt;
 
 	const bool fullWidth = (pos == "top" || pos == "topAbove");
@@ -3250,10 +3510,14 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 			if (!ph)
 				continue;
 			double hgt = ph->height();
+			double natural = hgt;
 			if (ph->pixm.width() > 0 && ph->pixm.height() > 0)
-				hgt = pw * (double) ph->pixm.height() / ph->pixm.width();
+				natural = hgt = pw * (double) ph->pixm.height() / ph->pixm.width();
 			else if (hgt <= 1.0)
-				hgt = defaultImgH;
+				natural = hgt = defaultImgH;
+			const bool cropped = (maxImgH > 0 && hgt > maxImgH);
+			if (cropped)
+				hgt = maxImgH;
 			ph->setXYPos(px, cy);
 			ph->setWidth(pw);
 			ph->setHeight(hgt);
@@ -3261,11 +3525,26 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 			if (ph->pixm.width() > 0)
 			{
 				// Like the reference: free scaling with the ratio kept, the
-				// scale chosen so the picture fills the frame width.
+				// scale chosen so the picture fills the frame width; a
+				// picture taller than the limit shows its middle.
 				ph->setImageScalingMode(false, true);
 				ph->adjustPictScale();
 				ph->setImageScalingMode(true, true);
 				ph->setImageXYOffset(0, 0);
+				if (cropped)
+				{
+					// adjustPictScale() fitted the (taller) picture to the
+					// frame height; scale up so the width is filled, then
+					// move the picture up by half the overhang.
+					const double shownW = ph->width() * hgt / natural;   // width after fit-to-height
+					if (shownW > 0.1)
+					{
+						const double k = pw / shownW;
+						ph->setImageXYScale(ph->imageXScale() * k, ph->imageYScale() * k);
+						const double overhang = natural - hgt;               // pt, at the new scale
+						ph->setImageXYOffset(0, -(overhang / 2.0) / ph->imageYScale());
+					}
+				}
 			}
 			setWrap(ph, wrap);
 			cy += hgt;
@@ -3291,7 +3570,7 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	f.text->setXYPos(x, y);
 	f.text->setWidth(totalW);
 	f.text->setColumns(cols);
-	f.text->setColumnGap(colGap);
+	f.text->setColumnGap(qMax(0.0, cfg.value("layout/colGapMm", 2.5).toDouble()) * kMmToPt);
 	f.text->setTextToFrameDist(0.0, 0.0, 0.0, 0.0);
 	f.text->setTextFlowMode(PageItem::TextFlowDisabled);
 	f.text->updateClip();
@@ -3459,7 +3738,7 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 	}
 	f.text->setItemName(title.left(30).trimmed().isEmpty() ? tr("News story") : title.left(30).trimmed());
 	f.text->setColumns(cols);
-	f.text->setColumnGap(colGapPt);
+	f.text->setColumnGap(qMax(0.0, settingsString("layout/colGapMm", "2.5").toDouble()) * kMmToPt);
 	setAttr(f.text, "news.role", "text");
 
 	// Kicker + headline block first, fitted, so its height is known.
@@ -3478,6 +3757,11 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 	if (!dateline.isEmpty())
 		addPara(f.text, dateline, datelineStyle);
 	bool firstBody = true;
+	if (!bodyParas.isEmpty() && collapseSpaces(bodyParas.first()) == collapseSpaces(title) && !title.trimmed().isEmpty())
+	{
+		apiLog(QStringLiteral("story ..%1: first body paragraph repeats the headline - dropped").arg(newsServerId(news).right(6)));
+		bodyParas.removeFirst();
+	}
 	for (const QString& para : bodyParas)
 	{
 		addPara(f.text, para, firstBody && !firstBodyStyle.isEmpty() ? firstBodyStyle : bodyStyle);
@@ -3486,13 +3770,13 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 	m_doc->docHyphenator->slotHyphenate(f.text);
 
 	// Photos: separate frames, each with a caption frame (caption_<image>).
-	const QJsonArray media = news["newsMedia"].toArray();
+	const QJsonArray media = mediaList(news);
 	if (pos != "none" && !media.isEmpty())
 	{
 		QStringList failed;
 		for (int mi = 0; mi < media.size(); ++mi)
 		{
-			const QJsonObject m = media[mi].toObject();
+			const QJsonObject m = media[mi].toObject();     // normalised by mediaList()
 			const QJsonObject md = m["media"].toObject();
 			const QString fileUrl = md["fileUrl"].toString();
 			QString capText = collapseSpaces(m["caption"].toString());
@@ -3504,8 +3788,12 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			m_statusLabel->setText(tr("Downloading picture %1 of %2...").arg(mi + 1).arg(media.size()));
 			QString why;
 			QString localImg = downloadImage(fileUrl, &why);
+			QString placeholder;
 			if (localImg.isEmpty())
-				failed << QStringLiteral("%1: %2").arg(QFileInfo(fileUrl).fileName(), why);
+			{
+				failed << QStringLiteral("%1: %2").arg(QFileInfo(QUrl(fileUrl).path()).fileName(), why);
+				placeholder = missingImagePlaceholder(why);
+			}
 			else
 			{
 				const int n = (pos == "top" || pos == "topAbove") ? cols : qBound(1, imgCols, cols);
@@ -3534,13 +3822,21 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			}
 			else
 			{
-				imgFrame->setLineColor("Black");
-				imgFrame->setLineShade(40);
-				imgFrame->setLineWidth(0.5);
+				// Never silent: the frame shows the red "Image missing" text
+				// (a generated picture, so it survives layout and re-arrange)
+				// and remembers the reason for the status line / re-link.
+				setAttr(imgFrame, "news.photoMissing", why);
+				setAttr(imgFrame, "news.photoUrl", fileUrl);
+				if (!placeholder.isEmpty())
+					m_doc->loadPict(placeholder, imgFrame, false, true);
+				const QString red = m_doc->PageColors.tryAddColor("Red", ScColor(0, 255, 255, 0));
+				imgFrame->setLineColor(red);
+				imgFrame->setLineShade(100);
+				imgFrame->setLineWidth(1.0);
 			}
 			f.photos << imgFrame;
 
-			PageItem* captFrame = makeTextFrame(x, y, 50.0 * kMmToPt, 10.0 * kMmToPt);
+			PageItem* captFrame = capText.isEmpty() ? nullptr : makeTextFrame(x, y, 50.0 * kMmToPt, 10.0 * kMmToPt);
 			if (captFrame)
 			{
 				captFrame->setItemName(QStringLiteral("caption_%1").arg(imgFrame->itemName()));
@@ -3562,7 +3858,7 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			f.captions << captFrame;
 		}
 		if (!failed.isEmpty())
-			missing << tr("photo not downloaded (%1)").arg(failed.join("; "));
+			missing << tr("Image missing: %1").arg(failed.join("; "));
 	}
 
 	layoutStory(f, x, y, cols, imgCols, pos);
@@ -3691,9 +3987,16 @@ QStringList SuneerNewsPanel::photoPositionKeys()
 	return { "top", "topAbove", "right", "left", "middle", "bottom", "none" };
 }
 
+// The choices offered for placing (Settings and the panel); the other keys
+// stay available for "Photo position" on a placed story.
+QStringList SuneerNewsPanel::placePhotoPositionKeys()
+{
+	return { "right", "left", "top" };
+}
+
 QString SuneerNewsPanel::photoPositionLabel(const QString& key)
 {
-	if (key == "top")      return tr("Top (full width, below headline)");
+	if (key == "top")      return tr("Full width (below headline)");
 	if (key == "topAbove") return tr("Top (above headline)");
 	if (key == "right")    return tr("Right");
 	if (key == "left")     return tr("Left");
@@ -3707,16 +4010,14 @@ QString SuneerNewsPanel::currentPhotoPos() const
 {
 	if (m_photoPosCmb && m_photoPosCmb->currentIndex() >= 0)
 		return m_photoPosCmb->currentData().toString();
-	return settingsString("layout/imagePosition", "right");
+	return settingsString("layout/photoPosition", "right");
 }
 
-int SuneerNewsPanel::storyImageCols(const QJsonObject& news) const
+int SuneerNewsPanel::storyImageCols(const QJsonObject& /*news*/) const
 {
 	QSettings cfg("Faircode", "ScribusNews");
-	int imgCols = news["imageColumns"].toInt();
-	if (imgCols <= 0)
-		imgCols = cfg.value("layout/imageColumns", 2).toInt();
-	return qMax(1, imgCols);
+	const int imgCols = cfg.value("layout/photoColumns", 3).toInt();
+	return qBound(1, imgCols, 8);
 }
 
 void SuneerNewsPanel::setAttr(PageItem* item, const QString& name, const QString& value)
@@ -3773,19 +4074,302 @@ void SuneerNewsPanel::fitFrame(PageItem* frame)
 // Right-click on a placed story: ungroup, re-arrange with the one layout
 // routine, group again. One undo step.
 
-// Cache in TempLocation/scribus_news/<hash>-<basename>. A server-side change
-// is detected with ETag / Last-Modified (304 keeps the cached copy). Empty
-// files are never kept; an empty return means "no picture".
+// ----------------------------------------------------------------------------
+// Pictures: one reader for every reply shape
+// ----------------------------------------------------------------------------
+
+QJsonArray SuneerNewsPanel::mediaList(const QJsonObject& news)
+{
+	QJsonArray out;
+	QSet<QString> seen;
+	auto urlOf = [](const QJsonObject& o) -> QString {
+		for (const char* k : { "fileUrl", "url", "fileURL", "file", "path", "src", "thumbUrl" })
+		{
+			const QString v = o[QLatin1String(k)].toString().trimmed();
+			if (!v.isEmpty())
+				return v;
+		}
+		return QString();
+	};
+	auto add = [&](const QJsonObject& entry) {
+		// entry = {media:{...}, caption} or the media record itself
+		QJsonObject md = entry["media"].isObject() ? entry["media"].toObject() : QJsonObject();
+		if (urlOf(md).isEmpty())
+		{
+			// flat shape: the entry carries the file fields
+			if (!urlOf(entry).isEmpty())
+				md = entry;
+			else if (entry["file"].isObject() && !urlOf(entry["file"].toObject()).isEmpty())
+				md = entry["file"].toObject();
+			else if (entry["image"].isObject() && !urlOf(entry["image"].toObject()).isEmpty())
+				md = entry["image"].toObject();
+		}
+		QString fileUrl = md["fileUrl"].toString().trimmed();
+		if (fileUrl.isEmpty())
+			fileUrl = urlOf(md);
+		if (fileUrl.isEmpty() || seen.contains(fileUrl))
+			return;
+		seen.insert(fileUrl);
+		QJsonObject m;
+		m["fileUrl"]  = fileUrl;
+		m["thumbUrl"] = md["thumbUrl"].toString();
+		m["caption"]  = md["caption"].toString();
+		m["fileName"] = md["fileName"].toString().isEmpty() ? md["originalName"].toString() : md["fileName"].toString();
+		m["id"]       = md["id"].toString();
+		QJsonObject e;
+		e["media"]   = m;
+		e["caption"] = entry["caption"].toString();
+		if (entry.contains("isSelected"))
+			e["isSelected"] = entry["isSelected"];
+		out.append(e);
+	};
+	auto addArray = [&](const QJsonValue& v) {
+		if (v.isArray())
+		{
+			for (const QJsonValue& x : v.toArray())
+			{
+				if (x.isObject())
+					add(x.toObject());
+				else if (x.isString() && !x.toString().trimmed().isEmpty())
+					add(QJsonObject{{"fileUrl", x.toString().trimmed()}});
+			}
+		}
+		else if (v.isObject())
+			add(v.toObject());
+	};
+	for (const char* k : { "newsMedia", "mediaFiles", "media", "images", "newsImages", "files", "attachments" })
+		addArray(news[QLatin1String(k)]);
+	// A sent story: the per-edition clone carries the pictures.
+	for (const QJsonValue& te : news["targetEditions"].toArray())
+		addArray(te.toObject()["clonedNews"].toObject()["newsMedia"]);
+	if (news["clonedNews"].isObject())
+		addArray(news["clonedNews"].toObject()["newsMedia"]);
+	// Layout-page fields: a single picture URL on the story.
+	for (const char* k : { "obitHeadshotUrl", "imageUrl", "fileUrl" })
+	{
+		const QString u = news[QLatin1String(k)].toString().trimmed();
+		if (!u.isEmpty())
+			add(QJsonObject{{"fileUrl", u}});
+	}
+	return out;
+}
+
+bool SuneerNewsPanel::mergeMedia(QJsonObject& into, const QJsonObject& from)
+{
+	if (!mediaList(into).isEmpty())
+		return false;
+	const QJsonArray ml = mediaList(from);
+	if (ml.isEmpty())
+		return false;
+	into["newsMedia"] = ml;
+	return true;
+}
+
+void SuneerNewsPanel::fetchMediaIfMissing(QJsonObject& news)
+{
+	if (!mediaList(news).isEmpty())
+		return;
+	const QString id = newsServerId(news);
+	if (id.isEmpty() || m_accessToken.isEmpty())
+	{
+		apiLog(QStringLiteral("story ..%1: no picture in the list reply; %2").arg(id.right(6), m_accessToken.isEmpty() ? QStringLiteral("not logged in, so not asked again") : QStringLiteral("no id")));
+		return;
+	}
+	// 1. The full record, which the web app's editor reads.
+	QJsonObject full;
+	QString err;
+	int code = 0;
+	apiGet(QUrl(apiUrl("/news/" + id)), [&](QNetworkReply* reply) {
+		code = httpStatus(reply);
+		if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300)
+		{
+			err = describeError(reply);
+			return;
+		}
+		const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+		full = root["data"].isObject() ? root["data"].toObject() : root;
+		if (full["news"].isObject())
+			full = full["news"].toObject();
+	});
+	const QJsonArray ml = mediaList(full);
+	apiLog(QStringLiteral("GET /news/%1 (picture check) -> HTTP %2, %3 picture(s), newsMedia entries %4%5")
+	       .arg(id.right(6)).arg(code).arg(ml.size()).arg(full["newsMedia"].toArray().size()).arg(err.isEmpty() ? QString() : " (" + err + ")"));
+	if (!ml.isEmpty())
+	{
+		news["newsMedia"] = ml;
+		return;
+	}
+	// 2. The media route (reply data.mediaFiles[]).
+	QJsonObject mf;
+	err.clear();
+	code = 0;
+	apiGet(QUrl(apiUrl("/news/" + id + "/media")), [&](QNetworkReply* reply) {
+		code = httpStatus(reply);
+		if (reply->error() != QNetworkReply::NoError || code < 200 || code >= 300)
+		{
+			err = describeError(reply);
+			return;
+		}
+		const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
+		mf = root["data"].isObject() ? root["data"].toObject() : root;
+	});
+	const QJsonArray ml2 = mediaList(mf);
+	apiLog(QStringLiteral("GET /news/%1/media (picture check) -> HTTP %2, %3 picture(s)%4").arg(id.right(6)).arg(code).arg(ml2.size()).arg(err.isEmpty() ? QString() : " (" + err + ")"));
+	if (!ml2.isEmpty())
+		news["newsMedia"] = ml2;
+}
+
+// A picture (PNG in the cache folder) that says in red why the photo is
+// not here. Loaded into the photo frame so nothing is ever placed silently.
+QString SuneerNewsPanel::missingImagePlaceholder(const QString& reason) const
+{
+	const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/news/";
+	if (!QDir().mkpath(cacheDir))
+		return QString();
+	const QString text = tr("Image missing: %1").arg(reason.isEmpty() ? tr("unknown reason") : reason);
+	const QString hash = QString::fromLatin1(QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha1).toHex().left(10));
+	const QString path = cacheDir + "missing-" + hash + ".png";
+	if (QFileInfo(path).size() > 0 && QImageReader(path).canRead())
+		return path;
+	QImage img(900, 600, QImage::Format_RGB32);
+	img.fill(Qt::white);
+	img.setDotsPerMeterX(int(300 / 0.0254));
+	img.setDotsPerMeterY(int(300 / 0.0254));
+	QPainter p(&img);
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(QPen(QColor(220, 0, 0), 8));
+	p.drawRect(QRect(4, 4, img.width() - 8, img.height() - 8));
+	p.drawLine(4, 4, img.width() - 4, img.height() - 4);
+	p.drawLine(img.width() - 4, 4, 4, img.height() - 4);
+	p.fillRect(QRect(40, 200, img.width() - 80, 200), Qt::white);
+	QFont f = p.font();
+	f.setPixelSize(44);
+	f.setBold(true);
+	p.setFont(f);
+	p.setPen(QColor(220, 0, 0));
+	p.drawText(QRect(50, 200, img.width() - 100, 200), Qt::AlignCenter | Qt::TextWordWrap, text);
+	p.end();
+	if (!img.save(path, "PNG"))
+		return QString();
+	return path;
+}
+
+QString SuneerNewsPanel::sniffImageFormat(const QByteArray& b)
+{
+	if (b.size() < 12)
+		return QString();
+	const unsigned char* u = reinterpret_cast<const unsigned char*>(b.constData());
+	if (u[0] == 0xFF && u[1] == 0xD8 && u[2] == 0xFF)
+		return QStringLiteral("jpg");
+	if (b.startsWith("\x89PNG"))
+		return QStringLiteral("png");
+	if (b.startsWith("GIF8"))
+		return QStringLiteral("gif");
+	if (b.startsWith("RIFF") && b.mid(8, 4) == "WEBP")
+		return QStringLiteral("webp");
+	if (b.startsWith("II*\0") || b.startsWith("MM\0*"))
+		return QStringLiteral("tif");
+	if (b.startsWith("BM"))
+		return QStringLiteral("bmp");
+	if (b.startsWith("8BPS"))
+		return QStringLiteral("psd");
+	return QString();
+}
+
+QByteArray SuneerNewsPanel::convertWebpToPng(const QByteArray& webp, QString& how, QString& why) const
+{
+	why.clear();
+	// 1. Qt's own decoder (qt6-image-formats-plugins).
+	if (QImageReader::supportedImageFormats().contains("webp"))
+	{
+		qDebug() << "news image: Qt webp plugin present";
+		QBuffer in;
+		in.setData(webp);
+		in.open(QIODevice::ReadOnly);
+		QImageReader r(&in, "webp");
+		const QImage img = r.read();
+		if (!img.isNull())
+		{
+			QByteArray out;
+			QBuffer ob(&out);
+			ob.open(QIODevice::WriteOnly);
+			QImageWriter w(&ob, "png");
+			if (w.write(img))
+			{
+				how = QStringLiteral("Qt webp plugin");
+				return out;
+			}
+		}
+		why = tr("Qt webp plugin: %1").arg(r.errorString().isEmpty() ? QStringLiteral("read failed") : r.errorString());
+	}
+	else
+		why = tr("no Qt webp plugin (formats: %1)").arg(QString::fromLatin1(QImageReader::supportedImageFormats().join(',')));
+	// 2. A helper process writing PNG to a temp file.
+	const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/news/";
+	QTemporaryFile inFile(dir + "webp-XXXXXX.webp");
+	if (!inFile.open() || inFile.write(webp) != webp.size())
+	{
+		why = tr("cannot write temp file in %1").arg(dir);
+		return QByteArray();
+	}
+	inFile.close();
+	const QString outPath = inFile.fileName() + ".png";
+	struct Tool { QString name; QStringList args; };
+	const QList<Tool> tools = {
+		{ QStringLiteral("dwebp"), { inFile.fileName(), "-o", outPath } },
+		{ QStringLiteral("python3"), { "-c", "import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[2], 'PNG')", inFile.fileName(), outPath } },
+	};
+	QStringList tried;
+	for (const Tool& t : tools)
+	{
+		if (QStandardPaths::findExecutable(t.name).isEmpty())
+		{
+			tried << t.name + ": " + tr("not installed");
+			continue;
+		}
+		QProcess p;
+		p.start(t.name, t.args);
+		if (!p.waitForFinished(20000))
+		{
+			p.kill();
+			tried << t.name + ": " + tr("timed out");
+			continue;
+		}
+		if (p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0 && QFileInfo(outPath).size() > 0)
+		{
+			QFile f(outPath);
+			f.open(QIODevice::ReadOnly);
+			const QByteArray out = f.readAll();
+			f.close();
+			QFile::remove(outPath);
+			how = t.name + (why.isEmpty() ? QString() : " (" + why + ")");
+			return out;
+		}
+		tried << t.name + ": " + QString::fromUtf8(p.readAllStandardError()).trimmed().section('\n', -1).left(120);
+		QFile::remove(outPath);
+	}
+	why = (why.isEmpty() ? QString() : why + "; ") + tried.join("; ");
+	return QByteArray();
+}
+
+// Cache in ~/.cache/scribus/news/<hash>-<basename>. A server-side change is
+// detected with ETag / Last-Modified (304 keeps the cached copy). Only a
+// reply that really decodes as a picture is kept; a 0-byte or unreadable
+// cache entry is thrown away and fetched again. Every step is logged
+// (URL path, status, size - never the token).
 QString SuneerNewsPanel::downloadImage(const QString& fileUrl, QString* why)
 {
+	// A local file (fixture tests, pre-downloaded pictures) needs no download.
+	if (fileUrl.startsWith('/') && QFileInfo(fileUrl).isFile())
+		return fileUrl;
 	auto fail = [&](const QString& reason) {
 		if (why)
 			*why = reason;
-		qDebug() << "news image:" << reason;
+		apiLog(QStringLiteral("image %1: FAILED - %2").arg(QUrl(fileUrl).path(), reason));
 		return QString();
 	};
 	if (fileUrl.trimmed().isEmpty())
-		return fail(tr("no file URL"));
+		return fail(tr("no file URL in the story"));
 	// Per-user cache (~/.cache/scribus/news). A shared /tmp folder created by
 	// another user was not writable, which lost every photo silently.
 	const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/news/";
@@ -3798,67 +4382,234 @@ QString SuneerNewsPanel::downloadImage(const QString& fileUrl, QString* why)
 	if (base.isEmpty() || base == "." || base == "..")
 		base = QStringLiteral("image.jpg");
 	const QString hash = QString::fromLatin1(QCryptographicHash::hash(fileUrl.toUtf8(), QCryptographicHash::Sha1).toHex().left(10));
-	const QString localPath = cacheDir + hash + "-" + base;
-	const QString metaPath  = localPath + ".meta";
+	// Cache key without the server's extension: the real format comes from
+	// the bytes (the server hands out WebP as ".jpg"), and the file gets
+	// the extension Scribus' loaders expect.
+	QString stem = base;
+	if (stem.contains('.'))
+		stem = stem.left(stem.lastIndexOf('.'));
+	const QString cacheKey = hash + "-" + stem;
+	const QString metaPath = cacheDir + cacheKey + ".meta";
+	QString localPath;
+	{
+		const QStringList found = QDir(cacheDir).entryList({ cacheKey + ".*" }, QDir::Files);
+		for (const QString& f : found)
+			if (!f.endsWith(".meta"))
+			{
+				localPath = cacheDir + f;
+				break;
+			}
+	}
+	if (localPath.isEmpty())
+		localPath = cacheDir + cacheKey + "." + (base.contains('.') ? base.section('.', -1) : QStringLiteral("jpg"));
 
-	QString fullUrl = fileUrl;
-	if (!fileUrl.startsWith("http://") && !fileUrl.startsWith("https://"))
-		fullUrl = m_filesBase + (fileUrl.startsWith('/') ? fileUrl : "/" + fileUrl);
+	// Candidate URLs: filesBase + fileUrl, and when fileUrl already starts
+	// with /files (or is absolute) the plain form, so a doubled "/files/files"
+	// never hides the picture.
+	QStringList candidates;
+	if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://"))
+		candidates << fileUrl;
+	else
+	{
+		const QString rel = fileUrl.startsWith('/') ? fileUrl : "/" + fileUrl;
+		candidates << m_filesBase + rel;
+		const QUrl fb(m_filesBase);
+		const QString basePath = fb.path();
+		if (!basePath.isEmpty() && basePath != "/" && rel.startsWith(basePath + "/"))
+			candidates << QStringLiteral("%1://%2%3").arg(fb.scheme(), fb.authority(), rel);
+	}
 
-	// Through the one request builder; the Bearer header goes along (the
-	// file server accepts it today and may require it later).
-	QNetworkRequest req = apiRequest(QUrl(fullUrl), true);
-	req.setRawHeader("Accept", "image/*");
-	req.setTransferTimeout(20000);
-	const bool haveCached = QFile::exists(localPath) && QFileInfo(localPath).size() > 0;
+	// A cached copy counts only when it decodes as a picture.
+	bool haveCached = QFile::exists(localPath) && QFileInfo(localPath).size() > 0;
+	QString cachedFmt;
 	if (haveCached)
 	{
-		QSettings meta(metaPath, QSettings::IniFormat);
-		const QString etag = meta.value("etag").toString();
-		const QString lastMod = meta.value("lastModified").toString();
-		if (!etag.isEmpty())
-			req.setRawHeader("If-None-Match", etag.toUtf8());
-		if (!lastMod.isEmpty())
-			req.setRawHeader("If-Modified-Since", lastMod.toUtf8());
+		QFile f(localPath);
+		f.open(QIODevice::ReadOnly);
+		cachedFmt = sniffImageFormat(f.read(16));
 	}
-
-	QNetworkReply* reply = m_nam->get(req);
-	QEventLoop loop;
-	connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-	QTimer::singleShot(25000, reply, &QNetworkReply::abort);   // really aborts, ends the loop
-	loop.exec();
-	reply->deleteLater();
-
-	const int status = httpStatus(reply);
-	qDebug() << "news image:" << QUrl(fullUrl).path() << "HTTP" << status
-	         << (reply->error() == QNetworkReply::NoError ? "" : reply->errorString());
-	if (status == 304 && haveCached)
-		return localPath;
-	if (reply->error() != QNetworkReply::NoError || status != 200)
+	// A cached WebP (saved before the converter existed) or a file that is
+	// no picture at all is thrown away and fetched again.
+	if (haveCached && (cachedFmt == "webp" || (cachedFmt.isEmpty() && !QImageReader(localPath).canRead())))
 	{
-		if (haveCached)
-			return localPath;
-		return fail(status > 0 ? tr("HTTP %1 %2").arg(status).arg(serverMessage(reply->peek(reply->bytesAvailable())))
-		                       : describeError(reply));
+		apiLog(QStringLiteral("image %1: cached file %2 (%3 bytes) is %4 - discarded").arg(QUrl(fileUrl).path(), localPath).arg(QFileInfo(localPath).size()).arg(cachedFmt == "webp" ? QStringLiteral("WebP, not converted") : QStringLiteral("not a readable picture")));
+		QFile::remove(localPath);
+		QFile::remove(metaPath);
+		haveCached = false;
 	}
-	const QByteArray bytes = reply->readAll();
-	if (bytes.isEmpty())
-		return haveCached ? localPath : fail(tr("empty reply"));
-	QFile f(localPath);
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-		return fail(tr("cannot write %1: %2").arg(localPath, f.errorString()));
-	f.write(bytes);
-	f.close();
-	QSettings meta(metaPath, QSettings::IniFormat);
-	meta.setValue("etag", QString::fromUtf8(reply->rawHeader("ETag")));
-	meta.setValue("lastModified", QString::fromUtf8(reply->rawHeader("Last-Modified")));
-	meta.setValue("url", fullUrl);
-	return localPath;
+	else if (QFile::exists(localPath) && QFileInfo(localPath).size() == 0)
+	{
+		QFile::remove(localPath);
+		QFile::remove(metaPath);
+	}
+
+	QString lastReason;
+	for (int ci = 0; ci < candidates.size(); ++ci)
+	{
+		const QString fullUrl = candidates[ci];
+		// Through the one request builder; the Bearer header goes along (the
+		// file server ignores it today and may require it later).
+		QNetworkRequest req = apiRequest(QUrl(fullUrl), true);
+		req.setRawHeader("Accept", "image/*,*/*;q=0.8");
+		req.setTransferTimeout(20000);
+		req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+		req.setMaximumRedirectsAllowed(5);
+		if (haveCached)
+		{
+			QSettings meta(metaPath, QSettings::IniFormat);
+			const QString etag = meta.value("etag").toString();
+			const QString lastMod = meta.value("lastModified").toString();
+			if (!etag.isEmpty())
+				req.setRawHeader("If-None-Match", etag.toUtf8());
+			if (!lastMod.isEmpty())
+				req.setRawHeader("If-Modified-Since", lastMod.toUtf8());
+		}
+
+		QNetworkReply* reply = m_nam->get(req);
+		QEventLoop loop;
+		connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+		QTimer::singleShot(25000, reply, &QNetworkReply::abort);   // really aborts, ends the loop
+		loop.exec();
+		reply->deleteLater();
+
+		const int status = httpStatus(reply);
+		const QString ctype = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+		const QByteArray bytes = (reply->error() == QNetworkReply::NoError && status == 200) ? reply->readAll() : QByteArray();
+		apiLog(QStringLiteral("image GET %1 -> HTTP %2 %3 %4 bytes%5%6")
+		       .arg(QUrl(fullUrl).host() + QUrl(fullUrl).path()).arg(status).arg(ctype).arg(bytes.size())
+		       .arg(haveCached ? QStringLiteral(" (cached %1 bytes)").arg(QFileInfo(localPath).size()) : QString())
+		       .arg(reply->error() == QNetworkReply::NoError ? QString() : " " + reply->errorString()));
+		if (status == 304 && haveCached)
+			return localPath;
+		if (reply->error() != QNetworkReply::NoError || status != 200)
+		{
+			if (haveCached)
+			{
+				apiLog(QStringLiteral("image %1: server unavailable, cached copy used").arg(QUrl(fileUrl).path()));
+				return localPath;
+			}
+			lastReason = status > 0 ? tr("HTTP %1 %2").arg(status).arg(serverMessage(reply->peek(reply->bytesAvailable()))).trimmed()
+			                        : describeError(reply);
+			continue;   // next candidate URL, if any
+		}
+		if (bytes.isEmpty())
+		{
+			lastReason = tr("empty reply");
+			continue;
+		}
+		// The format from the bytes, never from the name or content-type.
+		QString ext = sniffImageFormat(bytes);
+		QByteArray data = bytes;
+		if (ext == "webp")
+		{
+			QString how, cwhy;
+			data = convertWebpToPng(bytes, how, cwhy);
+			if (data.isEmpty())
+			{
+				lastReason = tr("WebP picture, no decoder (%1)").arg(cwhy);
+				continue;
+			}
+			apiLog(QStringLiteral("image %1: WebP (%2 bytes) converted to PNG (%3 bytes) via %4").arg(QUrl(fileUrl).path()).arg(bytes.size()).arg(data.size()).arg(how));
+			ext = QStringLiteral("png");
+		}
+		else if (ext.isEmpty())
+		{
+			QBuffer buf;
+			buf.setData(bytes);
+			buf.open(QIODevice::ReadOnly);
+			ext = QString::fromLatin1(QImageReader::imageFormat(&buf)).toLower();
+			if (ext.isEmpty())
+			{
+				lastReason = tr("reply is not a picture (%1, %2 bytes, starts with %3)").arg(ctype.isEmpty() ? tr("no content-type") : ctype).arg(bytes.size()).arg(QString::fromLatin1(bytes.left(8).toHex()));
+				continue;
+			}
+		}
+		if (ext == "jpeg")
+			ext = QStringLiteral("jpg");
+		localPath = cacheDir + cacheKey + "." + ext;
+		// Write beside, then rename: a half-written file is never a cache hit.
+		QTemporaryFile tmp(cacheDir + "dl-XXXXXX");
+		if (!tmp.open() || tmp.write(data) != data.size())
+			return fail(tr("cannot write %1: %2").arg(cacheDir, tmp.errorString()));
+		tmp.close();
+		for (const QString& f : QDir(cacheDir).entryList({ cacheKey + ".*" }, QDir::Files))
+			if (!f.endsWith(".meta"))
+				QFile::remove(cacheDir + f);
+		if (!QFile::rename(tmp.fileName(), localPath))
+		{
+			if (!QFile::copy(tmp.fileName(), localPath))
+				return fail(tr("cannot write %1").arg(localPath));
+		}
+		tmp.setAutoRemove(true);
+		QFile::setPermissions(localPath, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup | QFile::ReadOther);
+		QSettings meta(metaPath, QSettings::IniFormat);
+		meta.setValue("etag", QString::fromUtf8(reply->rawHeader("ETag")));
+		meta.setValue("lastModified", QString::fromUtf8(reply->rawHeader("Last-Modified")));
+		meta.setValue("url", fullUrl);
+		meta.setValue("size", bytes.size());
+		meta.setValue("format", ext);
+		apiLog(QStringLiteral("image %1: saved %2 (%3 bytes, %4)").arg(QUrl(fileUrl).path(), localPath).arg(data.size()).arg(ext));
+		return localPath;
+	}
+	if (haveCached)
+		return localPath;
+	return fail(lastReason.isEmpty() ? tr("download failed") : lastReason);
 }
 
 // ============================================================================
 // Settings dialog
 // ============================================================================
+
+void SuneerNewsPanel::updateHostLabel()
+{
+	if (!m_hostLabel)
+		return;
+	const QUrl u(m_apiHost);
+	QString host = u.host();
+	if (host.isEmpty())
+		host = m_apiHost;
+	m_hostLabel->setText(tr("Server: %1").arg(host));
+	m_hostLabel->setToolTip(tr("API: %1\nFiles: %2").arg(m_apiHost, m_filesBase));
+}
+
+bool SuneerNewsPanel::validServerUrl(const QString& url, QString* why)
+{
+	const QUrl u(url.trimmed());
+	if (url.trimmed().isEmpty())
+	{
+		if (why) *why = tr("it is empty");
+		return false;
+	}
+	if (!u.isValid() || u.host().isEmpty())
+	{
+		if (why) *why = tr("it is not a valid URL");
+		return false;
+	}
+	if (u.scheme() != "http" && u.scheme() != "https")
+	{
+		if (why) *why = tr("it must start with http:// or https://");
+		return false;
+	}
+	return true;
+}
+
+QString SuneerNewsPanel::probeUrl(const QString& url)
+{
+	QNetworkRequest req{QUrl(url)};
+	req.setTransferTimeout(5000);
+	QNetworkReply* reply = m_nam->get(req);
+	QEventLoop loop;
+	connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+	loop.exec();
+	reply->deleteLater();
+	const int status = httpStatus(reply);
+	if (status > 0)
+	{
+		const QString phrase = reply->attribute(QNetworkRequest::HttpReasonPhraseAttribute).toString();
+		return QStringLiteral("HTTP %1 %2").arg(status).arg(phrase).trimmed();
+	}
+	return reply->errorString();
+}
 
 void SuneerNewsPanel::onSettings()
 {
@@ -3877,15 +4628,76 @@ void SuneerNewsPanel::onSettings()
 	fl->setSpacing(10);
 	QLineEdit* hostEdit = new QLineEdit(m_apiHost, connTab);
 	hostEdit->setPlaceholderText("http://IP:3011");
-	fl->addRow(tr("API server:"), hostEdit);
+	QPushButton* hostDefBtn = new QPushButton(tr("Use default"), connTab);
+	hostDefBtn->setToolTip(kDefaultApiHost);
+	QHBoxLayout* hostRow = new QHBoxLayout();
+	hostRow->addWidget(hostEdit, 1);
+	hostRow->addWidget(hostDefBtn);
+	fl->addRow(tr("API base URL:"), hostRow);
 	QLineEdit* filesEdit = new QLineEdit(m_filesBase, connTab);
 	filesEdit->setPlaceholderText("http://IP/files");
-	fl->addRow(tr("Files base:"), filesEdit);
-	QPushButton* deriveBtn = new QPushButton(tr("Derive files base from server"), connTab);
-	connect(deriveBtn, &QPushButton::clicked, connTab, [hostEdit, filesEdit]() {
+	QPushButton* filesDefBtn = new QPushButton(tr("Use default"), connTab);
+	filesDefBtn->setToolTip(tr("Derive the files base from the API server"));
+	QHBoxLayout* filesRow = new QHBoxLayout();
+	filesRow->addWidget(filesEdit, 1);
+	filesRow->addWidget(filesDefBtn);
+	fl->addRow(tr("Files base URL:"), filesRow);
+	connect(hostDefBtn, &QPushButton::clicked, connTab, [hostEdit, filesEdit]() {
+		hostEdit->setText(kDefaultApiHost);
+		filesEdit->setText(defaultFilesBaseFor(kDefaultApiHost));
+	});
+	connect(filesDefBtn, &QPushButton::clicked, connTab, [hostEdit, filesEdit]() {
 		filesEdit->setText(defaultFilesBaseFor(hostEdit->text().trimmed()));
 	});
-	fl->addRow("", deriveBtn);
+	// Default edition: the short name opened when the panel starts.
+	QComboBox* editionCmb = new QComboBox(connTab);
+	editionCmb->setEditable(true);
+	{
+		QStringList names;
+		for (int i = 0; i < (m_editionCombo ? m_editionCombo->count() : 0); ++i)
+			names << m_editionCombo->itemData(i).toString();
+		if (names.isEmpty())
+			names = m_editionShortNames.split(',', Qt::SkipEmptyParts);
+		for (QString& n : names)
+			n = n.trimmed();
+		names.removeAll(QString());
+		editionCmb->addItems(names);
+		editionCmb->setEditText(m_lastEdition);
+	}
+	fl->addRow(tr("Default edition:"), editionCmb);
+	QLabel* urlErr = new QLabel(connTab);
+	urlErr->setWordWrap(true);
+	urlErr->setStyleSheet("color:#C62828; font-size:11px;");
+	urlErr->setVisible(false);
+	fl->addRow(urlErr);
+	QPushButton* testBtn = new QPushButton(tr("Test connection"), connTab);
+	QLabel* testLbl = new QLabel(connTab);
+	testLbl->setWordWrap(true);
+	testLbl->setStyleSheet("font-size:11px;");
+	QHBoxLayout* testRow = new QHBoxLayout();
+	testRow->addWidget(testBtn);
+	testRow->addWidget(testLbl, 1);
+	fl->addRow("", testRow);
+	connect(testBtn, &QPushButton::clicked, connTab, [this, hostEdit, filesEdit, testLbl, testBtn]() {
+		QString host = hostEdit->text().trimmed();
+		while (host.endsWith('/')) host.chop(1);
+		QString files = filesEdit->text().trimmed();
+		while (files.endsWith('/')) files.chop(1);
+		QString why;
+		if (!validServerUrl(host, &why))
+		{
+			testLbl->setText(tr("API base URL: %1").arg(why));
+			return;
+		}
+		testBtn->setEnabled(false);
+		testLbl->setText(tr("Testing..."));
+		QApplication::setOverrideCursor(Qt::WaitCursor);
+		const QString apiRes = probeUrl(host + "/api/v1/common/web/initial-data/static");
+		const QString filesRes = validServerUrl(files, &why) ? probeUrl(files + "/") : why;
+		QApplication::restoreOverrideCursor();
+		testBtn->setEnabled(true);
+		testLbl->setText(tr("API: %1\nFiles: %2").arg(apiRes, filesRes));
+	});
 	QLineEdit* shortNamesEdit = new QLineEdit(m_editionShortNames, connTab);
 	shortNamesEdit->setToolTip(tr("Used only when the edition list cannot be loaded from the server"));
 	fl->addRow(tr("Edition short names (fallback):"), shortNamesEdit);
@@ -3902,25 +4714,60 @@ void SuneerNewsPanel::onSettings()
 	fl2->setSpacing(10);
 	QSpinBox* colsSpin = new QSpinBox(layoutTab);
 	colsSpin->setRange(1, 8);
-	colsSpin->setValue(s.value("layout/columns", 4).toInt());
-	fl2->addRow(tr("Columns when the story has none:"), colsSpin);
+	colsSpin->setValue(s.value("layout/storyColumns", 4).toInt());
+	colsSpin->setToolTip(tr("Grid columns of the story frame (its inner columns use the column gap below)"));
+	fl2->addRow(tr("Story columns:"), colsSpin);
 	QSpinBox* imgColsSpin = new QSpinBox(layoutTab);
-	imgColsSpin->setRange(1, 4);
-	imgColsSpin->setValue(s.value("layout/imageColumns", 2).toInt());
-	fl2->addRow(tr("Image columns when the story has none:"), imgColsSpin);
+	imgColsSpin->setRange(1, 8);
+	imgColsSpin->setValue(s.value("layout/photoColumns", 3).toInt());
+	fl2->addRow(tr("Photo columns:"), imgColsSpin);
 	QComboBox* posCmb = new QComboBox(layoutTab);
-	for (const QString& key : photoPositionKeys())
+	for (const QString& key : placePhotoPositionKeys())
 		posCmb->addItem(photoPositionLabel(key), key);
 	{
-		int pi = posCmb->findData(settingsString("layout/imagePosition", "right"));
+		int pi = posCmb->findData(settingsString("layout/photoPosition", "right"));
 		posCmb->setCurrentIndex(pi >= 0 ? pi : 0);
 	}
-	fl2->addRow(tr("Default photo position:"), posCmb);
+	fl2->addRow(tr("Photo position:"), posCmb);
+	QSpinBox* gridColsSpin = new QSpinBox(layoutTab);
+	gridColsSpin->setRange(1, 16);
+	gridColsSpin->setValue(s.value("layout/gridColumns", 8).toInt());
+	gridColsSpin->setToolTip(tr("Used when the page has no automatic column guides"));
+	fl2->addRow(tr("Page grid columns:"), gridColsSpin);
+	QDoubleSpinBox* gutterSpin = new QDoubleSpinBox(layoutTab);
+	gutterSpin->setRange(0.0, 30.0);
+	gutterSpin->setSuffix(" mm");
+	gutterSpin->setValue(s.value("layout/gridGutterMm", 8.0).toDouble());
+	fl2->addRow(tr("Page grid gutter:"), gutterSpin);
+	QDoubleSpinBox* innerGapSpin = new QDoubleSpinBox(layoutTab);
+	innerGapSpin->setRange(0.0, 20.0);
+	innerGapSpin->setSuffix(" mm");
+	innerGapSpin->setValue(s.value("layout/colGapMm", 2.5).toDouble());
+	fl2->addRow(tr("Column gap inside the story frame:"), innerGapSpin);
+	QDoubleSpinBox* maxPhotoSpin = new QDoubleSpinBox(layoutTab);
+	maxPhotoSpin->setRange(20.0, 400.0);
+	maxPhotoSpin->setSuffix(" mm");
+	maxPhotoSpin->setValue(s.value("layout/photoMaxHeightMm", 100.0).toDouble());
+	fl2->addRow(tr("Photo height at most (taller: centre crop):"), maxPhotoSpin);
 	QDoubleSpinBox* wrapGapSpin = new QDoubleSpinBox(layoutTab);
 	wrapGapSpin->setRange(0.0, 10.0);
 	wrapGapSpin->setSuffix(" mm");
 	wrapGapSpin->setValue(s.value("layout/wrapGapMm", 2.0).toDouble());
 	fl2->addRow(tr("Text wrap gap around photos:"), wrapGapSpin);
+	QComboBox* obitBgCmb = new QComboBox(layoutTab);
+	obitBgCmb->setEditable(true);
+	{
+		const SuneerObitModel om = SuneerObitModel::load();
+		QStringList names{QStringLiteral("DB obit"), QStringLiteral("Light grey")};
+		if (m_doc)
+			for (auto it = m_doc->PageColors.cbegin(); it != m_doc->PageColors.cend(); ++it)
+				if (!names.contains(it.key()))
+					names << it.key();
+		obitBgCmb->addItems(names);
+		obitBgCmb->setCurrentText(om.photoBackground);
+		obitBgCmb->setToolTip(tr("Uniform background behind every obituary photo (Obituary layout model): a document colour or Light grey. Default DB obit (C23 M0 Y0 K23). Stored in %1").arg(SuneerObitModel::filePath()));
+	}
+	fl2->addRow(tr("Obit photo background:"), obitBgCmb);
 	QComboBox* targetCmb = new QComboBox(layoutTab);
 	targetCmb->addItem(tr("Pasteboard left of the page (story spike)"), "left");
 	targetCmb->addItem(tr("Pasteboard right of the page"), "right");
@@ -3969,7 +4816,30 @@ void SuneerNewsPanel::onSettings()
 	tabs->addTab(styleTab, tr("🎨 Style"));
 
 	QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-	connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+	// OK is refused while either URL is unusable; the reason is shown in red
+	// on the Connection tab (same pattern as the updater's settings dialog).
+	connect(bb, &QDialogButtonBox::accepted, &dlg, [&dlg, hostEdit, filesEdit, urlErr, tabs, connTab]() {
+		QString host = hostEdit->text().trimmed();
+		if (!host.isEmpty() && !host.startsWith("http://") && !host.startsWith("https://"))
+			host.prepend("http://");
+		QString why;
+		if (!validServerUrl(host, &why))
+		{
+			urlErr->setText(tr("The API base URL is not used because %1. Correct it or click Use default.").arg(why));
+			urlErr->setVisible(true);
+			tabs->setCurrentWidget(connTab);
+			return;
+		}
+		const QString files = filesEdit->text().trimmed();
+		if (!files.isEmpty() && !validServerUrl(files, &why))
+		{
+			urlErr->setText(tr("The files base URL is not used because %1. Clear it or click Use default.").arg(why));
+			urlErr->setVisible(true);
+			tabs->setCurrentWidget(connTab);
+			return;
+		}
+		dlg.accept();
+	});
 	connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
 	mainVl->addWidget(bb);
 
@@ -3992,12 +4862,38 @@ void SuneerNewsPanel::onSettings()
 	m_editionShortNames = shortNamesEdit->text().trimmed();
 	if (m_editionShortNames.isEmpty())
 		m_editionShortNames = kDefaultShortNames;
+	{
+		const QString ed = editionCmb->currentText().trimmed();
+		if (!ed.isEmpty())
+			m_lastEdition = ed;
+	}
 	saveConfig();
-	s.setValue("layout/columns", colsSpin->value());
-	s.setValue("layout/imageColumns", imgColsSpin->value());
+	updateHostLabel();
+	s.setValue("layout/storyColumns", colsSpin->value());
+	s.setValue("layout/photoColumns", imgColsSpin->value());
 	s.setValue("layout/placeTarget", targetCmb->currentData().toString());
-	s.setValue("layout/imagePosition", posCmb->currentData().toString());
+	s.setValue("layout/photoPosition", posCmb->currentData().toString());
+	s.setValue("layout/photoPositionPanel", posCmb->currentData().toString());
+	s.setValue("layout/colGapMm", innerGapSpin->value());
+	s.setValue("layout/gridColumns", gridColsSpin->value());
+	s.setValue("layout/gridGutterMm", gutterSpin->value());
+	s.setValue("layout/photoMaxHeightMm", maxPhotoSpin->value());
+	if (m_photoPosCmb)
+	{
+		const int pi = m_photoPosCmb->findData(posCmb->currentData().toString());
+		if (pi >= 0)
+			m_photoPosCmb->setCurrentIndex(pi);
+	}
 	s.setValue("layout/wrapGapMm", wrapGapSpin->value());
+	{
+		SuneerObitModel om = SuneerObitModel::load();
+		const QString bg = obitBgCmb->currentText().trimmed();
+		if (!bg.isEmpty() && bg != om.photoBackground)
+		{
+			om.photoBackground = bg;
+			om.save();
+		}
+	}
 	s.setValue("image/height", imgHspin->value());
 	s.setValue("style/titleStyle", titleStyleEdit->text().trimmed());
 	s.setValue("style/kickerStyle", kickerStyleEdit->text().trimmed());

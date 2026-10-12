@@ -6,6 +6,8 @@
 #include <QDockWidget>
 #include "undoobject.h"
 #include <QPointer>
+#include <QColor>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -52,6 +54,8 @@ class PageItem;
  */
 class UndoState;
 class SimpleState;
+struct SuneerObitModel;
+class SuneerObitPhotoWorker;
 class SuneerNewsPanel : public QDockWidget, public UndoObject
 {
 	Q_OBJECT
@@ -64,6 +68,12 @@ public:
 	//! entities are decoded. The text itself is not normalised.
 	static QStringList contentToParagraphs(const QString& content);
 
+public slots:
+	//! The configuration dialog (server, layout, styles). Also reachable from
+	//! Windows → News Browser Settings… so a wrong server address can always
+	//! be corrected, logged in or not.
+	void onSettings();
+
 private slots:
 	void onFetchStatic();
 	void onEditionChanged(int index);
@@ -74,7 +84,6 @@ private slots:
 	void onPlaceNews();
 	void onPlaceSelected();
 	void onRefresh();
-	void onSettings();
 	void onLogin();
 	void onLogout();
 
@@ -93,6 +102,12 @@ private:
 	QPushButton* m_placeBtn      {nullptr};
 	QPushButton* m_refreshBtn    {nullptr};
 	QPushButton* m_settingsBtn   {nullptr};
+	QLabel*      m_hostLabel     {nullptr};   // "Server: host" under the title
+	void updateHostLabel();
+	//! One blocking GET with a short timeout; returns "HTTP 200 OK" or the error.
+	QString probeUrl(const QString& url);
+	//! http(s) URL with a host; *why says what is wrong.
+	static bool validServerUrl(const QString& url, QString* why);
 	QLabel*      m_statusLabel   {nullptr};
 	QLabel*      m_userLabel     {nullptr};
 	QLabel*      m_lockLabel     {nullptr};
@@ -217,6 +232,7 @@ public:
 	//! Selects every item of the story \a item belongs to.
 	void selectWholeStory(PageItem* item);
 	static QStringList photoPositionKeys();
+	static QStringList placePhotoPositionKeys();
 	static QString photoPositionLabel(const QString& key);
 private:
 	//! Frame width and column gap for \a cols columns from the column config.
@@ -319,8 +335,55 @@ private:
 	//! Downloads into the per-user cache. Empty on failure; \a why then says
 	//! what happened ("HTTP 403 …", "cache not writable"), with no secrets.
 	QString downloadImage(const QString& fileUrl, QString* why = nullptr);
+	//! The story's pictures, whatever the reply shape: newsMedia[].media,
+	//! newsMedia[] flat, mediaFiles[], media[], images[], the edition clone's
+	//! newsMedia, obitHeadshotUrl / imageUrl. Every entry comes back as
+	//! {media:{fileUrl,thumbUrl,caption,fileName,id}, caption}; entries
+	//! without any URL are dropped, duplicates (same fileUrl) folded.
+	static QJsonArray mediaList(const QJsonObject& news);
+	//! Copies \a from's pictures into \a into when \a into has none. True when changed.
+	static bool mergeMedia(QJsonObject& into, const QJsonObject& from);
+	//! Story has no picture in the list reply: ask the server once
+	//! (GET /news/:id, then /news/:id/media). Logged; never throws.
+	void fetchMediaIfMissing(QJsonObject& news);
+	//! A generated picture carrying the red "Image missing: <reason>" text,
+	//! loaded into the photo frame when the download failed. Empty on failure.
+	QString missingImagePlaceholder(const QString& reason) const;
+	//! File extension from the first bytes (jpg, png, gif, tif, bmp, psd,
+	//! webp) or empty when unknown. The server names WebP files ".jpg".
+	static QString sniffImageFormat(const QByteArray& bytes);
+	//! WebP bytes -> PNG bytes: Qt's webp plugin when present, else a
+	//! helper process (dwebp, python3 + Pillow). Empty with \a why on failure.
+	QByteArray convertWebpToPng(const QByteArray& webp, QString& how, QString& why) const;
 	static QString newsCaption(const QJsonObject& news);
 	static QString newsHighlights(const QJsonObject& news);
 	QString styleOrEmpty(const QString& name, const QString& what, QStringList& missing) const;
+
+	// ---- Layout model (Normal / Obituary) ---------------------------------
+	//! "Normal" = the 4-col story + 3-col photo placement above; "Obituary" =
+	//! the masonry obit modules of obituary.json (see suneer_news_obit.cpp).
+	QComboBox* m_layoutModelCmb {nullptr};
+	QHash<QString, QString> m_pageTypes;          // page id -> pageType from the page list
+	SuneerObitPhotoWorker* m_obitWorker {nullptr};
+	QList<QJsonObject> m_obitPending;             // stories waiting for the photo worker
+	QHash<QString, QString> m_obitPhotoOut;       // story id -> processed photo path
+	QHash<QString, QString> m_obitPhotoStatus;    // story id -> ok / noface / fail / cached
+	int m_obitPhotoFailed {0};
+	QHash<QString, QString> m_obitPhotoWhy;       // story id -> why the photo is missing / unprocessed
+	QHash<QString, QString> m_obitNewsPhoto;      // story id -> downloaded (unprocessed) photo of a short news
+	//! Settings key of the current page: its pageType, else its name.
+	QString layoutModelKey() const;
+	void fillLayoutModelCombo();
+	void preselectLayoutModel();
+	//! Obituary vs short news (long body or headline-like title).
+	static bool obitIsObituary(const QJsonObject& news, const SuneerObitModel& model);
+	//! Entry point of the Obituary model: pictures first (background), then obitPlaceNow().
+	void placeObituaries(const QList<QJsonObject>& stories);
+	void obitPlaceNow();
+	//! "<docname>_images/obit/" beside the document, or the news cache when unsaved.
+	QString obitImageDir() const;
+	//! Background tone for the obit photos: a document colour (added when
+	//! needed) and its RGB;  fillName receives the colour name.
+	QColor obitBackgroundColor(const SuneerObitModel& model, QString* fillName) const;
 };
 #endif
