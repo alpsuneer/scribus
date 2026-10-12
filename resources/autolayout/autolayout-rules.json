@@ -1,0 +1,994 @@
+{
+ "_about": "Auto-layout rules for Deshabhimani pages, learned from 7 general pages of 21-09-2024 (105 story modules). Units: mm unless stated; type sizes in pt. See report result-20261011-*-autolayout-phase1.md. Every rule carries 'source': 'measured' (from the SLA pages), 'given' (from the designer's brief, confirmed by measurement) or 'proposed' (my suggestion for the engine, not measured).",
+ "version": 1,
+ "learned_from": {
+  "pages": [
+   "21page3N.sla",
+   "21page4.sla",
+   "21page7.sla",
+   "21page9.sla",
+   "21page10.sla",
+   "21page11.sla",
+   "21page14.sla"
+  ],
+  "modules": 105,
+  "date_of_pages": "2024-09-21",
+  "excluded": [
+   "21page12charamam (obituary grid)",
+   "21page8TC/8TH,E/8TW/8TW1 (TV/cinema)",
+   "21edupage",
+   "21page13 Spo",
+   "21page Jacket",
+   "21page5SPL (feature spread)",
+   "21page6edit (editorial)",
+   "21page2/21page3 (empty)"
+  ]
+ },
+ "page": {
+  "width": 350.0,
+  "height": 538.0,
+  "margins": {
+   "left": 10.0,
+   "right": 10.0,
+   "top": 26.0,
+   "bottom": 15.0
+  },
+  "note": "Document default margins say 12/10/15 but every page's own PAGE element uses L/R 10, top 26 (room for the masthead strip at y=10-17 and the date/folio line at y=17-22), bottom 15 (page 14: 20). Source: measured.",
+  "masthead_strip": {
+   "x": 10.1,
+   "y": 10.0,
+   "w": 330.7,
+   "h": 6.7,
+   "kind": "image, locked area, never touch"
+  },
+  "folio_text": [
+   {
+    "x": 157.3,
+    "y": 10.0,
+    "w": 35.7,
+    "h": 6.7,
+    "what": "section name (ub84)"
+   },
+   {
+    "x": 10.0,
+    "y": 17.4,
+    "w": 61.2,
+    "h": 4.3,
+    "what": "date line, style 13 M (left pages)"
+   },
+   {
+    "x": 278.6,
+    "y": 18.3,
+    "w": 61.4,
+    "h": 4.3,
+    "what": "date line, style 13 M (right pages)"
+   }
+  ],
+  "content_area": {
+   "x": 10.0,
+   "y": 26.0,
+   "w": 330.0,
+   "h": 497.0
+  }
+ },
+ "grid": {
+  "columns": 8,
+  "column_width": 34.25,
+  "gutter": 8.0,
+  "pitch": 42.25,
+  "source": "measured: content width 330 = 8*34.25 + 7*8; frame x positions cluster at 10, 52, 94, 137, 179, 221, 263, 306",
+  "module_widths_mm": {
+   "1": 34.25,
+   "2": 76.5,
+   "3": 118.75,
+   "4": 161.0,
+   "5": 203.25,
+   "6": 245.5,
+   "7": 287.75,
+   "8": 330.0
+  },
+  "measured_frame_widths": {
+   "1": [
+    34
+   ],
+   "2": [
+    76,
+    77
+   ],
+   "3": [
+    118,
+    119
+   ],
+   "4": [
+    160,
+    161
+   ],
+   "5": [
+    203
+   ]
+  },
+  "column_x": [
+   10.0,
+   52.25,
+   94.5,
+   136.75,
+   179.0,
+   221.25,
+   263.5,
+   305.75
+  ]
+ },
+ "story_frame": {
+  "one_text_frame_per_story": true,
+  "internal_columns_equal_grid_columns": "101 of 102 single-frame modules",
+  "column_gap": 2.5,
+  "paragraph_order": [
+   "kicker (12 Kicker; 11 Kicker Lead on the lead) - optional",
+   "headline (NN M / 68 B / 72 B / 80 B, FullSpan=1 so it spans all columns)",
+   "07 Byline - optional",
+   "01 Dateline",
+   "02 BodyText / 03 BodyNoInd body paragraphs"
+  ],
+  "first_body_paragraph_style": "03 BodyNoInd (no indent), then 02 BodyText",
+  "body_font": {
+   "font": "DBI Text Regular",
+   "size": 9.3,
+   "leading": 9.3,
+   "align": "justified"
+  },
+  "headline_font": {
+   "M styles": "DZ DB Display 3 Medium (char style 'Headings')",
+   "68 B / 72 B": "DZ DB Display 5 Bold",
+   "80 B": "DZ DB Display 7 Black Condensed"
+  },
+  "split_frames_seen": "6 of 105 modules keep the headline in its own frame above the body frame (68 B/80 B leads, or a 3-col headline over 1+2-col bodies). Source: measured. Engine: always build the single-frame form; split only for 68/80 B leads if the designer wants it.",
+  "frames_are_never_chained": "no NEXTITEM/BACKITEM chains on the general pages (measured)"
+ },
+ "kicker": {
+  "usage": {
+   "1": "0/38",
+   "2": "5/24",
+   "3": "8/20",
+   "4": "4/19",
+   "5": "1/4"
+  },
+  "style_by_cols": {
+   "1": "never",
+   "2-4": "12 Kicker (18 pt, bullet ■)",
+   "5 (lead)": "11 Kicker Lead (24 pt)"
+  },
+  "source": "measured"
+ },
+ "byline": {
+  "usage": {
+   "1": "0/38",
+   "2": "4/24",
+   "3": "8/20",
+   "4": "10/19",
+   "5": "3/4"
+  },
+  "rule": "never on 1-col briefs; about half of 3-4 col stories; always on the lead. Use when the story text carries a byline. Source: measured"
+ },
+ "dateline": {
+  "usage": {
+   "1": "15/38",
+   "2": "15/24",
+   "3": "16/20",
+   "4": "13/19",
+   "5": "4/4"
+  },
+  "rule": "'01 Dateline' paragraph when the story has a place; 1-col briefs often fold the place into the body. Source: measured"
+ },
+ "headline": {
+  "size_by_cols_observed": {
+   "1": [
+    [
+     16.0,
+     33
+    ],
+    [
+     20.0,
+     4
+    ],
+    [
+     22.0,
+     1
+    ]
+   ],
+   "2": [
+    [
+     20.0,
+     3
+    ],
+    [
+     22.0,
+     1
+    ],
+    [
+     24.0,
+     14
+    ],
+    [
+     28.0,
+     3
+    ],
+    [
+     32.0,
+     2
+    ],
+    [
+     40.0,
+     1
+    ]
+   ],
+   "3": [
+    [
+     18.0,
+     1
+    ],
+    [
+     22.0,
+     1
+    ],
+    [
+     24.0,
+     1
+    ],
+    [
+     28.0,
+     3
+    ],
+    [
+     32.0,
+     4
+    ],
+    [
+     36.0,
+     5
+    ],
+    [
+     40.0,
+     1
+    ],
+    [
+     44.0,
+     1
+    ],
+    [
+     48.0,
+     1
+    ],
+    [
+     52.0,
+     1
+    ],
+    [
+     56.0,
+     1
+    ]
+   ],
+   "4": [
+    [
+     16.0,
+     1
+    ],
+    [
+     24.0,
+     2
+    ],
+    [
+     28.0,
+     2
+    ],
+    [
+     32.0,
+     5
+    ],
+    [
+     40.0,
+     4
+    ],
+    [
+     44.0,
+     1
+    ],
+    [
+     48.0,
+     2
+    ],
+    [
+     56.0,
+     1
+    ],
+    [
+     68.0,
+     1
+    ]
+   ],
+   "5": [
+    [
+     68.0,
+     1
+    ],
+    [
+     80.0,
+     3
+    ]
+   ]
+  },
+  "lines_by_cols_observed": {
+   "1": [
+    [
+     1,
+     14
+    ],
+    [
+     2,
+     10
+    ],
+    [
+     3,
+     11
+    ],
+    [
+     4,
+     2
+    ],
+    [
+     6,
+     1
+    ]
+   ],
+   "2": [
+    [
+     1,
+     12
+    ],
+    [
+     2,
+     9
+    ],
+    [
+     3,
+     3
+    ]
+   ],
+   "3": [
+    [
+     1,
+     13
+    ],
+    [
+     2,
+     7
+    ]
+   ],
+   "4": [
+    [
+     1,
+     15
+    ],
+    [
+     2,
+     4
+    ]
+   ],
+   "5": [
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     2
+    ]
+   ]
+  },
+  "chars_by_cols_observed": {
+   "1": {
+    "n": 38,
+    "min": 18,
+    "p25": 30,
+    "median": 37.0,
+    "p75": 45,
+    "max": 80
+   },
+   "2": {
+    "n": 24,
+    "min": 16,
+    "p25": 34,
+    "median": 41.0,
+    "p75": 46,
+    "max": 69
+   },
+   "3": {
+    "n": 20,
+    "min": 22,
+    "p25": 35,
+    "median": 38.0,
+    "p75": 47,
+    "max": 61
+   },
+   "4": {
+    "n": 19,
+    "min": 9,
+    "p25": 33,
+    "median": 37,
+    "p75": 42,
+    "max": 58
+   },
+   "5": {
+    "n": 4,
+    "min": 23,
+    "p25": 23,
+    "median": 25.5,
+    "p75": 54,
+    "max": 54
+   }
+  },
+  "rule_size_pt": {
+   "1": {
+    "default": 16,
+    "range": [
+     16,
+     22
+    ],
+    "font": "DZ DB Display 3/4 Medium (Condensed) local size, 2-4 lines"
+   },
+   "2": {
+    "default": 24,
+    "range": [
+     20,
+     32
+    ],
+    "lines": "2-3"
+   },
+   "3": {
+    "default": 32,
+    "range": [
+     28,
+     48
+    ],
+    "lines": "1-2 (36 for 2 lines)"
+   },
+   "4": {
+    "default": 32,
+    "range": [
+     28,
+     56
+    ],
+    "lines": "1-2; 40-48 for the page's second story"
+   },
+   "5": {
+    "default": 80,
+    "range": [
+     68,
+     80
+    ],
+    "style": "80 B (2 lines) or 68 B",
+    "lines": "2"
+   }
+  },
+  "importance_rule": "the page lead takes the largest size (80 B on 5 cols, 48-56 M on 4 cols, 44-52 M on 3 cols); the second story 40-68; others 24-36; briefs 16. Source: measured (lead per page = largest headline).",
+  "line_estimate": {
+   "formula": "lines = ceil(chars * k * size_pt / width_pt)",
+   "k": 0.4,
+   "k_measured": {
+    "median": 0.42,
+    "p25": 0.36,
+    "p75": 0.53
+   },
+   "note": "k = width_pt/(chars_per_line*size) from 47 headlines with manual breaks; chars exclude soft hyphens. Phase 2 should replace this with the real Scribus layout of the headline paragraph."
+  },
+  "line_spacing_pt": {
+   "16": 13.6,
+   "20": 18,
+   "24": 21,
+   "28": 25,
+   "32": 28,
+   "36": 31,
+   "40": 35,
+   "44": 39,
+   "48": 43,
+   "52": 45,
+   "56": 50,
+   "68": 60,
+   "72": 62,
+   "80": 69
+  },
+  "space_before_pt": 1.5,
+  "space_after_pt": {
+   "M styles": 0,
+   "80 B": 10
+  },
+  "header_block_height_mm_observed": {
+   "1": {
+    "n": 38,
+    "min": 5.3,
+    "p25": 10.1,
+    "median": 14.9,
+    "p75": 18.0,
+    "max": 29.3
+   },
+   "2": {
+    "n": 24,
+    "min": 6.9,
+    "p25": 15.3,
+    "median": 19.1,
+    "p75": 25.4,
+    "max": 40.0
+   },
+   "3": {
+    "n": 20,
+    "min": 6.9,
+    "p25": 20.9,
+    "median": 23.1,
+    "p75": 32.4,
+    "max": 42.5
+   },
+   "4": {
+    "n": 19,
+    "min": 5.3,
+    "p25": 15.7,
+    "median": 24.1,
+    "p75": 32.4,
+    "max": 83.2
+   },
+   "5": {
+    "n": 4,
+    "min": 43.4,
+    "p25": 49.2,
+    "median": 57.2,
+    "p75": 73.2,
+    "max": 73.2
+   }
+  }
+ },
+ "body_capacity": {
+  "definition": "body characters (soft hyphen, ZWJ, ZWNJ removed) per column-mm of body area; body area = frame columns x frame height - header block - photo+caption+2 mm wrap",
+  "chars_per_column_mm_by_cols": {
+   "1": {
+    "n": 38,
+    "min": 4.5,
+    "p25": 5.6,
+    "median": 6.1,
+    "p75": 6.5,
+    "max": 7.1
+   },
+   "2": {
+    "n": 24,
+    "min": 5.2,
+    "p25": 6.0,
+    "median": 6.4,
+    "p75": 7.2,
+    "max": 8.8
+   },
+   "3": {
+    "n": 20,
+    "min": 3.9,
+    "p25": 6.2,
+    "median": 6.7,
+    "p75": 8.2,
+    "max": 9.8
+   },
+   "4": {
+    "n": 19,
+    "min": 3.8,
+    "p25": 6.6,
+    "median": 7.6,
+    "p75": 8.9,
+    "max": 9.8
+   },
+   "5": {
+    "n": 4,
+    "min": 4.1,
+    "p25": 7.8,
+    "median": 8.4,
+    "p75": 9.6,
+    "max": 9.6
+   }
+  },
+  "chars_per_column_mm_no_photo_all": {
+   "n": 72,
+   "min": 3.9,
+   "p25": 5.9,
+   "median": 6.3,
+   "p75": 7.1,
+   "max": 9.8
+  },
+  "recommended": {
+   "1-col": 6.5,
+   "2-col": 7.0,
+   "3-col": 8.0,
+   "4-5-col": 8.5,
+   "note": "the given 6.2 holds for 1-col briefs; wider modules measure higher because their headline block is estimated and short body lines in narrow columns lose more to justification. Use these only for planning; the engine must verify with the real text layout (frame overflow check) before accepting a module height. Source: measured, medians."
+  },
+  "lines_per_mm": 2.731,
+  "chars_per_line_34mm_column": 6.5
+ },
+ "body_length_by_cols_observed_chars": {
+  "1": {
+   "n": 38,
+   "min": 204,
+   "p25": 321,
+   "median": 420.0,
+   "p75": 615,
+   "max": 1007
+  },
+  "2": {
+   "n": 24,
+   "min": 282,
+   "p25": 519,
+   "median": 698.0,
+   "p75": 907,
+   "max": 1201
+  },
+  "3": {
+   "n": 20,
+   "min": 318,
+   "p25": 722,
+   "median": 875.5,
+   "p75": 1130,
+   "max": 1978
+  },
+  "4": {
+   "n": 19,
+   "min": 500,
+   "p25": 981,
+   "median": 1272,
+   "p75": 1868,
+   "max": 2458
+  },
+  "5": {
+   "n": 4,
+   "min": 1099,
+   "p25": 1580,
+   "median": 1602.0,
+   "p75": 1641,
+   "max": 1641
+  }
+ },
+ "module_height_by_cols_observed": {
+  "1": {
+   "n": 38,
+   "min": 49.2,
+   "p25": 68.9,
+   "median": 88.5,
+   "p75": 119.6,
+   "max": 188.5
+  },
+  "2": {
+   "n": 24,
+   "min": 32.1,
+   "p25": 62.6,
+   "median": 73.2,
+   "p75": 97.1,
+   "max": 159.6
+  },
+  "3": {
+   "n": 20,
+   "min": 51.5,
+   "p25": 62.5,
+   "median": 75.5,
+   "p75": 109.5,
+   "max": 148.5
+  },
+  "4": {
+   "n": 19,
+   "min": 27.9,
+   "p25": 63.9,
+   "median": 99.6,
+   "p75": 113.8,
+   "max": 175.9
+  },
+  "5": {
+   "n": 4,
+   "min": 88.2,
+   "p25": 105.0,
+   "median": 133.3,
+   "p75": 174.9,
+   "max": 174.9
+  }
+ },
+ "width_choice_by_body_length": {
+  "rule": "briefs < 450 chars: 1 col; 450-900: 1-2 col; 700-1300: 2-3 col; 1000-2000: 3-4 col; lead: 4-5 col regardless, then depth follows. Source: measured quartiles of body chars per width (see body_length_by_cols_observed_chars)."
+ },
+ "photo": {
+  "share_of_modules_with_photo": {
+   "1": "6/38",
+   "2": "4/24",
+   "3": "8/20",
+   "4": "13/19",
+   "5": "2/4"
+  },
+  "photo_cols_vs_module_cols": [
+   [
+    [
+     1,
+     1
+    ],
+    6
+   ],
+   [
+    [
+     2,
+     1
+    ],
+    3
+   ],
+   [
+    [
+     2,
+     2
+    ],
+    1
+   ],
+   [
+    [
+     3,
+     1
+    ],
+    8
+   ],
+   [
+    [
+     3,
+     2
+    ],
+    2
+   ],
+   [
+    [
+     3,
+     3
+    ],
+    1
+   ],
+   [
+    [
+     4,
+     1
+    ],
+    11
+   ],
+   [
+    [
+     4,
+     2
+    ],
+    5
+   ],
+   [
+    [
+     4,
+     3
+    ],
+    3
+   ],
+   [
+    [
+     5,
+     1
+    ],
+    2
+   ]
+  ],
+  "rule_width": "1 column in most modules (31 of 42 photos); 2 columns in 3-4 col stories; 3 columns only for the lead or a picture story. Source: measured.",
+  "position": {
+   "vertical": "top of the body, right under the headline/byline block (33 of 42); photo stacked above the headline in 4 (picture-led stories); mid-column only in 1-col briefs",
+   "horizontal": "centre column of the module (20), right edge (15), left (7). 1-col briefs: right edge, 2-3 col: centre or right, 4 col: centre (10) or right (6). Source: measured."
+  },
+  "height_mm_by_photo_cols": {
+   "1": {
+    "n": 30,
+    "min": 11.3,
+    "p25": 22.2,
+    "median": 28.8,
+    "p75": 41.6,
+    "max": 100.2
+   },
+   "2": {
+    "n": 8,
+    "min": 26.3,
+    "p25": 38.1,
+    "median": 46.7,
+    "p75": 55.8,
+    "max": 77.9
+   },
+   "3": {
+    "n": 4,
+    "min": 23.7,
+    "p25": 48.7,
+    "median": 62.2,
+    "p75": 85.6,
+    "max": 85.6
+   }
+  },
+  "aspect_w_over_h": {
+   "n": 42,
+   "min": 0.4,
+   "p25": 0.9,
+   "median": 1.0,
+   "p75": 1.5,
+   "max": 5.0
+  },
+  "wrap": "separate image frame over the text frame, text flows around the frame; 2 mm wrap offsets (existing News Browser rule). Source: given.",
+  "caption": {
+   "style": "09 Caption (9.5/8.5)",
+   "placement": "separate frame directly under the photo, same width, 0 gap",
+   "height_mm": {
+    "n": 13,
+    "min": 2.9,
+    "p25": 5.9,
+    "median": 7.2,
+    "p75": 8.0,
+    "max": 10.8
+   },
+   "lines": "1-3, usually 2",
+   "chars": {
+    "n": 13,
+    "min": 10,
+    "p25": 60,
+    "median": 110,
+    "p75": 131,
+    "max": 185
+   },
+   "captions_found": "13 of 42 photos (mugshots carry none)"
+  }
+ },
+ "gaps": {
+  "horizontal_between_modules": {
+   "median": 8.0,
+   "observed": "82 of 85 pairs exactly the 8 mm gutter"
+  },
+  "vertical_between_modules": {
+   "median": 4.8,
+   "p25": 2.5,
+   "p75": 7.2,
+   "observed_histogram_mm": [
+    [
+     0,
+     2
+    ],
+    [
+     1,
+     8
+    ],
+    [
+     2,
+     15
+    ],
+    [
+     3,
+     8
+    ],
+    [
+     4,
+     8
+    ],
+    [
+     5,
+     9
+    ],
+    [
+     6,
+     10
+    ],
+    [
+     7,
+     11
+    ],
+    [
+     8,
+     14
+    ],
+    [
+     9,
+     2
+    ],
+    [
+     11,
+     2
+    ],
+    [
+     14,
+     1
+    ],
+    [
+     15,
+     3
+    ],
+    [
+     19,
+     1
+    ]
+   ],
+   "rule": "5 mm default; 2-3 mm between a rail brief and the next; up to 8 mm under a rule line / before a big headline. Source: measured."
+  },
+  "rule_lines": "0.35 mm hairlines are drawn between stacked modules and beside rails on about half the pages (measured as PTYPE 5 lines); optional in Phase 2."
+ },
+ "placement": {
+  "lead": {
+   "observed_per_page": [
+    [
+     "21page3N.sla",
+     5,
+     1,
+     142
+    ],
+    [
+     "21page4.sla",
+     4,
+     1,
+     268
+    ],
+    [
+     "21page7.sla",
+     5,
+     1,
+     113
+    ],
+    [
+     "21page9.sla",
+     5,
+     3,
+     95
+    ],
+    [
+     "21page10.sla",
+     3,
+     1,
+     26
+    ],
+    [
+     "21page11.sla",
+     4,
+     0,
+     413
+    ],
+    [
+     "21page14.sla",
+     3,
+     1,
+     308
+    ]
+   ],
+   "rule": "5 cols on an inside page (col 1-5 or 3-7), top third of the page (y 95-145) under a top band of 2-4 col stories; on pages without an 80 B story the biggest story (44-52 M, 3-4 cols) sits mid/low page. Source: measured."
+  },
+  "rails": {
+   "observed": "38 one-col briefs: 22 at col 0, 9 at col 7, 7 inner",
+   "rule": "left rail (x=10) is the brief column on every page; right rail (x=306) on about half. Stack briefs top to bottom with 2-5 mm gaps. Source: measured."
+  },
+  "secondary": "2-4 col stories tile the middle 6 columns in horizontal bands; a band's modules share the top edge (26 of 79 side-by-side pairs) more often than the bottom (22 of 79). Source: measured.",
+  "ads": "loose image frames at the bottom right (163x250 / 163x280 at x=177 y=243-273; 80x100 pairs at y=418; 122x200 at x=52) - locked, outside the free area. Source: measured.",
+  "fill": "every general page fills to y=524 (bottom margin 15) with no holes larger than a gap. Source: measured."
+ },
+ "engine_defaults_proposed": {
+  "vertical_gap": 5.0,
+  "horizontal_gap": 8.0,
+  "min_module_height": {
+   "1": 45,
+   "2": 30,
+   "3": 50,
+   "4": 28
+  },
+  "max_module_height": {
+   "1": 190,
+   "2": 160,
+   "3": 150,
+   "4": 176,
+   "5": 175
+  },
+  "body_min_cols_for_photo": 1,
+  "photo_default_cols": {
+   "1": 1,
+   "2": 1,
+   "3": 1,
+   "4": 1,
+   "5": 2
+  },
+  "caption_lines_default": 2,
+  "wrap_offset_mm": 2.0,
+  "never_shrink_body": true
+ }
+}
