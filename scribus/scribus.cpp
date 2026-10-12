@@ -1025,17 +1025,11 @@ void ScribusMainWindow::initPalettes()
 					}
 					else
 					{
+						// suneer: through the document funnel, like the selection
+						// case: undo step, and the leading follows the size.
 						int pos = item->itemText.cursorPosition();
-						CharStyle cs = item->itemText.charStyle(pos);
-
-						int curSz = qRound(cs.fontSize());
-						cs.setFontSize(curSz + 10);
-
-						item->itemText.applyCharStyle(pos, 1, cs);
-
-						item->update();
-						doc->regionsChanged()->update(QRectF());
-						doc->changed();
+						int curSz = qRound(item->itemText.charStyle(pos).fontSize());
+						doc->itemSelection_SetFontSize(curSz + 10);
 					}
 				}
 				else
@@ -1077,17 +1071,11 @@ void ScribusMainWindow::initPalettes()
 					}
 					else
 					{
+						// suneer: through the document funnel, like the selection
+						// case: undo step, and the leading follows the size.
 						int pos = item->itemText.cursorPosition();
-						CharStyle cs = item->itemText.charStyle(pos);
-
-						int curSz = qRound(cs.fontSize());
-						cs.setFontSize(qMax(10, curSz - 10));
-
-						item->itemText.applyCharStyle(pos, 1, cs);
-
-						item->update();
-						doc->regionsChanged()->update(QRectF());
-						doc->changed();
+						int curSz = qRound(item->itemText.charStyle(pos).fontSize());
+						doc->itemSelection_SetFontSize(qMax(10, curSz - 10));
 					}
 				}
 				else
@@ -10147,7 +10135,12 @@ void ScribusMainWindow::suneerEnlargeTextSize()
 		suneerRecordAndApplyCharStyle(m_undoManager, item, text, runStart, runEnd - runStart, cs);
 		runStart = runEnd;
 	}
-	// Line spacing proportionally change
+	// Line spacing proportionally change. With auto-adjusted leading on, the
+	// paragraphs follow the style's leading/size ratio (every paragraph in
+	// the range); otherwise the old fixed +/-0.3 pt step on the first one.
+	if (doc->typographicPrefs().autoAdjustLeading)
+		doc->suneerAutoAdjustLeading(item, start, end);
+	else
 	{
 		ParagraphStyle ps = text.paragraphStyle(start);
 		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
@@ -10208,7 +10201,12 @@ void ScribusMainWindow::suneerReduceTextSize()
 		suneerRecordAndApplyCharStyle(m_undoManager, item, text, runStart, runEnd - runStart, cs);
 		runStart = runEnd;
 	}
-	// Line spacing proportionally change
+	// Line spacing proportionally change. With auto-adjusted leading on, the
+	// paragraphs follow the style's leading/size ratio (every paragraph in
+	// the range); otherwise the old fixed +/-0.3 pt step on the first one.
+	if (doc->typographicPrefs().autoAdjustLeading)
+		doc->suneerAutoAdjustLeading(item, start, end);
+	else
 	{
 		ParagraphStyle ps = text.paragraphStyle(start);
 		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)

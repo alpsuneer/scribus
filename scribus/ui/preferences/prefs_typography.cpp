@@ -45,6 +45,8 @@ void Prefs_Typography::languageChange()
 	strikeoutLineWidthSpinBox->setToolTip( tr( "Line width expressed as a percentage of the font size" ) );
 	smallcapsScalingSpinBox->setToolTip( tr( "Relative size of the small caps font compared to the normal font" ) );
 	automaticLineSpacingSpinBox->setToolTip( tr( "Percentage increase over the font size for the line spacing" ) );
+	autoAdjustLeadingCheckBox->setToolTip( tr( "When the font size of text is changed locally (control bar, Properties, shortcuts, fit tools, Design Style) and the paragraph uses fixed line spacing, the paragraph's line spacing is scaled with the paragraph style's own leading/size ratio. Existing documents are not changed when opened; only new edits." ) );
+	autoLeadingRatioSpinBox->setToolTip( tr( "Used when the paragraph style has no usable leading/size ratio: line spacing = this percentage of the largest font size in the paragraph." ) );
 }
 
 void Prefs_Typography::updateParagraphStyles(QString removedID, QString newID)
@@ -74,6 +76,8 @@ void Prefs_Typography::restoreDefaults(struct ApplicationPrefs *prefsData)
 	strikeoutLineWidthSpinBox->setValue(prefsData->typoPrefs.valueStrikeThruWidth / 10.0);
 	smallcapsScalingSpinBox->setValue(prefsData->typoPrefs.valueSmallCaps);
 	automaticLineSpacingSpinBox->setValue(prefsData->typoPrefs.autoLineSpacing);
+	autoAdjustLeadingCheckBox->setChecked(prefsData->typoPrefs.autoAdjustLeading != 0);
+	autoLeadingRatioSpinBox->setValue(prefsData->typoPrefs.autoLeadingRatio);
 	opticalMarginsEditor->setOpticalMarginSets(prefsData->typoPrefs.opticalMarginSets);
 }
 
@@ -89,6 +93,8 @@ void Prefs_Typography::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefsData->typoPrefs.valueStrikeThruWidth = strikeoutLineWidthSpinBox->value() * 10.0;
 	prefsData->typoPrefs.valueSmallCaps = smallcapsScalingSpinBox->value();
 	prefsData->typoPrefs.autoLineSpacing = automaticLineSpacingSpinBox->value();
+	prefsData->typoPrefs.autoAdjustLeading = autoAdjustLeadingCheckBox->isChecked() ? 1 : 0;
+	prefsData->typoPrefs.autoLeadingRatio = autoLeadingRatioSpinBox->value();
 	prefsData->typoPrefs.opticalMarginSets = opticalMarginsEditor->opticalMarginSets();
 }
 

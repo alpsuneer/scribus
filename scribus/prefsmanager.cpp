@@ -317,6 +317,8 @@ void PrefsManager::initDefaults()
 	appPrefs.typoPrefs.scalingSubScript = 66;
 	appPrefs.typoPrefs.valueSmallCaps = 75;
 	appPrefs.typoPrefs.autoLineSpacing = 100;
+	appPrefs.typoPrefs.autoAdjustLeading = 1;
+	appPrefs.typoPrefs.autoLeadingRatio = 88;
 	appPrefs.typoPrefs.valueUnderlinePos = -1;
 	appPrefs.typoPrefs.valueUnderlineWidth = -1;
 	appPrefs.typoPrefs.valueStrikeThruPos = -1;
@@ -1661,6 +1663,8 @@ bool PrefsManager::writePref(const QString& filePath)
 	dcTypography.setAttribute("SuperScriptScaling", appPrefs.typoPrefs.scalingSuperScript);
 	dcTypography.setAttribute("SmallCapsScaling", appPrefs.typoPrefs.valueSmallCaps);
 	dcTypography.setAttribute("AutomaticLineSpacing", appPrefs.typoPrefs.autoLineSpacing);
+	dcTypography.setAttribute("SuneerAutoAdjustLeading", appPrefs.typoPrefs.autoAdjustLeading);
+	dcTypography.setAttribute("SuneerAutoLeadingRatio", appPrefs.typoPrefs.autoLeadingRatio);
 	if (appPrefs.typoPrefs.valueUnderlinePos == -1)
 		dcTypography.setAttribute("UnderlineDistance", appPrefs.typoPrefs.valueUnderlinePos);
 	else
@@ -2411,6 +2415,8 @@ bool PrefsManager::readPref(const QString& filePath)
 			appPrefs.typoPrefs.scalingSubScript = dc.attribute("SubScriptScaling").toInt();
 			appPrefs.typoPrefs.valueSmallCaps  = dc.attribute("SmallCapsScaling").toInt();
 			appPrefs.typoPrefs.autoLineSpacing = dc.valueAsInt("AutomaticLineSpacing", 1, 500, 100);
+			appPrefs.typoPrefs.autoAdjustLeading = dc.valueAsInt("SuneerAutoAdjustLeading", 0, 1, 1);
+			appPrefs.typoPrefs.autoLeadingRatio = dc.valueAsInt("SuneerAutoLeadingRatio", 50, 200, 88);
 			double ulp = ScCLocale::toDoubleC(dc.attribute("UnderlineDistance"), -1.0);
 			if (ulp != -1)
 				appPrefs.typoPrefs.valueUnderlinePos = qRound(ulp * 10);

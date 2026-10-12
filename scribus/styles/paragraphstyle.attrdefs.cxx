@@ -18,6 +18,12 @@
 
 ATTRDEF(ParagraphStyle::LineSpacingMode, lineSpacingMode, LineSpacingMode, ParagraphStyle::FixedLineSpacing)
 ATTRDEF(double, lineSpacing, LineSpacing, 0.0)
+// suneer: set together with a local LineSpacing that was derived from a font
+// size change (auto-adjusted leading). The layout then refuses to let a line
+// whose glyphs are far taller than the fixed leading overlap the line above.
+// Absent in files written before this attribute existed, so old documents
+// keep their exact line positions.
+ATTRDEF(bool, leadingGuard, LeadingGuard, false)
 ATTRDEF(ParagraphStyle::AlignmentType, alignment, Alignment, LeftAligned)
 ATTRDEF(ParagraphStyle::DirectionType, direction, Direction, LTR)
 ATTRDEF(int, opticalMargins, OpticalMargins, 0)

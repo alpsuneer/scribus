@@ -3098,6 +3098,10 @@ void Scribus150Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 	if (attrs.hasAttribute(LINESP))
 		newStyle.setLineSpacing(attrs.valueAsDouble(LINESP));
 
+	static const QString SUNEERLEADINGGUARD("SuneerLeadingGuard");
+	if (attrs.hasAttribute(SUNEERLEADINGGUARD))
+		newStyle.setLeadingGuard(attrs.valueAsInt(SUNEERLEADINGGUARD) != 0);
+
 	static const QString INDENT("INDENT");
 	if (attrs.hasAttribute(INDENT))
 		newStyle.setLeftMargin(attrs.valueAsDouble(INDENT));
@@ -5596,6 +5600,8 @@ PageItem* Scribus150Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	ParagraphStyle pstyle;
 	if (attrs.hasAttribute("LINESP"))
 		pstyle.setLineSpacing(attrs.valueAsDouble("LINESP"));
+	if (attrs.hasAttribute("SuneerLeadingGuard"))
+		pstyle.setLeadingGuard(attrs.valueAsInt("SuneerLeadingGuard") != 0);
 	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute("LINESPMode"))
 		pstyle.setLineSpacingMode(static_cast<ParagraphStyle::LineSpacingMode>(attrs.valueAsInt("LINESPMode", 0)));

@@ -3653,6 +3653,10 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
                 }
                 else
                     suneerRecordAndApplyParaStyle(tf, tf->itemText, pos, ps);
+                // suneer: the paragraph's leading follows whatever size the
+                // text now has (back to the style's own leading when the
+                // manual sizes were cleared). Same undo step.
+                m_doc->suneerAutoAdjustLeading(tf, pos, pEnd);
             }
             // Insert column break after this paragraph if style matches colBreak
             // Insert column break if style matches

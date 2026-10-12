@@ -3599,6 +3599,8 @@ void Scribus171Format::readParagraphStyle(ScribusDoc *doc, ScXmlStreamReader& re
 		newStyle.setLineSpacing(attrs.valueAsDouble("LINESP"));
 	else if (attrs.hasAttribute("LineSpacing"))
 		newStyle.setLineSpacing(attrs.valueAsDouble("LineSpacing"));
+	if (attrs.hasAttribute("SuneerLeadingGuard"))
+		newStyle.setLeadingGuard(attrs.valueAsInt("SuneerLeadingGuard") != 0);
 
 	//Remove uppercase in 1.8 format
 	if (attrs.hasAttribute("INDENT"))
@@ -6588,6 +6590,8 @@ PageItem* Scribus171Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 	else
 		if (attrs.hasAttribute("LineSpacing"))
 			pstyle.setLineSpacing(attrs.valueAsDouble("LineSpacing"));
+	if (attrs.hasAttribute("SuneerLeadingGuard"))
+		pstyle.setLeadingGuard(attrs.valueAsInt("SuneerLeadingGuard") != 0);
 	//Remove uppercase in 1.8
 	// Some legacy documents spell this attribute in all caps; modern spelling wins.
 	if (attrs.hasAttribute("LINESPMode"))

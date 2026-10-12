@@ -528,6 +528,33 @@
                </property>
               </widget>
              </item>
+             <item row="1" column="0" colspan="2">
+              <widget class="QCheckBox" name="autoAdjustLeadingCheckBox">
+               <property name="text">
+                <string>Auto-adjust line spacing when font size changes</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="autoLeadingRatioLabel">
+               <property name="text">
+                <string>Fallback ratio (leading / size):</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QSpinBox" name="autoLeadingRatioSpinBox">
+               <property name="suffix">
+                <string> %</string>
+               </property>
+               <property name="minimum">
+                <number>50</number>
+               </property>
+               <property name="maximum">
+                <number>200</number>
+               </property>
+              </widget>
+             </item>
             </layout>
            </item>
           </layout>
@@ -597,6 +624,8 @@
   <tabstop>strikeoutDisplacementSpinBox</tabstop>
   <tabstop>strikeoutLineWidthSpinBox</tabstop>
   <tabstop>automaticLineSpacingSpinBox</tabstop>
+  <tabstop>autoAdjustLeadingCheckBox</tabstop>
+  <tabstop>autoLeadingRatioSpinBox</tabstop>
  </tabstops>
  <resources/>
  <connections/>

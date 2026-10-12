@@ -1198,6 +1198,19 @@ public:
 	void itemSelection_SetLanguage(const QString& w, Selection* customSelection = nullptr);
 	void itemSelection_SetFont(const QString& font, Selection* customSelection = nullptr);
 	void itemSelection_SetFontSize(int size, Selection* customSelection = nullptr);
+	//! suneer: auto-adjusted leading. After the font size of text in
+	//! [start, stop) of item changed locally, scale the FIXED line spacing of
+	//! every paragraph that range touches with the paragraph style's own
+	//! leading/size ratio (fallback: typoPrefs.autoLeadingRatio % of the largest
+	//! size in the paragraph). Local paragraph attribute only; sets LeadingGuard.
+	//! Records undo states (call inside the caller's transaction) when
+	//! recordUndo is true and undo is enabled. No-op when the preference is off.
+	void suneerAutoAdjustLeading(PageItem* item, int start, int stop, bool recordUndo = true);
+	//! The leading suneerAutoAdjustLeading() would give a paragraph with style
+	//! para whose largest font size is maxSizePt. 0 = leave the paragraph alone.
+	//! backToStyle is set when that value is the style's own leading, so the
+	//! local attribute can be dropped instead of written.
+	double suneerLeadingFor(const ParagraphStyle& para, double maxSizePt, bool* backToStyle = nullptr) const;
 	void itemSelection_SetFontFeatures(const QString& fontfeature, Selection* customSelection = nullptr);
 	void itemSelection_SetParBackgroundColor(QString farbe, Selection* customSelection = nullptr);
 	void itemSelection_SetParBackgroundShade(int sha, Selection* customSelection = nullptr);

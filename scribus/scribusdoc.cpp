@@ -8277,6 +8277,123 @@ void ScribusDoc::itemSelection_SetFontSize(int size, Selection* customSelection)
 	itemSelection_ApplyCharStyle(newStyle, customSelection, "FONT_SIZE");
 }
 
+// suneer: auto-adjusted leading -------------------------------------------
+// The paragraph style as the operator defined it, without the paragraph's local
+// overrides: the ratio leading/size comes from there ("36 M" = 31/36 = 0.861).
+// Returns false when there is no usable ratio (not fixed, zero, or absurd).
+static bool suneerStyleLeadingBase(const ScribusDoc* doc, const ParagraphStyle& para, double& baseLeading, double& baseSize)
+{
+	baseLeading = 0.0;
+	baseSize = 0.0;
+	// The style the paragraph (or a frame's default style) is based on. A named
+	// parent is looked up directly; without one, the context's parent is the
+	// frame's default style (for a paragraph) or the document default (for a
+	// frame's default style). Not ParagraphStyle::erase(): that drops the
+	// parent name as well and would resolve to the document default.
+	const ParagraphStyle* base = nullptr;
+	if (!para.parent().isEmpty() && doc->paragraphStyles().contains(para.parent()))
+		base = &doc->paragraphStyles().get(para.parent());
+	else
+		base = dynamic_cast<const ParagraphStyle*>(para.parentStyle());
+	if (!base)
+		return false;
+	if (base->lineSpacingMode() != ParagraphStyle::FixedLineSpacing)
+		return false;
+	baseLeading = base->lineSpacing();
+	baseSize = base->charStyle().fontSize() / 10.0;
+	if (baseLeading <= 0.0 || baseSize <= 0.0)
+		return false;
+	double ratio = baseLeading / baseSize;
+	return (ratio >= 0.5) && (ratio <= 2.0);
+}
+
+double ScribusDoc::suneerLeadingFor(const ParagraphStyle& para, double maxSizePt, bool* backToStyle) const
+{
+	if (backToStyle)
+		*backToStyle = false;
+	if (maxSizePt <= 0.0)
+		return 0.0;
+	if (para.lineSpacingMode() != ParagraphStyle::FixedLineSpacing)
+		return 0.0;
+	double baseLeading = 0.0, baseSize = 0.0;
+	double target;
+	bool haveRatio = suneerStyleLeadingBase(this, para, baseLeading, baseSize);
+	if (haveRatio)
+		target = maxSizePt * (baseLeading / baseSize);
+	else
+		target = maxSizePt * (m_docPrefsData.typoPrefs.autoLeadingRatio / 100.0);
+	target = qRound(target * 10.0) / 10.0;
+	if (target <= 0.0)
+		return 0.0;
+	if (haveRatio && backToStyle && (qAbs(target - baseLeading) < 0.051))
+		*backToStyle = true;
+	return target;
+}
+
+void ScribusDoc::suneerAutoAdjustLeading(PageItem* item, int start, int stop, bool recordUndo)
+{
+	if (!item || !m_docPrefsData.typoPrefs.autoAdjustLeading)
+		return;
+	if (!item->isTextFrame() && !item->isPathText())
+		return;
+	StoryText& text = item->itemText;
+	int len = text.length();
+	start = qBound(0, start, len);
+	stop = qBound(start, stop, len);
+	uint firstPar = text.nrOfParagraph(start);
+	uint lastPar = text.nrOfParagraph(qMax(start, stop - 1));
+	for (uint par = firstPar; par <= lastPar; ++par)
+	{
+		int pStart = text.startOfParagraph(par);
+		int pEnd = text.endOfParagraph(par); // position of the PARSEP, or len
+		if (pStart > len)
+			break;
+		const ParagraphStyle& para = text.paragraphStyle(qMin(pStart, len));
+		if (para.lineSpacingMode() != ParagraphStyle::FixedLineSpacing)
+			continue;
+		// Largest size in the paragraph. An empty paragraph takes the size its
+		// PARSEP carries: that is what the next typed character will get.
+		double maxSize = 0.0;
+		for (int i = pStart; i < pEnd; ++i)
+			maxSize = qMax(maxSize, text.charStyle(i).fontSize() / 10.0);
+		if (maxSize <= 0.0 && pEnd < len)
+			maxSize = text.charStyle(pEnd).fontSize() / 10.0;
+		if (maxSize <= 0.0 && len == 0)
+			maxSize = text.defaultStyle().charStyle().fontSize() / 10.0;
+		bool backToStyle = false;
+		double target = suneerLeadingFor(para, maxSize, &backToStyle);
+		if (target <= 0.0)
+			continue;
+
+		ParagraphStyle newPara(para);
+		if (backToStyle)
+		{
+			newPara.resetLineSpacing();
+			newPara.resetLeadingGuard();
+		}
+		else
+		{
+			newPara.setLineSpacing(target);
+			newPara.setLeadingGuard(true);
+		}
+		if (newPara.equiv(para))
+			continue;
+		// Whole-style replacement, so dropping a local value undoes as cleanly
+		// as setting one (PageItem::restoreSetParagraphStyle).
+		int pos = qMin(pEnd, len);
+		if (recordUndo && UndoManager::undoEnabled())
+		{
+			auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+			is->set("SET_PARASTYLE");
+			is->set("POS", pos);
+			is->setStates(para, newPara);
+			m_undoManager->action(item, is);
+		}
+		text.setStyle(pos, newPara);
+		item->invalid = true;
+	}
+}
+
 void ScribusDoc::itemSelection_SetFontFeatures(const QString& fontfeature, Selection* customSelection)
 {
 	CharStyle newStyle;
@@ -10312,11 +10429,34 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 			}
 			currItem->itemText.applyCharStyle(start, qMax(0, length), newStyle);
 			currItem->invalid = true;
+			// suneer: the leading follows a local size change (same undo step)
+			if (!newStyle.isInhFontSize())
+				suneerAutoAdjustLeading(currItem, start, start + qMax(0, length));
 		}
 		else
 		{
 			ParagraphStyle dstyle(currItem->itemText.defaultStyle());
 			dstyle.charStyle().applyCharStyle(newStyle);
+			// suneer: the frame's default style follows the new size too, so an
+			// empty frame or the trailing paragraph gets the matching leading.
+			if (!newStyle.isInhFontSize() && m_docPrefsData.typoPrefs.autoAdjustLeading)
+			{
+				bool backToStyle = false;
+				double target = suneerLeadingFor(dstyle, newStyle.fontSize() / 10.0, &backToStyle);
+				if (target > 0.0)
+				{
+					if (backToStyle)
+					{
+						dstyle.resetLineSpacing();
+						dstyle.resetLeadingGuard();
+					}
+					else
+					{
+						dstyle.setLineSpacing(target);
+						dstyle.setLeadingGuard(true);
+					}
+				}
+			}
 			if (UndoManager::undoEnabled())
 			{
 				auto *is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
@@ -10345,9 +10485,20 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 					lastParent = curParent;
 				}
 			}
+			// suneer: an empty story still remembers the formatting of the text it
+			// held (what the palette shows); keep it and layer the new value on it,
+			// so the next typed character gets exactly what the palette displays.
+			CharStyle rememberedStyle(currItem->itemText.charStyle(0));
 			currItem->itemText.setDefaultStyle(dstyle);
+			if (currItemTextCount == 0)
+			{
+				currItem->itemText.applyCharStyleToEmptyStory(rememberedStyle);
+				currItem->itemText.applyCharStyleToEmptyStory(newStyle);
+			}
 			currItem->itemText.applyCharStyle(0, currItem->itemText.length(), newStyle);
 			currItem->invalid = true;
+			if (!newStyle.isInhFontSize())
+				suneerAutoAdjustLeading(currItem, 0, currItem->itemText.length());
 			if (currItem->isNoteFrame())
 				setNotesChanged(true);
 			else if (currItem->isTextFrame())
@@ -10407,6 +10558,8 @@ void ScribusDoc::itemSelection_SetCharStyle(const CharStyle & newStyle, Selectio
 				m_undoManager->action(currItem, is);
 			}
 			currItem->itemText.setCharStyle(start, length, newStyle);
+			if (!newStyle.isInhFontSize())
+				suneerAutoAdjustLeading(currItem, start, start + qMax(0, length));
 			currItem->invalid = true;
 		}
 		else
@@ -10429,6 +10582,8 @@ void ScribusDoc::itemSelection_SetCharStyle(const CharStyle & newStyle, Selectio
 			}
 			currItem->itemText.setDefaultStyle(dstyle);
 			currItem->itemText.setCharStyle(0, currItem->itemText.length(), newStyle);
+			if (!newStyle.isInhFontSize())
+				suneerAutoAdjustLeading(currItem, 0, currItem->itemText.length());
 			if (currItem->isNoteFrame())
 				setNotesChanged(true);
 			else if (currItem->isTextFrame())

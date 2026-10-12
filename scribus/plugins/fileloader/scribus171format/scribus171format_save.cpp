@@ -833,6 +833,8 @@ void Scribus171Format::putPStyle(ScXmlStreamWriter & docu, const ParagraphStyle 
 		docu.writeAttribute("LineSpacingMode", style.lineSpacingMode());
 	if (!style.isInhLineSpacing())
 		docu.writeAttribute("LineSpacing", style.lineSpacing());
+	if (!style.isInhLeadingGuard())
+		docu.writeAttribute("SuneerLeadingGuard", static_cast<int>(style.leadingGuard()));
 	if (!style.isInhLeftMargin())
 		docu.writeAttribute("LeftMargin", style.leftMargin());
 	if (!style.isInhRightMargin())

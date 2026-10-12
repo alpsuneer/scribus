@@ -82,6 +82,12 @@ struct TypoPrefs
 	int scalingSubScript; //! Scaling of subscript
 	int valueSmallCaps; //! Scaling of small caps
 	int autoLineSpacing; //! Automatic line spacing percentage
+	// suneer: a local font size change scales the paragraph's fixed line
+	// spacing with the style's own leading/size ratio (1 = on). When the style
+	// has no usable ratio, leading = autoLeadingRatio % of the largest size.
+	// ints, not bool/double: operator== is a memcmp and padding would lie.
+	int autoAdjustLeading;
+	int autoLeadingRatio;
 	int valueUnderlinePos; //! Underline displacement
 	int valueUnderlineWidth; //! Underline width
 	int valueStrikeThruPos; //! Strike-through displacement

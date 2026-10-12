@@ -537,6 +537,12 @@ struct LineControl {
 	int      restartRowIndex { 0 };  //index of glyph run where row of text is started
 	double   restartX { 0.0 }; //starting X position of line if must be restarted
 	double   rowDesc { 0.0 };
+	// suneer: real ink extents of the line being built, and the ink bottom of
+	// the line committed before it (frame coordinates). Used by the leading
+	// guard for paragraphs with LeadingGuard set.
+	double   inkAscent { 0.0 };
+	double   inkDescent { 0.0 };
+	double   prevLineInkBottom { -1.0 };
 
 	double   xPos { 0.0 };
 	double   yPos { 0.0 };
@@ -578,6 +584,7 @@ struct LineControl {
 	void nextColumn(TextLayout &textLayout)
 	{
 		startOfCol = true;
+		prevLineInkBottom = -1.0; // no line above in a fresh column
 		if (textLayout.story()->defaultStyle().direction() == ParagraphStyle::RTL)
 			colLeft = textLayout.frame()->width() - insets.right() - ((colWidth * (column + 1)) + (colGap * column));
 		else
@@ -632,6 +639,8 @@ struct LineControl {
 		rightIndent = 0.0;
 		rightMargin = 0.0;
 		rowDesc = 0.0;
+		inkAscent = 0.0;
+		inkDescent = 0.0;
 	}
 
 
@@ -2014,6 +2023,22 @@ if (HasMark)
 					}
 				}
 			}
+			// suneer: ink extents of this character for the leading guard.
+			// realDesc above is a running maximum over the whole frame, so the
+			// descent is measured again here, for this cluster only.
+			double inkAsce = 0.0, inkDesc = 0.0;
+			if (!DropCmode && !HasObject && itemText.text(a) != SpecialChars::OBJECT)
+			{
+				const QList<GlyphLayout>& inkGlyphs = current.glyphs[currentIndex].glyphs();
+				for (const GlyphLayout& gl : inkGlyphs)
+				{
+					GlyphMetrics gm = font.glyphBBox(gl.glyph, hlcsize10);
+					inkAsce = qMax(inkAsce, gm.ascent * scaleV + offset);
+					inkDesc = qMax(inkDesc, gm.descent * scaleV - offset);
+				}
+			}
+			current.inkAscent = qMax(current.inkAscent, inkAsce);
+			current.inkDescent = qMax(current.inkDescent, inkDesc);
 //			if (BulNumMode)
 //				hl->glyph.last()->xadvance += style.parEffectOffset();
 			//check for Y position at beginning of line
@@ -2299,6 +2324,17 @@ if (HasMark)
 					if (HasObject)
 					//	diff = (currentObject->height() + currentObject->lineWidth()) * scaleV + offset - (current.yPos - lastLineY);
 						diff = currentObjectBox.height() * scaleV + offset - (current.yPos - lastLineY);
+					else if (style.leadingGuard() && current.prevLineInkBottom >= 0.0)
+					{
+						// suneer: leading guard. Fixed leading is kept unless the
+						// tallest glyph of this line is more than 15% taller than
+						// the leading (Malayalam vowel signs above and below), and
+						// then the line only moves down as far as it must so its
+						// ink clears the ink of the line above by 1 pt.
+						double glyphHeight = inkAsce + inkDesc;
+						if (glyphHeight > style.lineSpacing() * 1.15)
+							diff = (inkAsce + 1.0) - (current.yPos - current.prevLineInkBottom);
+					}
 				}
 				if (diff >= 1 || (!DropCmode && diff > 0))
 				{
@@ -2950,6 +2986,7 @@ if (HasMark)
 						current.fillInTabLeaders();
 						//if right margin is set we temporally save line, not append it
 						textLayout.appendLine(current.createLineBox());
+						current.prevLineInkBottom = current.yPos + current.inkDescent;
 						setMaxY(maxYDesc);
 						current.restartIndex = current.lineData.lastCluster + 1;
 						i = current.lineData.lastCluster;
@@ -4850,7 +4887,12 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 				if (UndoManager::undoEnabled())
 					activeTransaction = undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::ReplaceText, "", Um::IDelete);
 
+				// suneer: typing over a selection keeps the character formatting
+				// of the replaced text (its first character), as InDesign and
+				// Word do, instead of falling back to the paragraph default.
+				CharStyle replacedStyle(itemText.charStyle(itemText.startOfSelection()));
 				deleteSelectedTextFromFrame();
+				itemText.setPendingCharStyle(replacedStyle);
 				doUpdate = true;
 			}
 			/*
@@ -4936,7 +4978,73 @@ void PageItem_TextFrame::handleModeEditKey(QKeyEvent *k, bool& keyRepeat)
 			// StoryText::insertChars() now inherits the whole CharStyle of the
 			// preceding character at a paragraph end, so the font-size-only
 			// patch that used to live here is redundant.
+			// suneer: Enter inside a headline. The new paragraph must type on
+			// in the same character formatting (pending typing style, taken
+			// from the character before the caret) and keep the paragraph's
+			// local line spacing; see also StoryText::insertParSep().
+			bool carryOver = (uc[0] == SpecialChars::PARSEP);
+			CharStyle carryStyle;
+			ParagraphStyle carryPara;
+			bool carryParaValues = false;
+			if (carryOver)
+			{
+				int caret = itemText.cursorPosition();
+				int src = -1;
+				if (caret > 0 && itemText.text(caret - 1) != SpecialChars::PARSEP && !itemText.hasMark(caret - 1))
+					src = caret - 1;
+				else if (caret < itemText.length() && !itemText.hasMark(caret))
+					src = caret;
+				if (src >= 0)
+					carryStyle = itemText.charStyle(src);
+				else
+					carryOver = false;
+				const ParagraphStyle& before = itemText.paragraphStyle(caret);
+				if (!before.isInhLineSpacingMode())
+				{
+					carryPara.setLineSpacingMode(before.lineSpacingMode());
+					carryParaValues = true;
+				}
+				if (!before.isInhLineSpacing())
+				{
+					carryPara.setLineSpacing(before.lineSpacing());
+					carryParaValues = true;
+				}
+				if (!before.isInhLeadingGuard())
+				{
+					carryPara.setLeadingGuard(before.leadingGuard());
+					carryParaValues = true;
+				}
+			}
 			itemText.insertChars(uc, true);
+			if (carryOver)
+				itemText.setPendingCharStyle(carryStyle);
+			if (carryParaValues)
+			{
+				// The half after the new separator normally copies the style
+				// already (insertParSep); at the story end the trailing style is
+				// erased instead (#7432) and would only inherit the leading from
+				// the frame's default style, so write it as a local value there.
+				int after = itemText.cursorPosition();
+				const ParagraphStyle& nextPara = itemText.paragraphStyle(after);
+				bool lacksValue = (!carryPara.isInhLineSpacing() && nextPara.isInhLineSpacing())
+					|| (!carryPara.isInhLineSpacingMode() && nextPara.isInhLineSpacingMode())
+					|| (!carryPara.isInhLeadingGuard() && nextPara.isInhLeadingGuard());
+				if (lacksValue
+					|| nextPara.lineSpacing() != carryPara.lineSpacing()
+					|| nextPara.lineSpacingMode() != carryPara.lineSpacingMode()
+					|| nextPara.leadingGuard() != carryPara.leadingGuard())
+				{
+					if (UndoManager::undoEnabled())
+					{
+						auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+						is->set("APPLY_PARASTYLE");
+						is->set("POS", after);
+						is->setStates(nextPara, carryPara);
+						undoManager->action(this, is);
+					}
+					itemText.applyStyle(after, carryPara);
+				}
+			}
 			if ((m_Doc->docHyphenator->autoCheck()) && (itemText.cursorPosition() > 1))
 			{
 				Twort = "";
@@ -6989,6 +7097,9 @@ void PageItem_TextFrame::applyAutoFitFactors(double fontScale, double glyphScale
 		}
 		itemText.applyCharStyle(run.start, run.length, ns);
 	}
+	// suneer: fixed leading follows the fitted sizes (trial passes included, so
+	// the fit is measured with the leading it will end up with).
+	m_Doc->suneerAutoAdjustLeading(this, 0, itemText.length(), withUndo);
 
 	if (withUndo && UndoManager::undoEnabled())
 	{
