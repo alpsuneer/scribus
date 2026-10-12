@@ -37,6 +37,16 @@ public:
 
 	void setLineMode(int lineMode);
 
+	// suneer: the control bar's W/H fields mirror this panel. They apply
+	// through these so both paths resize identically (same base point,
+	// groups, lines, ratio lock, undo), and refresh on sizeDisplayChanged().
+	void applyWidthFromToolbar(double value);
+	void applyHeightFromToolbar(double value);
+
+signals:
+	//! The W/H display (value, unit, enabled state) was just refreshed.
+	void sizeDisplayChanged();
+
 private:
 	PageItem* currentItemFromSelection();
 	

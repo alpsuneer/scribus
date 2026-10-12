@@ -169,6 +169,7 @@ if(HAVE_OSG)
 		ui/suneerbgremovedialog.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
+		ui/suneerframesizebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
@@ -274,6 +275,7 @@ else()
 		ui/suneerbgremovedialog.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
+		ui/suneerframesizebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp

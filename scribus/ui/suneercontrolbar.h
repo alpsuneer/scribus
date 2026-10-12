@@ -462,6 +462,17 @@ public:
 	QDoubleSpinBox* m_fillOpacitySpin      {nullptr};
 	QDoubleSpinBox* m_imgLineOpacitySpin   {nullptr};
 	class SuneerImageSizeBar* m_imageSizeBar {nullptr};
+	// Frame W/H + ratio lock, first on the bar as its own toolbar action so
+	// QToolBar's overflow (">>") takes the big row container before it.
+	class SuneerFrameSizeBar* m_frameSizeBar {nullptr};
+	QAction* m_frameSizeAction {nullptr};
+	QAction* m_frameSizeSepAction {nullptr};
+	void updateFrameSizeVisibility();
+public:
+	//! Live size while a new frame is being drawn with the mouse (read-only), and its end.
+	void showDrawingFrameSize(double wPt, double hPt);
+	void endDrawingFrameSize();
+private:
 	QDoubleSpinBox* m_imgWidthSpin         {nullptr};
 	QDoubleSpinBox* m_imgHeightSpin        {nullptr};
 	QComboBox*      m_imgLineStyleCombo    {nullptr};

@@ -39,6 +39,7 @@
 #include "scribus.h"
 #include "scribusdoc.h"
 #include "scribusview.h"
+#include "ui/suneercontrolbar.h"
 #include "selection.h"
 #include "text/frect.h"
 #include "ui/insertTable.h"
@@ -308,6 +309,9 @@ void CreateMode::mouseMoveEvent(QMouseEvent *m)
 		if (modifiers == Qt::ControlModifier)
 			hSize = wSize;
 		m_canvas->displaySizeHUD(m->globalPosition(), wSize, hSize, false);
+		// suneer: live W/H in the control bar while the frame is drawn
+		if (m_view->m_ScMW && m_view->m_ScMW->suneerControlBar())
+			m_view->m_ScMW->suneerControlBar()->showDrawingFrameSize(wSize, hSize);
 	}
 	else
 	{
@@ -316,6 +320,9 @@ void CreateMode::mouseMoveEvent(QMouseEvent *m)
 			angle = angle + 360;
 		double trueLength = sqrt(pow(createObjectRect.width(), 2) + pow(createObjectRect.height(), 2));
 		m_canvas->displaySizeHUD(m->globalPosition(), trueLength, angle, true);
+		// A line's "W" is its length, as in Properties; it has no height.
+		if (m_view->m_ScMW && m_view->m_ScMW->suneerControlBar())
+			m_view->m_ScMW->suneerControlBar()->showDrawingFrameSize(trueLength, 0.0);
 	}
 
 	// Necessary for drawControls to be called
@@ -389,6 +396,10 @@ void CreateMode::mouseReleaseEvent(QMouseEvent *m)
 	m_canvas->resetRenderMode();
 	m->accept();
 //	m_view->stopDragTimer();
+
+	// suneer: hand the W/H fields back to the selection (editable again)
+	if (m_view->m_ScMW && m_view->m_ScMW->suneerControlBar())
+		m_view->m_ScMW->suneerControlBar()->endDrawingFrameSize();
 
 	m_createTransaction = Um::instance()->beginTransaction("creating");
 	currItem = doCreateNewObject();

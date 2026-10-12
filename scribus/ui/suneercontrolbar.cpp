@@ -84,6 +84,10 @@
 #include "suneerbgremove.h"
 #include "ui/suneerbgremovedialog.h"
 #include "ui/suneerimagesizebar.h"
+#include "ui/suneerframesizebar.h"
+#include "appmodehelper.h"
+#include "ui/propertiespalette.h"
+#include "ui/propertiespalette_xyz.h"
 #include "suneercursor.h"
 #include "scimageerasermask.h"
 #include "cmsettings.h"
@@ -1519,6 +1523,12 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	lineRow2->addStretch();
 	vlay->addLayout(lineRow2);
 
+	// suneer: frame Width/Height widget. Created here (before the descendant
+	// event-filter pass below) but placed at the END of the bar, after the
+	// Align and Distribute action, so showing or hiding it never moves any
+	// other control: only the empty space to its right changes.
+	m_frameSizeBar = new SuneerFrameSizeBar(this);
+
 	addWidget(container);
 	showTextWidgets(false);
 	showImageWidgets(false);
@@ -1928,6 +1938,44 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_alignDistributeAction->setVisible(false);
 	addAction(m_alignDistributeAction);
 	connect(m_alignDistributeAction, &QAction::triggered, this, [this] { onAlignDistributeClicked(); });
+
+	// Frame W/H: last on the bar, context-sensitive like the other sections
+	// (shown/hidden from updateFromSelection(), no timer of its own).
+	m_frameSizeSepAction = addSeparator();
+	m_frameSizeAction = addWidget(m_frameSizeBar);
+	m_frameSizeSepAction->setVisible(false);
+	m_frameSizeAction->setVisible(false);
+	if (m_scmw && m_scmw->appModeHelper)
+		connect(m_scmw->appModeHelper, &AppModeHelper::AppModeChanged, this, [this](int, int) { updateFrameSizeVisibility(); });
+}
+
+void SuneerControlBar::updateFrameSizeVisibility()
+{
+	if (!m_frameSizeAction)
+		return;
+	// Same rule as the other contextual sections: something with a frame is
+	// selected (any item type: frames, shapes, tables, groups, lines). Hidden
+	// with no selection and while a text cursor is active in edit mode.
+	bool show = m_doc && !m_doc->m_Selection->isEmpty()
+		&& m_doc->appMode != modeEdit && m_doc->appMode != modeEditTable;
+	m_frameSizeSepAction->setVisible(show);
+	m_frameSizeAction->setVisible(show);
+}
+
+void SuneerControlBar::showDrawingFrameSize(double wPt, double hPt)
+{
+	if (!m_frameSizeAction || !m_frameSizeBar)
+		return;
+	m_frameSizeSepAction->setVisible(true);
+	m_frameSizeAction->setVisible(true);
+	m_frameSizeBar->showDrawingSize(wPt, hPt);
+}
+
+void SuneerControlBar::endDrawingFrameSize()
+{
+	if (m_frameSizeBar)
+		m_frameSizeBar->endDrawingSize();
+	updateFrameSizeVisibility();
 }
 
 bool SuneerControlBar::alignPaletteShowing() const
@@ -2009,6 +2057,12 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 	// nullptr included, so it can never refresh from a closed document.
 	if (m_shadeWidget)
 		m_shadeWidget->setDoc(doc);
+	if (m_frameSizeBar)
+	{
+		if (m_scmw && m_scmw->propertiesPalette)
+			m_frameSizeBar->setPalette(m_scmw->propertiesPalette->xyzPal);
+		m_frameSizeBar->setDocument(doc);
+	}
 	if (!doc)
 	{
 		// Document closed: stop polling it, drop every cached frame, show no
@@ -2025,6 +2079,7 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		showImageWidgets(false);
 		showTextWrapWidgets(false);
 		updateAlignDistributeButton();
+		updateFrameSizeVisibility();
 		return;
 	}
 	// Load Scribus fonts into combo
@@ -2157,6 +2212,7 @@ void SuneerControlBar::updateFromSelection()
 
 	// Before any early return: it follows the selection, not the item type.
 	updateAlignDistributeButton();
+	updateFrameSizeVisibility();
 	if (!m_doc) return;
 	for (QAbstractSpinBox* sb : m_mixedSpins)
 		sb->setSpecialValueText(QString());
@@ -2926,6 +2982,9 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 		auto* k = static_cast<QKeyEvent*>(ev);
 		if (k->key() == Qt::Key_Escape)
 		{
+			// Frame W/H: Esc puts the current size back before leaving.
+			if (m_frameSizeBar && m_frameSizeBar->owns(qobject_cast<QWidget*>(obj)))
+				m_frameSizeBar->revert();
 			returnFocusToCanvas();
 			return true;
 		}

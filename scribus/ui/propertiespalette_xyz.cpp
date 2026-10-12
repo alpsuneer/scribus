@@ -149,6 +149,7 @@ void PropertiesPalette_XYZ::setDoc(ScribusDoc *d)
 
 	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));
 	connect(m_doc             , SIGNAL(docChanged())      , this, SLOT(handleSelectionChanged()));
+	emit sizeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unsetDoc()
@@ -182,6 +183,7 @@ void PropertiesPalette_XYZ::unsetDoc()
 	rotationSpin->showValue(0);
 	basePointWidget->setAngle(0);
 	setEnabled(false);
+	emit sizeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unsetItem()
@@ -544,6 +546,7 @@ void PropertiesPalette_XYZ::handleSelectionChanged()
 		setCurrentItem(currItem);
 	}
 	updateGeometry();
+	emit sizeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unitChange()
@@ -559,6 +562,7 @@ void PropertiesPalette_XYZ::unitChange()
 	widthSpin->setNewUnit( m_unitIndex );
 	heightSpin->setNewUnit( m_unitIndex );
 	m_haveItem = tmp;
+	emit sizeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::localeChange()
@@ -707,6 +711,7 @@ void PropertiesPalette_XYZ::showWH(double x, double y)
 	}
 	widthSpin->blockSignals(sigBlocked1);
 	heightSpin->blockSignals(sigBlocked2);
+	emit sizeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::showRotation(double r)
@@ -917,6 +922,26 @@ void PropertiesPalette_XYZ::handleNewY()
 	m_doc->regionsChanged()->update(QRect());
 	m_doc->changed();
 	m_doc->changedPagePreview();
+}
+
+void PropertiesPalette_XYZ::applyWidthFromToolbar(double value)
+{
+	if (!m_haveDoc || !m_haveItem || !widthSpin->isEnabled())
+		return;
+	bool sigBlocked = widthSpin->blockSignals(true);
+	widthSpin->setValue(value);
+	widthSpin->blockSignals(sigBlocked);
+	handleNewW();
+}
+
+void PropertiesPalette_XYZ::applyHeightFromToolbar(double value)
+{
+	if (!m_haveDoc || !m_haveItem || !heightSpin->isEnabled())
+		return;
+	bool sigBlocked = heightSpin->blockSignals(true);
+	heightSpin->setValue(value);
+	heightSpin->blockSignals(sigBlocked);
+	handleNewH();
 }
 
 void PropertiesPalette_XYZ::handleNewW()
