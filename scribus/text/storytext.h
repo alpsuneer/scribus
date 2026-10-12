@@ -127,6 +127,14 @@ public:
 	void append(const StoryText& other) { insert(length(), other, false); }
 	// Remove len chars at specific position
  	void removeChars(int pos, uint len);
+	// suneer: style carried over from deleted text to the next insert at the
+	// caret (typing over a selection keeps the replaced text's formatting).
+	void setPendingCharStyle(const CharStyle& style);
+	void clearPendingCharStyle();
+	bool hasPendingCharStyle() const;
+	// Formatting applied to an empty story (Properties Palette with no text):
+	// keep what the next typed character will inherit in sync with it.
+	void applyCharStyleToEmptyStory(const CharStyle& style);
 	// Removes trailing empty paragraphs
 	void trim();
 	// Insert chars at current cursor position
@@ -360,6 +368,7 @@ private:
 
 	QString textWithSoftHyphens (int pos, uint len) const;
 	void    insertCharsWithSoftHyphens(int pos, const QString& txt, bool applyNeighbourStyle = false);
+	void    applyInheritedStyle(ScText& clone, int pos) const;
 	
 	/// mark these runs as invalid, ie. need itemize and shaping
 	void invalidate(int firstRun, int lastRun);

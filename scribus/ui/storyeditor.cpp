@@ -441,7 +441,25 @@ void SEditor::keyPressEvent(QKeyEvent *k)
 			default:
 				if (!k->text().isEmpty())
 				{
+					// suneer: typing over a selection keeps the character
+					// formatting of the replaced text's first character, as the
+					// canvas does. QTextEdit removes and inserts inside one
+					// contentsChange, so the style is applied afterwards.
+					QTextCursor selCursor = textCursor();
+					bool replacing = selCursor.hasSelection();
+					int selStart = selCursor.selectionStart();
+					CharStyle replacedStyle;
+					if (replacing && (selStart < StyledText.length()))
+						replacedStyle = StyledText.charStyle(selStart);
 					QTextEdit::keyPressEvent(k);
+					if (replacing && (selStart < StyledText.length()))
+					{
+						int inserted = textCursor().position() - selStart;
+						if ((inserted > 0) && (selStart + inserted <= StyledText.length()))
+						{
+							StyledText.setCharStyle(selStart, inserted, replacedStyle);
+						}
+					}
 					emit SideBarUp(true);
 					emit SideBarUpdate();
 				}

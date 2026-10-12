@@ -231,6 +231,8 @@ void StoryText::setCursorPosition(int pos, bool relative)
 		}
 	}
 	d->cursorPosition = qMin((uint) qMax(pos, 0), d->len);
+	if (d->pendingCharStyleValid && (d->pendingCharStylePos != static_cast<int>(d->cursorPosition)))
+		clearPendingCharStyle();
 }
 
 void StoryText::normalizeCursorPosition()
@@ -623,12 +625,35 @@ void StoryText::removeChars(int pos, uint len)
 
 	uint oldMarksCount = d->marksCount;
 
+	// suneer: remember the formatting of what is being deleted so that text
+	// typed in its place keeps it. Whole story gone: the last character
+	// (Backspace-all then type). Otherwise the first deleted character
+	// (typing over a selection).
+	int styleSource = -1;
 	if ((pos == 0) && (len > 0) && (static_cast<int>(len) == length()))
 	{
 		int lastChar = length() - 1;
 		while (lastChar > 0 && text(lastChar) == SpecialChars::PARSEP)
 			--lastChar;
 		d->orphanedCharStyle = charStyle(lastChar);
+		styleSource = lastChar;
+	}
+	else
+	{
+		for (int i = pos; i < pos + static_cast<int>(len); ++i)
+		{
+			if (text(i) == SpecialChars::PARSEP)
+				continue;
+			styleSource = i;
+			break;
+		}
+	}
+	if (styleSource >= 0)
+	{
+		d->pendingCharStyle = charStyle(styleSource);
+		d->pendingCharStyle.setContext(d->defaultStyle.charStyle().context());
+		d->pendingCharStyleValid = true;
+		d->pendingCharStylePos = pos;
 	}
 	for (int i = pos + static_cast<int>(len) - 1; i >= pos; --i)
 	{
@@ -689,6 +714,77 @@ void StoryText::trim()
 	}
 }
 
+// suneer: which formatting a character inserted at pos takes.
+//  1. A pending style captured from text just deleted at this position
+//     (typing over a selection, Backspace/Delete then typing) wins; this is
+//     the InDesign/Word rule and keeps a Malayalam cluster in one font.
+//  2. Otherwise the character BEFORE the caret, as every word processor does,
+//     so continued typing stays in the run the operator is extending. The
+//     character at pos is used only at the start of a paragraph (pos 0 or
+//     right after a PARSEP). A PARSEP carries the paragraph's base style and
+//     a bullet/numbering mark is a layout artefact, so neither is a source.
+//  3. An empty story inherits the style of the last character it held
+//     (orphanedCharStyle), which is also what the Properties Palette shows.
+void StoryText::applyInheritedStyle(ScText& clone, int pos) const
+{
+	if (d->pendingCharStyleValid && (d->pendingCharStylePos == pos))
+	{
+		clone.applyCharStyle(d->pendingCharStyle);
+		clone.setEffects(d->pendingCharStyle.effects() & ScStyle_UserStyles);
+		return;
+	}
+	if (length() <= 0)
+	{
+		clone.applyCharStyle(d->orphanedCharStyle);
+		clone.setEffects(d->orphanedCharStyle.effects() & ScStyle_UserStyles);
+		return;
+	}
+	int referenceChar = -1;
+	if (pos > 0)
+	{
+		int prevChar = pos - 1;
+		if ((text(prevChar) != SpecialChars::PARSEP) && !hasMark(prevChar))
+			referenceChar = prevChar;
+	}
+	if (referenceChar < 0)
+	{
+		int nextChar = qMin(pos, length() - 1);
+		if (!hasMark(nextChar))
+			referenceChar = nextChar; // char at pos, or the PARSEP = paragraph base style
+	}
+	if (referenceChar >= 0)
+	{
+		clone.applyCharStyle(charStyle(referenceChar));
+		clone.setEffects(ScStyle_Default);
+	}
+}
+
+void StoryText::setPendingCharStyle(const CharStyle& style)
+{
+	d->pendingCharStyle = style;
+	d->pendingCharStyle.setContext(d->defaultStyle.charStyle().context());
+	d->pendingCharStyleValid = true;
+	d->pendingCharStylePos = d->cursorPosition;
+}
+
+void StoryText::clearPendingCharStyle()
+{
+	d->pendingCharStyleValid = false;
+	d->pendingCharStylePos = -1;
+}
+
+bool StoryText::hasPendingCharStyle() const
+{
+	return d->pendingCharStyleValid;
+}
+
+void StoryText::applyCharStyleToEmptyStory(const CharStyle& style)
+{
+	d->orphanedCharStyle.applyCharStyle(style);
+	if (d->pendingCharStyleValid)
+		d->pendingCharStyle.applyCharStyle(style);
+}
+
 void StoryText::insertChars(const QString& txt, bool applyNeighbourStyle) //, const CharStyle & charstyle)
 {
 	insertChars(d->cursorPosition, txt, applyNeighbourStyle);
@@ -709,36 +805,7 @@ void StoryText::insertChars(int pos, const QString& txt, bool applyNeighbourStyl
 
 	ScText clone;
 	if (applyNeighbourStyle)
-	{
-		// Inherit from the character BEFORE the caret when sitting at the end of
-		// a paragraph. The character at pos is the paragraph separator there,
-		// and a PARSEP carries the paragraph's base style (see insertParSep),
-		// so copying it silently drops the colour, font or size applied to the
-		// text itself. Mid-paragraph the character at pos belongs to the same
-		// run, so that case is deliberately left as it was.
-		int referenceChar = qMax(0, qMin(pos, length() - 1));
-		bool inheritStyle = (length() > 0);
-		if (inheritStyle && (pos > 0))
-		{
-			bool atParagraphEnd = (pos >= length()) || (text(pos) == SpecialChars::PARSEP);
-			if (atParagraphEnd)
-			{
-				int prevChar = pos - 1;
-				// Never reach back into the previous paragraph, and never take
-				// formatting from a bullet or numbering mark: a mark is a layout
-				// artefact, not something the operator styled.
-				if ((text(prevChar) == SpecialChars::PARSEP) || hasMark(prevChar))
-					inheritStyle = false;
-				else
-					referenceChar = prevChar;
-			}
-		}
-		if (inheritStyle)
-		{
-			clone.applyCharStyle(charStyle(referenceChar));
-			clone.setEffects(ScStyle_Default);
-		}
-	}
+		applyInheritedStyle(clone, pos);
 
 	for (int i = 0; i < txt.length(); ++i)
 	{
@@ -759,6 +826,7 @@ void StoryText::insertChars(int pos, const QString& txt, bool applyNeighbourStyl
 	d->len = d->count();
 	if ((d->selLast >= d->selFirst) && (d->selFirst <= pos) && (pos <= d->selLast))
 		d->selLast += txt.length();
+	clearPendingCharStyle();
 	invalidate(pos, pos + txt.length());
 }
 
@@ -777,36 +845,7 @@ void StoryText::insertCharsWithSoftHyphens(int pos, const QString& txt, bool app
 
 	ScText clone;
 	if (applyNeighbourStyle)
-	{
-		// Inherit from the character BEFORE the caret when sitting at the end of
-		// a paragraph. The character at pos is the paragraph separator there,
-		// and a PARSEP carries the paragraph's base style (see insertParSep),
-		// so copying it silently drops the colour, font or size applied to the
-		// text itself. Mid-paragraph the character at pos belongs to the same
-		// run, so that case is deliberately left as it was.
-		int referenceChar = qMax(0, qMin(pos, length() - 1));
-		bool inheritStyle = (length() > 0);
-		if (inheritStyle && (pos > 0))
-		{
-			bool atParagraphEnd = (pos >= length()) || (text(pos) == SpecialChars::PARSEP);
-			if (atParagraphEnd)
-			{
-				int prevChar = pos - 1;
-				// Never reach back into the previous paragraph, and never take
-				// formatting from a bullet or numbering mark: a mark is a layout
-				// artefact, not something the operator styled.
-				if ((text(prevChar) == SpecialChars::PARSEP) || hasMark(prevChar))
-					inheritStyle = false;
-				else
-					referenceChar = prevChar;
-			}
-		}
-		if (inheritStyle)
-		{
-			clone.applyCharStyle(charStyle(referenceChar));
-			clone.setEffects(ScStyle_Default);
-		}
-	}
+		applyInheritedStyle(clone, pos);
 
 	int inserted = 0;
 	for (int i = 0; i < txt.length(); ++i) 
@@ -844,6 +883,7 @@ void StoryText::insertCharsWithSoftHyphens(int pos, const QString& txt, bool app
 	d->len = d->count();
 	if ((d->selLast >= d->selFirst) && (d->selFirst <= pos) && (pos <= d->selLast))
 		d->selLast += inserted;
+	clearPendingCharStyle();
 	invalidate(pos, pos + inserted);
 }
 
@@ -1684,6 +1724,11 @@ void StoryText::setDefaultStyle(const ParagraphStyle& style)
 	const StyleContext * oldPContext = d->defaultStyle.context();
 	d->defaultStyle = style;
 	d->defaultStyle.setContext( oldPContext );
+	// suneer: a new default style is a fresh start for an empty story; drop
+	// the formatting remembered from deleted text so it cannot override it.
+	d->orphanedCharStyle = CharStyle();
+	d->orphanedCharStyle.setContext(d->defaultStyle.charStyle().context());
+	clearPendingCharStyle();
 	invalidateAll();
 }
 

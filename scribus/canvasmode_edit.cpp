@@ -1385,6 +1385,28 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 		m_preeditPos = -1;
 	}
 
+	// suneer: a composition starting while text is selected replaces that
+	// text, exactly like a directly typed key does (handleModeEditKey), and
+	// the new text keeps the replaced text's character formatting. Only the
+	// first event of a composition does this; later preedit updates must not.
+	// The undo step is local to this event: it wraps the commit string when
+	// that arrives in the same event, otherwise it closes right after the
+	// delete. Holding it open across events is unsafe (the transaction
+	// stack asserts it is still on top).
+	UndoTransaction replaceTrans;
+	if (currItem->itemText.hasSelection()
+		&& (!event->commitString().isEmpty() || !event->preeditString().isEmpty()))
+	{
+		PageItem_TextFrame* textFrame = currItem->asTextFrame();
+		CharStyle replacedStyle(currItem->itemText.charStyle(currItem->itemText.startOfSelection()));
+		if (UndoManager::undoEnabled())
+			replaceTrans = undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::ReplaceText, "", Um::IDelete);
+		textFrame->deleteSelectedTextFromFrame();
+		currItem->itemText.setPendingCharStyle(replacedStyle);
+		textFrame->HasSel = false;
+		m_ScMW->setCopyCutEnabled(false);
+	}
+
 	// Replace selected text if IME specifies a replacement range
 	if (event->replacementLength() > 0) {
 		int pos = currItem->itemText.cursorPosition() + event->replacementStart();
@@ -1402,9 +1424,34 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 	// heading came out in the paragraph's default colour.
 	if (!event->commitString().isEmpty()) {
 		int pos = currItem->itemText.cursorPosition();
+		// suneer: committed text joins the running "insert text" undo step the
+		// same way typed keys do, so a replace-by-typing stays one undo step.
+		if (UndoManager::undoEnabled())
+		{
+			SimpleState *ss = dynamic_cast<SimpleState*>(undoManager->getLastUndo());
+			UndoObject *undoTarget = currItem;
+			if (ss && (ss->get("ETEA") == "insert_frametext") && (ss->undoObject() == undoTarget))
+				ss->set("TEXT_STR", ss->get("TEXT_STR") + event->commitString());
+			else
+			{
+				ss = new SimpleState(Um::InsertText, "", Um::ICreate);
+				ss->set("INSERT_FRAMETEXT");
+				ss->set("ETEA", QString("insert_frametext"));
+				ss->set("TEXT_STR", event->commitString());
+				ss->set("START", pos);
+				if (currItem->isNoteFrame())
+				{
+					undoTarget = m_doc;
+					ss->set("noteframeName", currItem->getUName());
+				}
+				undoManager->action(undoTarget, ss);
+			}
+		}
 		currItem->itemText.insertChars(pos, event->commitString(), true);
 		currItem->itemText.setCursorPosition(pos + event->commitString().length());
 	}
+	if (replaceTrans)
+		replaceTrans.commit();
 
 	// Insert preedit text temporarily so it appears visually in the frame;
 	// it will be removed/replaced on the next inputMethodEvent call.

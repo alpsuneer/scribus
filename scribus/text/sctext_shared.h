@@ -34,6 +34,12 @@ public:
 	bool marksCountChanged { false };
 	ParagraphStyle trailingStyle;
 	CharStyle orphanedCharStyle;
+	// suneer: character style the next insert at pendingCharStylePos should
+	// take, captured from text that was just deleted (typing over a selection,
+	// Backspace/Delete). Valid until an insert consumes it or the caret moves.
+	CharStyle pendingCharStyle;
+	bool pendingCharStyleValid { false };
+	int  pendingCharStylePos { -1 };
 
 	void clear();
 	
