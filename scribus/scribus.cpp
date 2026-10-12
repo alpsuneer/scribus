@@ -4923,6 +4923,76 @@ bool ScribusMainWindow::suneerLinkedImagesCheck(const QString& action)
 	return true;
 }
 
+// A layer whose "print" flag is off is left out of the PDF (and of the printed
+// page) without a word: a page whose content sits on such a layer comes out
+// blank, which looks like "export does not work". Stop and ask before that.
+// Returns false when the user cancels.
+bool ScribusMainWindow::suneerNonPrintingLayersCheck(const QString& action)
+{
+	if (!HaveDoc || !doc)
+		return true;
+	// Never stop a script or a headless run on a modal dialog.
+	if (!ScCore->usingGUI() || scriptIsRunning())
+		return true;
+	// With "Include Layers" the PDF carries every layer, printable or not.
+	if (doc->pdfOptions().exportsLayers())
+		return true;
+
+	// top-level objects on a page, per non-printing layer
+	QMap<int, int> itemsOnLayer;
+	QMap<int, QSet<int> > pagesOfLayer;
+	for (PageItem* item : std::as_const(*doc->Items))
+	{
+		if (!item || item->OwnPage < 0)
+			continue;
+		if (doc->layerPrintable(item->m_layerID))
+			continue;
+		itemsOnLayer[item->m_layerID]++;
+		pagesOfLayer[item->m_layerID].insert(item->OwnPage + 1);
+	}
+	if (itemsOnLayer.isEmpty())
+		return true;
+
+	QStringList lines;
+	QList<int> layerIDs;
+	for (const ScLayer& layer : std::as_const(doc->Layers))
+	{
+		if (!itemsOnLayer.contains(layer.ID))
+			continue;
+		layerIDs.append(layer.ID);
+		QList<int> pages = pagesOfLayer[layer.ID].values();
+		std::sort(pages.begin(), pages.end());
+		QStringList pageStrings;
+		for (int page : std::as_const(pages))
+			pageStrings << QString::number(page);
+		lines << tr("Layer \"%1\": %n object(s) on page %2", "", itemsOnLayer[layer.ID]).arg(layer.Name, pageStrings.join(", "));
+	}
+
+	ScMessageBox box(QMessageBox::Warning, action,
+		tr("Some objects are on a layer that is set to \"Do not print\". They will be left out of the %1 and the page may come out empty.").arg(action)
+		+ "\n\n" + lines.join("\n") + "\n\n"
+		+ tr("The print flag is the printer icon in the Layers palette (Window > Layers)."),
+		QMessageBox::NoButton, this);
+	QPushButton* makePrintable = box.addButton(tr("Make the layer(s) printable and continue"), QMessageBox::AcceptRole);
+	QPushButton* leaveOut = box.addButton(tr("Continue without them"), QMessageBox::DestructiveRole);
+	QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+	box.setDefaultButton(makePrintable);
+	box.setEscapeButton(cancel);
+	box.exec();
+	if (box.clickedButton() == cancel || box.clickedButton() == nullptr)
+		return false;
+	if (box.clickedButton() == leaveOut)
+		return true;
+	Q_UNUSED(makePrintable);
+	for (int layerID : std::as_const(layerIDs))
+		doc->setLayerPrintable(layerID, true);
+	layerPalette->setDoc(doc);
+	rebuildLayersList();
+	doc->changed();
+	view->DrawNew();
+	return true;
+}
+
 void ScribusMainWindow::suneerEmbedAllImages()
 {
 	if (!HaveDoc || !doc)
@@ -9416,6 +9486,11 @@ void ScribusMainWindow::SaveAsPDF()
 void ScribusMainWindow::suneerSaveAsPDFChecked()
 {
 	if (!suneerLinkedImagesCheck(tr("PDF export")))
+	{
+		s_pdfDirectPreset.clear();
+		return;
+	}
+	if (!suneerNonPrintingLayersCheck(tr("PDF export")))
 	{
 		s_pdfDirectPreset.clear();
 		return;

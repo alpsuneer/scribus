@@ -731,6 +731,7 @@ public slots:
 	//! Before Save / PDF export / Print / Proof Print: lists linked and missing
 	//! images and asks. False = the user cancelled, do not go on.
 	bool suneerLinkedImagesCheck(const QString& action);
+	bool suneerNonPrintingLayersCheck(const QString& action);
 	void setUndoMode(bool isObjectSpecific);
 	//! \brief Apply a Lorem Ipsum to the each item in a selection
 	void insertSampleText();
