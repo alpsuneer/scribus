@@ -57,14 +57,28 @@ struct SuneerObitModel
 	int titleMaxWords {3};
 	int titleMaxChars {24};
 	int bodyMaxChars  {450};
+	// text options
+	QString textAlign    {QStringLiteral("centre")};       // "centre" (house style) or "left"
+	bool    runInPlace   {false};                           // place in bold + ":" and the details on the same line
+	QString stylePlaceRunin {QStringLiteral("92 ObitPlace Runin")};   // character style, created when missing
 	// photo processing
 	int     photoPx      {600};
 	int     photoQuality {95};
-	QString photoBackground {QStringLiteral("DB obit")};   // document colour name, or "Light grey"
+	QString photoBackground {QStringLiteral("Obit BG")};   // "Obit BG" (neutral light grey, created), "DB obit", or any document colour
+	int     bgCMYK[4]    {2, 1, 0, 20};                     // the "Obit BG" document colour (C2 M1 Y0 K20 from Illustrator, 2026-10-13)
+	//! An earlier default "Obit BG" CMYK (percent) that migrates to the current one.
+	static bool isOldBgCMYK(const int* c);
+	int     bgRGB[3]     {194, 198, 199};                   // the exact tone written into every processed file (#C2C6C7)
 	QString rembgModel   {QStringLiteral("u2net_human_seg")};
-	double  eyeY         {0.40};
-	double  faceH        {0.50};
+	double  eyeY         {0.40};                            // unused since the face-fill crop; kept for old files
+	double  faceH        {0.55};                            // hairline-chin / frame height (Tight 0.50, Normal 0.55, Loose 0.60)
+	double  headTop      {0.03};                            // top of the head below the frame top
+	int     toneStrength {60};                              // 0-100
+	QString frameShape   {QStringLiteral("square")};        // "square" (30.3 x 30.3) or "portrait" (30.3 x portraitHeightMm)
+	double  portraitHeightMm {34.0};
+	int     minPpi       {300};
 	QString flagColor    {QStringLiteral("DB Orange")};
+	double  photoFrameHeightMm() const { return frameShape == QLatin1String("portrait") ? portraitHeightMm : photoMm; }
 
 	static QString filePath();                 // <prefs>/layout-models/obituary.json
 	static SuneerObitModel load(QString* note = nullptr);   // defaults + file; writes the file when missing

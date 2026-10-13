@@ -18,8 +18,14 @@
 #include "suneer_obit_model.h"
 
 #include "commonstrings.h"
+#include "hyphenator.h"
+#include "styles/styleset.h"
+#include "text/specialchars.h"
+#include "scpaths.h"
+#include "langmgr.h"
 #include "pageitem.h"
 #include "pageitem_textframe.h"
+#include "pageitem_group.h"
 #include "sccolor.h"
 #include "sccolorengine.h"
 #include "scpage.h"
@@ -36,6 +42,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
@@ -106,6 +113,27 @@ QString SuneerNewsPanel::layoutModelKey() const
 
 // The remembered choice for this page type (or page name); without one, an
 // OBIT page (pageType or name says obit / ചരമ) starts with the Obituary model.
+// "Left · run-in · Portrait · Obit BG": what the Obituary model will do now.
+void SuneerNewsPanel::updateLayoutModelInfo()
+{
+	if (!m_layoutModelInfo)
+		return;
+	if (!m_layoutModelCmb || m_layoutModelCmb->currentData().toString() != QLatin1String("obituary"))
+	{
+		m_layoutModelInfo->clear();
+		return;
+	}
+	const SuneerObitModel m = SuneerObitModel::load();
+	QStringList parts;
+	parts << (m.textAlign == QLatin1String("left") ? tr("Left") : tr("Centred"));
+	if (m.runInPlace)
+		parts << tr("run-in");
+	parts << (m.frameShape == QLatin1String("portrait") ? tr("Portrait") : tr("Square"));
+	parts << m.photoBackground << tr("face %1%").arg(qRound(m.faceH * 100));
+	m_layoutModelInfo->setText(parts.join(QStringLiteral(" \u00b7 ")));
+	m_layoutModelInfo->setToolTip(tr("Current Obituary model settings (Settings > Obituary): %1").arg(SuneerObitModel::filePath()));
+}
+
 void SuneerNewsPanel::preselectLayoutModel()
 {
 	if (!m_layoutModelCmb)
@@ -122,6 +150,7 @@ void SuneerNewsPanel::preselectLayoutModel()
 	m_layoutModelCmb->blockSignals(true);
 	m_layoutModelCmb->setCurrentIndex(idx < 0 ? 0 : idx);
 	m_layoutModelCmb->blockSignals(false);
+	updateLayoutModelInfo();
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +198,34 @@ QColor SuneerNewsPanel::obitBackgroundColor(const SuneerObitModel& model, QStrin
 			*fillName = name;
 		return QColor(190, 196, 200);
 	}
-	if (name.compare(QLatin1String("light grey"), Qt::CaseInsensitive) == 0 || name.compare(QLatin1String("light gray"), Qt::CaseInsensitive) == 0)
-		name = m_doc->PageColors.tryAddColor(QStringLiteral("Obit Light Grey"), ScColor(0, 0, 0, 51));
+	auto cmyk = [](const int* c) { ScColor col; col.setCmykColorF(c[0] / 100.0, c[1] / 100.0, c[2] / 100.0, c[3] / 100.0); return col; };   // exact percentages
+	if (name.compare(QLatin1String("light grey"), Qt::CaseInsensitive) == 0 || name.compare(QLatin1String("light gray"), Qt::CaseInsensitive) == 0
+	    || name.compare(QLatin1String("Neutral light grey"), Qt::CaseInsensitive) == 0 || name == QLatin1String("Obit BG"))
+	{
+		// "Obit BG": a document colour (C2 M1 Y0 K20 by default, Illustrator's
+		// value for #C2C6C7) the user may edit in the Colours palette. A copy
+		// still at an earlier default (C0 M0 Y0 K12, C3 M2 Y0 K27 or
+		// C3 M1 Y0 K22) is updated; any other edit is kept.
+		const QString obitBg = QStringLiteral("Obit BG");
+		if (!m_doc->PageColors.contains(obitBg))
+			m_doc->PageColors.insert(obitBg, cmyk(model.bgCMYK));
+		else
+		{
+			int c, m, y, k;   // 0-255 scale
+			m_doc->PageColors[obitBg].getCMYK(&c, &m, &y, &k);
+			auto near = [](int v, int pct) { return qAbs(v - qRound(pct * 2.55)) <= 1; };
+			const bool firstDefault  = c == 0 && m == 0 && y == 0 && (k == 31 || k == 30);
+			const bool secondDefault = near(c, 3) && near(m, 2) && y == 0 && near(k, 27);
+			const bool thirdDefault  = near(c, 3) && near(m, 1) && y == 0 && near(k, 22);
+			if (firstDefault || secondDefault || thirdDefault)
+				m_doc->PageColors[obitBg] = cmyk(model.bgCMYK);
+		}
+		if (fillName)
+			*fillName = obitBg;
+		// The processed files get the exact RGB (#C2C6C7 by default), not a
+		// colour-managed conversion, so every file carries the same value.
+		return QColor(model.bgRGB[0], model.bgRGB[1], model.bgRGB[2]);
+	}
 	else if (!m_doc->PageColors.contains(name) && name == model.photoFill)
 		name = m_doc->PageColors.tryAddColor(name, ScColor(qRound(model.photoFillCMYK[0] * 2.55), qRound(model.photoFillCMYK[1] * 2.55), qRound(model.photoFillCMYK[2] * 2.55), qRound(model.photoFillCMYK[3] * 2.55)));
 	else if (!m_doc->PageColors.contains(name))
@@ -203,6 +258,8 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 	m_obitPhotoStatus.clear();
 	m_obitPhotoWhy.clear();
 	m_obitNewsPhoto.clear();
+	m_obitPhotoSrc.clear();
+	m_obitPhotoInfo.clear();
 	m_obitPhotoFailed = 0;
 
 	QList<SuneerObitPhotoWorker::Item> items;
@@ -244,7 +301,8 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		SuneerObitPhotoWorker::Item it;
 		it.id = sid.isEmpty() ? QString::number(items.size()) : sid;
 		it.src = local;
-		it.out = dir + '/' + it.id + QStringLiteral(".jpg");
+		m_obitPhotoSrc[it.id] = local;
+		it.out = dir + '/' + it.id + QStringLiteral(".png");      // lossless: the background tone stays exact
 		items << it;
 	}
 	apiLog(QStringLiteral("obituary model: %1 obits, %2 short news, %3 pictures to process in %4").arg(obits).arg(news).arg(items.size()).arg(dir));
@@ -281,6 +339,7 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		for (const SuneerObitPhotoWorker::Result& r : m_obitWorker->results())
 		{
 			m_obitPhotoStatus[r.id] = r.status;
+			m_obitPhotoInfo[r.id] = r.message;
 			if (r.status != QLatin1String("fail") && QFileInfo::exists(r.out))
 				m_obitPhotoOut[r.id] = r.out;
 			else
@@ -331,7 +390,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	const double top = pageY + model.contentTopMm * kMm;
 	const double bottom = pageY + page->height() - page->Margins.bottom();
 	const double moduleGap = model.moduleGapMm * kMm;
-	const double photoH = model.photoMm * kMm;
+	const double photoH = model.photoFrameHeightMm() * kMm;
 
 	// -- what is already there: every item touching this page, master items too
 	QList<QRectF> obstacles;
@@ -409,6 +468,26 @@ void SuneerNewsPanel::obitPlaceNow()
 		}
 		return it;
 	};
+	// StoryText::applyStyle(pos, style, bool) styles ONE paragraph (and the
+	// bool erases direct formatting - never pass a length there). This walks
+	// every paragraph that starts inside [pos, pos+len).
+	auto applyParaRange = [](PageItem* frame, int pos, int len, const ParagraphStyle& style) {
+		StoryText& st = frame->itemText;
+		const int end = qMin(st.length(), pos + qMax(1, len));
+		int i = qBound(0, pos, st.length());
+		while (i < end || i == pos)
+		{
+			st.applyStyle(i, style, false);
+			int j = i;
+			while (j < st.length() && st.text(j, 1) != QStringLiteral("\r"))
+				++j;
+			if (j >= st.length())
+				break;
+			i = j + 1;
+			if (i >= end)
+				break;
+		}
+	};
 	int lastParaStart = 0;
 	QString lastParaStyle;
 	auto addPara = [&](PageItem* frame, const QString& text, const QString& styleName) {
@@ -423,10 +502,33 @@ void SuneerNewsPanel::obitPlaceNow()
 		{
 			ParagraphStyle pStyle;
 			pStyle.setParent(st);
-			story.applyStyle(startPos, pStyle, story.length() - startPos);
+			story.applyStyle(startPos, pStyle, false);
 		}
 		lastParaStart = startPos;
 		lastParaStyle = st;
+	};
+	// Soft hyphens before any height is measured: the heights of the masonry
+	// are those of hyphenated, justified text (same call as the Normal path).
+	static bool dictWarned = false;
+	auto hyphenate = [&](PageItem* frame) {
+		if (!frame || !m_doc->docHyphenator || frame->itemText.length() == 0)
+			return;
+		const QString lang = frame->itemText.defaultStyle().charStyle().language();
+		const QString dict = LanguageManager::instance()->getHyphFilename(lang);
+		// Hyphenation points are layout flags on the characters (written as
+		// soft hyphens in the SLA), so they are counted as flags.
+		auto hyphenPoints = [](PageItem* f) { int n = 0; for (int i = 0; i < f->itemText.length(); ++i) if (f->itemText.hasFlag(i, ScLayout_HyphenationPossible)) ++n; return n; };
+		const int had = hyphenPoints(frame);
+		m_doc->docHyphenator->slotHyphenate(frame);
+		const int now = hyphenPoints(frame);
+		apiLog(QStringLiteral("hyphenate '%1': language %2, dictionary %3, %4 chars, +%5 soft hyphens").arg(frame->itemName().left(20), lang, dict.isEmpty() ? QStringLiteral("NOT FOUND") : dict).arg(frame->itemText.length()).arg(now - had));
+		if (dict.isEmpty() && !dictWarned)
+		{
+			dictWarned = true;
+			const QString msg = tr("Malayalam hyphenation dictionary not found for language '%1'. Looked in: %2").arg(lang, ScPaths::instance().hyphDirs().join(", "));
+			m_statusLabel->setText(msg);
+			QMessageBox::warning(this, tr("Hyphenation"), msg);
+		}
 	};
 	auto trimTrailingParSep = [&](PageItem* frame) {
 		// The last paragraph break would add an empty line to the fitted
@@ -439,7 +541,7 @@ void SuneerNewsPanel::obitPlaceNow()
 			{
 				ParagraphStyle pStyle;
 				pStyle.setParent(lastParaStyle);
-				frame->itemText.applyStyle(lastParaStart, pStyle, frame->itemText.length() - lastParaStart);
+				frame->itemText.applyStyle(lastParaStart, pStyle, false);
 			}
 		}
 	};
@@ -475,6 +577,8 @@ void SuneerNewsPanel::obitPlaceNow()
 		newsCols << c;
 	if (obitCols.isEmpty())
 		obitCols << 1;
+	struct PlacedModule { int col; double y; double h; PageItem* text; PageItem* photo; PageItem* extra; QString title; };
+	QList<PlacedModule> placedModules;       // obit modules, for the settle / overlap pass
 	QHash<int, double> cursor;
 	for (int c : obitCols)
 		cursor[c] = top;
@@ -482,6 +586,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	bool obitsStopped = false, newsStopped = false;
 	int noFace = 0, obitsPlaced = 0, obitsWithPhoto = 0, newsPlaced = 0, newsWithPhoto = 0;
 	QStringList photoProblems;      // "title: reason" for every placed story without its picture
+	const bool leftAligned = (model.textAlign == QLatin1String("left"));
 	auto captionStyle = [&]() { QSettings cfg("Faircode", "ScribusNews"); const QString v = cfg.value("style/captionStyle", "09 Caption").toString().trimmed(); return v.isEmpty() ? QStringLiteral("09 Caption") : v; }();
 
 	for (const QJsonObject& n : stories)
@@ -520,6 +625,8 @@ void SuneerNewsPanel::obitPlaceNow()
 				photo = (pi >= 0) ? m_doc->Items->at(pi) : nullptr;
 				if (photo)
 				{
+					setAttr(photo, "obit.src", m_obitPhotoSrc.value(sid));
+					setAttr(photo, "obit.out", photoPath);
 					photo->setFillColor(fillName);
 					photo->setLineColor(CommonStrings::None);
 					photo->setImageScalingMode(false, true);   // scale to frame, keep ratio
@@ -547,10 +654,32 @@ void SuneerNewsPanel::obitPlaceNow()
 			text->setItemName(title.left(30).isEmpty() ? tr("Obituary") : title.left(30));
 			setAttr(text, "news.role", "text");
 			addPara(text, title, photo ? model.styleName : model.styleNameNoPic);
-			addPara(text, place, photo ? model.stylePlace : model.stylePlaceNoPic);
-			for (const QString& p : paras)
-				addPara(text, p, photo ? model.styleBody : model.styleBodyNoPic);
+			if (model.runInPlace && !place.isEmpty() && !paras.isEmpty())
+			{
+				// Run-in: "<place>: <details...>" as one body paragraph, the
+				// place in the run-in character style.
+				const int runStart = text->itemText.length();
+				addPara(text, place + QStringLiteral(": ") + paras.first(), photo ? model.styleBody : model.styleBodyNoPic);
+				CharStyle cs;
+				cs.setParent(obitRuninStyle(model));
+				text->itemText.applyCharStyle(runStart, place.length() + 1, cs);
+				for (int i = 1; i < paras.size(); ++i)
+					addPara(text, paras[i], photo ? model.styleBody : model.styleBodyNoPic);
+			}
+			else
+			{
+				addPara(text, place, photo ? model.stylePlace : model.stylePlaceNoPic);
+				for (const QString& p : paras)
+					addPara(text, p, photo ? model.styleBody : model.styleBodyNoPic);
+			}
 			trimTrailingParSep(text);
+			if (leftAligned)
+			{
+				ParagraphStyle al;
+				al.setAlignment(ParagraphStyle::LeftAligned);
+				applyParaRange(text, 0, text->itemText.length(), al);
+			}
+			hyphenate(text);
 			fitFrame(text);
 			items << text;
 			const double moduleH = (photo ? photoH : 0.0) + text->height();
@@ -593,25 +722,40 @@ void SuneerNewsPanel::obitPlaceNow()
 			if (photo)
 				photo->setXYPos(x, y);
 			text->setXYPos(x, y + (photo ? photoH : 0.0));
-			cursor[bestCol] = y + moduleH + moduleGap;
-			obstacles << QRectF(x, y, colW, moduleH);
+			// The height once more on the final, fully laid-out text (never an
+			// estimate): the next module in this column starts under it.
+			text->invalidateLayout();
+			text->layout();
+			fitFrame(text);
+			const double finalH = (photo ? photoH : 0.0) + text->height();
+			cursor[bestCol] = y + finalH + moduleGap;
+			obstacles << QRectF(x, y, colW, finalH);
+			placedModules << PlacedModule{bestCol, y, finalH, text, photo, nullptr, title};
 
-			// No face found: a small orange, non-printing "check" flag on the photo.
-			if (photo && photoStatus == QLatin1String("noface"))
+			// No face found, or a source too small for 300 ppi: a small orange,
+			// non-printing "check" flag on the photo.
+			if (photo && (photoStatus == QLatin1String("noface") || photoStatus == QLatin1String("lowres")))
 			{
 				++noFace;
-				PageItem* flag = makeTextFrame(x, y, 12.0 * kMm, 4.0 * kMm);
+				const QString info = m_obitPhotoInfo.value(sid);          // "180 ppi (240x240 px)"
+				const QString flagText = photoStatus == QLatin1String("lowres")
+					? (info.isEmpty() ? tr("low res") : tr("low res: %1").arg(info))
+					: tr("no face");
+				PageItem* flag = makeTextFrame(x, y, qMin(colW, 4.0 * kMm + flagText.length() * 1.3 * kMm), 4.0 * kMm);
 				if (flag)
 				{
 					flag->setFillColor(flagColorName());
 					flag->setPrintEnabled(false);
 					flag->setItemName(QStringLiteral("check_%1").arg(text->itemName()));
-					flag->itemText.insertChars(QStringLiteral("check"));
+					flag->itemText.insertChars(flagText);
+					setAttr(flag, "obit.checkInfo", flagText);
+					if (photoStatus == QLatin1String("lowres"))
+						photoProblems << QStringLiteral("%1: %2").arg(title.left(22), flagText);
 					CharStyle cs;
 					cs.setFontSize(70);
 					flag->itemText.applyCharStyle(0, flag->itemText.length(), cs);
 					setAttr(flag, "news.role", "flag");
-					setAttr(flag, "obit.check", "noface");
+					setAttr(flag, "obit.check", photoStatus);
 					items << flag;
 				}
 			}
@@ -673,34 +817,57 @@ void SuneerNewsPanel::obitPlaceNow()
 				}
 			if (headStyle.isEmpty() && !model.newsHeadlines.isEmpty())
 				headStyle = model.newsHeadlines.last().style;
+			// Headline (spanning both columns) + dateline first, hyphenated and
+			// fitted, so the photo can start right under that block.
 			addPara(text, title, headStyle);
 			{
-				// The headline spans the text columns, as on the reference page.
 				ParagraphStyle span;
 				span.setSpanColumns(-1);
-				text->itemText.applyStyle(0, span, qMax(1, title.length()));
+				text->itemText.applyStyle(0, span, false);
 			}
+			trimTrailingParSep(text);
+			hyphenate(text);
+			fitFrame(text);
+			const double headH = text->height();     // the spanning headline block only
+			// Now dateline + body (the dateline sits in the first column).
+			if (text->itemText.length() > 0)
+				text->itemText.insertChars(text->itemText.length(), QStringLiteral("\r"));
 			addPara(text, place, model.newsDateline);
 			for (int i = 0; i < paras.size(); ++i)
 				addPara(text, paras[i], i == 0 ? model.newsFirstBody : model.newsBody);
 			trimTrailingParSep(text);
 
-			// The picture: one column wide at the top right of the frame, the
-			// text wrapping around it with the wrap gap; caption under it.
+			// The picture: one column wide in the right column, directly under
+			// the headline block (+2 mm); caption under it; the body wraps
+			// around both with the wrap gap. A failed download gets the red
+			// "Image missing" placeholder, never nothing.
 			PageItem* photo = nullptr;
 			PageItem* caption = nullptr;
 			double photoBlockH = 0.0;
-			const QString newsPhotoPath = m_obitNewsPhoto.value(sid);
-			if (!newsPhotoPath.isEmpty() && QFileInfo::exists(newsPhotoPath))
+			const bool photoAbove = false;
+			const double textTop = newsCursor;
+			QString newsPhotoPath = m_obitNewsPhoto.value(sid);
+			const bool hasMedia = !mediaList(n).isEmpty();
+			QString placeholder;
+			if (hasMedia && (newsPhotoPath.isEmpty() || !QFileInfo::exists(newsPhotoPath)))
 			{
-				QImageReader rd(newsPhotoPath);
-				rd.setAutoTransform(true);
-				const QSize sz = rd.size();
-				double ph = colW;                                       // square when the size is unknown
-				if (sz.isValid() && sz.width() > 0)
-					ph = qBound(colW * 0.6, colW * sz.height() / double(sz.width()), colW * 1.3);   // taller pictures are cropped
+				placeholder = missingImagePlaceholder(m_obitPhotoWhy.value(sid, tr("picture missing")));
+				newsPhotoPath.clear();
+			}
+			const double photoTop = newsCursor + headH + 2.0 * kMm;
+			if (!newsPhotoPath.isEmpty() || !placeholder.isEmpty())
+			{
+				double pw = colW, ph = colW;                        // square when the size is unknown
+				if (!newsPhotoPath.isEmpty())
+				{
+					QImageReader rd(newsPhotoPath);
+					rd.setAutoTransform(true);
+					const QSize sz = rd.size();
+					if (sz.isValid() && sz.width() > 0 && sz.height() > 0)
+						ph = qBound(pw * 0.7, pw * sz.height() / double(sz.width()), pw * 1.3);   // wider/taller pictures are cropped
+				}
 				const double px = x + w - colW;
-				const int pi = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Rectangle, px, newsCursor, colW, ph, 0, CommonStrings::None, CommonStrings::None);
+				const int pi = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Rectangle, px, photoTop, pw, ph, 0, CommonStrings::None, CommonStrings::None);
 				photo = (pi >= 0) ? m_doc->Items->at(pi) : nullptr;
 				if (photo)
 				{
@@ -708,11 +875,25 @@ void SuneerNewsPanel::obitPlaceNow()
 					photo->setFillColor(CommonStrings::None);
 					photo->setLineColor(CommonStrings::None);
 					photo->setImageScalingMode(false, true);        // fill the frame, keep ratio (centre crop)
-					m_doc->loadPict(newsPhotoPath, photo, false, true);
-					photo->adjustPictScale();
-					if (photo->pixm.imgInfo.lowResType == 0)
-						photo->setResolution(1);
-					SuneerImageLinks::embedPlaced(m_doc, photo);
+					if (!newsPhotoPath.isEmpty())
+					{
+						m_doc->loadPict(newsPhotoPath, photo, false, true);
+						photo->adjustPictScale();
+						if (photo->pixm.imgInfo.lowResType == 0)
+							photo->setResolution(1);
+						SuneerImageLinks::embedPlaced(m_doc, photo);
+					}
+					else
+					{
+						setAttr(photo, "news.photoMissing", m_obitPhotoWhy.value(sid));
+						setAttr(photo, "news.photoUrl", mediaList(n)[0].toObject()["media"].toObject()["fileUrl"].toString());
+						if (!placeholder.isEmpty())
+							m_doc->loadPict(placeholder, photo, false, true);
+						const QString red = m_doc->PageColors.tryAddColor("Red", ScColor(0, 255, 255, 0));
+						photo->setLineColor(red);
+						photo->setLineShade(100);
+						photo->setLineWidth(1.0);
+					}
 					setAttr(photo, "news.role", "photo");
 					setAttr(photo, "news.index", "0");
 					setWrap(photo, true);
@@ -720,7 +901,7 @@ void SuneerNewsPanel::obitPlaceNow()
 					const QString capText = newsCaption(n);
 					if (!capText.isEmpty())
 					{
-						caption = makeTextFrame(px, newsCursor + ph, colW, 8.0 * kMm);
+						caption = makeTextFrame(px, photoTop + ph, pw, 8.0 * kMm);
 						if (caption)
 						{
 							items << caption;
@@ -729,6 +910,7 @@ void SuneerNewsPanel::obitPlaceNow()
 							setAttr(caption, "news.index", "0");
 							addPara(caption, capText, captionStyle);
 							trimTrailingParSep(caption);
+							hyphenate(caption);
 							fitFrame(caption);
 							setWrap(caption, true);
 							photoBlockH += caption->height();
@@ -736,10 +918,13 @@ void SuneerNewsPanel::obitPlaceNow()
 					}
 				}
 			}
-			else if (!m_obitPhotoWhy.value(sid).isEmpty())
-				photoProblems << QStringLiteral("%1: %2").arg(title.left(22), m_obitPhotoWhy.value(sid));
+			hyphenate(text);
+			text->invalidateLayout();
 			fitFrame(text);
-			const double h = qMax(text->height(), photoBlockH);
+			Q_UNUSED(photoAbove);
+			Q_UNUSED(textTop);
+			const double h = qMax(text->height(), (photoTop - newsCursor) + photoBlockH);
+			apiLog(QStringLiteral("obituary model: news '%1': headline block %2 mm, photo at +%3 mm, frame %4 mm").arg(title.left(20)).arg(headH / kMm, 0, 'f', 1).arg((photoTop - newsCursor) / kMm, 0, 'f', 1).arg(text->height() / kMm, 0, 'f', 1));
 			bool fitted = false;
 			double cy = newsCursor;
 			for (int guard = 0; guard < 50; ++guard)
@@ -765,14 +950,25 @@ void SuneerNewsPanel::obitPlaceNow()
 			}
 			const double dy = cy - newsCursor;
 			if (dy != 0.0)
-			{
 				for (PageItem* it : items)
 					it->setXYPos(it->xPos(), it->yPos() + dy);
-				text->invalidateLayout();
-				text->layout();
+			// Final layout and height on the real text at the final position.
+			text->invalidateLayout();
+			text->layout();
+			fitFrame(text);
+			const double hFinal = qMax(text->height(), (photoTop - newsCursor) + photoBlockH);
+			if (cy + hFinal > bottom + tol || text->frameOverflows())
+			{
+				apiLog(QStringLiteral("obituary model: news '%1' runs past the bottom margin after layout (%2 mm) - not placed").arg(title.left(20)).arg(hFinal / kMm, 0, 'f', 1));
+				removeItems(items);
+				newsStopped = true;
+				remaining << n;
+				remainingTitles << title;
+				continue;
 			}
-			newsCursor = cy + h + model.newsGapMm * kMm;
-			obstacles << QRectF(x, cy, w, h);
+			newsCursor = cy + hFinal + model.newsGapMm * kMm;
+			obstacles << QRectF(x, cy, w, hFinal);
+			placedModules << PlacedModule{-1, cy, hFinal, text, photo, caption, title};
 			PageItem* group = nullptr;
 			if (items.size() > 1)
 			{
@@ -793,9 +989,106 @@ void SuneerNewsPanel::obitPlaceNow()
 			}
 			placed << n;
 			++newsPlaced;
-			if (photo)
+			if (photo && !newsPhotoPath.isEmpty())
 				++newsWithPhoto;
+			apiLog(QStringLiteral("obituary model: news '%1': media %2, fileUrl %3 -> %4").arg(title.left(24)).arg(mediaList(n).size())
+			       .arg(hasMedia ? mediaList(n)[0].toObject()["media"].toObject()["fileUrl"].toString() : QStringLiteral("-"))
+			       .arg(!newsPhotoPath.isEmpty() ? QStringLiteral("photo placed in the right column under the headline")
+			            : (hasMedia ? QStringLiteral("placeholder: ") + m_obitPhotoWhy.value(sid) : QStringLiteral("no media")) ));
 		}
+	}
+
+	// ---- settle + check: every column top to bottom, each module at least
+	// the gap under the previous one (heights re-measured on the laid-out
+	// text), nothing below the bottom margin, no overflowing text frame,
+	// and finally no overlap between modules of different stories.
+	int fixedMoves = 0, overlaps = 0, overflows = 0;
+	{
+		auto moduleItems = [&](const PlacedModule& m) { QList<PageItem*> l{m.text}; if (m.photo) l << m.photo; if (m.extra) l << m.extra; if (m.text && m.text->Parent) l << m.text->Parent; return l; };
+		auto moduleRect = [&](const PlacedModule& m) {
+			QRectF r;
+			for (PageItem* it : moduleItems(m))
+				if (it && !it->isGroup())
+					r = r.isNull() ? it->getBoundingRect() : r.united(it->getBoundingRect());
+			return r;
+		};
+		QHash<int, QList<int>> byCol;
+		for (int i = 0; i < placedModules.size(); ++i)
+			byCol[placedModules[i].col] << i;
+		for (auto it = byCol.begin(); it != byCol.end(); ++it)
+		{
+			QList<int>& idx = it.value();
+			std::stable_sort(idx.begin(), idx.end(), [&](int a, int b) { return placedModules[a].y < placedModules[b].y; });
+			double prevBottom = -1.0;
+			const double g = (it.key() < 0) ? model.newsGapMm * kMm : moduleGap;
+			for (int k = 0; k < idx.size(); ++k)
+			{
+				PlacedModule& m = placedModules[idx[k]];
+				if (!m.text)
+					continue;
+				m.text->invalidateLayout();
+				m.text->layout();
+				if (m.text->frameOverflows())
+				{
+					fitFrame(m.text);
+					if (m.text->frameOverflows())
+						++overflows;
+				}
+				QRectF r = moduleRect(m);
+				if (prevBottom >= 0.0 && r.top() < prevBottom + g - tol)
+				{
+					const double dy = prevBottom + g - r.top();
+					// Move the top-level items (the group moves its children).
+					QList<PageItem*> tops;
+					for (PageItem* pi : moduleItems(m))
+						if (pi && !pi->isGroupChild() && !tops.contains(pi))
+							tops << pi;
+					for (PageItem* pi : tops)
+						m_doc->moveItem(0.0, dy, pi);
+					++fixedMoves;
+					apiLog(QStringLiteral("obituary model: settle - '%1' moved down %2 mm (was over the module above)").arg(m.title.left(20)).arg(dy / kMm, 0, 'f', 2));
+					r = moduleRect(m);
+				}
+				prevBottom = r.bottom();
+			}
+		}
+		// Anything now below the bottom margin is taken out and listed.
+		for (int i = placedModules.size() - 1; i >= 0; --i)
+		{
+			const QRectF r = moduleRect(placedModules[i]);
+			if (r.bottom() > bottom + tol)
+			{
+				apiLog(QStringLiteral("obituary model: '%1' ends %2 mm below the bottom margin after settling - removed").arg(placedModules[i].title.left(20)).arg((r.bottom() - bottom) / kMm, 0, 'f', 1));
+				QList<PageItem*> del;
+				if (placedModules[i].text && placedModules[i].text->Parent)
+					del << placedModules[i].text->Parent;
+				else
+					del = moduleItems(placedModules[i]);
+				removeItems(del);
+				for (int p = 0; p < placed.size(); ++p)
+					if (obitCollapse(placed[p]["title"].toString()) == placedModules[i].title)
+					{
+						remaining << placed[p];
+						remainingTitles << placedModules[i].title;
+						placed.removeAt(p);
+						break;
+					}
+				placedModules.removeAt(i);
+			}
+		}
+		// Pairwise overlap check between modules of different stories.
+		for (int a = 0; a < placedModules.size(); ++a)
+			for (int b = a + 1; b < placedModules.size(); ++b)
+			{
+				const QRectF ra = moduleRect(placedModules[a]).adjusted(tol, tol, -tol, -tol);
+				const QRectF rb = moduleRect(placedModules[b]);
+				if (ra.isValid() && ra.intersects(rb))
+				{
+					++overlaps;
+					apiLog(QStringLiteral("obituary model: OVERLAP '%1' and '%2'").arg(placedModules[a].title.left(20), placedModules[b].title.left(20)));
+				}
+			}
+		apiLog(QStringLiteral("obituary model: check - %1 modules, %2 moved in settling, %3 overlaps, %4 overflowing frames").arg(placedModules.size()).arg(fixedMoves).arg(overlaps).arg(overflows));
 	}
 
 	recordPlaceUndo(placed);
@@ -827,10 +1120,154 @@ void SuneerNewsPanel::obitPlaceNow()
 		tip += tr("Not placed (no room on this page):") + QStringLiteral("\n\u2022 ") + t.join(QStringLiteral("\n\u2022 "));
 	}
 	m_statusLabel->setToolTip(tip);
+	line += QStringLiteral("\n") + tr("Check: %1 overlap(s), %2 overflowing frame(s)%3").arg(overlaps).arg(overflows).arg(fixedMoves ? tr(", %n module(s) moved down in settling", "", fixedMoves) : QString());
 	if (noFace > 0)
-		line += QStringLiteral("\n") + tr("%n photo(s) without a detected face - see the orange 'check' flag", "", noFace);
+		line += QStringLiteral("\n") + tr("%n photo(s) to check (no face / low res) - see the orange flag", "", noFace);
 	if (!missingStyles.isEmpty())
 		line += QStringLiteral("\n") + tr("Missing paragraph styles: %1").arg(missingStyles.join(", "));
 	m_statusLabel->setText(line);
 	apiLog(QStringLiteral("obituary model: placed %1 (%2 obits, %3 with photo; %4 news, %5 with photo), remaining %6, noface %7, photo failures %8: %9").arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto).arg(remaining.size()).arg(noFace).arg(m_obitPhotoFailed).arg(photoProblems.join("; ")));
+}
+
+// The character style of a run-in place ("92 ObitPlace Runin"): created in
+// the document when missing, from the name style's font at the body size,
+// so the house paragraph styles themselves are never edited.
+QString SuneerNewsPanel::obitRuninStyle(const SuneerObitModel& model)
+{
+	if (!m_doc)
+		return QString();
+	const QString name = model.stylePlaceRunin.isEmpty() ? QStringLiteral("92 ObitPlace Runin") : model.stylePlaceRunin;
+	if (m_doc->charStyles().contains(name))
+		return name;
+	CharStyle cs;
+	cs.setName(name);
+	cs.setContext(&m_doc->charStyles());
+	if (m_doc->paragraphStyles().contains(model.styleName))
+	{
+		const ParagraphStyle& ps = m_doc->paragraphStyles().get(model.styleName);
+		cs.setFont(ps.charStyle().font());
+	}
+	if (m_doc->paragraphStyles().contains(model.styleBody))
+		cs.setFontSize(m_doc->paragraphStyles().get(model.styleBody).charStyle().fontSize());
+	StyleSet<CharStyle> set;
+	set.create(cs);
+	m_doc->redefineCharStyles(set, false);
+	apiLog(QStringLiteral("obituary model: character style '%1' created").arg(name));
+	return name;
+}
+
+// "Re-process photos": the current photo settings applied again to the
+// selected placed obit photos (or every obit photo of the document when
+// nothing is selected), without touching the text. The processed file is
+// rewritten and reloaded into the same frame; one undo step.
+void SuneerNewsPanel::onObitReprocess()
+{
+	if (!m_doc)
+		return;
+	if (m_obitWorker && m_obitWorker->running())
+	{
+		m_statusLabel->setText(tr("Obituary photos are still being processed"));
+		return;
+	}
+	QList<PageItem*> frames;
+	auto consider = [&](PageItem* it) {
+		if (!it)
+			return;
+		if (it->isGroup())
+		{
+			for (PageItem* c : it->groupItemList)
+				if (c && attr(c, "news.role") == QLatin1String("photo") && !attr(c, "obit.src").isEmpty())
+					frames << c;
+			return;
+		}
+		if (attr(it, "news.role") == QLatin1String("photo") && !attr(it, "obit.src").isEmpty())
+			frames << it;
+	};
+	if (m_doc->m_Selection->count() > 0)
+		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+			consider(m_doc->m_Selection->itemAt(i));
+	else
+		for (int i = 0; i < m_doc->DocItems.count(); ++i)
+			consider(m_doc->DocItems.at(i));
+	if (frames.isEmpty())
+	{
+		m_statusLabel->setText(tr("Re-process photos: select placed obituary photos (or nothing for all); none found"));
+		return;
+	}
+	const SuneerObitModel model = SuneerObitModel::load();
+	QString fillName;
+	const QColor bg = obitBackgroundColor(model, &fillName);
+	QList<SuneerObitPhotoWorker::Item> items;
+	QHash<QString, PageItem*> byId;
+	for (PageItem* f : frames)
+	{
+		SuneerObitPhotoWorker::Item it;
+		it.id = QString::number(items.size());
+		it.src = attr(f, "obit.src");
+		it.out = attr(f, "obit.out");
+		if (it.out.isEmpty() || it.out.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive))
+			it.out = obitImageDir() + '/' + (it.out.isEmpty() ? QFileInfo(it.src).completeBaseName() : QFileInfo(it.out).completeBaseName()) + QStringLiteral(".png");
+		if (!QFileInfo::exists(it.src))
+		{
+			apiLog(QStringLiteral("re-process: source missing %1").arg(it.src));
+			continue;
+		}
+		byId[it.id] = f;
+		items << it;
+	}
+	if (items.isEmpty())
+	{
+		m_statusLabel->setText(tr("Re-process photos: the original pictures were not found"));
+		return;
+	}
+	if (!m_obitWorker)
+		m_obitWorker = new SuneerObitPhotoWorker(this);
+	QString why;
+	if (!m_obitWorker->start(items, model, bg, obitImageDir(), &why))
+	{
+		m_statusLabel->setText(tr("Re-process photos: %1").arg(why));
+		return;
+	}
+	m_statusLabel->setText(tr("Re-processing %n obituary photo(s)...", "", items.size()));
+	m_obitWorker->disconnect(this);
+	connect(m_obitWorker, &SuneerObitPhotoWorker::progress, this, [this](int done, int total, const QString&, const QString& status, const QString&) {
+		m_statusLabel->setText(tr("Obituary photos: %1 of %2 (%3)").arg(done).arg(total).arg(status));
+	});
+	connect(m_obitWorker, &SuneerObitPhotoWorker::finished, this, [this, byId, fillName, model](bool ok, const QString& error) {
+		if (!m_doc)
+			return;
+		UndoTransaction tx;
+		if (UndoManager::undoEnabled())
+			tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Re-process obituary photos"), QString(), Um::IImageFrame);
+		int done = 0, flagged = 0;
+		for (const SuneerObitPhotoWorker::Result& r : m_obitWorker->results())
+		{
+			PageItem* f = byId.value(r.id);
+			if (!f || r.status == QLatin1String("fail") || !QFileInfo::exists(r.out))
+				continue;
+			f->setFillColor(fillName);
+			f->setImageScalingMode(false, true);
+			m_doc->loadPict(r.out, f, true, true);
+			f->adjustPictScale();
+			SuneerImageLinks::embedPlaced(m_doc, f);
+			setAttr(f, "obit.photoStatus", r.status);
+			setAttr(f, "obit.out", r.out);
+			++done;
+			if (r.status != QLatin1String("ok"))
+				++flagged;
+		}
+		if (tx)
+			tx.commit();
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+		if (m_mw)
+			m_mw->emitUpdateRequest(0);
+		QString line = tr("Re-processed %1 of %2 photo(s)").arg(done).arg(byId.size());
+		if (flagged)
+			line += tr("; %n to check (no face / low resolution)", "", flagged);
+		if (!ok)
+			line += QStringLiteral(" - ") + error;
+		m_statusLabel->setText(line);
+		apiLog(QStringLiteral("re-process: %1").arg(line));
+	});
 }

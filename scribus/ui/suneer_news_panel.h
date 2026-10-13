@@ -371,6 +371,15 @@ private:
 	int m_obitPhotoFailed {0};
 	QHash<QString, QString> m_obitPhotoWhy;       // story id -> why the photo is missing / unprocessed
 	QHash<QString, QString> m_obitNewsPhoto;      // story id -> downloaded (unprocessed) photo of a short news
+	QHash<QString, QString> m_obitPhotoSrc;       // story id -> original (cached) picture handed to the worker
+	QPushButton* m_obitReprocessBtn {nullptr};
+	QLabel* m_layoutModelInfo {nullptr};          // current Obituary settings next to the dropdown
+	QHash<QString, QString> m_obitPhotoInfo;      // story id -> "180 ppi (240x240 px)"
+	void updateLayoutModelInfo();
+	//! The run-in place character style name, created in the document when missing.
+	QString obitRuninStyle(const SuneerObitModel& model);
+	//! Re-applies the current photo settings to the selected placed obit photos.
+	void onObitReprocess();
 	//! Settings key of the current page: its pageType, else its name.
 	QString layoutModelKey() const;
 	void fillLayoutModelCombo();

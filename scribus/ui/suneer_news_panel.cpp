@@ -64,6 +64,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSpinBox>
+#include <QSlider>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -444,8 +445,13 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QString k = layoutModelKey().trimmed();
 		k.replace('/', '_');
 		cfg.setValue(QStringLiteral("layoutModel/") + (k.isEmpty() ? QStringLiteral("_default") : k), m_layoutModelCmb->currentData().toString());
+		updateLayoutModelInfo();
 	});
 	btnRow->addWidget(m_layoutModelCmb, 1);
+	m_layoutModelInfo = new QLabel(w);
+	m_layoutModelInfo->setStyleSheet("font-size:10px; color:#555;");
+	m_layoutModelInfo->setWordWrap(true);
+	vl->addWidget(m_layoutModelInfo);
 	m_placeBtn = new QPushButton(im.loadIcon("tool-insert-text-frame"), tr("Place Selected"), w);
 	m_placeBtn->setStyleSheet("background:#2E7D32; color:white; font-weight:bold; padding:4px;");
 	m_placeBtn->setEnabled(false);
@@ -465,6 +471,11 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_balanceBtn->setEnabled(false);
 	connect(m_balanceBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onMarkBalanceTicked);
 	markRow->addWidget(m_balanceBtn, 1);
+	m_obitReprocessBtn = new QPushButton(tr("Re-process photos"), w);
+	m_obitReprocessBtn->setToolTip(tr("Obituary model: apply the current photo settings (background, tone, face fill, frame shape) again to the SELECTED placed obit photos, or to all of them when nothing is selected. The text is not touched."));
+	m_obitReprocessBtn->setStyleSheet("padding:4px;");
+	connect(m_obitReprocessBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitReprocess);
+	markRow->addWidget(m_obitReprocessBtn, 1);
 	vl->addLayout(btnRow);
 	vl->addLayout(markRow);
 
@@ -4754,20 +4765,6 @@ void SuneerNewsPanel::onSettings()
 	wrapGapSpin->setSuffix(" mm");
 	wrapGapSpin->setValue(s.value("layout/wrapGapMm", 2.0).toDouble());
 	fl2->addRow(tr("Text wrap gap around photos:"), wrapGapSpin);
-	QComboBox* obitBgCmb = new QComboBox(layoutTab);
-	obitBgCmb->setEditable(true);
-	{
-		const SuneerObitModel om = SuneerObitModel::load();
-		QStringList names{QStringLiteral("DB obit"), QStringLiteral("Light grey")};
-		if (m_doc)
-			for (auto it = m_doc->PageColors.cbegin(); it != m_doc->PageColors.cend(); ++it)
-				if (!names.contains(it.key()))
-					names << it.key();
-		obitBgCmb->addItems(names);
-		obitBgCmb->setCurrentText(om.photoBackground);
-		obitBgCmb->setToolTip(tr("Uniform background behind every obituary photo (Obituary layout model): a document colour or Light grey. Default DB obit (C23 M0 Y0 K23). Stored in %1").arg(SuneerObitModel::filePath()));
-	}
-	fl2->addRow(tr("Obit photo background:"), obitBgCmb);
 	QComboBox* targetCmb = new QComboBox(layoutTab);
 	targetCmb->addItem(tr("Pasteboard left of the page (story spike)"), "left");
 	targetCmb->addItem(tr("Pasteboard right of the page"), "right");
@@ -4778,6 +4775,72 @@ void SuneerNewsPanel::onSettings()
 	}
 	fl2->addRow(tr("Place stories on:"), targetCmb);
 	tabs->addTab(layoutTab, tr("📐 Layout"));
+
+	// ---- Obituary model (obituary.json) -----------------------------------
+	QWidget* obitTab = new QWidget();
+	QFormLayout* flo = new QFormLayout(obitTab);
+	flo->setSpacing(10);
+	const SuneerObitModel om = SuneerObitModel::load();
+	QComboBox* obitAlignCmb = new QComboBox(obitTab);
+	obitAlignCmb->addItem(tr("Centred (house style)"), "centre");
+	obitAlignCmb->addItem(tr("Left aligned"), "left");
+	obitAlignCmb->setCurrentIndex(qMax(0, obitAlignCmb->findData(om.textAlign)));
+	obitAlignCmb->setToolTip(tr("Left aligned: name on its own line, then the details left aligned. Local paragraph alignment; the house styles are not edited."));
+	flo->addRow(tr("Text alignment:"), obitAlignCmb);
+	QCheckBox* obitRuninChk = new QCheckBox(tr("Run-in place: \"Place: details...\" on one line (character style %1)").arg(om.stylePlaceRunin), obitTab);
+	obitRuninChk->setChecked(om.runInPlace);
+	flo->addRow(QString(), obitRuninChk);
+	QComboBox* obitBgCmb = new QComboBox(obitTab);
+	obitBgCmb->setEditable(true);
+	{
+		QStringList names{QStringLiteral("Obit BG"), QStringLiteral("DB obit")};
+		if (m_doc)
+			for (auto it = m_doc->PageColors.cbegin(); it != m_doc->PageColors.cend(); ++it)
+				if (!names.contains(it.key()))
+					names << it.key();
+		obitBgCmb->addItems(names);
+		obitBgCmb->setItemText(0, QStringLiteral("Obit BG"));
+		obitBgCmb->setCurrentText(om.photoBackground);
+		obitBgCmb->setToolTip(tr("Uniform tone behind every obit photo. \"Obit BG\" = the measured grey (RGB %6 in the files), a document colour C%1 M%2 Y%3 K%4 added when missing (editable in the Colours palette); \"DB obit\" = the old house tone; or any document colour. Stored in %5")
+		                      .arg(om.bgCMYK[0]).arg(om.bgCMYK[1]).arg(om.bgCMYK[2]).arg(om.bgCMYK[3]).arg(SuneerObitModel::filePath())
+		                      .arg(QStringLiteral("%1,%2,%3").arg(om.bgRGB[0]).arg(om.bgRGB[1]).arg(om.bgRGB[2])));
+	}
+	flo->addRow(tr("Photo background:"), obitBgCmb);
+	QSlider* obitToneSlider = new QSlider(Qt::Horizontal, obitTab);
+	obitToneSlider->setRange(0, 100);
+	obitToneSlider->setValue(om.toneStrength);
+	obitToneSlider->setTickInterval(10);
+	obitToneSlider->setTickPosition(QSlider::TicksBelow);
+	QLabel* obitToneVal = new QLabel(QString::number(om.toneStrength), obitTab);
+	connect(obitToneSlider, &QSlider::valueChanged, obitToneVal, [obitToneVal](int v) { obitToneVal->setText(QString::number(v)); });
+	QHBoxLayout* toneRow = new QHBoxLayout();
+	toneRow->addWidget(obitToneSlider, 1);
+	toneRow->addWidget(obitToneVal);
+	obitToneSlider->setToolTip(tr("Tone matching of the person after background removal: white balance, auto levels (1 % clip), gentle contrast, one target face brightness, slight sharpening. 0 = off, 100 = full."));
+	flo->addRow(tr("Tone matching strength:"), toneRow);
+	QComboBox* obitFillCmb = new QComboBox(obitTab);
+	obitFillCmb->addItem(tr("Tight (face 50 %)"), 0.50);
+	obitFillCmb->addItem(tr("Normal (face 55 %)"), 0.55);
+	obitFillCmb->addItem(tr("Loose (face 60 %)"), 0.60);
+	{
+		int best = 1;
+		for (int k = 0; k < obitFillCmb->count(); ++k)
+			if (qAbs(obitFillCmb->itemData(k).toDouble() - om.faceH) < 0.02)
+				best = k;
+		obitFillCmb->setCurrentIndex(best);
+	}
+	obitFillCmb->setToolTip(tr("Face fill: hairline-chin as a share of the frame height, top of the head 3 %% below the frame top, centred, shoulders cut at the bottom. Sources smaller than 300 ppi get the largest crop that keeps 300 ppi and an orange flag."));
+	flo->addRow(tr("Face fill:"), obitFillCmb);
+	QComboBox* obitShapeCmb = new QComboBox(obitTab);
+	obitShapeCmb->addItem(tr("Square (%1 x %1 mm)").arg(om.photoMm), "square");
+	obitShapeCmb->addItem(tr("Portrait (%1 x %2 mm)").arg(om.photoMm).arg(om.portraitHeightMm), "portrait");
+	obitShapeCmb->setCurrentIndex(qMax(0, obitShapeCmb->findData(om.frameShape)));
+	flo->addRow(tr("Photo frame:"), obitShapeCmb);
+	QLabel* obitNote = new QLabel(tr("Changes apply to the next Place and to \"Re-process photos\". Model file: %1").arg(SuneerObitModel::filePath()), obitTab);
+	obitNote->setWordWrap(true);
+	obitNote->setStyleSheet("color:#666; font-size:11px;");
+	flo->addRow(obitNote);
+	tabs->addTab(obitTab, tr("⚰ Obituary"));
 
 	// Image
 	QWidget* imgTab = new QWidget();
@@ -4886,13 +4949,19 @@ void SuneerNewsPanel::onSettings()
 	}
 	s.setValue("layout/wrapGapMm", wrapGapSpin->value());
 	{
-		SuneerObitModel om = SuneerObitModel::load();
+		SuneerObitModel om2 = SuneerObitModel::load();
 		const QString bg = obitBgCmb->currentText().trimmed();
-		if (!bg.isEmpty() && bg != om.photoBackground)
-		{
-			om.photoBackground = bg;
-			om.save();
-		}
+		if (!bg.isEmpty())
+			om2.photoBackground = bg;
+		om2.textAlign = obitAlignCmb->currentData().toString();
+		om2.runInPlace = obitRuninChk->isChecked();
+		om2.toneStrength = obitToneSlider->value();
+		om2.faceH = obitFillCmb->currentData().toDouble();
+		om2.frameShape = obitShapeCmb->currentData().toString();
+		QString err;
+		if (!om2.save(&err))
+			m_statusLabel->setText(err);
+		updateLayoutModelInfo();
 	}
 	s.setValue("image/height", imgHspin->value());
 	s.setValue("style/titleStyle", titleStyleEdit->text().trimmed());
