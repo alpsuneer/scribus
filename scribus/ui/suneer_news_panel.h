@@ -373,6 +373,8 @@ private:
 	QHash<QString, QString> m_obitNewsPhoto;      // story id -> downloaded (unprocessed) photo of a short news
 	QHash<QString, QString> m_obitPhotoSrc;       // story id -> original (cached) picture handed to the worker
 	QPushButton* m_obitReprocessBtn {nullptr};
+	QPushButton* m_obitRepackBtn {nullptr};
+	QPushButton* m_obitPinBtn {nullptr};
 	QLabel* m_layoutModelInfo {nullptr};          // current Obituary settings next to the dropdown
 	QHash<QString, QString> m_obitPhotoInfo;      // story id -> "180 ppi (240x240 px)"
 	void updateLayoutModelInfo();
@@ -380,6 +382,10 @@ private:
 	QString obitRuninStyle(const SuneerObitModel& model);
 	//! Re-applies the current photo settings to the selected placed obit photos.
 	void onObitReprocess();
+	//! "Re-pack page": obit modules up in their columns, then the gap / empty-area check. Returns the report lines.
+	QStringList obitRepackPage(int* moved = nullptr, bool* changed = nullptr);
+	void onObitRepack();
+	void onObitPinSelected();
 	//! Settings key of the current page: its pageType, else its name.
 	QString layoutModelKey() const;
 	void fillLayoutModelCombo();

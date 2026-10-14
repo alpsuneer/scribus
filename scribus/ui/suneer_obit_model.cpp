@@ -45,7 +45,8 @@ QJsonObject SuneerObitModel::toJson() const
 		{"sizePx", photoPx}, {"quality", photoQuality}, {"background", photoBackground},
 		{"bgCMYK", QJsonArray{bgCMYK[0], bgCMYK[1], bgCMYK[2], bgCMYK[3]}},
 		{"bgRGB", QJsonArray{bgRGB[0], bgRGB[1], bgRGB[2]}},
-		{"model", rembgModel}, {"eyeY", eyeY}, {"faceH", faceH}, {"headTop", headTop},
+		{"model", rembgModel}, {"bgModels", QJsonArray::fromStringList(bgModels)},
+		{"eyeY", eyeY}, {"faceH", faceH}, {"headTop", headTop}, {"faceW", faceW}, {"faceTop", faceTop},
 		{"toneStrength", toneStrength}, {"frameShape", frameShape}, {"portraitHeightMm", portraitHeightMm},
 		{"minPpi", minPpi}, {"flagColor", flagColor}};
 	QJsonObject text{{"align", textAlign}, {"runInPlace", runInPlace}, {"placeRuninStyle", stylePlaceRunin}};
@@ -113,6 +114,15 @@ void SuneerObitModel::fromJson(const QJsonObject& o)
 	eyeY            = qBound(0.2, num(photo, "eyeY", eyeY), 0.6);
 	faceH           = qBound(0.3, num(photo, "faceH", faceH), 0.8);
 	headTop         = qBound(0.0, num(photo, "headTop", headTop), 0.2);
+	faceW           = qBound(0.0, num(photo, "faceW", faceW), 0.9);
+	faceTop         = qBound(0.0, num(photo, "faceTop", faceTop), 0.5);
+	if (photo["bgModels"].isArray())
+	{
+		bgModels.clear();
+		for (const QJsonValue& v : photo["bgModels"].toArray())
+			if (!v.toString().isEmpty())
+				bgModels << v.toString();
+	}
 	toneStrength    = qBound(0, int(num(photo, "toneStrength", toneStrength)), 100);
 	frameShape      = str(photo, "frameShape", frameShape);
 	portraitHeightMm = qBound(20.0, num(photo, "portraitHeightMm", portraitHeightMm), 60.0);
@@ -121,22 +131,23 @@ void SuneerObitModel::fromJson(const QJsonObject& o)
 	{
 		for (int i = 0; i < 4; ++i)
 			bgCMYK[i] = qBound(0, photo["bgCMYK"].toArray()[i].toInt(), 100);
-		// Earlier defaults (C0 M0 Y0 K12 of 2026-10-12, C3 M2 Y0 K27, and
-		// C3 M1 Y0 K22 of 2026-10-13 morning) were replaced by Illustrator's
-		// C2 M1 Y0 K20 for #C2C6C7; an old file still carrying one of them
-		// moves on. Any other value is the user's.
+		// Earlier defaults (C0 M0 Y0 K12 of 2026-10-12, C3 M2 Y0 K27,
+		// C3 M1 Y0 K22 and C2 M1 Y0 K20 of 2026-10-13) were replaced by
+		// C2 M1 Y0 K27 (#B6B8B9, measured on the reference strip); an old
+		// file still carrying one of them moves on. Any other value is the
+		// user's.
 		if (SuneerObitModel::isOldBgCMYK(bgCMYK))
 		{
-			bgCMYK[0] = 2; bgCMYK[1] = 1; bgCMYK[2] = 0; bgCMYK[3] = 20;
+			bgCMYK[0] = 2; bgCMYK[1] = 1; bgCMYK[2] = 0; bgCMYK[3] = 27;
 		}
 	}
 	if (photo["bgRGB"].toArray().size() == 3)
 	{
 		for (int i = 0; i < 3; ++i)
 			bgRGB[i] = qBound(0, photo["bgRGB"].toArray()[i].toInt(), 255);
-		if (bgRGB[0] == 181 && bgRGB[1] == 184 && bgRGB[2] == 187)   // the #B5B8BB default
+		if (SuneerObitModel::isOldBgRGB(bgRGB))   // #B5B8BB / #C2C6C7 defaults
 		{
-			bgRGB[0] = 194; bgRGB[1] = 198; bgRGB[2] = 199;
+			bgRGB[0] = 182; bgRGB[1] = 184; bgRGB[2] = 185;
 		}
 	}
 	flagColor       = str(photo, "flagColor", flagColor);
@@ -183,8 +194,11 @@ SuneerObitModel SuneerObitModel::load(QString* note)
 	if (oldBg.size() == 4)
 		for (int i = 0; i < 4; ++i)
 			oldCmyk[i] = oldBg[i].toInt();
-	const bool oldRgbDefault = oldRgb.size() == 3 && oldRgb[0].toInt() == 181 && oldRgb[1].toInt() == 184 && oldRgb[2].toInt() == 187;
-	if (!photo.contains(QLatin1String("bgRGB")) || isOldBgCMYK(oldCmyk) || oldRgbDefault)
+	int oldRgbV[3] { -1, -1, -1 };
+	if (oldRgb.size() == 3)
+		for (int i = 0; i < 3; ++i)
+			oldRgbV[i] = oldRgb[i].toInt();
+	if (!photo.contains(QLatin1String("bgRGB")) || !photo.contains(QLatin1String("faceW")) || isOldBgCMYK(oldCmyk) || isOldBgRGB(oldRgbV))
 		m.save();
 	return m;
 }
@@ -193,7 +207,14 @@ bool SuneerObitModel::isOldBgCMYK(const int* c)
 {
 	return (c[0] == 0 && c[1] == 0 && c[2] == 0 && c[3] == 12)
 	    || (c[0] == 3 && c[1] == 2 && c[2] == 0 && c[3] == 27)
-	    || (c[0] == 3 && c[1] == 1 && c[2] == 0 && c[3] == 22);
+	    || (c[0] == 3 && c[1] == 1 && c[2] == 0 && c[3] == 22)
+	    || (c[0] == 2 && c[1] == 1 && c[2] == 0 && c[3] == 20);
+}
+
+bool SuneerObitModel::isOldBgRGB(const int* c)
+{
+	return (c[0] == 181 && c[1] == 184 && c[2] == 187)
+	    || (c[0] == 194 && c[1] == 198 && c[2] == 199);
 }
 
 bool SuneerObitModel::save(QString* error) const
@@ -276,7 +297,9 @@ bool SuneerObitPhotoWorker::start(const QList<Item>& items, const SuneerObitMode
 	QJsonObject job{
 		{"size", model.photoPx}, {"outH", outH}, {"quality", model.photoQuality},
 		{"bg", QJsonArray{background.red(), background.green(), background.blue()}},
-		{"model", model.rembgModel}, {"eyeY", model.eyeY}, {"faceH", model.faceH}, {"headTop", model.headTop},
+		{"model", model.rembgModel}, {"bgModels", QJsonArray::fromStringList(model.bgModels)},
+		{"eyeY", model.eyeY}, {"faceH", model.faceH}, {"headTop", model.headTop},
+		{"faceW", model.faceW}, {"faceTop", model.faceTop},
 		{"toneStrength", model.toneStrength}, {"minPx", minPx}, {"mm", model.photoMm},
 		{"matting", false}, {"items", arr}};
 	m_jobFile = workDir + QStringLiteral("/obit-photos.job.json");

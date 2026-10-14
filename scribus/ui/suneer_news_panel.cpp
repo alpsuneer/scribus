@@ -471,13 +471,26 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_balanceBtn->setEnabled(false);
 	connect(m_balanceBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onMarkBalanceTicked);
 	markRow->addWidget(m_balanceBtn, 1);
+	// The Obituary-model buttons on a row of their own (the mark row is full).
+	QHBoxLayout* obitRow = new QHBoxLayout();
+	m_obitRepackBtn = new QPushButton(tr("Re-pack page"), w);
+	m_obitRepackBtn->setToolTip(tr("Obituary model: move every obit module up in its column to close the gaps (2.3 mm between modules, order kept). Locked items, ads, masthead/folio, news modules and modules pinned with \"Pin position\" are never moved. Then the check: vertical gaps over 4 mm and empty areas over 30 x 30 mm are listed. Runs by itself after every Place."));
+	m_obitRepackBtn->setStyleSheet("padding:4px;");
+	connect(m_obitRepackBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitRepack);
+	obitRow->addWidget(m_obitRepackBtn, 1);
+	m_obitPinBtn = new QPushButton(tr("Pin position"), w);
+	m_obitPinBtn->setToolTip(tr("Mark the SELECTED placed modules as moved by hand (attribute news.manual = 1): Re-pack leaves them where they are. Click again on a pinned module to unpin it."));
+	m_obitPinBtn->setStyleSheet("padding:4px;");
+	connect(m_obitPinBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitPinSelected);
+	obitRow->addWidget(m_obitPinBtn, 1);
 	m_obitReprocessBtn = new QPushButton(tr("Re-process photos"), w);
 	m_obitReprocessBtn->setToolTip(tr("Obituary model: apply the current photo settings (background, tone, face fill, frame shape) again to the SELECTED placed obit photos, or to all of them when nothing is selected. The text is not touched."));
 	m_obitReprocessBtn->setStyleSheet("padding:4px;");
 	connect(m_obitReprocessBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitReprocess);
-	markRow->addWidget(m_obitReprocessBtn, 1);
+	obitRow->addWidget(m_obitReprocessBtn, 1);
 	vl->addLayout(btnRow);
 	vl->addLayout(markRow);
+	vl->addLayout(obitRow);
 
 	m_stack->addWidget(w);
 	m_stack->setCurrentIndex(0);
@@ -4819,17 +4832,17 @@ void SuneerNewsPanel::onSettings()
 	obitToneSlider->setToolTip(tr("Tone matching of the person after background removal: white balance, auto levels (1 % clip), gentle contrast, one target face brightness, slight sharpening. 0 = off, 100 = full."));
 	flo->addRow(tr("Tone matching strength:"), toneRow);
 	QComboBox* obitFillCmb = new QComboBox(obitTab);
-	obitFillCmb->addItem(tr("Tight (face 50 %)"), 0.50);
-	obitFillCmb->addItem(tr("Normal (face 55 %)"), 0.55);
-	obitFillCmb->addItem(tr("Loose (face 60 %)"), 0.60);
+	obitFillCmb->addItem(tr("Tighter (face box 66 % of the width)"), 0.66);
+	obitFillCmb->addItem(tr("Reference (face box 60 % of the width)"), 0.60);
+	obitFillCmb->addItem(tr("Looser (face box 54 % of the width)"), 0.54);
 	{
 		int best = 1;
 		for (int k = 0; k < obitFillCmb->count(); ++k)
-			if (qAbs(obitFillCmb->itemData(k).toDouble() - om.faceH) < 0.02)
+			if (qAbs(obitFillCmb->itemData(k).toDouble() - om.faceW) < 0.02)
 				best = k;
 		obitFillCmb->setCurrentIndex(best);
 	}
-	obitFillCmb->setToolTip(tr("Face fill: hairline-chin as a share of the frame height, top of the head 3 %% below the frame top, centred, shoulders cut at the bottom. Sources smaller than 300 ppi get the largest crop that keeps 300 ppi and an orange flag."));
+	obitFillCmb->setToolTip(tr("Face crop in Haar frontal-face box terms (measured on the reference strip): the face box is this share of the frame width, centred, its top %1 %% of the frame width below the frame top - hair almost at the top edge, only neck and collar below the chin. Sources smaller than 300 ppi get the largest crop that keeps 300 ppi and an orange flag.").arg(qRound(om.faceTop * 100)));
 	flo->addRow(tr("Face fill:"), obitFillCmb);
 	QComboBox* obitShapeCmb = new QComboBox(obitTab);
 	obitShapeCmb->addItem(tr("Square (%1 x %1 mm)").arg(om.photoMm), "square");
@@ -4956,7 +4969,7 @@ void SuneerNewsPanel::onSettings()
 		om2.textAlign = obitAlignCmb->currentData().toString();
 		om2.runInPlace = obitRuninChk->isChecked();
 		om2.toneStrength = obitToneSlider->value();
-		om2.faceH = obitFillCmb->currentData().toDouble();
+		om2.faceW = obitFillCmb->currentData().toDouble();
 		om2.frameShape = obitShapeCmb->currentData().toString();
 		QString err;
 		if (!om2.save(&err))

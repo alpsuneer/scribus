@@ -65,14 +65,19 @@ struct SuneerObitModel
 	int     photoPx      {600};
 	int     photoQuality {95};
 	QString photoBackground {QStringLiteral("Obit BG")};   // "Obit BG" (neutral light grey, created), "DB obit", or any document colour
-	int     bgCMYK[4]    {2, 1, 0, 20};                     // the "Obit BG" document colour (C2 M1 Y0 K20 from Illustrator, 2026-10-13)
+	int     bgCMYK[4]    {2, 1, 0, 27};                     // the "Obit BG" document colour (C2 M1 Y0 K27 = #B6B8B9, reference strip 2026-10-13)
 	//! An earlier default "Obit BG" CMYK (percent) that migrates to the current one.
 	static bool isOldBgCMYK(const int* c);
-	int     bgRGB[3]     {194, 198, 199};                   // the exact tone written into every processed file (#C2C6C7)
+	//! An earlier default "Obit BG" RGB that migrates to the current one.
+	static bool isOldBgRGB(const int* c);
+	int     bgRGB[3]     {182, 184, 185};                   // the exact tone written into every processed file (#B6B8B9)
 	QString rembgModel   {QStringLiteral("u2net_human_seg")};
+	QStringList bgModels {QStringLiteral("isnet-general-use"), QStringLiteral("u2net")};   // tried in turn when the first model keeps the background
 	double  eyeY         {0.40};                            // unused since the face-fill crop; kept for old files
-	double  faceH        {0.55};                            // hairline-chin / frame height (Tight 0.50, Normal 0.55, Loose 0.60)
-	double  headTop      {0.03};                            // top of the head below the frame top
+	double  faceH        {0.55};                            // old rule: hairline-chin / frame height (used when faceW is 0)
+	double  headTop      {0.03};                            // old rule: top of the head below the frame top
+	double  faceW        {0.60};                            // Haar face box width / frame width (reference strip: 60 %, face centred)
+	double  faceTop      {0.18};                            // Haar face box top below the frame top, in frame widths (reference: 18 %)
 	int     toneStrength {60};                              // 0-100
 	QString frameShape   {QStringLiteral("square")};        // "square" (30.3 x 30.3) or "portrait" (30.3 x portraitHeightMm)
 	double  portraitHeightMm {34.0};

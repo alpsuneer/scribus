@@ -15,6 +15,10 @@
                       lists the rest; then the usual USED marking.
 */
 #include "suneer_news_panel.h"
+
+#include <cmath>
+#include <QPoint>
+#include <QVector>
 #include "suneer_obit_model.h"
 
 #include "commonstrings.h"
@@ -78,6 +82,14 @@ QString obitPlaceLine(const QJsonObject& news, QStringList& paras)
 	return place;
 }
 
+//! An empty text frame with no fill and no line prints nothing: a leftover
+//! of the template (an old caption frame) must not block the placement.
+bool obitInvisibleEmptyFrame(const PageItem* it)
+{
+	return it && it->isTextFrame() && it->itemText.length() == 0
+	       && it->fillColor() == CommonStrings::None && it->lineColor() == CommonStrings::None;
+}
+
 QString obitSettingsKey(const QString& key)
 {
 	QString k = key.trimmed();
@@ -129,7 +141,7 @@ void SuneerNewsPanel::updateLayoutModelInfo()
 	if (m.runInPlace)
 		parts << tr("run-in");
 	parts << (m.frameShape == QLatin1String("portrait") ? tr("Portrait") : tr("Square"));
-	parts << m.photoBackground << tr("face %1%").arg(qRound(m.faceH * 100));
+	parts << m.photoBackground << tr("face %1%").arg(qRound((m.faceW > 0 ? m.faceW : m.faceH) * 100));
 	m_layoutModelInfo->setText(parts.join(QStringLiteral(" \u00b7 ")));
 	m_layoutModelInfo->setToolTip(tr("Current Obituary model settings (Settings > Obituary): %1").arg(SuneerObitModel::filePath()));
 }
@@ -202,10 +214,10 @@ QColor SuneerNewsPanel::obitBackgroundColor(const SuneerObitModel& model, QStrin
 	if (name.compare(QLatin1String("light grey"), Qt::CaseInsensitive) == 0 || name.compare(QLatin1String("light gray"), Qt::CaseInsensitive) == 0
 	    || name.compare(QLatin1String("Neutral light grey"), Qt::CaseInsensitive) == 0 || name == QLatin1String("Obit BG"))
 	{
-		// "Obit BG": a document colour (C2 M1 Y0 K20 by default, Illustrator's
-		// value for #C2C6C7) the user may edit in the Colours palette. A copy
-		// still at an earlier default (C0 M0 Y0 K12, C3 M2 Y0 K27 or
-		// C3 M1 Y0 K22) is updated; any other edit is kept.
+		// "Obit BG": a document colour (C2 M1 Y0 K27 by default, the reference
+		// strip's #B6B8B9) the user may edit in the Colours palette. A copy
+		// still at an earlier default (C0 M0 Y0 K12, C3 M2 Y0 K27, C3 M1 Y0
+		// K22 or C2 M1 Y0 K20) is updated; any other edit is kept.
 		const QString obitBg = QStringLiteral("Obit BG");
 		if (!m_doc->PageColors.contains(obitBg))
 			m_doc->PageColors.insert(obitBg, cmyk(model.bgCMYK));
@@ -217,12 +229,13 @@ QColor SuneerNewsPanel::obitBackgroundColor(const SuneerObitModel& model, QStrin
 			const bool firstDefault  = c == 0 && m == 0 && y == 0 && (k == 31 || k == 30);
 			const bool secondDefault = near(c, 3) && near(m, 2) && y == 0 && near(k, 27);
 			const bool thirdDefault  = near(c, 3) && near(m, 1) && y == 0 && near(k, 22);
-			if (firstDefault || secondDefault || thirdDefault)
+			const bool fourthDefault = near(c, 2) && near(m, 1) && y == 0 && near(k, 20);
+			if (firstDefault || secondDefault || thirdDefault || fourthDefault)
 				m_doc->PageColors[obitBg] = cmyk(model.bgCMYK);
 		}
 		if (fillName)
 			*fillName = obitBg;
-		// The processed files get the exact RGB (#C2C6C7 by default), not a
+		// The processed files get the exact RGB (#B6B8B9 by default), not a
 		// colour-managed conversion, so every file carries the same value.
 		return QColor(model.bgRGB[0], model.bgRGB[1], model.bgRGB[2]);
 	}
@@ -401,8 +414,14 @@ void SuneerNewsPanel::obitPlaceNow()
 		if (!it || it->isGroupChild() || (it->isAutoText && it->itemText.length() == 0))
 			continue;                                   // an empty automatic text frame is not an obstacle
 		const QRectF r = it->getBoundingRect();
-		if (r.intersects(pageRect))
-			obstacles << r;
+		if (!r.intersects(pageRect))
+			continue;
+		if (obitInvisibleEmptyFrame(it))
+		{
+			apiLog(QStringLiteral("obituary model: empty invisible frame '%1' at (%2,%3 %4x%5) mm ignored as an obstacle").arg(it->itemName().left(24)).arg((r.x() - pageX) / kMm, 0, 'f', 1).arg((r.y() - pageY) / kMm, 0, 'f', 1).arg(r.width() / kMm, 0, 'f', 1).arg(r.height() / kMm, 0, 'f', 1));
+			continue;
+		}
+		obstacles << r;
 	}
 	if (m_doc->MasterNames.contains(page->masterPageName()))
 	{
@@ -583,11 +602,50 @@ void SuneerNewsPanel::obitPlaceNow()
 	for (int c : obitCols)
 		cursor[c] = top;
 	double newsCursor = top;
-	bool obitsStopped = false, newsStopped = false;
 	int noFace = 0, obitsPlaced = 0, obitsWithPhoto = 0, newsPlaced = 0, newsWithPhoto = 0;
 	QStringList photoProblems;      // "title: reason" for every placed story without its picture
 	const bool leftAligned = (model.textAlign == QLatin1String("left"));
 	auto captionStyle = [&]() { QSettings cfg("Faircode", "ScribusNews"); const QString v = cfg.value("style/captionStyle", "09 Caption").toString().trimmed(); return v.isEmpty() ? QStringLiteral("09 Caption") : v; }();
+	// No room on the page: the finished module goes to the pasteboard right
+	// of the page, grouped and tagged (news.parked = 1), and is listed -
+	// never dropped silently. It stays out of the server marks.
+	const double parkX = pageX + page->width() + 10.0 * kMm;
+	double parkY = pageY;
+	QStringList parkedTitles;
+	auto parkModule = [&](QList<PageItem*> items, const QJsonObject& n, const QString& title, const QString& modelName, const QString& pos, int cols) {
+		QRectF u;
+		for (PageItem* it : items)
+			if (it)
+				u = u.isNull() ? it->getBoundingRect() : u.united(it->getBoundingRect());
+		const double dx = parkX - u.left(), dy = parkY - u.top();
+		for (PageItem* it : items)
+			if (it)
+				it->setXYPos(it->xPos() + dx, it->yPos() + dy);
+		parkY += u.height() + 2.0 * moduleGap;
+		PageItem* group = nullptr;
+		if (items.size() > 1)
+		{
+			Selection sel(this, false);
+			for (PageItem* it : items)
+				sel.addItem(it);
+			group = m_doc->itemSelection_GroupObjects(false, false, &sel);
+		}
+		QList<PageItem*> tagged = items;
+		if (group)
+			tagged << group;
+		tagStoryItems(tagged, title, pos, 1, cols, newsServerId(n));
+		for (PageItem* it : tagged)
+		{
+			setAttr(it, "news.model", modelName);
+			setAttr(it, "news.parked", QStringLiteral("1"));
+			if (!newsRefId(n).isEmpty())
+				setAttr(it, "news.refId", newsRefId(n));
+		}
+		remaining << n;
+		remainingTitles << title;
+		parkedTitles << title;
+		apiLog(QStringLiteral("obituary model: '%1' parked on the pasteboard (no room on the page)").arg(title.left(24)));
+	};
 
 	for (const QJsonObject& n : stories)
 	{
@@ -598,12 +656,6 @@ void SuneerNewsPanel::obitPlaceNow()
 
 		if (isObit)
 		{
-			if (obitsStopped)
-			{
-				remaining << n;
-				remainingTitles << title;
-				continue;
-			}
 			const QString photoPath = m_obitPhotoOut.value(sid);
 			const QString photoStatus = m_obitPhotoStatus.value(sid);
 			const bool hasPhoto = !photoPath.isEmpty() && QFileInfo::exists(photoPath);
@@ -713,11 +765,8 @@ void SuneerNewsPanel::obitPlaceNow()
 			if (!fitted)
 			{
 				apiLog(QStringLiteral("obituary model: '%1' does not fit (module %2 mm high, photo %3, text frame %4 mm, cursors %5)").arg(title.left(20)).arg(moduleH / kMm, 0, 'f', 1).arg(photo ? "yes" : "no").arg(text->height() / kMm, 0, 'f', 1).arg([&]() { QStringList c; for (int cc : obitCols) c << QString::number((cursor[cc] - pageY) / kMm, 'f', 0); return c.join('/'); }()));
-				removeItems(items);
-				obitsStopped = true;
-				remaining << n;
-				remainingTitles << title;
-				continue;
+				parkModule(items, n, title, QStringLiteral("obituary"), photo ? QStringLiteral("top") : QStringLiteral("none"), 1);
+				continue;   // a smaller module later may still fit
 			}
 			if (photo)
 				photo->setXYPos(x, y);
@@ -734,13 +783,14 @@ void SuneerNewsPanel::obitPlaceNow()
 
 			// No face found, or a source too small for 300 ppi: a small orange,
 			// non-printing "check" flag on the photo.
-			if (photo && (photoStatus == QLatin1String("noface") || photoStatus == QLatin1String("lowres")))
+			if (photo && (photoStatus == QLatin1String("noface") || photoStatus == QLatin1String("lowres") || photoStatus == QLatin1String("bg")))
 			{
 				++noFace;
 				const QString info = m_obitPhotoInfo.value(sid);          // "180 ppi (240x240 px)"
 				const QString flagText = photoStatus == QLatin1String("lowres")
 					? (info.isEmpty() ? tr("low res") : tr("low res: %1").arg(info))
-					: tr("no face");
+					: photoStatus == QLatin1String("bg") ? tr("bg? %1").arg(info)
+					: (info.contains(QLatin1String("bg?")) ? tr("no face; bg?") : tr("no face"));
 				PageItem* flag = makeTextFrame(x, y, qMin(colW, 4.0 * kMm + flagText.length() * 1.3 * kMm), 4.0 * kMm);
 				if (flag)
 				{
@@ -786,7 +836,7 @@ void SuneerNewsPanel::obitPlaceNow()
 		else
 		{
 			// Short news in the news columns: one frame spanning them, text columns inside.
-			if (newsStopped || newsCols.isEmpty())
+			if (newsCols.isEmpty())
 			{
 				remaining << n;
 				remainingTitles << title;
@@ -927,6 +977,8 @@ void SuneerNewsPanel::obitPlaceNow()
 			apiLog(QStringLiteral("obituary model: news '%1': headline block %2 mm, photo at +%3 mm, frame %4 mm").arg(title.left(20)).arg(headH / kMm, 0, 'f', 1).arg((photoTop - newsCursor) / kMm, 0, 'f', 1).arg(text->height() / kMm, 0, 'f', 1));
 			bool fitted = false;
 			double cy = newsCursor;
+			double nx = x;          // final left edge (an alternative slot moves it)
+			int altCol = 0;         // first column of the alternative 2-column slot, 0 = the news columns
 			for (int guard = 0; guard < 50; ++guard)
 			{
 				if (cy + h > bottom + tol)
@@ -941,17 +993,56 @@ void SuneerNewsPanel::obitPlaceNow()
 			}
 			if (!fitted)
 			{
+				// The news columns are full: the free two-column slot on the
+				// grid in the obit columns that starts highest on the page
+				// (every pair of neighbouring columns is tried, the bottom
+				// area included), so the hole it leaves is the smallest.
+				double bestY = 0.0;
+				int bestC = 0;
+				for (int ci = 0; ci + 1 < obitCols.size(); ++ci)
+				{
+					const int c1 = obitCols[ci], c2 = obitCols[ci + 1];
+					if (c2 != c1 + 1)
+						continue;
+					const double ax = colX(c1);
+					double ay = top;
+					for (int guard = 0; guard < 80; ++guard)
+					{
+						if (ay + h > bottom + tol)
+							break;
+						double pushTo = ay;
+						if (!blockedBelow(QRectF(ax, ay, w, h), &pushTo))
+						{
+							if (!bestC || ay < bestY - tol)
+							{
+								bestY = ay;
+								bestC = c1;
+							}
+							break;
+						}
+						ay = pushTo;
+					}
+				}
+				if (bestC)
+				{
+					fitted = true;
+					nx = colX(bestC);
+					cy = bestY;
+					altCol = bestC;
+					apiLog(QStringLiteral("obituary model: news '%1' goes to columns %2-%3 at %4 mm (news columns full)").arg(title.left(20)).arg(bestC).arg(bestC + 1).arg((bestY - pageY) / kMm, 0, 'f', 1));
+				}
+			}
+			if (!fitted)
+			{
 				apiLog(QStringLiteral("obituary model: news '%1' does not fit (%2 mm high)").arg(title.left(20)).arg(h / kMm, 0, 'f', 1));
-				removeItems(items);
-				newsStopped = true;
-				remaining << n;
-				remainingTitles << title;
+				parkModule(items, n, title, QStringLiteral("obituary-news"), photo ? QStringLiteral("right") : QStringLiteral("none"), newsCols.size());
 				continue;
 			}
 			const double dy = cy - newsCursor;
-			if (dy != 0.0)
+			const double dx = nx - x;
+			if (dy != 0.0 || dx != 0.0)
 				for (PageItem* it : items)
-					it->setXYPos(it->xPos(), it->yPos() + dy);
+					it->setXYPos(it->xPos() + dx, it->yPos() + dy);
 			// Final layout and height on the real text at the final position.
 			text->invalidateLayout();
 			text->layout();
@@ -959,16 +1050,20 @@ void SuneerNewsPanel::obitPlaceNow()
 			const double hFinal = qMax(text->height(), (photoTop - newsCursor) + photoBlockH);
 			if (cy + hFinal > bottom + tol || text->frameOverflows())
 			{
-				apiLog(QStringLiteral("obituary model: news '%1' runs past the bottom margin after layout (%2 mm) - not placed").arg(title.left(20)).arg(hFinal / kMm, 0, 'f', 1));
-				removeItems(items);
-				newsStopped = true;
-				remaining << n;
-				remainingTitles << title;
+				apiLog(QStringLiteral("obituary model: news '%1' runs past the bottom margin after layout (%2 mm) - parked").arg(title.left(20)).arg(hFinal / kMm, 0, 'f', 1));
+				parkModule(items, n, title, QStringLiteral("obituary-news"), photo ? QStringLiteral("right") : QStringLiteral("none"), newsCols.size());
 				continue;
 			}
-			newsCursor = cy + hFinal + model.newsGapMm * kMm;
-			obstacles << QRectF(x, cy, w, hFinal);
-			placedModules << PlacedModule{-1, cy, hFinal, text, photo, caption, title};
+			if (altCol)
+			{
+				const double under = cy + hFinal + moduleGap;
+				cursor[altCol] = qMax(cursor[altCol], under);
+				cursor[altCol + 1] = qMax(cursor[altCol + 1], under);
+			}
+			else
+				newsCursor = cy + hFinal + model.newsGapMm * kMm;
+			obstacles << QRectF(nx, cy, w, hFinal);
+			placedModules << PlacedModule{altCol ? -100 - altCol : -1, cy, hFinal, text, photo, caption, title};
 			PageItem* group = nullptr;
 			if (items.size() > 1)
 			{
@@ -1091,6 +1186,11 @@ void SuneerNewsPanel::obitPlaceNow()
 		apiLog(QStringLiteral("obituary model: check - %1 modules, %2 moved in settling, %3 overlaps, %4 overflowing frames").arg(placedModules.size()).arg(fixedMoves).arg(overlaps).arg(overflows));
 	}
 
+	// Re-pack: obit modules up in their columns (gaps closed), then the gap /
+	// empty-area check. Same undo step as the placement.
+	int repackMoved = 0;
+	const QStringList repackReport = obitRepackPage(&repackMoved);
+
 	recordPlaceUndo(placed);
 	if (tx)
 		tx.commit();
@@ -1116,17 +1216,339 @@ void SuneerNewsPanel::obitPlaceNow()
 		QStringList t;
 		for (const QString& s : remainingTitles)
 			t << s.left(28);
-		line += QStringLiteral("\n") + tr("Not placed (no room): %n story(ies): ", "", remaining.size()) + t.mid(0, 3).join(QStringLiteral(", ")) + (t.size() > 3 ? QStringLiteral(" ...") : QString());
-		tip += tr("Not placed (no room on this page):") + QStringLiteral("\n\u2022 ") + t.join(QStringLiteral("\n\u2022 "));
+		line += QStringLiteral("\n") + tr("No room on the page, parked on the pasteboard: %n story(ies): ", "", remaining.size()) + t.mid(0, 3).join(QStringLiteral(", ")) + (t.size() > 3 ? QStringLiteral(" ...") : QString());
+		tip += tr("No room on this page - parked on the pasteboard right of the page (grouped, tagged news.parked):") + QStringLiteral("\n\u2022 ") + t.join(QStringLiteral("\n\u2022 "));
 	}
+	if (!repackReport.isEmpty())
+		tip += (tip.isEmpty() ? QString() : QStringLiteral("\n")) + repackReport.join(QStringLiteral("\n"));
 	m_statusLabel->setToolTip(tip);
 	line += QStringLiteral("\n") + tr("Check: %1 overlap(s), %2 overflowing frame(s)%3").arg(overlaps).arg(overflows).arg(fixedMoves ? tr(", %n module(s) moved down in settling", "", fixedMoves) : QString());
+	if (!repackReport.isEmpty())
+		line += QStringLiteral("\n") + repackReport.first();
 	if (noFace > 0)
 		line += QStringLiteral("\n") + tr("%n photo(s) to check (no face / low res) - see the orange flag", "", noFace);
 	if (!missingStyles.isEmpty())
 		line += QStringLiteral("\n") + tr("Missing paragraph styles: %1").arg(missingStyles.join(", "));
 	m_statusLabel->setText(line);
-	apiLog(QStringLiteral("obituary model: placed %1 (%2 obits, %3 with photo; %4 news, %5 with photo), remaining %6, noface %7, photo failures %8: %9").arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto).arg(remaining.size()).arg(noFace).arg(m_obitPhotoFailed).arg(photoProblems.join("; ")));
+	apiLog(QStringLiteral("obituary model: placed %1 (%2 obits, %3 with photo; %4 news, %5 with photo), parked %6 (%10), noface %7, photo failures %8: %9").arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto).arg(remaining.size()).arg(noFace).arg(m_obitPhotoFailed).arg(photoProblems.join("; ")).arg(parkedTitles.join("; ")));
+}
+
+// ---------------------------------------------------------------------------
+// Re-pack: every obit module (news.model = obituary) of the current page up
+// in its column so the column has no gap wider than the module gap, order
+// kept. Never moved: locked items, items without the model tag (ads,
+// masthead, folio, hand-made frames), news modules, parked modules, and
+// modules pinned by hand (news.manual = 1); all of them stay obstacles.
+// Then the check: vertical gaps over 4 mm between modules of a column and
+// empty areas of at least 30 x 30 mm inside the content area are listed.
+// ---------------------------------------------------------------------------
+
+QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
+{
+	QStringList report;
+	if (movedOut)
+		*movedOut = 0;
+	if (changedOut)
+		*changedOut = false;
+	if (!m_doc)
+		return report;
+	ScPage* page = m_doc->currentPage();
+	if (!page)
+		return report;
+	const SuneerObitModel model = SuneerObitModel::load();
+	const double pageX = page->xOffset();
+	const double pageY = page->yOffset();
+	const double usableW = page->width() - page->Margins.left() - page->Margins.right();
+	const int gridCols = qMax(1, model.gridColumns);
+	const double gap = model.gridGapMm * kMm;
+	const double colW = (usableW - gap * (gridCols - 1)) / gridCols;
+	auto colX = [&](int col1) { return pageX + page->Margins.left() + (col1 - 1) * (colW + gap); };
+	const double top = pageY + model.contentTopMm * kMm;
+	const double bottom = pageY + page->height() - page->Margins.bottom();
+	const double moduleGap = model.moduleGapMm * kMm;
+	const double tol = 0.5;
+	const QRectF pageRect(pageX, pageY, page->width(), page->height());
+	const double ox0 = pageX + page->Margins.left();
+
+	struct Mod { PageItem* item; QRectF r; int col; };
+	QList<Mod> mods;
+	QList<QRectF> obstacles;     // everything that is not a movable module
+	QList<QRectF> occupied;      // everything on the page, for the empty-area check
+	QList<QRectF> tagged;        // every placed module (obit and news, pinned too), for the gap check
+	for (int i = 0; i < m_doc->DocItems.count(); ++i)
+	{
+		PageItem* it = m_doc->DocItems.at(i);
+		if (!it || it->isGroupChild() || (it->isAutoText && it->itemText.length() == 0))
+			continue;
+		const QRectF r = it->getBoundingRect();
+		if (!r.intersects(pageRect) || obitInvisibleEmptyFrame(it))
+			continue;
+		occupied << r;
+		if (attr(it, "news.model").startsWith(QLatin1String("obituary")) && attr(it, "news.parked") != QLatin1String("1") && attr(it, "news.role") != QLatin1String("flag"))
+			tagged << r;
+		// Obit modules and news modules alike (news.model obituary /
+		// obituary-news); never locked, pinned, parked or flag items.
+		const bool movable = attr(it, "news.model").startsWith(QLatin1String("obituary")) && !it->locked()
+		                     && attr(it, "news.manual") != QLatin1String("1") && attr(it, "news.parked") != QLatin1String("1")
+		                     && attr(it, "news.role") != QLatin1String("flag");
+		if (!movable)
+		{
+			obstacles << r;
+			continue;
+		}
+		// Column from the left edge; one or two grid columns wide and on
+		// the grid (a module widened or moved off the grid by hand is left alone).
+		const int col = qRound((r.left() - pageX - page->Margins.left()) / (colW + gap)) + 1;
+		const int span = qRound((r.width() + gap) / (colW + gap));
+		if (col < 1 || col > gridCols || span < 1 || span > 2 || qAbs(r.left() - colX(col)) > 1.5 * kMm || qAbs(r.width() - (span * colW + (span - 1) * gap)) > 1.5 * kMm)
+		{
+			obstacles << r;
+			continue;
+		}
+		mods << Mod{it, r, col};
+	}
+	if (m_doc->MasterNames.contains(page->masterPageName()))
+	{
+		const ScPage* mp = m_doc->MasterPages.at(m_doc->MasterNames[page->masterPageName()]);
+		for (int i = 0; i < m_doc->MasterItems.count(); ++i)
+		{
+			PageItem* it = m_doc->MasterItems.at(i);
+			if (!it || it->isGroupChild() || it->OnMasterPage != page->masterPageName())
+				continue;
+			if (it->isTextFrame() && it->itemText.length() == 0)
+				continue;
+			QRectF r = it->getBoundingRect();
+			if (mp)
+				r.translate(pageX - mp->xOffset(), pageY - mp->yOffset());
+			obstacles << r;
+			occupied << r;
+		}
+	}
+	auto blocked = [&](const QRectF& r, const QList<QRectF>& list, double* pushTo) -> bool {
+		bool hit = false;
+		double maxBottom = r.top();
+		for (const QRectF& o : list)
+		{
+			const QRectF oi = o.adjusted(tol, tol, -tol, -tol);
+			if (oi.isValid() && oi.intersects(r))
+			{
+				hit = true;
+				maxBottom = qMax(maxBottom, o.bottom());
+			}
+		}
+		if (hit && pushTo)
+			*pushTo = maxBottom + moduleGap;
+		return hit;
+	};
+
+	// -- move up: every module in the order of its current top; each one
+	// slides down from the content top past the obstacles and the modules
+	// settled before it (so a two-column module respects both columns and
+	// the order within a column is kept) ---------------------------------
+	int moved = 0;
+	QList<int> order;
+	for (int i = 0; i < mods.size(); ++i)
+		order << i;
+	std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return mods[a].r.top() < mods[b].r.top() || (mods[a].r.top() == mods[b].r.top() && mods[a].r.left() < mods[b].r.left()); });
+	QList<QRectF> settled;
+	for (int k : order)
+	{
+		Mod& m = mods[k];
+		double y = top;
+		const double h = m.r.height();
+		const QList<QRectF> list = obstacles + settled;
+		for (int guard = 0; guard < 120; ++guard)
+		{
+			double pushTo = y;
+			if (!blocked(QRectF(m.r.left(), y, m.r.width(), h), list, &pushTo))
+				break;
+			y = pushTo;
+		}
+		if (y < m.r.top() - tol)
+		{
+			const double dy = y - m.r.top();
+			m_doc->moveItem(0.0, dy, m.item);
+			m.r.translate(0.0, dy);
+			++moved;
+			apiLog(QStringLiteral("obituary model: repack - '%1' column %2 up %3 mm").arg(m.item->itemName().left(24)).arg(m.col).arg(-dy / kMm, 0, 'f', 1));
+		}
+		settled << m.r;
+	}
+	QHash<int, QList<int>> byCol;
+	for (int i = 0; i < mods.size(); ++i)
+		byCol[mods[i].col] << i;
+	QList<int> cols = byCol.keys();
+	std::sort(cols.begin(), cols.end());
+	if (movedOut)
+		*movedOut = moved;
+	if (changedOut)
+		*changedOut = moved > 0;
+
+	// -- check 1: vertical gaps over 4 mm between the modules of a column --
+	// Every placed module (obit, news, pinned) counts, in each grid column it
+	// covers; the module rects after the re-pack.
+	QStringList gapLines;
+	const double gapLimit = 4.0 * kMm;
+	QList<QRectF> gapRects = tagged;
+	for (const Mod& m : mods)
+		if (!gapRects.contains(m.r))
+			gapRects << m.r;
+	QHash<int, QList<QRectF>> perCol;
+	for (const QRectF& r : gapRects)
+	{
+		const int c1 = qBound(1, qRound((r.left() - ox0) / (colW + gap)) + 1, gridCols);
+		const int c2 = qBound(c1, int((r.right() - ox0 - 1.0) / (colW + gap)) + 1, gridCols);
+		for (int c = c1; c <= c2; ++c)
+			perCol[c] << r;
+	}
+	QList<int> gapCols = perCol.keys();
+	std::sort(gapCols.begin(), gapCols.end());
+	for (int c : gapCols)
+	{
+		QList<QRectF>& l = perCol[c];
+		std::stable_sort(l.begin(), l.end(), [](const QRectF& a, const QRectF& b) { return a.top() < b.top(); });
+		double prevBottom = top;
+		for (const QRectF& r : l)
+		{
+			const double g = r.top() - prevBottom;
+			if (g > gapLimit)
+				gapLines << tr("column %1: %2 mm gap at %3 mm").arg(c).arg(g / kMm, 0, 'f', 1).arg((prevBottom - pageY) / kMm, 0, 'f', 0);
+			prevBottom = qMax(prevBottom, r.bottom());
+		}
+	}
+	// -- check 2: empty areas of at least 30 x 30 mm in the content area ----
+	// 1 mm occupancy grid over the content area; every 30 x 30 window that is
+	// empty is merged with its neighbours into one reported area.
+	QList<QRectF> allRects = occupied;
+	for (const Mod& m : mods)
+		allRects << m.r;
+	const double areaMm = 30.0;
+	const int gw = qMax(1, int(usableW / kMm));
+	const int gh = qMax(1, int((bottom - top) / kMm));
+	QVector<quint8> grid(gw * gh, 0);
+	const double ox = pageX + page->Margins.left();
+	for (const QRectF& r : allRects)
+	{
+		const int x0 = qBound(0, int(std::floor((r.left() - ox) / kMm)), gw), x1 = qBound(0, int(std::ceil((r.right() - ox) / kMm)), gw);
+		const int y0 = qBound(0, int(std::floor((r.top() - top) / kMm)), gh), y1 = qBound(0, int(std::ceil((r.bottom() - top) / kMm)), gh);
+		for (int y = y0; y < y1; ++y)
+			for (int x = x0; x < x1; ++x)
+				grid[y * gw + x] = 1;
+	}
+	// column sums for a fast window test
+	QVector<int> colSum(gw * (gh + 1), 0);
+	for (int x = 0; x < gw; ++x)
+		for (int y = 0; y < gh; ++y)
+			colSum[(y + 1) * gw + x] = colSum[y * gw + x] + grid[y * gw + x];
+	const int win = int(areaMm);
+	QVector<quint8> emptyWin(gw * gh, 0);
+	int emptyCount = 0;
+	for (int y = 0; y + win <= gh; ++y)
+		for (int x = 0; x + win <= gw; ++x)
+		{
+			int sum = 0;
+			for (int xx = x; xx < x + win && sum == 0; ++xx)
+				sum += colSum[(y + win) * gw + xx] - colSum[y * gw + xx];
+			if (sum == 0)
+			{
+				emptyWin[y * gw + x] = 1;
+				++emptyCount;
+			}
+		}
+	QStringList areaLines;
+	if (emptyCount)
+	{
+		// merge window origins into connected areas (4-neighbour flood fill)
+		QVector<quint8> seen(gw * gh, 0);
+		for (int y = 0; y < gh; ++y)
+			for (int x = 0; x < gw; ++x)
+			{
+				if (!emptyWin[y * gw + x] || seen[y * gw + x])
+					continue;
+				int minX = x, maxX = x, minY = y, maxY = y;
+				QList<QPoint> stack{QPoint(x, y)};
+				seen[y * gw + x] = 1;
+				while (!stack.isEmpty())
+				{
+					const QPoint p = stack.takeLast();
+					minX = qMin(minX, p.x()); maxX = qMax(maxX, p.x()); minY = qMin(minY, p.y()); maxY = qMax(maxY, p.y());
+					const QPoint nb[4] { {p.x() + 1, p.y()}, {p.x() - 1, p.y()}, {p.x(), p.y() + 1}, {p.x(), p.y() - 1} };
+					for (const QPoint& q : nb)
+						if (q.x() >= 0 && q.y() >= 0 && q.x() < gw && q.y() < gh && emptyWin[q.y() * gw + q.x()] && !seen[q.y() * gw + q.x()])
+						{
+							seen[q.y() * gw + q.x()] = 1;
+							stack << q;
+						}
+				}
+				const int aw = maxX - minX + win, ah = maxY - minY + win;
+				const double ax = (ox - pageX) / kMm + minX, ay = (top - pageY) / kMm + minY;
+				const int c1 = int((minX * kMm) / (colW + gap)) + 1, c2 = int(((maxX + win) * kMm - 1) / (colW + gap)) + 1;
+				areaLines << tr("%1 x %2 mm at (%3, %4) mm, columns %5-%6").arg(aw).arg(ah).arg(ax, 0, 'f', 0).arg(ay, 0, 'f', 0).arg(c1).arg(c2);
+			}
+	}
+	QString head = tr("Re-pack: %n module(s) moved up", "", moved);
+	head += QStringLiteral("; ") + (gapLines.isEmpty() ? tr("no gap over 4 mm") : tr("%n gap(s) over 4 mm", "", gapLines.size()));
+	head += QStringLiteral("; ") + (areaLines.isEmpty() ? tr("no empty area over 30 x 30 mm") : tr("%n empty area(s) over 30 x 30 mm", "", areaLines.size()));
+	report << head;
+	for (const QString& g : gapLines)
+		report << tr("Gap: ") + g;
+	for (const QString& a : areaLines)
+		report << tr("Empty: ") + a;
+	for (const QString& l : report)
+		apiLog(QStringLiteral("obituary model: ") + l);
+	return report;
+}
+
+void SuneerNewsPanel::onObitRepack()
+{
+	if (!m_doc)
+		return;
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Re-pack obituary page"), QString(), Um::IMove);
+	int moved = 0;
+	const QStringList report = obitRepackPage(&moved);
+	if (tx)
+		tx.commit();
+	if (moved)
+	{
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+		if (m_mw)
+			m_mw->emitUpdateRequest(0);
+	}
+	m_statusLabel->setText(report.isEmpty() ? tr("Re-pack: no obituary page open") : report.first());
+	m_statusLabel->setToolTip(report.join(QStringLiteral("\n")));
+}
+
+void SuneerNewsPanel::onObitPinSelected()
+{
+	if (!m_doc || m_doc->m_Selection->count() == 0)
+	{
+		m_statusLabel->setText(tr("Pin position: select the placed module(s) first"));
+		return;
+	}
+	int pinned = 0, unpinned = 0;
+	for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+	{
+		PageItem* it = m_doc->m_Selection->itemAt(i);
+		if (!it)
+			continue;
+		while (it->isGroupChild() && it->Parent)
+			it = it->Parent;
+		if (attr(it, "news.manual") == QLatin1String("1"))
+		{
+			setAttr(it, "news.manual", QString());
+			++unpinned;
+		}
+		else
+		{
+			setAttr(it, "news.manual", QStringLiteral("1"));
+			++pinned;
+		}
+	}
+	m_doc->changed();
+	m_statusLabel->setText(tr("Pin position: %1 pinned, %2 unpinned (Re-pack leaves pinned modules where they are)").arg(pinned).arg(unpinned));
 }
 
 // The character style of a run-in place ("92 ObitPlace Runin"): created in
