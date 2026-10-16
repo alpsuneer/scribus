@@ -157,6 +157,7 @@ if(HAVE_OSG)
 		suneerimagelinks.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
+		ui/suneergappopup.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
@@ -169,9 +170,13 @@ if(HAVE_OSG)
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
 		ui/suneerbgremovedialog.cpp
+		ui/suneereditphotodialog.cpp
+		ui/suneerphotobgdialog.cpp
+		ui/suneerspacingdialog.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
 		ui/suneerframesizebar.cpp
+		ui/suneerarrangebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
@@ -228,6 +233,9 @@ if(HAVE_OSG)
 		scimageerasermask.cpp
 		scimagefeather.cpp
 		suneerbgremove.cpp
+		suneerphotoedit.cpp
+		suneerphotostore.cpp
+		suneerspacing.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp
@@ -265,6 +273,7 @@ else()
 		suneerimagelinks.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
+		ui/suneergappopup.cpp
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
@@ -277,9 +286,13 @@ else()
 		suneertexteffects.cpp
 		ui/scimageeditor.cpp
 		ui/suneerbgremovedialog.cpp
+		ui/suneereditphotodialog.cpp
+		ui/suneerphotobgdialog.cpp
+		ui/suneerspacingdialog.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
 		ui/suneerframesizebar.cpp
+		ui/suneerarrangebar.cpp
 		ui/scimagefilterdialogs.cpp
 		ui/optionsbar.cpp
 		ui/imageeraseroptions.cpp
@@ -336,6 +349,9 @@ else()
 		scimageerasermask.cpp
 		scimagefeather.cpp
 		suneerbgremove.cpp
+		suneerphotoedit.cpp
+		suneerphotostore.cpp
+		suneerspacing.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp

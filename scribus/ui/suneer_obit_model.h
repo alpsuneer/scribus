@@ -21,6 +21,13 @@
 #include <QStringList>
 
 class QProcess;
+class QPainter;
+class Canvas;
+class ScribusDoc;
+
+//! The orange "low res / no face / bg?" marks of obit photos: a cheap screen
+//! overlay painted by the canvas (never a frame, never in print or PDF).
+void suneerPaintObitFlags(QPainter* painter, const Canvas* canvas, ScribusDoc* doc);
 
 struct SuneerObitModel
 {
@@ -72,6 +79,7 @@ struct SuneerObitModel
 	static bool isOldBgRGB(const int* c);
 	int     bgRGB[3]     {182, 184, 185};                   // the exact tone written into every processed file (#B6B8B9)
 	QString rembgModel   {QStringLiteral("u2net_human_seg")};
+	QString bgPolicy     {QStringLiteral("auto")};          // background removal: "auto", "ask" (do not place a damaged AI result), "manual"
 	QStringList bgModels {QStringLiteral("isnet-general-use"), QStringLiteral("u2net")};   // tried in turn when the first model keeps the background
 	double  eyeY         {0.40};                            // unused since the face-fill crop; kept for old files
 	double  faceH        {0.55};                            // old rule: hairline-chin / frame height (used when faceW is 0)
@@ -97,7 +105,7 @@ class SuneerObitPhotoWorker : public QObject
 {
 	Q_OBJECT
 public:
-	struct Item { QString id; QString src; QString out; };
+	struct Item { QString id; QString src; QString out; QString protect; };   // protect: Edit photo's protect/exclude mask PNG (optional)
 	struct Result { QString id; QString status; QString out; QString message; };
 
 	explicit SuneerObitPhotoWorker(QObject* parent = nullptr);

@@ -358,6 +358,15 @@ void StyleSelect::removeGroupSpacers()
 	}
 }
 
+void StyleSelect::setAdvancedButtonsVisible(bool on)
+{
+	// Hidden widgets take no space in a QHBoxLayout, so no gap is left behind.
+	// They stay in the layout and keep their checked state: setStyle()/getStyle()
+	// still read and write them, so the feature itself is untouched.
+	for (QToolButton* b : { underlineButton, underlineWordButton, strikeoutButton, subscriptButton, superscriptButton })
+		if (b) b->setVisible(on);
+}
+
 QToolButton* StyleSelect::detachShadowButton()
 {
 	if (ssLayout && shadowButton)

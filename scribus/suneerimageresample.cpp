@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "suneerimageresample.h"
+#include "suneerphotostore.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -252,13 +253,8 @@ QString SuneerImageResample::outputPathFor(const ScribusDoc* doc, const QString&
 	static const QStringList known { "jpg", "jpeg", "png", "tif", "tiff", "bmp" };
 	if (!known.contains(suffix))
 		suffix = QStringLiteral("jpg");
-	QString dir;
-	if (doc && doc->hasName)
-	{
-		const QFileInfo df(doc->documentFileName());
-		dir = df.absolutePath() + "/" + df.completeBaseName() + "_images";
-	}
-	else
+	QString dir = SuneerPhotoStore::editedDir(doc, true);   // "<doc>_photos/edited" for a saved document
+	if (dir.isEmpty())
 		dir = src.absolutePath();
 	QDir().mkpath(dir);
 	// Strip tags an earlier resample added, so names do not pile up.

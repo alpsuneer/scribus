@@ -1,4 +1,9 @@
 #include "suneer_obit_model.h"
+#include "pageitem_group.h"
+#include "pageitem.h"
+#include "scribusdoc.h"
+#include "canvas.h"
+#include <QPainter>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -45,7 +50,7 @@ QJsonObject SuneerObitModel::toJson() const
 		{"sizePx", photoPx}, {"quality", photoQuality}, {"background", photoBackground},
 		{"bgCMYK", QJsonArray{bgCMYK[0], bgCMYK[1], bgCMYK[2], bgCMYK[3]}},
 		{"bgRGB", QJsonArray{bgRGB[0], bgRGB[1], bgRGB[2]}},
-		{"model", rembgModel}, {"bgModels", QJsonArray::fromStringList(bgModels)},
+		{"model", rembgModel}, {"bgModels", QJsonArray::fromStringList(bgModels)}, {"bgPolicy", bgPolicy},
 		{"eyeY", eyeY}, {"faceH", faceH}, {"headTop", headTop}, {"faceW", faceW}, {"faceTop", faceTop},
 		{"toneStrength", toneStrength}, {"frameShape", frameShape}, {"portraitHeightMm", portraitHeightMm},
 		{"minPpi", minPpi}, {"flagColor", flagColor}};
@@ -111,6 +116,9 @@ void SuneerObitModel::fromJson(const QJsonObject& o)
 	photoQuality    = qBound(50, int(num(photo, "quality", photoQuality)), 100);
 	photoBackground = str(photo, "background", photoBackground);
 	rembgModel      = str(photo, "model", rembgModel);
+	bgPolicy        = str(photo, "bgPolicy", bgPolicy);
+	if (bgPolicy != QLatin1String("auto") && bgPolicy != QLatin1String("ask") && bgPolicy != QLatin1String("manual"))
+		bgPolicy = QStringLiteral("auto");
 	eyeY            = qBound(0.2, num(photo, "eyeY", eyeY), 0.6);
 	faceH           = qBound(0.3, num(photo, "faceH", faceH), 0.8);
 	headTop         = qBound(0.0, num(photo, "headTop", headTop), 0.2);
@@ -233,6 +241,105 @@ bool SuneerObitModel::save(QString* error) const
 }
 
 // ---------------------------------------------------------------------------
+// Flag overlay
+// ---------------------------------------------------------------------------
+
+namespace {
+QString obitAttr(const PageItem* item, const QString& name)
+{
+	const ObjAttrVector* attrs = const_cast<PageItem*>(item)->getObjectAttributes();
+	if (!attrs)
+		return QString();
+	for (const ObjectAttribute& a : *attrs)
+		if (a.name == name)
+			return a.value;
+	return QString();
+}
+
+void paintFlagsIn(QPainter* painter, const Canvas* canvas, ScribusDoc* doc, const QList<PageItem*>& items, const QRectF& visible)
+{
+	for (PageItem* item : items)
+	{
+		if (!item)
+			continue;
+		if (item->isGroup())
+		{
+			paintFlagsIn(painter, canvas, doc, item->groupItemList, visible);
+			continue;
+		}
+		if (!item->isImageFrame() || !doc->layerVisible(item->m_layerID))
+			continue;
+		const QString status = obitAttr(item, QStringLiteral("obit.photoStatus"));
+		const bool manualMask = obitAttr(item, QStringLiteral("suneer.photoEditBgMode")) == QLatin1String("manual");
+		const bool flagged = status == QLatin1String("noface") || status == QLatin1String("lowres") || status == QLatin1String("bg");
+		if (!flagged && !manualMask)
+			continue;
+		QRectF br = item->getBoundingRect();
+		if (!br.intersects(visible))
+			continue;
+		if (manualMask)
+		{
+			// small "M" badge, top right: the background mask is manual (never re-processed)
+			QTransform tm;
+			tm.scale(canvas->scale(), canvas->scale());
+			tm.translate(-doc->minCanvasCoordinate.x(), -doc->minCanvasCoordinate.y());
+			const QPointF tr = (item->getTransform() * tm).map(QPointF(item->width(), 0.0));
+			painter->save();
+			painter->resetTransform();
+			QFont mf = painter->font();
+			mf.setPixelSize(10);
+			mf.setBold(true);
+			painter->setFont(mf);
+			const QRectF mb(tr.x() - 15, tr.y() + 1, 14, 13);
+			painter->setPen(Qt::NoPen);
+			painter->setBrush(QColor(21, 101, 192, 230));
+			painter->drawRect(mb);
+			painter->setPen(Qt::white);
+			painter->drawText(mb, Qt::AlignCenter, QStringLiteral("M"));
+			painter->restore();
+		}
+		if (!flagged)
+			continue;
+		QString text = obitAttr(item, QStringLiteral("obit.checkInfo"));
+		if (text.isEmpty())
+			text = status == QLatin1String("lowres") ? QStringLiteral("low res") : status == QLatin1String("bg") ? QStringLiteral("check BG") : QStringLiteral("no face");
+		// top-left corner of the frame in widget pixels, then a fixed-size badge
+		QTransform t;
+		t.scale(canvas->scale(), canvas->scale());
+		t.translate(-doc->minCanvasCoordinate.x(), -doc->minCanvasCoordinate.y());
+		const QPointF tl = (item->getTransform() * t).map(QPointF(0.0, 0.0));
+		painter->save();
+		painter->resetTransform();
+		QFont f = painter->font();
+		f.setPixelSize(10);
+		f.setBold(true);
+		painter->setFont(f);
+		const QFontMetrics fm(f);
+		const int w = qMin(int(item->width() * canvas->scale()), fm.horizontalAdvance(text) + 8);
+		const QRectF badge(tl.x(), tl.y(), qMax(w, 24), fm.height() + 2);
+		painter->setRenderHint(QPainter::Antialiasing, false);
+		painter->setPen(Qt::NoPen);
+		painter->setBrush(QColor(255, 138, 0, 230));
+		painter->drawRect(badge);
+		painter->setPen(Qt::black);
+		painter->drawText(badge.adjusted(4, 0, -2, 0), Qt::AlignLeft | Qt::AlignVCenter, fm.elidedText(text, Qt::ElideRight, int(badge.width()) - 6));
+		painter->restore();
+	}
+}
+} // namespace
+
+void suneerPaintObitFlags(QPainter* painter, const Canvas* canvas, ScribusDoc* doc)
+{
+	if (!painter || !canvas || !doc || doc->drawAsPreview || doc->masterPageMode())
+		return;
+	// the visible part of the canvas in document coordinates
+	const FPoint a = canvas->localToCanvas(QPointF(0, 0));
+	const FPoint b = canvas->localToCanvas(QPointF(canvas->width(), canvas->height()));
+	const QRectF visible(QPointF(a.x(), a.y()), QPointF(b.x(), b.y()));
+	paintFlagsIn(painter, canvas, doc, doc->DocItems, visible);
+}
+
+// ---------------------------------------------------------------------------
 
 SuneerObitPhotoWorker::SuneerObitPhotoWorker(QObject* parent) : QObject(parent)
 {
@@ -291,13 +398,13 @@ bool SuneerObitPhotoWorker::start(const QList<Item>& items, const SuneerObitMode
 	QDir().mkpath(workDir);
 	QJsonArray arr;
 	for (const Item& it : items)
-		arr << QJsonObject{{"id", it.id}, {"src", it.src}, {"out", it.out}};
+		arr << QJsonObject{{"id", it.id}, {"src", it.src}, {"out", it.out}, {"protect", it.protect}};
 	const int outH = qRound(model.photoPx * model.photoFrameHeightMm() / model.photoMm);
 	const int minPx = qRound(model.photoMm / 25.4 * model.minPpi);
 	QJsonObject job{
 		{"size", model.photoPx}, {"outH", outH}, {"quality", model.photoQuality},
 		{"bg", QJsonArray{background.red(), background.green(), background.blue()}},
-		{"model", model.rembgModel}, {"bgModels", QJsonArray::fromStringList(model.bgModels)},
+		{"model", model.rembgModel}, {"bgModels", QJsonArray::fromStringList(model.bgModels)}, {"bgPolicy", model.bgPolicy},
 		{"eyeY", model.eyeY}, {"faceH", model.faceH}, {"headTop", model.headTop},
 		{"faceW", model.faceW}, {"faceTop", model.faceTop},
 		{"toneStrength", model.toneStrength}, {"minPx", minPx}, {"mm", model.photoMm},

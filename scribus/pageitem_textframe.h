@@ -280,6 +280,7 @@ private:
 	double m_autoFitStampHeight {-1.0};
 	bool   m_autoFitStampOverflow {false};
 	//! \brief Set while the fit's trial layouts run, so they never re-queue.
+	int m_suneerLayoutDepth {0};   // layout() re-entrancy (see the drag note in layout())
 	bool   m_autoFitRunning {false};
 	//! \brief Record the frame's state after a fit pass, fitted or not.
 	void autoFitStamp(bool fitted);

@@ -20,6 +20,10 @@
 #include <QPoint>
 #include <QVector>
 #include "suneer_obit_model.h"
+#include "suneerphotoedit.h"
+#include "suneerphotostore.h"
+#include "suneerspacing.h"
+#include "ui/suneerspacingdialog.h"
 
 #include "commonstrings.h"
 #include "hyphenator.h"
@@ -187,12 +191,9 @@ bool SuneerNewsPanel::obitIsObituary(const QJsonObject& news, const SuneerObitMo
 
 QString SuneerNewsPanel::obitImageDir() const
 {
-	QString dir;
-	if (m_doc && !m_doc->documentFileName().isEmpty())
-	{
-		const QFileInfo fi(m_doc->documentFileName());
-		dir = fi.absolutePath() + '/' + fi.completeBaseName() + QStringLiteral("_images/obit");
-	}
+	QString dir = SuneerPhotoStore::editedDir(m_doc, true);
+	if (!dir.isEmpty())
+		dir += QStringLiteral("/obit");
 	else
 		dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/news/obit");
 	QDir().mkpath(dir);
@@ -258,7 +259,7 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		return;
 	if (m_obitWorker && m_obitWorker->running())
 	{
-		m_statusLabel->setText(tr("Obituary photos are still being processed - wait for the previous placement"));
+		setStatus(tr("Obituary photos are still being processed - wait for the previous placement"));
 		return;
 	}
 	QString note;
@@ -295,9 +296,18 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 			continue;
 		}
 		const QString fileUrl = media[0].toObject()["media"].toObject()["fileUrl"].toString();
-		m_statusLabel->setText(tr("Downloading picture %1...").arg(++downloaded));
+		statusProgress(tr("Downloading"), ++downloaded, stories.size());
 		QString why;
-		const QString local = downloadImage(fileUrl, &why);
+		QString local = downloadImage(fileUrl, &why);
+		if (!local.isEmpty())
+		{
+			// a saved document: the original goes next to it, never modified
+			QString iwhy;
+			local = SuneerPhotoStore::importOriginal(m_doc, local, newsRefId(n).isEmpty() ? sid : newsRefId(n), 0, &iwhy);
+			if (!iwhy.isEmpty())
+				apiLog(QStringLiteral("photo store: %1").arg(iwhy));
+		}
+		m_obitPhotoUrl[sid] = fileUrl;
 		if (local.isEmpty())
 		{
 			m_obitPhotoStatus[sid] = QStringLiteral("fail");
@@ -331,7 +341,7 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 	QString why;
 	if (!m_obitWorker->start(items, model, bg, dir, &why))
 	{
-		m_statusLabel->setText(tr("Obituary photos could not be processed (%1); placing with the original pictures").arg(why));
+		setStatus(tr("Obituary photos could not be processed (%1); placing with the original pictures").arg(why));
 		apiLog(QStringLiteral("obit photo worker not started: %1").arg(why));
 		for (const SuneerObitPhotoWorker::Item& it : items)
 		{
@@ -343,10 +353,10 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		return;
 	}
 	m_placeBtn->setEnabled(false);
-	m_statusLabel->setText(tr("Processing %n obituary photo(s) (background removal, face crop)...", "", items.size()));
+	statusProgress(tr("Photos"), 0, items.size());
 	m_obitWorker->disconnect(this);
 	connect(m_obitWorker, &SuneerObitPhotoWorker::progress, this, [this](int done, int total, const QString&, const QString& status, const QString&) {
-		m_statusLabel->setText(tr("Obituary photos: %1 of %2 (%3)").arg(done).arg(total).arg(status));
+		statusProgress(tr("Photos"), done, total);
 	});
 	connect(m_obitWorker, &SuneerObitPhotoWorker::finished, this, [this, items](bool ok, const QString& error) {
 		for (const SuneerObitPhotoWorker::Result& r : m_obitWorker->results())
@@ -391,19 +401,26 @@ void SuneerNewsPanel::obitPlaceNow()
 	const SuneerObitModel model = SuneerObitModel::load();
 	QString fillName;
 	obitBackgroundColor(model, &fillName);
+	statusProgress(tr("Placing"), 0, stories.size());
+	// spacing from the one store (Faircode Layout: Spacing), Obituary values
+	m_placingModel = QStringLiteral("obituary");
+	struct PlacingGuard { QString& m; ~PlacingGuard() { m.clear(); } } placingGuard { m_placingModel };
+	const SuneerSpacing::Values sp = SuneerSpacing::forModel(QStringLiteral("obituary"));
 
 	// -- geometry -----------------------------------------------------------
 	const double pageX = page->xOffset();
 	const double pageY = page->yOffset();
 	const double usableW = page->width() - page->Margins.left() - page->Margins.right();
 	const int gridCols = qMax(1, model.gridColumns);
-	const double gap = model.gridGapMm * kMm;
+	const double gap = sp.pt(SuneerSpacing::ModuleGapH);
 	const double colW = (usableW - gap * (gridCols - 1)) / gridCols;
 	auto colX = [&](int col1) { return pageX + page->Margins.left() + (col1 - 1) * (colW + gap); };
 	const double top = pageY + model.contentTopMm * kMm;
 	const double bottom = pageY + page->height() - page->Margins.bottom();
-	const double moduleGap = model.moduleGapMm * kMm;
+	const double moduleGap = sp.pt(SuneerSpacing::ModuleGapV);
 	const double photoH = model.photoFrameHeightMm() * kMm;
+	const double photoTextGap = sp.pt(SuneerSpacing::PhotoText);
+	const double inset = sp.pt(SuneerSpacing::Inset);
 
 	// -- what is already there: every item touching this page, master items too
 	QList<QRectF> obstacles;
@@ -545,7 +562,7 @@ void SuneerNewsPanel::obitPlaceNow()
 		{
 			dictWarned = true;
 			const QString msg = tr("Malayalam hyphenation dictionary not found for language '%1'. Looked in: %2").arg(lang, ScPaths::instance().hyphDirs().join(", "));
-			m_statusLabel->setText(msg);
+			setStatus(msg);
 			QMessageBox::warning(this, tr("Hyphenation"), msg);
 		}
 	};
@@ -603,7 +620,8 @@ void SuneerNewsPanel::obitPlaceNow()
 		cursor[c] = top;
 	double newsCursor = top;
 	int noFace = 0, obitsPlaced = 0, obitsWithPhoto = 0, newsPlaced = 0, newsWithPhoto = 0;
-	QStringList photoProblems;      // "title: reason" for every placed story without its picture
+	QStringList photoProblems;      // "title: reason" for every placed story without its picture (and the low-res ones)
+	int noPicture = 0;              // placed obits that have no picture at all
 	const bool leftAligned = (model.textAlign == QLatin1String("left"));
 	auto captionStyle = [&]() { QSettings cfg("Faircode", "ScribusNews"); const QString v = cfg.value("style/captionStyle", "09 Caption").toString().trimmed(); return v.isEmpty() ? QStringLiteral("09 Caption") : v; }();
 	// No room on the page: the finished module goes to the pasteboard right
@@ -647,12 +665,15 @@ void SuneerNewsPanel::obitPlaceNow()
 		apiLog(QStringLiteral("obituary model: '%1' parked on the pasteboard (no room on the page)").arg(title.left(24)));
 	};
 
+	int storyIdx = 0;
 	for (const QJsonObject& n : stories)
 	{
 		const QString sid = newsServerId(n);
 		const QString title = obitCollapse(n["title"].toString());
 		QStringList paras = contentToParagraphs(n["content"].toString());
 		const bool isObit = obitIsObituary(n, model);
+		if ((++storyIdx % 4) == 0)
+			statusProgress(tr("Placing"), storyIdx, stories.size());
 
 		if (isObit)
 		{
@@ -660,7 +681,10 @@ void SuneerNewsPanel::obitPlaceNow()
 			const QString photoStatus = m_obitPhotoStatus.value(sid);
 			const bool hasPhoto = !photoPath.isEmpty() && QFileInfo::exists(photoPath);
 			if (!hasPhoto)
+			{
 				photoProblems << QStringLiteral("%1: %2").arg(title.left(22), m_obitPhotoWhy.value(sid, tr("picture missing")));
+				++noPicture;
+			}
 			const QString place = obitPlaceLine(n, paras);
 
 			// Build at the top of the shortest column, then slide down past obstacles.
@@ -686,14 +710,18 @@ void SuneerNewsPanel::obitPlaceNow()
 					photo->adjustPictScale();
 					if (photo->pixm.imgInfo.lowResType == 0)
 						photo->setResolution(1);
-					SuneerImageLinks::embedPlaced(m_doc, photo);
+					// never embedded: the file lives in <doc>_photos/ and is linked relatively
 					setAttr(photo, "news.role", "photo");
 					setAttr(photo, "news.index", "0");
 					setAttr(photo, "obit.photoStatus", photoStatus);
+					if (model.bgPolicy == QLatin1String("manual"))
+						setAttr(photo, SuneerPhotoEdit::AttrBgMode, "manual");   // placed unremoved; mask by hand in Edit photo
+					setAttr(photo, SuneerPhotoStore::AttrFileUrl, m_obitPhotoUrl.value(sid));
+					setAttr(photo, SuneerPhotoStore::AttrOriginal, m_obitPhotoSrc.value(sid));
 					items << photo;
 				}
 			}
-			PageItem* text = makeTextFrame(x, y + (photo ? photoH : 0.0), colW, 60.0 * kMm);
+			PageItem* text = makeTextFrame(x, y + (photo ? photoH + photoTextGap : 0.0), colW, 60.0 * kMm);
 			if (!text)
 			{
 				removeItems(items);
@@ -701,7 +729,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				remainingTitles << title;
 				continue;
 			}
-			text->setTextToFrameDist(0.0, 0.0, model.textTopDistPt, 0.0);
+			text->setTextToFrameDist(inset, inset, qMax(inset, model.textTopDistPt), inset);
 			text->setColumns(1);
 			text->setItemName(title.left(30).isEmpty() ? tr("Obituary") : title.left(30));
 			setAttr(text, "news.role", "text");
@@ -734,7 +762,7 @@ void SuneerNewsPanel::obitPlaceNow()
 			hyphenate(text);
 			fitFrame(text);
 			items << text;
-			const double moduleH = (photo ? photoH : 0.0) + text->height();
+			const double moduleH = (photo ? photoH + photoTextGap : 0.0) + text->height();
 
 			// Find a column and y where the module is free of other items.
 			bool fitted = false;
@@ -770,44 +798,32 @@ void SuneerNewsPanel::obitPlaceNow()
 			}
 			if (photo)
 				photo->setXYPos(x, y);
-			text->setXYPos(x, y + (photo ? photoH : 0.0));
+			text->setXYPos(x, y + (photo ? photoH + photoTextGap : 0.0));
 			// The height once more on the final, fully laid-out text (never an
 			// estimate): the next module in this column starts under it.
 			text->invalidateLayout();
 			text->layout();
 			fitFrame(text);
-			const double finalH = (photo ? photoH : 0.0) + text->height();
+			const double finalH = (photo ? photoH + photoTextGap : 0.0) + text->height();
 			cursor[bestCol] = y + finalH + moduleGap;
 			obstacles << QRectF(x, y, colW, finalH);
 			placedModules << PlacedModule{bestCol, y, finalH, text, photo, nullptr, title};
 
-			// No face found, or a source too small for 300 ppi: a small orange,
-			// non-printing "check" flag on the photo.
+			// No face found, a source too small for 300 ppi, or a kept
+			// background: the orange mark is a screen overlay painted by the
+			// canvas from the photo's attributes (suneerPaintObitFlags) -
+			// no extra frame, nothing in print or PDF.
 			if (photo && (photoStatus == QLatin1String("noface") || photoStatus == QLatin1String("lowres") || photoStatus == QLatin1String("bg")))
 			{
 				++noFace;
 				const QString info = m_obitPhotoInfo.value(sid);          // "180 ppi (240x240 px)"
 				const QString flagText = photoStatus == QLatin1String("lowres")
 					? (info.isEmpty() ? tr("low res") : tr("low res: %1").arg(info))
-					: photoStatus == QLatin1String("bg") ? tr("bg? %1").arg(info)
+					: photoStatus == QLatin1String("bg") ? tr("check BG: %1").arg(info)
 					: (info.contains(QLatin1String("bg?")) ? tr("no face; bg?") : tr("no face"));
-				PageItem* flag = makeTextFrame(x, y, qMin(colW, 4.0 * kMm + flagText.length() * 1.3 * kMm), 4.0 * kMm);
-				if (flag)
-				{
-					flag->setFillColor(flagColorName());
-					flag->setPrintEnabled(false);
-					flag->setItemName(QStringLiteral("check_%1").arg(text->itemName()));
-					flag->itemText.insertChars(flagText);
-					setAttr(flag, "obit.checkInfo", flagText);
-					if (photoStatus == QLatin1String("lowres"))
-						photoProblems << QStringLiteral("%1: %2").arg(title.left(22), flagText);
-					CharStyle cs;
-					cs.setFontSize(70);
-					flag->itemText.applyCharStyle(0, flag->itemText.length(), cs);
-					setAttr(flag, "news.role", "flag");
-					setAttr(flag, "obit.check", photoStatus);
-					items << flag;
-				}
+				setAttr(photo, "obit.checkInfo", flagText);
+				if (photoStatus == QLatin1String("lowres"))
+					photoProblems << QStringLiteral("%1: %2").arg(title.left(22), flagText);
 			}
 			// Group photo + text (+ flag) and tag everything with the story.
 			PageItem* group = nullptr;
@@ -855,7 +871,8 @@ void SuneerNewsPanel::obitPlaceNow()
 			}
 			items << text;
 			text->setColumns(model.newsTextColumns);
-			text->setColumnGap(model.newsColGapMm * kMm);
+			text->setColumnGap(sp.pt(SuneerSpacing::ColumnGap));
+			text->setTextToFrameDist(inset, inset, inset, inset);
 			text->setItemName(title.left(30).isEmpty() ? tr("News story") : title.left(30));
 			setAttr(text, "news.role", "text");
 			QString headStyle;
@@ -904,7 +921,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				placeholder = missingImagePlaceholder(m_obitPhotoWhy.value(sid, tr("picture missing")));
 				newsPhotoPath.clear();
 			}
-			const double photoTop = newsCursor + headH + 2.0 * kMm;
+			const double photoTop = newsCursor + headH + sp.pt(SuneerSpacing::WrapPad);   // the wrap region starts under the headline
 			if (!newsPhotoPath.isEmpty() || !placeholder.isEmpty())
 			{
 				double pw = colW, ph = colW;                        // square when the size is unknown
@@ -931,7 +948,7 @@ void SuneerNewsPanel::obitPlaceNow()
 						photo->adjustPictScale();
 						if (photo->pixm.imgInfo.lowResType == 0)
 							photo->setResolution(1);
-						SuneerImageLinks::embedPlaced(m_doc, photo);
+						setAttr(photo, SuneerPhotoStore::AttrOriginal, newsPhotoPath);
 					}
 					else
 					{
@@ -946,12 +963,13 @@ void SuneerNewsPanel::obitPlaceNow()
 					}
 					setAttr(photo, "news.role", "photo");
 					setAttr(photo, "news.index", "0");
+					setAttr(photo, SuneerPhotoStore::AttrFileUrl, hasMedia ? mediaList(n)[0].toObject()["media"].toObject()["fileUrl"].toString() : QString());
 					setWrap(photo, true);
 					photoBlockH = ph;
 					const QString capText = newsCaption(n);
 					if (!capText.isEmpty())
 					{
-						caption = makeTextFrame(px, photoTop + ph, pw, 8.0 * kMm);
+						caption = makeTextFrame(px, photoTop + ph + sp.pt(SuneerSpacing::CaptionGap), pw, 8.0 * kMm);
 						if (caption)
 						{
 							items << caption;
@@ -1061,7 +1079,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				cursor[altCol + 1] = qMax(cursor[altCol + 1], under);
 			}
 			else
-				newsCursor = cy + hFinal + model.newsGapMm * kMm;
+				newsCursor = cy + hFinal + moduleGap;
 			obstacles << QRectF(nx, cy, w, hFinal);
 			placedModules << PlacedModule{altCol ? -100 - altCol : -1, cy, hFinal, text, photo, caption, title};
 			PageItem* group = nullptr;
@@ -1115,7 +1133,7 @@ void SuneerNewsPanel::obitPlaceNow()
 			QList<int>& idx = it.value();
 			std::stable_sort(idx.begin(), idx.end(), [&](int a, int b) { return placedModules[a].y < placedModules[b].y; });
 			double prevBottom = -1.0;
-			const double g = (it.key() < 0) ? model.newsGapMm * kMm : moduleGap;
+			const double g = moduleGap;
 			for (int k = 0; k < idx.size(); ++k)
 			{
 				PlacedModule& m = placedModules[idx[k]];
@@ -1190,6 +1208,8 @@ void SuneerNewsPanel::obitPlaceNow()
 	// empty-area check. Same undo step as the placement.
 	int repackMoved = 0;
 	const QStringList repackReport = obitRepackPage(&repackMoved);
+	if (sp.v[SuneerSpacing::RuleWidth] > 0.0)
+		respaceRules(sp);
 
 	recordPlaceUndo(placed);
 	if (tx)
@@ -1202,10 +1222,18 @@ void SuneerNewsPanel::obitPlaceNow()
 
 	// Server marks for what was placed; the status line lists the rest.
 	markPlaced(placed);
+	const QString markLine = statusText().section('\n', 0, 0);   // the server-mark result
+	int notMarked = 0;
+	{
+		static const QRegularExpression rx(QStringLiteral("(\\d+) could not be marked"));
+		const QRegularExpressionMatch mm = rx.match(markLine);
+		if (mm.hasMatch())
+			notMarked = mm.captured(1).toInt();
+	}
 	QString line = tr("Placed %1: %2 obits (%3 with photo, %4 no photo), %5 news (%6 with photo)")
 		.arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(obitsPlaced - obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto);
-	if (!m_statusLabel->text().isEmpty())
-		line += QStringLiteral("\n") + m_statusLabel->text().section('\n', 0, 0);   // the server-mark result
+	if (!markLine.isEmpty())
+		line += QStringLiteral("\n") + markLine;
 	if (!photoProblems.isEmpty())
 		line += QStringLiteral("\n") + tr("No picture: ") + photoProblems.mid(0, 3).join(QStringLiteral("; ")) + (photoProblems.size() > 3 ? QStringLiteral(" ...") : QString());
 	QString tip;
@@ -1221,7 +1249,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	}
 	if (!repackReport.isEmpty())
 		tip += (tip.isEmpty() ? QString() : QStringLiteral("\n")) + repackReport.join(QStringLiteral("\n"));
-	m_statusLabel->setToolTip(tip);
+	setStatusDetails(tip);
 	line += QStringLiteral("\n") + tr("Check: %1 overlap(s), %2 overflowing frame(s)%3").arg(overlaps).arg(overflows).arg(fixedMoves ? tr(", %n module(s) moved down in settling", "", fixedMoves) : QString());
 	if (!repackReport.isEmpty())
 		line += QStringLiteral("\n") + repackReport.first();
@@ -1229,7 +1257,23 @@ void SuneerNewsPanel::obitPlaceNow()
 		line += QStringLiteral("\n") + tr("%n photo(s) to check (no face / low res) - see the orange flag", "", noFace);
 	if (!missingStyles.isEmpty())
 		line += QStringLiteral("\n") + tr("Missing paragraph styles: %1").arg(missingStyles.join(", "));
-	m_statusLabel->setText(line);
+	// ONE short line; the long text and the lists go to Details / tooltip.
+	QStringList shortParts{tr("Placed %1").arg(placed.size())};
+	if (noFace > 0)
+		shortParts << tr("%n to check", "", noFace);
+	if (noPicture > 0)
+		shortParts << tr("%n no picture", "", noPicture);
+	if (!remaining.isEmpty())
+		shortParts << tr("%n parked", "", remaining.size());
+	if (notMarked > 0)
+		shortParts << tr("%n not marked used", "", notMarked);
+	if (overlaps || overflows)
+		shortParts << tr("%1 overlap(s), %2 overflow(s)").arg(overlaps).arg(overflows);
+	if (!missingStyles.isEmpty())
+		shortParts << tr("styles missing");
+	const bool failed = m_obitPhotoFailed > 0 || notMarked > 0 || overlaps > 0 || overflows > 0 || !missingStyles.isEmpty() || !remaining.isEmpty();
+	setStatus(shortParts.join(QStringLiteral(" \u00b7 ")), failed);
+	setStatusDetails(line + (tip.isEmpty() ? QString() : QStringLiteral("\n") + tip));
 	apiLog(QStringLiteral("obituary model: placed %1 (%2 obits, %3 with photo; %4 news, %5 with photo), parked %6 (%10), noface %7, photo failures %8: %9").arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto).arg(remaining.size()).arg(noFace).arg(m_obitPhotoFailed).arg(photoProblems.join("; ")).arg(parkedTitles.join("; ")));
 }
 
@@ -1256,16 +1300,17 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 	if (!page)
 		return report;
 	const SuneerObitModel model = SuneerObitModel::load();
+	const SuneerSpacing::Values sp = SuneerSpacing::forModel(QStringLiteral("obituary"));
 	const double pageX = page->xOffset();
 	const double pageY = page->yOffset();
 	const double usableW = page->width() - page->Margins.left() - page->Margins.right();
 	const int gridCols = qMax(1, model.gridColumns);
-	const double gap = model.gridGapMm * kMm;
+	const double gap = sp.pt(SuneerSpacing::ModuleGapH);
 	const double colW = (usableW - gap * (gridCols - 1)) / gridCols;
 	auto colX = [&](int col1) { return pageX + page->Margins.left() + (col1 - 1) * (colW + gap); };
 	const double top = pageY + model.contentTopMm * kMm;
 	const double bottom = pageY + page->height() - page->Margins.bottom();
-	const double moduleGap = model.moduleGapMm * kMm;
+	const double moduleGap = sp.pt(SuneerSpacing::ModuleGapV);
 	const double tol = 0.5;
 	const QRectF pageRect(pageX, pageY, page->width(), page->height());
 	const double ox0 = pageX + page->Margins.left();
@@ -1281,7 +1326,7 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 		if (!it || it->isGroupChild() || (it->isAutoText && it->itemText.length() == 0))
 			continue;
 		const QRectF r = it->getBoundingRect();
-		if (!r.intersects(pageRect) || obitInvisibleEmptyFrame(it))
+		if (!r.intersects(pageRect) || obitInvisibleEmptyFrame(it) || attr(it, "news.rule") == QLatin1String("1"))
 			continue;
 		occupied << r;
 		if (attr(it, "news.model").startsWith(QLatin1String("obituary")) && attr(it, "news.parked") != QLatin1String("1") && attr(it, "news.role") != QLatin1String("flag"))
@@ -1388,7 +1433,8 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 	// Every placed module (obit, news, pinned) counts, in each grid column it
 	// covers; the module rects after the re-pack.
 	QStringList gapLines;
-	const double gapLimit = 4.0 * kMm;
+	// a gap counts as too big when it is more than 1.7 mm over the module gap (2.3 -> 4.0 mm)
+	const double gapLimit = moduleGap + 1.7 * kMm;
 	QList<QRectF> gapRects = tagged;
 	for (const Mod& m : mods)
 		if (!gapRects.contains(m.r))
@@ -1517,15 +1563,15 @@ void SuneerNewsPanel::onObitRepack()
 		if (m_mw)
 			m_mw->emitUpdateRequest(0);
 	}
-	m_statusLabel->setText(report.isEmpty() ? tr("Re-pack: no obituary page open") : report.first());
-	m_statusLabel->setToolTip(report.join(QStringLiteral("\n")));
+	setStatus(report.isEmpty() ? tr("Re-pack: no obituary page open") : report.first());
+	setStatusDetails(report.join(QStringLiteral("\n")));
 }
 
 void SuneerNewsPanel::onObitPinSelected()
 {
 	if (!m_doc || m_doc->m_Selection->count() == 0)
 	{
-		m_statusLabel->setText(tr("Pin position: select the placed module(s) first"));
+		setStatus(tr("Pin position: select the placed module(s) first"));
 		return;
 	}
 	int pinned = 0, unpinned = 0;
@@ -1548,7 +1594,7 @@ void SuneerNewsPanel::onObitPinSelected()
 		}
 	}
 	m_doc->changed();
-	m_statusLabel->setText(tr("Pin position: %1 pinned, %2 unpinned (Re-pack leaves pinned modules where they are)").arg(pinned).arg(unpinned));
+	setStatus(tr("Pin position: %1 pinned, %2 unpinned (Re-pack leaves pinned modules where they are)").arg(pinned).arg(unpinned));
 }
 
 // The character style of a run-in place ("92 ObitPlace Runin"): created in
@@ -1588,7 +1634,7 @@ void SuneerNewsPanel::onObitReprocess()
 		return;
 	if (m_obitWorker && m_obitWorker->running())
 	{
-		m_statusLabel->setText(tr("Obituary photos are still being processed"));
+		setStatus(tr("Obituary photos are still being processed"));
 		return;
 	}
 	QList<PageItem*> frames;
@@ -1613,7 +1659,7 @@ void SuneerNewsPanel::onObitReprocess()
 			consider(m_doc->DocItems.at(i));
 	if (frames.isEmpty())
 	{
-		m_statusLabel->setText(tr("Re-process photos: select placed obituary photos (or nothing for all); none found"));
+		setStatus(tr("Re-process photos: select placed obituary photos (or nothing for all); none found"));
 		return;
 	}
 	const SuneerObitModel model = SuneerObitModel::load();
@@ -1621,12 +1667,20 @@ void SuneerNewsPanel::onObitReprocess()
 	const QColor bg = obitBackgroundColor(model, &fillName);
 	QList<SuneerObitPhotoWorker::Item> items;
 	QHash<QString, PageItem*> byId;
+	QStringList manualSkipped;
 	for (PageItem* f : frames)
 	{
+		const QString bgMode = attr(f, SuneerPhotoEdit::AttrBgMode);
+		if (SuneerPhotoEdit::isManual(f) || bgMode == QLatin1String("manual") || bgMode == QLatin1String("none"))
+		{
+			manualSkipped << f->itemName();   // edited by hand, or Manual / None background: never re-run automatically
+			continue;
+		}
 		SuneerObitPhotoWorker::Item it;
 		it.id = QString::number(items.size());
 		it.src = attr(f, "obit.src");
 		it.out = attr(f, "obit.out");
+		it.protect = attr(f, SuneerPhotoEdit::AttrProtect);   // Edit photo's protect / exclude areas survive a re-process
 		if (it.out.isEmpty() || it.out.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive))
 			it.out = obitImageDir() + '/' + (it.out.isEmpty() ? QFileInfo(it.src).completeBaseName() : QFileInfo(it.out).completeBaseName()) + QStringLiteral(".png");
 		if (!QFileInfo::exists(it.src))
@@ -1637,9 +1691,11 @@ void SuneerNewsPanel::onObitReprocess()
 		byId[it.id] = f;
 		items << it;
 	}
+	if (!manualSkipped.isEmpty())
+		setStatusDetails(tr("Re-process: skipped %n manually edited photo(s) (Edit photo > Reset to automatic makes them automatic again): %1", "", manualSkipped.size()).arg(manualSkipped.join(QStringLiteral(", "))));
 	if (items.isEmpty())
 	{
-		m_statusLabel->setText(tr("Re-process photos: the original pictures were not found"));
+		setStatus(manualSkipped.isEmpty() ? tr("Re-process photos: the original pictures were not found") : tr("Re-process photos: all %n selected photo(s) are manually edited - nothing to do", "", manualSkipped.size()));
 		return;
 	}
 	if (!m_obitWorker)
@@ -1647,13 +1703,13 @@ void SuneerNewsPanel::onObitReprocess()
 	QString why;
 	if (!m_obitWorker->start(items, model, bg, obitImageDir(), &why))
 	{
-		m_statusLabel->setText(tr("Re-process photos: %1").arg(why));
+		setStatus(tr("Re-process photos: %1").arg(why));
 		return;
 	}
-	m_statusLabel->setText(tr("Re-processing %n obituary photo(s)...", "", items.size()));
+	statusProgress(tr("Photos"), 0, items.size());
 	m_obitWorker->disconnect(this);
 	connect(m_obitWorker, &SuneerObitPhotoWorker::progress, this, [this](int done, int total, const QString&, const QString& status, const QString&) {
-		m_statusLabel->setText(tr("Obituary photos: %1 of %2 (%3)").arg(done).arg(total).arg(status));
+		statusProgress(tr("Photos"), done, total);
 	});
 	connect(m_obitWorker, &SuneerObitPhotoWorker::finished, this, [this, byId, fillName, model](bool ok, const QString& error) {
 		if (!m_doc)
@@ -1671,9 +1727,28 @@ void SuneerNewsPanel::onObitReprocess()
 			f->setImageScalingMode(false, true);
 			m_doc->loadPict(r.out, f, true, true);
 			f->adjustPictScale();
-			SuneerImageLinks::embedPlaced(m_doc, f);
 			setAttr(f, "obit.photoStatus", r.status);
 			setAttr(f, "obit.out", r.out);
+			// The orange mark is an overlay from these attributes; an old
+			// flag frame of the module (earlier builds) goes away.
+			const QString flagText = r.status == QLatin1String("lowres") ? tr("low res: %1").arg(r.message)
+			                       : r.status == QLatin1String("bg") ? tr("check BG: %1").arg(r.message)
+			                       : r.status == QLatin1String("noface") ? (r.message.contains(QLatin1String("bg?")) ? tr("no face; bg?") : tr("no face")) : QString();
+			setAttr(f, "obit.checkInfo", flagText);
+			if (f->Parent && f->Parent->isGroup())
+			{
+				QList<PageItem*> oldFlags;
+				for (PageItem* c : f->Parent->groupItemList)
+					if (c && attr(c, "news.role") == QLatin1String("flag"))
+						oldFlags << c;
+				for (PageItem* c : oldFlags)
+				{
+					m_doc->m_Selection->clear();
+					m_doc->m_Selection->addItem(c);
+					m_doc->itemSelection_DeleteItem(m_doc->m_Selection);
+				}
+				m_doc->m_Selection->clear();
+			}
 			++done;
 			if (r.status != QLatin1String("ok"))
 				++flagged;
@@ -1689,7 +1764,250 @@ void SuneerNewsPanel::onObitReprocess()
 			line += tr("; %n to check (no face / low resolution)", "", flagged);
 		if (!ok)
 			line += QStringLiteral(" - ") + error;
-		m_statusLabel->setText(line);
+		setStatus(line);
 		apiLog(QStringLiteral("re-process: %1").arg(line));
 	});
+}
+
+
+// ---------------------------------------------------------------------------
+// Faircode Layout: Spacing - dialog and "Apply to this page"
+// ---------------------------------------------------------------------------
+
+QString SuneerNewsPanel::pageSpacingModel() const
+{
+	if (!m_doc || !m_doc->currentPage())
+		return QStringLiteral("normal");
+	const QRectF pageRect(m_doc->currentPage()->xOffset(), m_doc->currentPage()->yOffset(), m_doc->currentPage()->width(), m_doc->currentPage()->height());
+	for (PageItem* it : m_doc->DocItems)
+		if (it && attr(it, "news.model").startsWith(QLatin1String("obituary")) && it->getBoundingRect().intersects(pageRect))
+			return QStringLiteral("obituary");
+	return QStringLiteral("normal");
+}
+
+namespace {
+QString spAttr(const PageItem* item, const QString& name)
+{
+	const QList<ObjectAttribute> l = item->getObjectAttributes(name);
+	return l.isEmpty() ? QString() : l.first().value;
+}
+
+// the placed modules of a page: top-level items with a story tag, minus
+// locked / pinned / parked items and the rules themselves
+QList<PageItem*> spacingModules(ScribusDoc* doc, const QRectF& pageRect)
+{
+	QList<PageItem*> out;
+	for (PageItem* it : doc->DocItems)
+	{
+		if (!it || it->isGroupChild() || it->locked())
+			continue;
+		if (spAttr(it, "news.story").isEmpty() && !spAttr(it, "news.model").startsWith(QLatin1String("obituary")))
+			continue;
+		if (spAttr(it, "news.manual") == QLatin1String("1") || spAttr(it, "news.parked") == QLatin1String("1")
+		    || spAttr(it, "news.rule") == QLatin1String("1") || spAttr(it, "news.role") == QLatin1String("flag"))
+			continue;
+		if (!pageRect.contains(it->getBoundingRect().center()))
+			continue;
+		out << it;
+	}
+	return out;
+}
+
+QList<PageItem*> partsOf(PageItem* module)
+{
+	QList<PageItem*> l;
+	if (module->isGroup())
+		l = module->getAllChildren();
+	else
+		l << module;
+	return l;
+}
+} // namespace
+
+void SuneerNewsPanel::spacingSnapshot()
+{
+	m_spacingSnap.clear();
+	if (!m_doc || !m_doc->currentPage())
+		return;
+	ScPage* page = m_doc->currentPage();
+	const QRectF pageRect(page->xOffset(), page->yOffset(), page->width(), page->height());
+	for (PageItem* m : spacingModules(m_doc, pageRect))
+	{
+		QList<PageItem*> all = partsOf(m);
+		if (m->isGroup())
+			all.prepend(m);
+		for (PageItem* it : all)
+		{
+			SpacingSnap s;
+			s.item = it;
+			s.x = it->xPos();
+			s.y = it->yPos();
+			s.wrap[0] = it->wrapOffsetLeft(); s.wrap[1] = it->wrapOffsetRight(); s.wrap[2] = it->wrapOffsetTop(); s.wrap[3] = it->wrapOffsetBottom();
+			s.dist[0] = it->textToFrameDistLeft(); s.dist[1] = it->textToFrameDistRight(); s.dist[2] = it->textToFrameDistTop(); s.dist[3] = it->textToFrameDistBottom();
+			s.colGap = it->columnGap();
+			m_spacingSnap << s;
+		}
+	}
+}
+
+void SuneerNewsPanel::spacingRestore()
+{
+	if (!m_doc)
+		return;
+	UndoManager::instance()->setUndoEnabled(false);
+	for (const SpacingSnap& s : m_spacingSnap)
+	{
+		PageItem* it = s.item.data();
+		if (!it)
+			continue;
+		it->setXYPos(s.x, s.y, true);
+		it->setWrapOffsets(s.wrap[2], s.wrap[3], s.wrap[0], s.wrap[1]);   // (top, bottom, left, right)
+		if (it->isTextFrame())
+		{
+			it->setTextToFrameDist(s.dist[0], s.dist[1], s.dist[2], s.dist[3]);
+			it->setColumnGap(s.colGap);
+			it->invalidateLayout();
+		}
+		it->setRedrawBounding();
+		it->updateClip();
+	}
+	for (const SpacingSnap& s : m_spacingSnap)
+		if (s.item && s.item->isGroup())
+			s.item->asGroupFrame()->adjustXYPosition();
+	UndoManager::instance()->setUndoEnabled(true);
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+}
+
+int SuneerNewsPanel::applySpacingToPage(const SuneerSpacing::Values& v, bool final)
+{
+	if (!m_doc || !m_doc->currentPage())
+		return 0;
+	ScPage* page = m_doc->currentPage();
+	const QRectF pageRect(page->xOffset(), page->yOffset(), page->width(), page->height());
+	UndoTransaction tx;
+	if (final && UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Apply spacing to page"), QString(), Um::IMove);
+	if (!final)
+		UndoManager::instance()->setUndoEnabled(false);
+	const bool obit = pageSpacingModel() == QLatin1String("obituary");
+	const SuneerObitModel om = SuneerObitModel::load();
+	const double wrap = v.pt(SuneerSpacing::WrapPad), inset = v.pt(SuneerSpacing::Inset), colGap = v.pt(SuneerSpacing::ColumnGap);
+	QList<PageItem*> mods = spacingModules(m_doc, pageRect);
+	// 1. inside the modules: wrap padding, insets, text column gaps
+	for (PageItem* m : mods)
+		for (PageItem* it : partsOf(m))
+		{
+			const QString role = attr(it, "news.role");
+			if ((role == QLatin1String("photo") || role == QLatin1String("caption")) && it->textFlowMode() != PageItem::TextFlowDisabled)
+				it->setWrapOffsets(wrap, wrap, wrap, wrap);
+			if (it->isTextFrame() && role == QLatin1String("text"))
+			{
+				const double topIn = obit && attr(it, "news.model") == QLatin1String("obituary") ? qMax(inset, om.textTopDistPt) : inset;
+				it->setTextToFrameDist(inset, inset, topIn, inset);
+				if (it->columns() > 1)
+					it->setColumnGap(colGap);
+				it->invalidateLayout();
+			}
+		}
+	// 2. vertical: each module sits the module gap under the nearest module
+	//    above it that overlaps it horizontally; a module with none keeps its place
+	const double gapV = v.pt(SuneerSpacing::ModuleGapV), tol = 0.5;
+	std::stable_sort(mods.begin(), mods.end(), [](PageItem* a, PageItem* b) { return a->getBoundingRect().top() < b->getBoundingRect().top(); });
+	QList<QRectF> settled;
+	int moved = 0;
+	for (PageItem* m : mods)
+	{
+		const QRectF r = m->getBoundingRect();
+		double above = -1e9;
+		for (const QRectF& s : settled)
+			if (s.right() > r.left() + tol && s.left() < r.right() - tol && s.top() < r.top() + tol)
+				above = qMax(above, s.bottom());
+		QRectF nr = r;
+		if (above > -1e8)
+		{
+			const double dy = above + gapV - r.top();
+			if (qAbs(dy) > 0.05)
+			{
+				m_doc->moveItem(0.0, dy, m);
+				nr.translate(0.0, dy);
+				++moved;
+			}
+		}
+		settled << nr;
+	}
+	if (final)
+		respaceRules(v);
+	if (!final)
+		UndoManager::instance()->setUndoEnabled(true);
+	if (tx)
+		tx.commit();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	apiLog(QStringLiteral("spacing: %1 %2 modules, %3 moved, gapV %4 mm, wrap %5, inset %6, rule %7 pt").arg(final ? "applied to" : "preview of").arg(mods.size()).arg(moved)
+	       .arg(v.v[SuneerSpacing::ModuleGapV]).arg(v.v[SuneerSpacing::WrapPad]).arg(v.v[SuneerSpacing::Inset]).arg(v.v[SuneerSpacing::RuleWidth]));
+	return mods.size();
+}
+
+void SuneerNewsPanel::respaceRules(const SuneerSpacing::Values& v)
+{
+	if (!m_doc || !m_doc->currentPage())
+		return;
+	ScPage* page = m_doc->currentPage();
+	const QRectF pageRect(page->xOffset(), page->yOffset(), page->width(), page->height());
+	QList<PageItem*> old;
+	for (PageItem* it : m_doc->DocItems)
+		if (it && attr(it, "news.rule") == QLatin1String("1") && pageRect.intersects(it->getBoundingRect()))
+			old << it;
+	if (!old.isEmpty())
+	{
+		Selection sel(this, false);
+		for (PageItem* it : old)
+			sel.addItem(it);
+		m_doc->itemSelection_DeleteItem(&sel);
+	}
+	const double w = v.v[SuneerSpacing::RuleWidth];
+	if (w <= 0.0)
+		return;
+	const QString colour = m_doc->PageColors.contains(v.ruleColor) ? v.ruleColor : QStringLiteral("Black");
+	QList<PageItem*> mods = spacingModules(m_doc, pageRect);
+	std::stable_sort(mods.begin(), mods.end(), [](PageItem* a, PageItem* b) { return a->getBoundingRect().top() < b->getBoundingRect().top(); });
+	const double tol = 0.5;
+	for (int i = 0; i < mods.size(); ++i)
+	{
+		const QRectF r = mods[i]->getBoundingRect();
+		// the nearest module below that overlaps horizontally: a rule in the middle of the gap
+		double below = 1e9;
+		for (int j = 0; j < mods.size(); ++j)
+		{
+			const QRectF s = mods[j]->getBoundingRect();
+			if (j != i && s.top() >= r.bottom() - tol && s.right() > r.left() + tol && s.left() < r.right() - tol)
+				below = qMin(below, s.top());
+		}
+		if (below > 1e8 || below - r.bottom() < 0.5)
+			continue;
+		const double y = (r.bottom() + below) / 2.0;
+		const int idx = m_doc->itemAdd(PageItem::Line, PageItem::Unspecified, r.left(), y, r.width(), 1.0, w, CommonStrings::None, colour);
+		if (idx < 0)
+			continue;
+		PageItem* line = m_doc->Items->at(idx);
+		line->setTextFlowMode(PageItem::TextFlowDisabled);
+		setAttr(line, "news.rule", "1");
+		setAttr(line, "news.role", "rule");
+	}
+}
+
+void SuneerNewsPanel::onSpacing()
+{
+	SuneerSpacingDialog::PageHooks hooks;
+	if (m_doc && m_doc->currentPage())
+	{
+		hooks.pageModel = [this]() { return pageSpacingModel(); };
+		hooks.snapshot = [this]() { spacingSnapshot(); };
+		hooks.restore = [this]() { spacingRestore(); };
+		hooks.apply = [this](const SuneerSpacing::Values& v, bool final) { return applySpacingToPage(v, final); };
+	}
+	SuneerSpacingDialog dlg(hooks, this);
+	dlg.exec();
+	m_spacingSnap.clear();
 }

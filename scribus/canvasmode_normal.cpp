@@ -36,6 +36,7 @@
 #include "canvasgesture_resize.h"
 #include "canvasgesture_rulermove.h"
 #include "canvasmode_normal.h"
+#include <QElapsedTimer>
 #include "fileloader.h"
 #include "fpoint.h"
 #include "iconmanager.h"
@@ -306,9 +307,16 @@ void CanvasMode_Normal::mouseDoubleClickEvent(QMouseEvent *m)
 }
 
 
+static const bool suneerDragDebugN = qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG");
+
 void CanvasMode_Normal::mouseMoveEvent(QMouseEvent *m)
 {
 // 	qDebug()<<"CanvasMode_Normal::mouseMoveEvent";
+	struct DbgScope {
+		QElapsedTimer t; bool on; Canvas* c;
+		DbgScope(bool o, Canvas* cv) : on(o), c(cv) { if (on) t.start(); }
+		~DbgScope() { if (on) fprintf(stderr, "DRAGDBG mousemove moving=%d total=%lld ms\n", int(c->m_viewMode.operItemMoving), (long long)t.elapsed()); }
+	} dbgScope(suneerDragDebugN, m_canvas);
 	const QPoint globalPos = m->globalPosition().toPoint();
 	const FPoint mousePointDoc = m_canvas->globalToCanvas(m->globalPosition());
 	

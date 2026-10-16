@@ -63,6 +63,7 @@ for which a new license (GPL+exception) is in place.
 #include <QMdiArea>
 #include <QMdiSubWindow>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPointer>
 
 #include <QDialog>
@@ -197,6 +198,11 @@ for which a new license (GPL+exception) is in place.
 #include "suneerfilltextimage.h"
 #include "suneertexteffects.h"
 #include "suneerposterstack.h"
+#include "suneerphotoedit.h"
+#include "suneerphotostore.h"
+#include <QPlainTextEdit>
+#include <QDialogButtonBox>
+#include "ui/resizeimagedialog.h"
 #include "suneerpopout.h"
 #include "serializer.h"
 #include "storyloader.h"
@@ -980,6 +986,26 @@ void ScribusMainWindow::initPalettes()
 	});
 	// HaveNewSel is a slot, not signal — handled directly in HaveNewSel()
 	connect(scrActions["suneerGetImage"], &QAction::triggered, this, &ScribusMainWindow::suneerGetImage);
+	connect(scrActions["suneerEditPhoto"], &QAction::triggered, this, [this]() {
+		if (!HaveDoc || !doc) return;
+		PageItem* item = doc->m_Selection->count() == 1 ? doc->m_Selection->itemAt(0) : nullptr;
+		if (item && item->isGroup())
+		{
+			PageItem* found = nullptr;
+			int n = 0;
+			for (PageItem* c : item->groupItemList)
+				if (c && c->isImageFrame()) { ++n; found = c; }
+			item = (n == 1) ? found : nullptr;
+		}
+		if (!item || !item->isImageFrame())
+		{
+			setStatusBarInfoText(tr("Edit Photo: select one image frame (or a module with one photo)"));
+			return;
+		}
+		SuneerPhotoEdit::openDialog(doc, item, this);
+	});
+	connect(scrActions["suneerPhotoBackgroundColour"], &QAction::triggered, this, [this]() { if (HaveDoc && doc) SuneerPhotoEdit::openBackgroundDialog(doc, this); });
+	connect(scrActions["suneerResizeImageToFrame"], &QAction::triggered, this, [this]() { if (HaveDoc && doc) ResizeImageDialog::openForSelection(doc, this); });
 	// The two preset export entries are available exactly when Save as PDF is.
 	connect(scrActions["fileExportAsPDF"], &QAction::enabledChanged, this, [this](bool enabled) {
 		scrActions["fileExportAsPDFDefault"]->setEnabled(enabled);
@@ -1491,6 +1517,11 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("styleImageEffects", "Image");
 	scrMenuMgr->addMenuItemString("itemExtendedImageProperties", "Image");
 	scrMenuMgr->addMenuItemString("itemToggleInlineImage", "Image");
+	// Suneer: the photo tools (also on the image right-click menu and in the News Browser)
+	scrMenuMgr->addMenuItemString("SEPARATOR", "Image");
+	scrMenuMgr->addMenuItemString("suneerEditPhoto", "Image");
+	scrMenuMgr->addMenuItemString("suneerPhotoBackgroundColour", "Image");
+	scrMenuMgr->addMenuItemString("suneerResizeImageToFrame", "Image");
 	scrMenuMgr->createMenu("ItemPreviewSettings", tr("Preview Settings"));
 	scrMenuMgr->addMenuItemString("ItemPreviewSettings", "Image");
 	scrMenuMgr->addMenuItemString("itemImageIsVisible", "ItemPreviewSettings");
@@ -1750,6 +1781,8 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasEmbedAllImages", "Extras");
+	scrMenuMgr->addMenuItemString("suneerRedownloadMissingPhotos", "Extras");
+	scrMenuMgr->addMenuItemString("suneerRemoveUnusedPhotos", "Extras");
 	scrMenuMgr->addMenuItemString("extrasWarnLinkedImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasCheckDuplicateShortcuts", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
@@ -1785,6 +1818,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("helpOnlineTutorial1", "Help");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Help");
 	scrMenuMgr->addMenuItemString("helpCheckUpdates", "Help");
+	scrMenuMgr->addMenuItemString("helpResetPreferences", "Help");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Help");
 	scrMenuMgr->addMenuItemString("helpAboutScribus", "Help");
 	scrMenuMgr->addMenuItemString("helpAboutPlugins", "Help");
@@ -2326,8 +2360,21 @@ void ScribusMainWindow::changeEvent(QEvent *e)
 		QMainWindow::changeEvent(e);
 }
 
+// Faircode: set once closeEvent() has saved the workspace and removed every
+// dock. A second close (logout / shutdown asks again before the process has
+// gone) used to save the now empty palette layout, and the next start showed no
+// page at all (an office PC, 2026-10-15).
+static bool s_mainWindowCloseDone = false;
+// Help > Reset Preferences: restart once this process has quit.
+static bool s_restartAfterClose = false;
+
 void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 {
+	if (s_mainWindowCloseDone)
+	{
+		ce->accept();
+		return;
+	}
 	//Do not quit if Preferences or new doc window is open
 	PreferencesDialog *prefsDialog = findChild<PreferencesDialog *>(QString::fromLocal8Bit("PreferencesDialog"));
 	NewDocDialog *newDocWin = findChild<NewDocDialog *>(QString::fromLocal8Bit("NewDocumentWindow"));
@@ -2379,6 +2426,7 @@ void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 	// on cleanup before it is removed from the DockManager.
 	// Removed Docks are not deleted directly.
 	dockManager->removeAllDockWidgets();
+	s_mainWindowCloseDone = true;
 
 
 	// Every document window is closed by now; drop any lock still held
@@ -2396,8 +2444,19 @@ void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 		if (!m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks.contains(sb))
 			m_prefsManager.appPrefs.scrapbookPrefs.RecentScrapbooks << sb;
 	}
-	if (!emergencyActivated)
+	if (!emergencyActivated && !s_restartAfterClose)   // a reset moves the folder away at the next start
 		m_prefsManager.savePrefs();
+	if (s_restartAfterClose)
+	{
+		// The wrapper script beside the binary (it sets argv[0] to "scribus", so
+		// the prefs folder name stays the same), else the binary itself. The new
+		// process waits for this one to exit.
+		QString program = QCoreApplication::applicationDirPath() + "/scribus";
+		if (!QFileInfo(program).isExecutable() || QFileInfo(program).canonicalFilePath() == QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath())
+			program = QCoreApplication::applicationFilePath();
+		const QString script = QString("while kill -0 %1 2>/dev/null; do sleep 0.3; done; exec \"$0\"").arg(QCoreApplication::applicationPid());
+		QProcess::startDetached("/bin/sh", { "-c", script, program });
+	}
 	UndoManager::deleteInstance();
 	FormatsManager::deleteInstance();
 //	qApp->changeOverrideCursor(QCursor(Qt::ArrowCursor));
@@ -2600,11 +2659,13 @@ bool ScribusMainWindow::slotFileNew()
 
 	if (doFileNew(pageWidth, pageHeight, topMargin, leftMargin, rightMargin, bottomMargin, columnDistance, numberCols, autoframes, facingPages, dia->unitOfMeasureComboBox->currentIndex(), firstPage, orientation, 1, pagesize, true, pageCount, true, dia->marginGroup->marginPreset()))
 	{
-		doc->setPageSetFirstPage(facingPages, firstPage);
+		doc->setPageSetFirstPage(doc->pagePositioning(), firstPage);   // doFileNew() may have replaced an invalid layout
 		doc->bleeds()->set(dia->bleedTop(), dia->bleedLeft(), dia->bleedBottom(), dia->bleedRight());
 		m_mainWindowStatusLabel->setText( tr("Ready"));
 		HaveNewDoc();
 		doc->reformPages(true);
+		// The page must be visible: a layout without the document area gets the default one.
+		dockManager->ensureCentralWidget();
 		retVal = true;
 		// Don't disturb user with "save?" dialog just after new doc
 		// doc changing should be rewritten maybe... maybe later...
@@ -2627,6 +2688,17 @@ ScribusDoc *ScribusMainWindow::doFileNew(double width, double height, double top
 {
 	if (HaveDoc)
 		outlinePalette->buildReopenVals();
+	// Faircode: a page layout that is not in the page sets (or has no columns)
+	// gives a document whose page cannot be placed: use Single Page.
+	{
+		const QList<PageSet>& sets = m_prefsManager.appPrefs.pageSets;
+		if (pageArrangement < 0 || pageArrangement >= sets.count() || sets.at(pageArrangement).Columns < 1 || sets.at(pageArrangement).Rows < 1)
+		{
+			m_prefsManager.logRepair(QString("new document: page layout %1 invalid (%2 page sets), Single Page used").arg(pageArrangement).arg(sets.count()));
+			pageArrangement = singlePage;
+			firstPageLocation = 0;
+		}
+	}
 	m_undoManager->setUndoEnabled(false);
 	MarginStruct margins(topMargin, leftMargin, bottomMargin, rightMargin);
 	DocPagesSetup pagesSetup(pageArrangement, firstPageLocation, firstPageNumber, orientation, autoTextFrames, columnDistance, columnCount);
@@ -4471,6 +4543,24 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		view->zoom();
 		view->GotoPage(0);
 		connect(mdiArea, SIGNAL(subWindowActivated(QMdiSubWindow*)), this, SLOT(newActWin(QMdiSubWindow*)));
+		// Suneer: the photos folder moved with the document: the tool attributes follow.
+		SuneerPhotoStore::relocateAttributes(doc);
+		// Suneer: News Browser photos whose file is missing can be fetched again (the story is on the frame).
+		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel)
+		{
+			const QList<PageItem*> missing = SuneerPhotoStore::missingNewsPhotos(doc);
+			if (!missing.isEmpty())
+			{
+				const int r = ScMessageBox::question(this, tr("Missing photos"),
+					tr("%n News Browser photo(s) of this document are missing on disk (the document was moved, or the photos folder is not reachable).\n\nRe-download them from the Workflow now?", "", missing.size()),
+					QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+				if (r == QMessageBox::Yes)
+				{
+					m_suneerNewsPanel->setDocument(doc);
+					m_suneerNewsPanel->redownloadPhotos(missing, false);
+				}
+			}
+		}
 		connect(ScCore->fileWatcher, SIGNAL(fileChanged(QString)), doc, SLOT(updatePict(QString)));
 		connect(ScCore->fileWatcher, SIGNAL(fileDeleted(QString)), doc, SLOT(removePict(QString)));
 		connect(ScCore->fileWatcher, SIGNAL(dirChanged(QString)), doc, SLOT(updatePictDir(QString)));
@@ -5000,6 +5090,71 @@ bool ScribusMainWindow::suneerNonPrintingLayersCheck(const QString& action)
 	return true;
 }
 
+// Extras > Re-download Missing Photos from Workflow
+void ScribusMainWindow::suneerRedownloadMissingPhotos()
+{
+	if (!HaveDoc || !doc || !m_suneerNewsPanel)
+		return;
+	const QList<PageItem*> missing = SuneerPhotoStore::missingNewsPhotos(doc);
+	if (missing.isEmpty())
+	{
+		ScMessageBox::information(this, tr("Re-download Missing Photos"), tr("No News Browser photo is missing."));
+		return;
+	}
+	m_suneerNewsPanel->setDocument(doc);
+	QString report;
+	const int done = m_suneerNewsPanel->redownloadPhotos(missing, false, &report);
+	ScMessageBox::information(this, tr("Re-download Missing Photos"), tr("Re-downloaded %1 of %2 photo(s).").arg(done).arg(missing.size()) + (report.isEmpty() ? QString() : QStringLiteral("\n\n") + report));
+}
+
+// Extras > Remove Unused Photos: files in "<doc>_photos/" no frame refers to.
+void ScribusMainWindow::suneerRemoveUnusedPhotos()
+{
+	if (!HaveDoc || !doc)
+		return;
+	const QString folder = SuneerPhotoStore::folder(doc);
+	if (folder.isEmpty())
+	{
+		ScMessageBox::information(this, tr("Remove Unused Photos"), tr("Save the document first: the photos folder is next to the .sla file."));
+		return;
+	}
+	const QStringList unused = SuneerPhotoStore::unusedFiles(doc);
+	if (unused.isEmpty())
+	{
+		ScMessageBox::information(this, tr("Remove Unused Photos"), tr("Every file in %1 is used by the document.").arg(folder));
+		return;
+	}
+	qint64 bytes = 0;
+	QStringList shown;
+	for (const QString& f : unused)
+	{
+		bytes += QFileInfo(f).size();
+		shown << QDir(folder).relativeFilePath(f);
+	}
+	QDialog dlg(this);
+	dlg.setWindowTitle(tr("Remove Unused Photos"));
+	dlg.resize(640, 480);
+	QVBoxLayout* lay = new QVBoxLayout(&dlg);
+	lay->addWidget(new QLabel(tr("%n file(s) in %1 are not used by any frame (%2). Delete them?", "", unused.size()).arg(folder, QLocale().formattedDataSize(bytes)), &dlg));
+	QPlainTextEdit* list = new QPlainTextEdit(&dlg);
+	list->setReadOnly(true);
+	list->setPlainText(shown.join(QStringLiteral("\n")));
+	lay->addWidget(list, 1);
+	QDialogButtonBox* bb = new QDialogButtonBox(&dlg);
+	QPushButton* del = bb->addButton(tr("Delete %n file(s)", "", unused.size()), QDialogButtonBox::DestructiveRole);
+	bb->addButton(QDialogButtonBox::Cancel);
+	connect(del, &QPushButton::clicked, &dlg, &QDialog::accept);
+	connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	lay->addWidget(bb);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+	int removed = 0;
+	for (const QString& f : unused)
+		if (QFile::remove(f))
+			++removed;
+	ScMessageBox::information(this, tr("Remove Unused Photos"), tr("%1 of %2 file(s) deleted.").arg(removed).arg(unused.size()));
+}
+
 void ScribusMainWindow::suneerEmbedAllImages()
 {
 	if (!HaveDoc || !doc)
@@ -5175,6 +5330,13 @@ bool ScribusMainWindow::DoFileSave(const QString& fileName, QString* savedFileNa
 	doc->reorganiseFonts();
 	m_mainWindowStatusLabel->setText( tr("Saving..."));
 	mainWindowProgressBar->reset();
+	// Suneer: News Browser photos next to the document (Save As copies the
+	// folder, old "<name>_images" merges into edited/, cache files are adopted).
+	{
+		const QString note = SuneerPhotoStore::prepareForSave(doc, fileName);
+		if (!note.isEmpty() && m_suneerNewsPanel)
+			m_suneerNewsPanel->setStatusDetails(QStringLiteral("Save: ") + note);
+	}
 	bool ret = doc->save(fileName, savedFileName, formatID);
 	// Every Save As route (the menu, Collect for Output, scripts) ends here, so
 	// this is where the network lock follows the document to its new name. A
@@ -6869,6 +7031,26 @@ void ScribusMainWindow::slotHelpCheckUpdates()
 	// URL and API key live behind its Settings... button.
 	UpdateCheckDialog dia(this);
 	dia.exec();
+}
+
+void ScribusMainWindow::slotHelpResetPreferences()
+{
+	const QString folder = QDir::toNativeSeparators(m_prefsManager.preferencesLocation());
+	const int answer = ScMessageBox::question(this, tr("Reset Preferences"),
+		"<qt>" + tr("Reset all Scribus preferences to the defaults?") + "<br><br>"
+		+ tr("Your current preferences folder is kept as a backup:<br><b>%1</b>.bak-&lt;date&gt;").arg(folder.endsWith('/') ? folder.chopped(1) : folder) + "<br><br>"
+		+ tr("Scribus will close (open documents are offered for saving first) and start again with the default settings.") + "</qt>",
+		QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (answer != QMessageBox::Yes)
+		return;
+	m_prefsManager.requestReset();
+	s_restartAfterClose = true;
+	if (!close())
+	{
+		// A document was not closed (Cancel): nothing happens.
+		s_restartAfterClose = false;
+		m_prefsManager.cancelResetRequest();
+	}
 }
 
 void ScribusMainWindow::slotOnlineHelp(const QString & jumpToSection, const QString & jumpToFile)

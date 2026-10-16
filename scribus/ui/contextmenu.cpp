@@ -38,6 +38,8 @@
 #include "suneergroupedit.h"
 #include "suneertexteffects.h"
 #include "suneerpopout.h"
+#include "suneerphotoedit.h"
+#include "suneerphotostore.h"
 #include "suneer_news_panel.h"
 #include "scribusview.h"
 #include "spellcheckfunctions.h"
@@ -453,6 +455,31 @@ void ContextMenu::createMenuItems_Selection()
 			menuImage->addAction(m_ScMW->scrActions["editEditWithImageEditor"]);
 		if (selectedItemCount == 1 && currItem->isImageFrame() && currItem->imageIsAvailable)
 		{
+			// Suneer: crop / rotate / background / tone on the ORIGINAL picture, non-destructive.
+			QAction* editPhoto = menuImage->addAction(tr("Edit photo\u2026"));
+			QPointer<PageItem> photoItem = currItem;
+			ScribusDoc* photoDoc = m_doc;
+			QWidget* mw = m_ScMW;
+			connect(editPhoto, &QAction::triggered, m_ScMW, [photoItem, photoDoc, mw]() {
+				if (photoItem && photoDoc)
+					SuneerPhotoEdit::openDialog(photoDoc, photoItem.data(), mw);
+			});
+			QAction* bgColor = menuImage->addAction(tr("Photo background colour\u2026"));
+			connect(bgColor, &QAction::triggered, m_ScMW, [photoDoc, mw]() {
+				if (photoDoc)
+					SuneerPhotoEdit::openBackgroundDialog(photoDoc, mw);
+			});
+			if (SuneerPhotoStore::isNewsPhoto(currItem) && m_ScMW->m_suneerNewsPanel)
+			{
+				QAction* redl = menuImage->addAction(tr("Re-download original from Workflow"));
+				SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+				connect(redl, &QAction::triggered, m_ScMW, [photoItem, photoDoc, panel]() {
+					if (photoItem && photoDoc) { panel->setDocument(photoDoc); panel->redownloadPhotos({photoItem.data()}, true); }
+				});
+			}
+		}
+		if (selectedItemCount == 1 && currItem->isImageFrame() && currItem->imageIsAvailable)
+		{
 			// Suneer: retrace the wrap contour from the picture's alpha, replacing
 			// a hand-edited one (an untouched auto contour already follows the image).
 			QAction* regenAct = menuImage->addAction(tr("Regenerate contour from image"));
@@ -645,6 +672,34 @@ void ContextMenu::createMenuItems_Selection()
 	{
 		addAction(m_ScMW->scrActions["itemUngroup"]);
 		addAction(m_ScMW->scrActions["itemGroupAdjust"]);
+		// Suneer: a module (group with one photo) offers the photo editor directly.
+		if (selectedItemCount == 1 && currItem->isGroup())
+		{
+			PageItem* photo = nullptr;
+			int nImages = 0;
+			for (PageItem* c : currItem->groupItemList)
+				if (c && c->isImageFrame() && c->imageIsAvailable)
+				{
+					++nImages;
+					photo = c;
+				}
+			if (nImages == 1 && photo)
+			{
+				QAction* editPhoto = addAction(tr("Edit photo\u2026"));
+				QPointer<PageItem> photoItem = photo;
+				ScribusDoc* photoDoc = m_doc;
+				QWidget* mw = m_ScMW;
+				connect(editPhoto, &QAction::triggered, m_ScMW, [photoItem, photoDoc, mw]() {
+					if (photoItem && photoDoc)
+						SuneerPhotoEdit::openDialog(photoDoc, photoItem.data(), mw);
+				});
+				QAction* bgColor = addAction(tr("Photo background colour\u2026"));
+				connect(bgColor, &QAction::triggered, m_ScMW, [photoDoc, mw]() {
+					if (photoDoc)
+						SuneerPhotoEdit::openBackgroundDialog(photoDoc, mw);
+				});
+			}
+		}
 	}
 	//-->
 

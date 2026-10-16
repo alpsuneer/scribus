@@ -4,6 +4,7 @@
 #include "ui/colorpicker/colorpicker.h"
 #include "manager/widget_manager.h"
 #include <functional>
+#include <memory>
 #include <QCompleter>
 #include <QAbstractItemView>
 #include <QStatusBar>
@@ -43,6 +44,8 @@
 #include "pageitem_textframe.h"
 #include "selection.h"
 #include "suneergroupedit.h"
+#include "suneerarrangebar.h"
+#include "suneergappopup.h"
 #include "styles/paragraphstyle.h"
 #include "styles/charstyle.h"
 #include "ui/smcheckbox.h"
@@ -54,10 +57,13 @@
 #include "propertywidget_distance.h"
 #include "resizeimagedialog.h"
 #include <QAction>
+#include <QApplication>
+#include <QPainter>
 #include <QFont>
 #include <QDebug>
 #include <QKeyEvent>
 #include <QFrame>
+#include <QContextMenuEvent>
 #include <QComboBox>
 #include <QImage>
 #include <QPolygon>
@@ -75,6 +81,8 @@
 #include <QApplication>
 #include <QDialog>
 #include <QMenu>
+#include <QActionGroup>
+#include <QSettings>
 #include <QWidgetAction>
 #include <QPushButton>
 #include "colorcombo.h"
@@ -82,6 +90,8 @@
 #include "util_printer.h"
 #include "suneerimagelinks.h"
 #include "suneerbgremove.h"
+#include "suneerphotoedit.h"
+#include "suneerphotostore.h"
 #include "ui/suneerbgremovedialog.h"
 #include "ui/suneerimagesizebar.h"
 #include "ui/suneerframesizebar.h"
@@ -232,12 +242,16 @@ QLabel* SuneerControlBar::makeLabel(const QString& text, const QString& tooltip)
 	return lbl;
 }
 
+// One thin 1 px line between two groups (3 px wide, plus the row spacing on
+// each side). The only kind of gap the rows use: no fixed-width spacers.
 static QFrame* makeSep()
 {
 	QFrame* f = new QFrame();
 	f->setFrameShape(QFrame::VLine);
-	f->setFixedWidth(8);
-	f->setStyleSheet("color: #aaa;");
+	f->setFrameShadow(QFrame::Plain);
+	f->setLineWidth(1);
+	f->setFixedWidth(3);
+	f->setStyleSheet("color: #b4b4b4;");
 	return f;
 }
 
@@ -259,7 +273,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	//         | Paragraph Alignment | Indents & Spacing
 	// ══════════════════════════════════════════════════════════════
 	QHBoxLayout* row1 = new QHBoxLayout();
-	row1->setSpacing(3);
+	m_row1 = row1;
+	row1->setSpacing(1);
 	row1->setContentsMargins(0,0,0,0);
 	// "Edit:" chooser for a mixed group, first in row 1. It is in none of the
 	// show*Widgets() lists, so those passes never touch it. It has to live in
@@ -288,7 +303,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 	// Font Selection
 	m_fontCombo = new QComboBox();
-	m_fontCombo->setFixedWidth(160);
+	m_fontCombo->setFixedWidth(120);
 	m_fontCombo->setEditable(true);
 	m_fontCombo->setInsertPolicy(QComboBox::NoInsert);
 	m_fontCombo->completer()->setCompletionMode(QCompleter::PopupCompletion);
@@ -298,11 +313,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 	// Font Size
 	m_fontSizeSpin = makeSpinBox(0.1, 3000, 2, 0.3, " pt");
-	m_fontSizeSpin->setFixedWidth(80);
+	m_fontSizeSpin->setFixedWidth(66);
 	m_fontSizeSpin->setToolTip("Font Size (pt)");
 	addR1(m_fontSizeSpin);
-
-
 
 	addR1(makeSep());
 
@@ -310,7 +323,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_styleSelect = new StyleSelect(this);
 	m_styleSelect->hideCapsButtons();     // remove All Caps / Fake Small Caps from the layout
 	m_styleSelect->removeGroupSpacers();  // drop the fixed 12px group gaps → even spacing
-	m_styleSelect->setButtonSpacing(3);   // uniform gap matching the toolbar row spacing
+	m_styleSelect->setButtonSpacing(2);   // uniform gap matching the toolbar row spacing
+	m_styleSelect->setAdvancedButtonsVisible(false);   // Underline/Strike/Sub/Super: "advanced", see setShowAdvanced()
 	// Detach the Shadow button so it can be placed after the +/- outline-width controls.
 	QToolButton* shadowBtn = m_styleSelect->detachShadowButton();
 	addR1(m_styleSelect);
@@ -341,8 +355,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	{
 		QWidget* leadW = new QWidget(this);
 		QHBoxLayout* leadL = new QHBoxLayout(leadW);
-		leadL->setContentsMargins(4, 0, 4, 0);
-		leadL->setSpacing(5);                     // space between checkbox and the +/- stack
+		leadL->setContentsMargins(0, 0, 0, 0);
+		leadL->setSpacing(3);                     // space between checkbox and the +/- stack
 		leadL->setAlignment(Qt::AlignVCenter);
 
 		m_outlineOutwardChk = new QCheckBox(leadW);
@@ -392,17 +406,17 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_columnsSpin = new QSpinBox();
 	m_columnsSpin->setRange(1, 100);
 	m_columnsSpin->setValue(1);
-	m_columnsSpin->setFixedWidth(50);
+	m_columnsSpin->setFixedWidth(44);
 	m_columnsSpin->setToolTip("Number of Columns");
 	addR1(m_columnsSpin);
 
 	m_columnGapCombo = new QComboBox();
 	m_columnGapCombo->addItems({"Gap:", "Width:"});
-	m_columnGapCombo->setFixedWidth(70);
+	m_columnGapCombo->setFixedWidth(58);
 	addR1(m_columnGapCombo);
 
 	m_columnGapSpin = makeSpinBox(0, 1000, 2, 0.5, " mm");
-	m_columnGapSpin->setFixedWidth(85);
+	m_columnGapSpin->setFixedWidth(70);
 	m_columnGapSpin->setToolTip("Column Gap (mm)");
 	addR1(m_columnGapSpin);
 
@@ -428,50 +442,21 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	addR1(m_bgColorBtn);
 	m_textWidgets << m_bgColorBtn;
 
-	// Image widgets in row1
-	// Image rotation
-	m_imgRotIconLbl = new QLabel(this);
-	m_imgRotIconLbl->setFixedSize(20, 20);
-	row1->addWidget(m_imgRotIconLbl);
-	m_imageWidgets << m_imgRotIconLbl;
-	m_imgRotSpin = makeSpinBox(0, 359.99, 1, 1, "°");
-	m_imgRotSpin->setFixedWidth(65);
-	m_imgRotSpin->setToolTip("Image Rotation (°)");
-	row1->addWidget(m_imgRotSpin);
-	m_imageWidgets << m_imgRotSpin;
+	// Image widgets in row1 (rotation / flip / arrange are in the shared
+	// SuneerArrangeBar at the end of this row, see below)
 
-	// Flip buttons
-	m_imgFlipHBtn = makeButton("", "Flip Horizontal");
-	row1->addWidget(m_imgFlipHBtn);
-	m_imageWidgets << m_imgFlipHBtn;
-
-	m_imgFlipVBtn = makeButton("", "Flip Vertical");
-	row1->addWidget(m_imgFlipVBtn);
-	m_imageWidgets << m_imgFlipVBtn;
-
-	// Rotate 90
-	m_imgRot90CCWBtn = makeButton("", "Rotate 90° Counter-Clockwise");
-	row1->addWidget(m_imgRot90CCWBtn);
-	m_imageWidgets << m_imgRot90CCWBtn;
-
-	m_imgRot90CWBtn = makeButton("", "Rotate 90° Clockwise");
-	row1->addWidget(m_imgRot90CWBtn);
-	m_imageWidgets << m_imgRot90CWBtn;
-
-	// Level buttons — created here, added to row1 later (in m_textWrapWidgets section)
-	m_imgToFrontBtn   = makeButton("", "Move to Front");
-	m_imgRaiseBtn     = makeButton("", "Move One Level Up");
-	m_imgLowerBtn     = makeButton("", "Move One Level Down");
-	m_imgToBackBtn    = makeButton("", "Move to Back");
-
-	// Frame fit buttons
+	// Frame fit buttons: "advanced" (off the bar by default; Item menu,
+	// Properties palette and the right-click menu keep the commands).
 	m_imgFitFrameBtn  = makeButton("Fi", "Fit Frame to Image");
 	row1->addWidget(m_imgFitFrameBtn);
 	m_imageWidgets << m_imgFitFrameBtn;
+	m_advancedWidgets << m_imgFitFrameBtn;
 
 	m_imgFitImageBtn  = makeButton("IF", "Fit Image to Frame");
 	row1->addWidget(m_imgFitImageBtn);
 	m_imageWidgets << m_imgFitImageBtn;
+	m_advancedWidgets << m_imgFitImageBtn;
+	{ auto* sep = makeSep(); row1->addWidget(sep); m_imageWidgets << sep; m_advancedWidgets << sep; }
 
 	// Crop + Resize section
 	// Enable/Disable checkbox
@@ -481,7 +466,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imgCropW->setRange(1, 9999);
 	m_imgCropW->setSuffix(" mm");
 	m_imgCropW->setValue(80);
-	m_imgCropW->setFixedWidth(75);
+	m_imgCropW->setFixedWidth(74);
 	m_imgCropW->setToolTip("Image Width (mm)");
 	row1->addWidget(m_imgCropW);
 	m_imageWidgets << m_imgCropW;
@@ -494,7 +479,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imgCropH->setRange(1, 9999);
 	m_imgCropH->setSuffix(" mm");
 	m_imgCropH->setValue(60);
-	m_imgCropH->setFixedWidth(75);
+	m_imgCropH->setFixedWidth(74);
 	m_imgCropH->setToolTip("Image Height (mm)");
 	row1->addWidget(m_imgCropH);
 	m_imageWidgets << m_imgCropH;
@@ -504,13 +489,27 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imgCropApplyBtn->setIconSize(QSize(20, 20));
 	row1->addWidget(m_imgCropApplyBtn);
 	m_imageWidgets << m_imgCropApplyBtn;
+	{ auto* sep = makeSep(); row1->addWidget(sep); m_imageWidgets << sep; }
 	// Resize Image button — resample the source file to what the frame needs
 	// in print (Fit @ 240dpi one-click path); writes name_resized.* + relinks.
 	m_imgResizeBtn = makeButton("RS", "Resize Image (reduce file resolution to frame)");
 	connect(m_imgResizeBtn, &QToolButton::clicked, this, [this]{ ResizeImageDialog::openForSelection(m_doc, this); });
 	row1->addWidget(m_imgResizeBtn);
 	m_imageWidgets << m_imgResizeBtn;
+	m_advancedWidgets << m_imgResizeBtn;   // also Item > Image > Resize Image File to Frame Resolution
 	// Background Remove button (rembg)
+	// Suneer: Edit photo (crop / rotate / bg / tone on the original) and the background colour
+	m_imgEditPhotoBtn = makeButton("Edit\u2026", "Edit photo: crop to the frame shape, rotate, flip, auto face, remove background, background colour, tone match - on the ORIGINAL picture, non-destructive");
+	m_imgEditPhotoBtn->setFixedSize(44, 22);
+	m_imgEditPhotoBtn->setStyleSheet("QToolButton { padding: 0px; }");
+	row1->addWidget(m_imgEditPhotoBtn);
+	m_imageWidgets << m_imgEditPhotoBtn;
+	m_imgBgColorBtn = makeButton("BGc", "Photo background colour: one colour behind the selected cut-out photos (nothing selected: every obituary photo of the page), live preview, screen picker");
+	m_imgBgColorBtn->setFixedSize(34, 22);
+	m_imgBgColorBtn->setStyleSheet("QToolButton { padding: 0px; }");
+	row1->addWidget(m_imgBgColorBtn);
+	m_imageWidgets << m_imgBgColorBtn;
+	m_advancedWidgets << m_imgBgColorBtn;   // also Item > Image > Photo Background Colour, right-click, News Browser
 	m_imgRemoveBgBtn = makeButton("BG", "Remove Background (AI)");
 	m_imgRemoveBgBtn->setFixedSize(26, 22);
 
@@ -564,12 +563,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	row1->addWidget(m_imageSizeBar);
 	m_imageWidgets << m_imageSizeBar;
 
-	// wide gap before the Fill section
-	QWidget* hwEndSpacer = new QWidget(this);
-	hwEndSpacer->setFixedWidth(16);
-	row1->addWidget(hwEndSpacer);
-	m_imageWidgets << hwEndSpacer;
-
 	// (Image Fill/Line/Line Width/Line Style moved to image row 2 — see below)
 
 	m_txtLineColorBtn = new ColorButton(this);
@@ -590,16 +583,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 	// Line Width thickness field (label removed to save space)
 	m_textLineWidthSpin = makeSpinBox(0, 300, 2, 0.1, " pt");
-	m_textLineWidthSpin->setFixedWidth(75);
+	m_textLineWidthSpin->setFixedWidth(78);
 	m_textLineWidthSpin->setToolTip(tr("Thickness of line"));
 	row1->addWidget(m_textLineWidthSpin);
 	m_textWidgets << m_textLineWidthSpin;
 
-	{ auto* sep2 = makeSep(); row1->addWidget(sep2); m_textWidgets << sep2; }
-
 	// Text Frame Border Style
 	m_textLineStyleCombo = new QComboBox();
-	m_textLineStyleCombo->setFixedWidth(110);
+	m_textLineStyleCombo->setFixedWidth(70);
 	m_textLineStyleCombo->addItem("───────", (int)Qt::SolidLine);
 	m_textLineStyleCombo->addItem("- - - - -", (int)Qt::DashLine);
 	m_textLineStyleCombo->addItem("· · · · ·", (int)Qt::DotLine);
@@ -607,45 +598,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_textLineStyleCombo->addItem("-··-··-", (int)Qt::DashDotDotLine);
 	row1->addWidget(m_textLineStyleCombo);
 	m_textWidgets << m_textLineStyleCombo;
-
-	{ auto* sep3 = makeSep(); row1->addWidget(sep3); m_textWidgets << sep3; }
+	// (the separator before the text-flow group belongs to m_textWrapWidgets)
 
 	// (Text Wrap + Layer order + L/R/T/B distances moved to image row 2 — see below)
-#if 0
-	// ── Text Wrap buttons — row1, right side (visible for Text Frames AND Image Frames) ──
-	{
-		auto* wrapSep = makeSep();
-		row1->addWidget(wrapSep);
-		m_textWrapWidgets << wrapSep;
-	}
-	m_textFlowNoneBtn    = makeButton("", "No Text Flow",           true);
-	m_textFlowShapeBtn   = makeButton("", "Text Flow Around Shape", true);
-	m_textFlowBBoxBtn    = makeButton("", "Text Flow Around Box",   true);
-	m_textFlowContourBtn = makeButton("", "Text Flow Contour Line", true);
-	m_textFlowClipBtn    = makeButton("", "Text Flow Image Clip",   true);
-	m_textWrapBtn = new QToolButton(this);
-	m_textWrapBtn->setText("Wrap");
-	m_textWrapBtn->setToolTip("Text Wrap Options");
-	m_textWrapBtn->setFixedSize(46, 22);
-	row1->addWidget(m_textFlowNoneBtn);    m_textWrapWidgets << m_textFlowNoneBtn;
-	row1->addWidget(m_textFlowShapeBtn);   m_textWrapWidgets << m_textFlowShapeBtn;
-	row1->addWidget(m_textFlowBBoxBtn);    m_textWrapWidgets << m_textFlowBBoxBtn;
-	row1->addWidget(m_textFlowContourBtn); m_textWrapWidgets << m_textFlowContourBtn;
-	row1->addWidget(m_textFlowClipBtn);    m_textWrapWidgets << m_textFlowClipBtn;
-	row1->addWidget(m_textWrapBtn);        m_textWrapWidgets << m_textWrapBtn;
-
-	// Layer order buttons — shown for both Text Frames and Image Frames
-	{
-		auto* layerSep = makeSep();
-		row1->addWidget(layerSep);
-		m_textWrapWidgets << layerSep;
-	}
-	row1->addWidget(m_imgToFrontBtn);    m_textWrapWidgets << m_imgToFrontBtn;
-	row1->addWidget(m_imgRaiseBtn);      m_textWrapWidgets << m_imgRaiseBtn;
-	row1->addWidget(m_imgLowerBtn);      m_textWrapWidgets << m_imgLowerBtn;
-	row1->addWidget(m_imgToBackBtn);     m_textWrapWidgets << m_imgToBackBtn;
-
-#endif
 
 	// ── Text Wrap flow + Layer order buttons at the END of row 1 (shared text/image) ──
 	{
@@ -660,21 +615,24 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_textWrapBtn = new QToolButton(this);
 	m_textWrapBtn->setText("Wrap");
 	m_textWrapBtn->setToolTip("Text Wrap Options");
-	m_textWrapBtn->setFixedSize(46, 22);
+	m_textWrapBtn->setFixedSize(36, 22);
 	row1->addWidget(m_textFlowNoneBtn);    m_textWrapWidgets << m_textFlowNoneBtn;
 	row1->addWidget(m_textFlowShapeBtn);   m_textWrapWidgets << m_textFlowShapeBtn;
 	row1->addWidget(m_textFlowBBoxBtn);    m_textWrapWidgets << m_textFlowBBoxBtn;
 	row1->addWidget(m_textFlowContourBtn); m_textWrapWidgets << m_textFlowContourBtn;
 	row1->addWidget(m_textFlowClipBtn);    m_textWrapWidgets << m_textFlowClipBtn;
 	row1->addWidget(m_textWrapBtn);        m_textWrapWidgets << m_textWrapBtn;
-	{
-		auto* layerSep = makeSep();
-		row1->addWidget(layerSep); m_textWrapWidgets << layerSep;
-	}
-	row1->addWidget(m_imgToFrontBtn);    m_textWrapWidgets << m_imgToFrontBtn;
-	row1->addWidget(m_imgRaiseBtn);      m_textWrapWidgets << m_imgRaiseBtn;
-	row1->addWidget(m_imgLowerBtn);      m_textWrapWidgets << m_imgLowerBtn;
-	row1->addWidget(m_imgToBackBtn);     m_textWrapWidgets << m_imgToBackBtn;
+
+	// suneer: rotation / flip H / flip V / raise to top / raise / lower /
+	// lower to bottom, mirrored from Properties → X, Y, Z. Last on row 1,
+	// shown for any selection and hidden in text edit mode, like the W/H bar
+	// (updateFrameSizeVisibility()); not in any show*Widgets() list.
+	m_arrangeSep = makeSep();
+	row1->addWidget(m_arrangeSep);
+	m_arrangeBar = new SuneerArrangeBar(m_scmw, this);
+	row1->addWidget(m_arrangeBar);
+	m_arrangeSep->setVisible(false);
+	m_arrangeBar->setVisible(false);
 
 	row1->addStretch();
 	vlay->addLayout(row1);
@@ -686,13 +644,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	//         | Hyphenation | Paragraph Settings
 	// ══════════════════════════════════════════════════════════════
 	QHBoxLayout* row2 = new QHBoxLayout();
-	row2->setSpacing(3);
+	m_row2 = row2;
+	row2->setSpacing(1);
 	row2->setContentsMargins(0,0,0,0);
 	auto addR2 = [&](QWidget* w) { row2->addWidget(w); m_textWidgets << w; };
 
 	// Font Style
 	m_styleCombo = new QComboBox();
-	m_styleCombo->setFixedWidth(160);
+	m_styleCombo->setFixedWidth(96);
 	m_styleCombo->setToolTip("Font Style");
 	m_styleCombo->addItems({"Regular", "Bold", "Italic", "Bold Italic"});
 	addR2(m_styleCombo);
@@ -701,68 +660,52 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// Line Spacing
 
 	m_lineSpSpin = makeSpinBox(0.1, 3000, 2, 0.3, " pt");
-	m_lineSpSpin->setFixedWidth(80);
+	m_lineSpSpin->setFixedWidth(72);
 	m_lineSpSpin->setToolTip("Line Spacing (pt)");
 	addR2(m_lineSpSpin);
 
 	m_lineSpModeCombo = new QComboBox();
-	m_lineSpModeCombo->setFixedWidth(80);
+	m_lineSpModeCombo->setFixedWidth(66);
 	m_lineSpModeCombo->setToolTip("Line Spacing Mode");
 	m_lineSpModeCombo->addItems({"Fixed", "Auto", "Baseline"});
 	addR2(m_lineSpModeCombo);
 	addR2(makeSep());
 
-	// Tracking
-	m_trackingIconLbl = new QLabel(this);
-	m_trackingIconLbl->setFixedSize(22, 22);
-	addR2(m_trackingIconLbl);
-	m_trackingSpin = makeSpinBox(-300, 300, 1, 1, "");
-	m_trackingSpin->setFixedWidth(65);
-	m_trackingSpin->setToolTip("Tracking / Character Spacing");
-	addR2(m_trackingSpin);
-
-	addR2(makeSep());
-
-	// Baseline
-	m_baselineIconLbl = new QLabel(this);
-	m_baselineIconLbl->setFixedSize(22, 22);
-	addR2(m_baselineIconLbl);
-	m_baselineSpin = makeSpinBox(-300, 300, 1, 1, "");
-	m_baselineSpin->setFixedWidth(65);
-	m_baselineSpin->setToolTip("Baseline Offset");
-	addR2(m_baselineSpin);
-
-	addR2(makeSep());
-
 	// Scale H
 	m_scaleHIconLbl = new QLabel(this);
-	m_scaleHIconLbl->setFixedSize(22, 22);
+	m_scaleHIconLbl->setFixedSize(20, 20);
 	addR2(m_scaleHIconLbl);
 	m_scaleHSpin = makeSpinBox(10, 400, 1, 1, " %");
-	m_scaleHSpin->setFixedWidth(70);
+	m_scaleHSpin->setFixedWidth(66);
 	m_scaleHSpin->setToolTip("Horizontal Scale (%)");
 	addR2(m_scaleHSpin);
 
-	// Scale V
+	// Tracking, Baseline offset, Scale V: "advanced" (hidden unless the
+	// toolbar's right-click setting is on; Properties palette keeps them).
+	auto addAdv2 = [&](QWidget* w) { addR2(w); m_advancedWidgets << w; };
+	m_trackingIconLbl = new QLabel(this);
+	m_trackingIconLbl->setFixedSize(20, 20);
+	addAdv2(m_trackingIconLbl);
+	m_trackingSpin = makeSpinBox(-300, 300, 1, 1, "");
+	m_trackingSpin->setFixedWidth(62);
+	m_trackingSpin->setToolTip("Tracking / Character Spacing");
+	addAdv2(m_trackingSpin);
+
+	m_baselineIconLbl = new QLabel(this);
+	m_baselineIconLbl->setFixedSize(20, 20);
+	addAdv2(m_baselineIconLbl);
+	m_baselineSpin = makeSpinBox(-300, 300, 1, 1, "");
+	m_baselineSpin->setFixedWidth(62);
+	m_baselineSpin->setToolTip("Baseline Offset");
+	addAdv2(m_baselineSpin);
+
 	m_scaleVIconLbl = new QLabel(this);
-	m_scaleVIconLbl->setFixedSize(22, 22);
-	addR2(m_scaleVIconLbl);
+	m_scaleVIconLbl->setFixedSize(20, 20);
+	addAdv2(m_scaleVIconLbl);
 	m_scaleVSpin = makeSpinBox(10, 400, 1, 1, " %");
-	m_scaleVSpin->setFixedWidth(70);
+	m_scaleVSpin->setFixedWidth(66);
 	m_scaleVSpin->setToolTip("Vertical Scale (%)");
-	addR2(m_scaleVSpin);
-
-
-
-
-
-
-
-
-
-
-
-
+	addAdv2(m_scaleVSpin);
 
 	addR2(makeSep());
 
@@ -771,7 +714,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_firstLineIndentIconLbl->setFixedSize(20, 20);
 	addR2(m_firstLineIndentIconLbl);
 	m_firstLineIndentSpin = makeSpinBox(-1000, 1000, 2, 0.5, " mm");
-	m_firstLineIndentSpin->setFixedWidth(80);
+	m_firstLineIndentSpin->setFixedWidth(72);
 	m_firstLineIndentSpin->setToolTip("First Line Indent (mm)");
 	addR2(m_firstLineIndentSpin);
 
@@ -780,7 +723,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_gapBeforeIconLbl->setFixedSize(20, 20);
 	addR2(m_gapBeforeIconLbl);
 	m_gapBeforeSpin = makeSpinBox(0, 300, 2, 0.5, " pt");
-	m_gapBeforeSpin->setFixedWidth(75);
+	m_gapBeforeSpin->setFixedWidth(62);
 	m_gapBeforeSpin->setToolTip(tr("Space Above Paragraph"));
 	addR2(m_gapBeforeSpin);
 
@@ -788,7 +731,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_gapAfterIconLbl->setFixedSize(20, 20);
 	addR2(m_gapAfterIconLbl);
 	m_gapAfterSpin = makeSpinBox(0, 300, 2, 0.5, " pt");
-	m_gapAfterSpin->setFixedWidth(75);
+	m_gapAfterSpin->setFixedWidth(62);
 	m_gapAfterSpin->setToolTip(tr("Space Below Paragraph"));
 	addR2(m_gapAfterSpin);
 
@@ -796,14 +739,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// Fe button in text row2
 	// Text Fe button — separate from image Fe
 	m_textFeatherBtn = makeButton("Fe", "Edge Feather");
-	m_textFeatherBtn->setFixedSize(28, 22);
+	m_textFeatherBtn->setFixedSize(26, 22);
 	m_textFeatherBtn->setToolTip("Apply edge feather to text frame");
 	row2->addWidget(m_textFeatherBtn);
 	m_textWidgets << m_textFeatherBtn;
 	// Condense to Fit: the same command as Item > Condense to Fit (Keep Frame Size)
 	{
 		QToolButton* condenseBtn = makeButton("→T←", "Condense to Fit");
-		condenseBtn->setFixedSize(40, 22);
+		condenseBtn->setFixedSize(34, 22);
 		condenseBtn->setToolTip(tr("Condense to Fit: narrow the text until it fits, the frame keeps its size"));
 		connect(condenseBtn, &QToolButton::clicked, this, [this] {
 			if (m_scmw && m_scmw->scrActions["itemCondenseToFit"])
@@ -815,7 +758,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// Fill Text with Image: the same command as Item > Fill Text with Image...
 	{
 		QToolButton* fillImageBtn = makeButton("▣T", "Fill Text with Image...");
-		fillImageBtn->setFixedSize(30, 22);
+		fillImageBtn->setFixedSize(26, 22);
 		fillImageBtn->setToolTip(tr("Fill Text with Image: show an image only inside the letters"));
 		connect(fillImageBtn, &QToolButton::clicked, this, [this] {
 			if (m_scmw && m_scmw->scrActions["itemFillTextWithImage"])
@@ -827,7 +770,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// Poster Stack: the same command as Item > Poster Stack...
 	{
 		QToolButton* posterBtn = makeButton("▣≡", "Poster Stack...");
-		posterBtn->setFixedSize(30, 22);
+		posterBtn->setFixedSize(26, 22);
 		posterBtn->setToolTip(tr("Poster Stack: stretch the lines to fill the frame, one image through all the letters"));
 		connect(posterBtn, &QToolButton::clicked, this, [this] {
 			if (m_scmw && m_scmw->scrActions["itemPosterStack"])
@@ -838,7 +781,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	}
 	// Text Frame Box button — opens a popup to choose border sides + text inset
 	m_textBoxBtn = makeButton("☐", "Frame Border");
-	m_textBoxBtn->setFixedSize(34, 22);
+	m_textBoxBtn->setFixedSize(26, 22);
 	m_textBoxBtn->setToolTip("Apply border to chosen sides + text inset");
 	{
 		QMenu* borderMenu = new QMenu(this);
@@ -1003,7 +946,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// writes is a LOCAL override on the selected paragraphs — the paragraph
 	// style itself is never touched.
 	m_shadingBtn = makeButton("▤", "Paragraph Shading");
-	m_shadingBtn->setFixedSize(34, 22);
+	m_shadingBtn->setFixedSize(26, 22);
 	m_shadingBtn->setToolTip(tr("Paragraph background shading for the selected paragraphs"));
 	row2->addWidget(m_shadingBtn);
 	m_textWidgets << m_shadingBtn;
@@ -1063,67 +1006,36 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 	// ── Text-frame Gap controls (mirrors image frame pad buttons) ──
 	{ auto* s = makeSep(); row2->addWidget(s); m_textWidgets << s; }
-	{ auto* lbl = makeLabel("Gap:", "Text Frame Inner Distance"); row2->addWidget(lbl); m_textWidgets << lbl; }
+	// (no "Gap:" label: the pad buttons' tooltips name the gap; saves 28 px on a 1366 px screen)
 
 	// Session-wide mode toggle for the pad buttons below (default: external wrap).
-	m_internalPadChk = new QCheckBox(tr("Internal"), this);
+	m_internalPadChk = new QCheckBox(tr("In"), this);   // "In" = internal gap (see tooltip)
 	m_internalPadChk->setToolTip(tr("When checked, padding buttons adjust internal "
 	                                "text distance instead of external wrap boundary"));
 	m_internalPadChk->setChecked(false);
 	row2->addWidget(m_internalPadChk); m_textWidgets << m_internalPadChk;
 
 	m_textPadAllPlusBtn = makeButton("+", "Increase Gap (All Sides)");
-	m_textPadAllPlusBtn->setFixedSize(32, 26);
+	m_textPadAllPlusBtn->setFixedSize(24, 22);
+	suneerSetGapGlyph(m_textPadAllPlusBtn, '+');
 	row2->addWidget(m_textPadAllPlusBtn); m_textWidgets << m_textPadAllPlusBtn;
 
 	m_textPadAllMinusBtn = makeButton("-", "Decrease Gap (All Sides)");
-	m_textPadAllMinusBtn->setFixedSize(32, 26);
+	m_textPadAllMinusBtn->setFixedSize(24, 22);
+	suneerSetGapGlyph(m_textPadAllMinusBtn, '-');
 	row2->addWidget(m_textPadAllMinusBtn); m_textWidgets << m_textPadAllMinusBtn;
 
 	m_textPadResetBtn = makeButton("↺", "Reset Gap to Zero");
-	m_textPadResetBtn->setFixedSize(28, 26);
+	m_textPadResetBtn->setFixedSize(24, 22);
 	m_textPadResetBtn->setStyleSheet("QToolButton { color: #666; font-size: 13px; }");
 	row2->addWidget(m_textPadResetBtn); m_textWidgets << m_textPadResetBtn;
 
-	m_textPadTopPlusBtn = makeButton("↑+", "Increase Top Gap");
-	m_textPadTopPlusBtn->setFixedSize(36, 28);
-	m_textPadTopPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	row2->addWidget(m_textPadTopPlusBtn); m_textWidgets << m_textPadTopPlusBtn;
-
-	m_textPadTopMinusBtn = makeButton("↑-", "Decrease Top Gap");
-	m_textPadTopMinusBtn->setFixedSize(36, 28);
-	m_textPadTopMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	row2->addWidget(m_textPadTopMinusBtn); m_textWidgets << m_textPadTopMinusBtn;
-
-	m_textPadBottomPlusBtn = makeButton("↓+", "Increase Bottom Gap");
-	m_textPadBottomPlusBtn->setFixedSize(36, 28);
-	m_textPadBottomPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	row2->addWidget(m_textPadBottomPlusBtn); m_textWidgets << m_textPadBottomPlusBtn;
-
-	m_textPadBottomMinusBtn = makeButton("↓-", "Decrease Bottom Gap");
-	m_textPadBottomMinusBtn->setFixedSize(36, 28);
-	m_textPadBottomMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	row2->addWidget(m_textPadBottomMinusBtn); m_textWidgets << m_textPadBottomMinusBtn;
-
-	m_textPadLeftPlusBtn = makeButton("←+", "Increase Left Gap");
-	m_textPadLeftPlusBtn->setFixedSize(36, 28);
-	m_textPadLeftPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	row2->addWidget(m_textPadLeftPlusBtn); m_textWidgets << m_textPadLeftPlusBtn;
-
-	m_textPadLeftMinusBtn = makeButton("←-", "Decrease Left Gap");
-	m_textPadLeftMinusBtn->setFixedSize(36, 28);
-	m_textPadLeftMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	row2->addWidget(m_textPadLeftMinusBtn); m_textWidgets << m_textPadLeftMinusBtn;
-
-	m_textPadRightPlusBtn = makeButton("→+", "Increase Right Gap");
-	m_textPadRightPlusBtn->setFixedSize(36, 28);
-	m_textPadRightPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	row2->addWidget(m_textPadRightPlusBtn); m_textWidgets << m_textPadRightPlusBtn;
-
-	m_textPadRightMinusBtn = makeButton("→-", "Decrease Right Gap");
-	m_textPadRightMinusBtn->setFixedSize(36, 28);
-	m_textPadRightMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	row2->addWidget(m_textPadRightMinusBtn); m_textWidgets << m_textPadRightMinusBtn;
+	// The eight per-side buttons live in a panel: diagram, - / value / + per side,
+	// link all sides, step and Reset.
+	m_textGapSidesBtn = makeButton("", "Gap sides: set the gap of each side (top, bottom, left, right)");
+	m_textGapSidesBtn->setFixedSize(32, 22);
+	suneerSetGapGlyph(m_textGapSidesBtn, 's');
+	row2->addWidget(m_textGapSidesBtn); m_textWidgets << m_textGapSidesBtn;
 
 	vlay->addLayout(row2);
 
@@ -1152,7 +1064,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		imgRow2b->addWidget(m_imgFillColorBtn); m_imageWidgets << m_imgFillColorBtn;
 
 		m_fillOpacitySpin = makeSpinBox(0,100,1,1," %");
-		m_fillOpacitySpin->setFixedWidth(60); m_fillOpacitySpin->setValue(100);
+		m_fillOpacitySpin->setFixedWidth(64); m_fillOpacitySpin->setValue(100);
 		m_fillOpacitySpin->setToolTip("Fill Opacity (%)");
 		imgRow2b->addWidget(m_fillOpacitySpin); m_imageWidgets << m_fillOpacitySpin;
 
@@ -1172,14 +1084,13 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		imgRow2b->addWidget(m_imgLineColorBtn); m_imageWidgets << m_imgLineColorBtn;
 
 		m_imgLineOpacitySpin = makeSpinBox(0,100,1,1," %");
-		m_imgLineOpacitySpin->setFixedWidth(60); m_imgLineOpacitySpin->setValue(100);
+		m_imgLineOpacitySpin->setFixedWidth(64); m_imgLineOpacitySpin->setValue(100);
 		m_imgLineOpacitySpin->setToolTip("Line Opacity (%)");
 		imgRow2b->addWidget(m_imgLineOpacitySpin); m_imageWidgets << m_imgLineOpacitySpin;
 
-		{ auto* lbl = makeLabel(tr("Line Width"), tr("Thickness of line"));
-		  imgRow2b->addWidget(lbl); m_imageWidgets << lbl; }
 		m_imgLineWidthSpin = makeSpinBox(0, 300, 2, 0.1, " pt");
-		m_imgLineWidthSpin->setFixedWidth(75);
+		m_imgLineWidthSpin->setFixedWidth(78);
+		m_imgLineWidthSpin->setToolTip(tr("Thickness of line"));
 		m_imgLineWidthSpin->setToolTip(tr("Thickness of line"));
 		imgRow2b->addWidget(m_imgLineWidthSpin); m_imageWidgets << m_imgLineWidthSpin;
 
@@ -1187,19 +1098,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		imgRow2b->addWidget(sep2); m_imageWidgets << sep2;
 
 		m_imgLineStyleCombo = new QComboBox(this);
-		m_imgLineStyleCombo->setFixedWidth(120);
+		m_imgLineStyleCombo->setFixedWidth(100);
 		m_imgLineStyleCombo->setToolTip("Line Style of current object");
 		m_imgLineStyleCombo->addItem("No Style");
 		m_imgLineStyleCombo->setVisible(false);
 		imgRow2b->addWidget(m_imgLineStyleCombo); m_imageWidgets << m_imgLineStyleCombo;
 
-		m_imgLineStyleEditBtn = makeButton("✎", "Edit current selected style");
-		m_imgLineStyleEditBtn->setFixedSize(26, 26);
-		imgRow2b->addWidget(m_imgLineStyleEditBtn); m_imageWidgets << m_imgLineStyleEditBtn;
-
-		m_imgLineStyleAddBtn = makeButton("+", "Add new line style");
-		m_imgLineStyleAddBtn->setFixedSize(26, 26);
-		imgRow2b->addWidget(m_imgLineStyleAddBtn); m_imageWidgets << m_imgLineStyleAddBtn;
+		// (no "edit style" / "add line style" buttons: Edit > Styles and the
+		//  Properties palette do both; the toolbar keeps only the style combo)
 	}
 
 	// (Text Wrap + Layer order buttons + L/R/T/B distances all moved to the END of row 1
@@ -1227,77 +1133,77 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 
 
 	// Image-Text distance +/- buttons
-	auto* padLbl = makeLabel("Gap:", "Image to Text Distance");
-	addIR2(padLbl);
 
 	m_padAllPlusBtn = makeButton("+", "Increase Gap (All Sides)");
-	m_padAllPlusBtn->setFixedSize(32, 26);
+	m_padAllPlusBtn->setFixedSize(24, 22);
+	suneerSetGapGlyph(m_padAllPlusBtn, '+');
 	addIR2(m_padAllPlusBtn);
 
 	m_padAllMinusBtn = makeButton("-", "Decrease Gap (All Sides)");
-	m_padAllMinusBtn->setFixedSize(32, 26);
+	m_padAllMinusBtn->setFixedSize(24, 22);
+	suneerSetGapGlyph(m_padAllMinusBtn, '-');
 	addIR2(m_padAllMinusBtn);
 
 	m_padResetBtn = makeButton("↺", "Reset Gap to Zero");
-	m_padResetBtn->setFixedSize(28, 26);
+	m_padResetBtn->setFixedSize(24, 22);
 	m_padResetBtn->setStyleSheet("QToolButton { color: #666; font-size: 13px; }");
 	addIR2(m_padResetBtn);
 
+	m_gapSidesBtn = makeButton("", "Gap sides: set the gap of each side (top, bottom, left, right)");
+	m_gapSidesBtn->setFixedSize(32, 22);
+	suneerSetGapGlyph(m_gapSidesBtn, 's');
+	addIR2(m_gapSidesBtn);
 
-	m_padTopPlusBtn    = makeButton("↑+", "Increase Top Gap");
-	m_padTopPlusBtn->setFixedSize(36, 28);
-	m_padTopPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	addIR2(m_padTopPlusBtn);
-	m_padTopMinusBtn   = makeButton("↑-", "Decrease Top Gap");
-	m_padTopMinusBtn->setFixedSize(36, 28);
-	m_padTopMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	addIR2(m_padTopMinusBtn);
 
-	m_padBottomPlusBtn = makeButton("↓+", "Increase Bottom Gap");
-	m_padBottomPlusBtn->setFixedSize(36, 28);
-	m_padBottomPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	addIR2(m_padBottomPlusBtn);
-	m_padBottomMinusBtn = makeButton("↓-", "Decrease Bottom Gap");
-	m_padBottomMinusBtn->setFixedSize(36, 28);
-	m_padBottomMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	addIR2(m_padBottomMinusBtn);
-
-	m_padLeftPlusBtn   = makeButton("←+", "Increase Left Gap");
-	m_padLeftPlusBtn->setFixedSize(36, 28);
-	m_padLeftPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	addIR2(m_padLeftPlusBtn);
-	m_padLeftMinusBtn  = makeButton("←-", "Decrease Left Gap");
-	m_padLeftMinusBtn->setFixedSize(36, 28);
-	m_padLeftMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	addIR2(m_padLeftMinusBtn);
-
-	m_padRightPlusBtn  = makeButton("→+", "Increase Right Gap");
-	m_padRightPlusBtn->setFixedSize(36, 28);
-	m_padRightPlusBtn->setStyleSheet("QToolButton { color: #1565C0; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #0D47A1; }");
-	addIR2(m_padRightPlusBtn);
-	m_padRightMinusBtn = makeButton("→-", "Decrease Right Gap");
-	m_padRightMinusBtn->setFixedSize(36, 28);
-	m_padRightMinusBtn->setStyleSheet("QToolButton { color: #E65100; font-size: 13px; font-weight: bold; } QToolButton:hover { color: #BF360C; }");
-	addIR2(m_padRightMinusBtn);
-	m_autoFitChk = new QCheckBox("Auto-Fit", this);
-	m_autoFitChk->setToolTip("Auto Fit Frame Height to content");
+	// Auto fit = Properties > Image "Scale image to frame size". The mode
+	// menu beside it is remembered (QSettings Scribus/SuneerImageTools,
+	// autoFitMode: 0 proportional, 1 stretch) and applied to the frame when
+	// the box is ticked or the mode is changed.
+	m_autoFitChk = new QCheckBox("Auto fit", this);
+	m_autoFitChk->setToolTip(tr("Auto fit: the picture scales with the frame, it is never cropped.\n"
+	                            "Proportional (default): the picture keeps its shape; drag or type one side and the other side of the frame follows.\n"
+	                            "Stretch: width and height scale the picture separately (graphics, logos).\n"
+	                            "Off: normal Scribus - resizing the frame crops or reveals the picture.\n"
+	                            "Same as Properties > Image > Scale image to frame size (+ Proportional)."));
 	m_autoFitChk->setFixedHeight(22);
 	addIR2(m_autoFitChk);
+	m_autoFitModeBtn = new QToolButton(this);
+	m_autoFitModeBtn->setFixedSize(14, 22);
+	m_autoFitModeBtn->setAutoRaise(true);
+	m_autoFitModeBtn->setArrowType(Qt::DownArrow);
+	m_autoFitModeBtn->setPopupMode(QToolButton::InstantPopup);
+	m_autoFitModeBtn->setStyleSheet("QToolButton::menu-indicator { image: none; }");
+	m_autoFitModeBtn->setToolTip(tr("Auto fit mode: Proportional or Stretch (remembered)"));
+	{
+		QMenu* modeMenu = new QMenu(m_autoFitModeBtn);
+		QActionGroup* grp = new QActionGroup(modeMenu);
+		m_autoFitPropAct = modeMenu->addAction(tr("Proportional (keep shape, other side follows)"));
+		m_autoFitStretchAct = modeMenu->addAction(tr("Stretch (width and height separately)"));
+		for (QAction* a : { m_autoFitPropAct, m_autoFitStretchAct })
+		{
+			a->setCheckable(true);
+			grp->addAction(a);
+		}
+		const int mode = QSettings(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools")).value(QStringLiteral("autoFitMode"), 0).toInt();
+		(mode == 1 ? m_autoFitStretchAct : m_autoFitPropAct)->setChecked(true);
+		m_autoFitModeBtn->setMenu(modeMenu);
+	}
+	addIR2(m_autoFitModeBtn);
 	addIR2(makeSep());
 	QLabel* cornerLbl = new QLabel("⌐:", this);
 	cornerLbl->setToolTip("Corner Radius");
-	cornerLbl->setFixedSize(18, 22);
+	cornerLbl->setFixedSize(14, 22);
 	addIR2(cornerLbl);
 	m_cornerRadiusSpin = new QDoubleSpinBox(this);
 	m_cornerRadiusSpin->setRange(0, 500);
 	m_cornerRadiusSpin->setDecimals(2);
 	m_cornerRadiusSpin->setSuffix(" mm");
-	m_cornerRadiusSpin->setFixedWidth(80);
+	m_cornerRadiusSpin->setFixedWidth(70);
 	m_cornerRadiusSpin->setToolTip("Corner Radius");
 	addIR2(m_cornerRadiusSpin);
 	// Corner Options popup button
 	m_cornerOptionsBtn = makeButton("⌐▾", "Corner Options per corner");
-	m_cornerOptionsBtn->setFixedSize(32, 22);
+	m_cornerOptionsBtn->setFixedSize(28, 22);
 	m_cornerOptionsBtn->setToolTip("Individual corner radius options");
 	addIR2(m_cornerOptionsBtn);
 	// Corner Options popup
@@ -1390,6 +1296,16 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_featherSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) { previewFeather(); });
 	for (QToolButton* b : { m_featherAllBtn, m_featherTopBtn, m_featherBottomBtn, m_featherLeftBtn, m_featherRightBtn })
 		connect(b, &QToolButton::clicked, this, [this]() { previewFeather(); });
+	// suneer: frame Width/Height, the LAST widget of row 2 (after the text
+	// and the image groups), so showing or hiding it never moves any other
+	// control: only the empty space to its right changes. Not in any
+	// show*Widgets() list; updateFrameSizeVisibility() drives it.
+	m_frameSizeSep = makeSep();
+	row2->addWidget(m_frameSizeSep);
+	m_frameSizeBar = new SuneerFrameSizeBar(this);
+	row2->addWidget(m_frameSizeBar);
+	m_frameSizeSep->setVisible(false);
+	m_frameSizeBar->setVisible(false);
 	row2->addStretch();
 
 
@@ -1523,12 +1439,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	lineRow2->addStretch();
 	vlay->addLayout(lineRow2);
 
-	// suneer: frame Width/Height widget. Created here (before the descendant
-	// event-filter pass below) but placed at the END of the bar, after the
-	// Align and Distribute action, so showing or hiding it never moves any
-	// other control: only the empty space to its right changes.
-	m_frameSizeBar = new SuneerFrameSizeBar(this);
-
 	addWidget(container);
 	showTextWidgets(false);
 	showImageWidgets(false);
@@ -1591,29 +1501,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	// now, with the step the buttons have always had.
 	connect(m_padAllPlusBtn,    &QToolButton::clicked, this, [this]{ onPadAllChanged(+1.0); });
 	connect(m_padAllMinusBtn,   &QToolButton::clicked, this, [this]{ onPadAllChanged(-1.0); });
-	connect(m_padTopPlusBtn,    &QToolButton::clicked, this, [this]{ onPadSideChanged(0, +0.5); });
-	connect(m_padTopMinusBtn,   &QToolButton::clicked, this, [this]{ onPadSideChanged(0, -0.5); });
-	connect(m_padBottomPlusBtn, &QToolButton::clicked, this, [this]{ onPadSideChanged(1, +0.5); });
-	connect(m_padBottomMinusBtn,&QToolButton::clicked, this, [this]{ onPadSideChanged(1, -0.5); });
-	connect(m_padLeftPlusBtn,   &QToolButton::clicked, this, [this]{ onPadSideChanged(2, +0.5); });
-	connect(m_padLeftMinusBtn,  &QToolButton::clicked, this, [this]{ onPadSideChanged(2, -0.5); });
-	connect(m_padRightPlusBtn,  &QToolButton::clicked, this, [this]{ onPadSideChanged(3, +0.5); });
-	connect(m_padRightMinusBtn, &QToolButton::clicked, this, [this]{ onPadSideChanged(3, -0.5); });
 
 	// Text-frame gap buttons
 	connect(m_textPadResetBtn,      &QToolButton::clicked, this, &SuneerControlBar::onTextPadReset);
+	connect(m_textGapSidesBtn,      &QToolButton::clicked, this, [this]{ showGapPopup(true); });
+	connect(m_gapSidesBtn,          &QToolButton::clicked, this, [this]{ showGapPopup(false); });
 	connect(m_textPadAllPlusBtn,    &QToolButton::clicked, this, [this]{ onTextPadAllChanged(+0.5); });
 	connect(m_textPadAllMinusBtn,   &QToolButton::clicked, this, [this]{ onTextPadAllChanged(-0.5); });
-	connect(m_textPadTopPlusBtn,    &QToolButton::clicked, this, [this]{ onTextPadSideChanged(0, +0.5); });
-	connect(m_textPadTopMinusBtn,   &QToolButton::clicked, this, [this]{ onTextPadSideChanged(0, -0.5); });
-	connect(m_textPadBottomPlusBtn, &QToolButton::clicked, this, [this]{ onTextPadSideChanged(1, +0.5); });
-	connect(m_textPadBottomMinusBtn,&QToolButton::clicked, this, [this]{ onTextPadSideChanged(1, -0.5); });
-	connect(m_textPadLeftPlusBtn,   &QToolButton::clicked, this, [this]{ onTextPadSideChanged(2, +0.5); });
-	connect(m_textPadLeftMinusBtn,  &QToolButton::clicked, this, [this]{ onTextPadSideChanged(2, -0.5); });
-	connect(m_textPadRightPlusBtn,  &QToolButton::clicked, this, [this]{ onTextPadSideChanged(3, +0.5); });
-	connect(m_textPadRightMinusBtn, &QToolButton::clicked, this, [this]{ onTextPadSideChanged(3, -0.5); });
 
-	connect(m_imgRotSpin,        QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SuneerControlBar::onImgRotChanged);
 	connect(m_autoContourBtn,   &QToolButton::clicked, this, &SuneerControlBar::onAutoContour);
 	// Corner options popup open
 	connect(m_cornerOptionsBtn, &QToolButton::clicked, this, [this](){
@@ -1693,34 +1588,69 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		if (sel()->count() > 0)
 			sel()->itemAt(0)->update();
 	});
-	connect(m_autoFitChk, &QCheckBox::toggled, this, [this](bool checked){
-		SuneerGroupUndo groupUndo(this);
+	// Auto fit on: scale-to-frame (+ proportional per the mode) and the frame
+	// snaps to the fitted picture right away (no gap, no crop). Off: free
+	// scaling with the picture left at its current scale. One undo step.
+	auto applyAutoFit = [this](bool on) {
 		ScribusDoc* doc = ScCore->primaryMainWindow()->doc;
-		if (!doc) return;
+		if (!doc || m_updating)
+			return;
+		const bool proportional = !m_autoFitStretchAct->isChecked();
+		SuneerGroupUndo groupUndo(this);
 		for (int i = 0; i < sel()->count(); ++i)
 		{
 			PageItem* item = sel()->itemAt(i);
-			if (item && item->isImageFrame())
+			if (!item || !item->isImageFrame())
+				continue;
+			item->setImageScalingMode(!on, on ? proportional : item->keepAspectRatio());
+			if (on)
 			{
-				// checked=true → AutoFit ON (scale=false)
-				// checked=false → Manual scale ON (scale=true)
-				item->setImageScalingMode(!checked, true);
-				item->update();
+				double w = item->width(), h = item->height();
+				if (item->suneerAutoFitFrameSize(w, h, w, h))
+					doc->sizeItem(w, h, item, false, true, false);
+				else
+					item->adjustPictScale();
 			}
+			item->update();
 		}
 		doc->regionsChanged()->update(QRectF());
 		doc->changed();
-	});
+		if (m_scmw)
+			m_scmw->setStatusBarTextSelectedItemInfo();
+	};
+	connect(m_autoFitChk, &QCheckBox::toggled, this, applyAutoFit);
+	for (QAction* a : { m_autoFitPropAct, m_autoFitStretchAct })
+		connect(a, &QAction::triggered, this, [this, applyAutoFit]() {
+			QSettings cfg(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools"));
+			cfg.setValue(QStringLiteral("autoFitMode"), m_autoFitStretchAct->isChecked() ? 1 : 0);
+			cfg.sync();
+			if (m_autoFitChk->isChecked())
+				applyAutoFit(true);
+		});
 	if (m_imgWidthSpin)
 		connect(m_imgWidthSpin,  QOverload<double>::of(&QDoubleSpinBox::valueChanged),
 			this, &SuneerControlBar::onImgWidthChanged);
 	if (m_imgHeightSpin)
 		connect(m_imgHeightSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
 			this, &SuneerControlBar::onImgHeightChanged);
+	connect(m_imgEditPhotoBtn, &QToolButton::clicked, this, [this]() {
+		if (!m_doc) return;
+		PageItem* item = sel()->count() == 1 ? sel()->itemAt(0) : nullptr;
+		if (item && item->isGroup())
+		{
+			const QList<PageItem*> imgs = SuneerGroupEdit::imageChildren(item);
+			item = imgs.size() == 1 ? imgs.first() : nullptr;
+		}
+		if (!item || !item->isImageFrame())
+		{
+			if (m_scmw) m_scmw->setStatusBarInfoText(tr("Edit photo: select one image frame"));
+			return;
+		}
+		SuneerPhotoEdit::openDialog(m_doc, item, this);
+	});
+	connect(m_imgBgColorBtn, &QToolButton::clicked, this, [this]() { if (m_doc) SuneerPhotoEdit::openBackgroundDialog(m_doc, this); });
 	connect(m_imgLineStyleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
 		this, &SuneerControlBar::onImgLineStyleChanged);
-	connect(m_imgLineStyleEditBtn, &QToolButton::clicked, this, &SuneerControlBar::onImgLineStyleEdit);
-	connect(m_imgLineStyleAddBtn,  &QToolButton::clicked, this, &SuneerControlBar::onImgLineStyleAdd);
 	connect(m_imgFillColorBtn,  &ColorButton::changed,  this, &SuneerControlBar::onFillColorChanged);
 	connect(m_imgLineColorBtn,  &ColorButton::changed,  this, &SuneerControlBar::onImgLineColorChanged);
 	connect(m_fillOpacitySpin,  QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SuneerControlBar::onFillOpacityChanged);
@@ -1736,14 +1666,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	connect(m_textFlowBBoxBtn,    &QToolButton::clicked, this, &SuneerControlBar::onTextFlowBBox);
 	connect(m_textFlowContourBtn, &QToolButton::clicked, this, &SuneerControlBar::onTextFlowContour);
 	connect(m_textFlowClipBtn,    &QToolButton::clicked, this, &SuneerControlBar::onTextFlowClip);
-	connect(m_imgRot90CCWBtn,   &QToolButton::clicked, this, &SuneerControlBar::onImgRot90CCW);
-	connect(m_imgRot90CWBtn,    &QToolButton::clicked, this, &SuneerControlBar::onImgRot90CW);
-	connect(m_imgToFrontBtn,    &QToolButton::clicked, this, &SuneerControlBar::onImgToFront);
-	connect(m_imgRaiseBtn,      &QToolButton::clicked, this, &SuneerControlBar::onImgRaise);
-	connect(m_imgLowerBtn,      &QToolButton::clicked, this, &SuneerControlBar::onImgLower);
-	connect(m_imgToBackBtn,     &QToolButton::clicked, this, &SuneerControlBar::onImgToBack);
-	connect(m_imgFlipHBtn,      &QToolButton::clicked, this, &SuneerControlBar::onImgFlipH);
-	connect(m_imgFlipVBtn,      &QToolButton::clicked, this, &SuneerControlBar::onImgFlipV);
 	connect(m_imgFitFrameBtn,   &QToolButton::clicked, this, &SuneerControlBar::onImgFitFrame);
 	connect(m_imgFitImageBtn,   &QToolButton::clicked, this, &SuneerControlBar::onImgFitImage);
 	connect(m_imgCropApplyBtn,  &QToolButton::clicked, this, &SuneerControlBar::onImgCropApply);
@@ -1939,35 +1861,95 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	addAction(m_alignDistributeAction);
 	connect(m_alignDistributeAction, &QAction::triggered, this, [this] { onAlignDistributeClicked(); });
 
-	// Frame W/H: last on the bar, context-sensitive like the other sections
-	// (shown/hidden from updateFromSelection(), no timer of its own).
-	m_frameSizeSepAction = addSeparator();
-	m_frameSizeAction = addWidget(m_frameSizeBar);
-	m_frameSizeSepAction->setVisible(false);
-	m_frameSizeAction->setVisible(false);
 	if (m_scmw && m_scmw->appModeHelper)
 		connect(m_scmw->appModeHelper, &AppModeHelper::AppModeChanged, this, [this](int, int) { updateFrameSizeVisibility(); });
+
+	// "Show advanced text/image buttons": remembered in the prefs file
+	// (context SuneerControlBar), default off. Offered on the toolbar's
+	// right-click menu, see contextMenuEvent().
+	{
+		PrefsContext* prefs = PrefsManager::instance().prefsFile ? PrefsManager::instance().prefsFile->getContext("SuneerControlBar") : nullptr;
+		m_showAdvancedAction = new QAction(tr("Show advanced text/image buttons"), this);
+		m_showAdvancedAction->setObjectName("controlBarShowAdvanced");
+		m_showAdvancedAction->setCheckable(true);
+		m_showAdvancedAction->setToolTip(tr("Underline, Strike out, Sub/Superscript, Tracking, Baseline offset, Vertical scale, Fit image/frame"));
+		connect(m_showAdvancedAction, &QAction::toggled, this, [this](bool on) { setShowAdvanced(on); });
+		setShowAdvanced(prefs ? prefs->getBool("showAdvancedButtons", false) : false);
+	}
+}
+
+void SuneerControlBar::setShowAdvanced(bool on)
+{
+	m_showAdvanced = on;
+	if (m_showAdvancedAction && m_showAdvancedAction->isChecked() != on)
+	{
+		QSignalBlocker b(m_showAdvancedAction);
+		m_showAdvancedAction->setChecked(on);
+	}
+	if (PrefsContext* prefs = PrefsManager::instance().prefsFile ? PrefsManager::instance().prefsFile->getContext("SuneerControlBar") : nullptr)
+		prefs->set("showAdvancedButtons", on);
+	if (m_styleSelect)
+		m_styleSelect->setAdvancedButtonsVisible(on);
+	// Re-run the contextual pass so the advanced widgets of the current
+	// state appear or disappear right away.
+	updateFromSelection();
+}
+
+void SuneerControlBar::contextMenuEvent(QContextMenuEvent* ev)
+{
+	QMenu menu(this);
+	if (m_showAdvancedAction)
+	{
+		menu.addAction(m_showAdvancedAction);
+		menu.addSeparator();
+	}
+	// The usual toolbar/palette toggles QMainWindow offers on a toolbar. The
+	// toggle actions belong to the main window; only the temporary menu that
+	// carried them is deleted after exec(). (Reparenting that menu into ours
+	// would paint it inside ours as a child widget.)
+	std::unique_ptr<QMenu> stdMenu(m_scmw ? m_scmw->createPopupMenu() : nullptr);
+	if (stdMenu)
+		menu.addActions(stdMenu->actions());
+	menu.exec(ev->globalPos());
+	ev->accept();
+}
+
+void SuneerControlBar::logToolbarWidth()
+{
+	int sel = (m_doc && m_doc->m_Selection) ? m_doc->m_Selection->count() : 0;
+	int mode = m_doc ? m_doc->appMode : -1;
+	QString type = (sel > 0) ? QString::number(m_doc->m_Selection->itemAt(0)->itemType()) : QStringLiteral("-");
+	int win = window() ? window()->width() : 0;
+	qWarning("CONTROLBAR width: toolbar=%d rows=%d row1=%d row2=%d window=%d appMode=%d sel=%d type=%s",
+	         sizeHint().width(), m_row1 ? m_row1->parentWidget()->sizeHint().width() : 0,
+	         m_row1 ? m_row1->sizeHint().width() : 0, m_row2 ? m_row2->sizeHint().width() : 0,
+	         win, mode, sel, qPrintable(type));
 }
 
 void SuneerControlBar::updateFrameSizeVisibility()
 {
-	if (!m_frameSizeAction)
+	if (!m_frameSizeBar)
 		return;
 	// Same rule as the other contextual sections: something with a frame is
 	// selected (any item type: frames, shapes, tables, groups, lines). Hidden
 	// with no selection and while a text cursor is active in edit mode.
 	bool show = m_doc && !m_doc->m_Selection->isEmpty()
 		&& m_doc->appMode != modeEdit && m_doc->appMode != modeEditTable;
-	m_frameSizeSepAction->setVisible(show);
-	m_frameSizeAction->setVisible(show);
+	m_frameSizeSep->setVisible(show);
+	m_frameSizeBar->setVisible(show);
+	if (m_arrangeBar)
+	{
+		m_arrangeSep->setVisible(show);
+		m_arrangeBar->setVisible(show);
+	}
 }
 
 void SuneerControlBar::showDrawingFrameSize(double wPt, double hPt)
 {
-	if (!m_frameSizeAction || !m_frameSizeBar)
+	if (!m_frameSizeBar)
 		return;
-	m_frameSizeSepAction->setVisible(true);
-	m_frameSizeAction->setVisible(true);
+	m_frameSizeSep->setVisible(true);
+	m_frameSizeBar->setVisible(true);
 	m_frameSizeBar->showDrawingSize(wPt, hPt);
 }
 
@@ -2063,6 +2045,12 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 			m_frameSizeBar->setPalette(m_scmw->propertiesPalette->xyzPal);
 		m_frameSizeBar->setDocument(doc);
 	}
+	if (m_arrangeBar)
+	{
+		if (m_scmw && m_scmw->propertiesPalette)
+			m_arrangeBar->setPalette(m_scmw->propertiesPalette->xyzPal);
+		m_arrangeBar->setDocument(doc);
+	}
 	if (!doc)
 	{
 		// Document closed: stop polling it, drop every cached frame, show no
@@ -2149,7 +2137,7 @@ void SuneerControlBar::showTextWidgets(bool show)
 	for (QWidget* w : m_textWidgets)
 	{
 		if (w)
-			w->setVisible(show);
+			w->setVisible(show && (m_showAdvanced || !m_advancedWidgets.contains(w)));
 	}
 }
 
@@ -2162,7 +2150,8 @@ void SuneerControlBar::showLineWidgets(bool show)
 void SuneerControlBar::showImageWidgets(bool show)
 {
 	if (show) showLineWidgets(false);
-	for (QWidget* w : m_imageWidgets) w->setVisible(show);
+	for (QWidget* w : m_imageWidgets)
+		w->setVisible(show && (m_showAdvanced || !m_advancedWidgets.contains(w)));
 }
 
 void SuneerControlBar::showTextWrapWidgets(bool show)
@@ -2200,8 +2189,7 @@ void SuneerControlBar::blockAllSignals(bool block)
 		m_firstLineIndentSpin,
 		m_gapBeforeSpin, m_gapAfterSpin,
 		m_trackingSpin, m_baselineSpin, m_scaleHSpin, m_scaleVSpin,
-		m_lineSpSpin, m_lineSpModeCombo,
-		 m_imgRotSpin
+		m_lineSpSpin, m_lineSpModeCombo
 	};
 	for (QObject* o : all) o->blockSignals(block);
 }
@@ -2213,6 +2201,9 @@ void SuneerControlBar::updateFromSelection()
 	// Before any early return: it follows the selection, not the item type.
 	updateAlignDistributeButton();
 	updateFrameSizeVisibility();
+	// SUNEER_CONTROLBAR_DEBUG=1: log the bar's natural width per state (after the layout settles).
+	if (qEnvironmentVariableIsSet("SUNEER_CONTROLBAR_DEBUG"))
+		QTimer::singleShot(300, this, [this] { logToolbarWidth(); });
 	if (!m_doc) return;
 	for (QAbstractSpinBox* sb : m_mixedSpins)
 		sb->setSpecialValueText(QString());
@@ -2391,7 +2382,6 @@ void SuneerControlBar::updateFromSelection()
 		showImageWidgets(true);
 		showTextWrapWidgets(true);
 		updateTextWrapControls(item);
-		m_imgRotSpin->setValue(fabs(item->imageRotation()));
 		// ✅ Show frame size in mm
 		const double PT2MM = 1.0 / 2.8346;
 		if (m_imgWidthSpin) {
@@ -2405,11 +2395,18 @@ void SuneerControlBar::updateFromSelection()
 			m_imgHeightSpin->blockSignals(false);
 		}
 		if (m_imgLineWidthSpin) m_imgLineWidthSpin->setValue(item->lineWidth() * m_doc->unitRatio());
+		if (m_autoFitChk)
+		{
+			QSignalBlocker b(m_autoFitChk);
+			m_autoFitChk->setChecked(item->fitImageToFrame());
+		}
 	}
 	else if (item->isLine() || item->isPolyLine() || item->isArc() || item->isSpiral())
 	{
 		showTextWidgets(false);
 		showImageWidgets(true);
+		m_autoFitChk->setVisible(false);
+		m_autoFitModeBtn->setVisible(false);
 		showLineWidgets(false);
 		showTextWrapWidgets(true);
 		updateTextWrapControls(item);
@@ -2493,6 +2490,8 @@ void SuneerControlBar::updateFromSelection()
 	{
 		showTextWidgets(false);
 		showImageWidgets(true);
+		m_autoFitChk->setVisible(false);
+		m_autoFitModeBtn->setVisible(false);
 		showLineWidgets(false);
 		showTextWrapWidgets(true);
 		updateTextWrapControls(item);
@@ -2797,11 +2796,7 @@ void SuneerControlBar::showGroupMixedValues()
 		setSpinMixed(m_lineWidthSpin);
 	}
 	if (first->isImageFrame())
-	{
-		if (differs([](const PageItem* it) { return it->imageRotation(); }))
-			setSpinMixed(m_imgRotSpin);
 		return;
-	}
 	if (differs([](const PageItem* it) { return it->fillTransparency(); }))
 		setSpinMixed(m_fillOpacitySpin);
 	if (differs([](const PageItem* it) { return it->lineTransparency(); }))
@@ -2985,6 +2980,8 @@ bool SuneerControlBar::eventFilter(QObject* obj, QEvent* ev)
 			// Frame W/H: Esc puts the current size back before leaving.
 			if (m_frameSizeBar && m_frameSizeBar->owns(qobject_cast<QWidget*>(obj)))
 				m_frameSizeBar->revert();
+			if (m_arrangeBar && m_arrangeBar->owns(qobject_cast<QWidget*>(obj)))
+				m_arrangeBar->revert();
 			returnFocusToCanvas();
 			return true;
 		}
@@ -3630,14 +3627,6 @@ void SuneerControlBar::onBgColorChanged()
 	m_doc->changed();
 }
 
-void SuneerControlBar::onImgRotChanged(double val)
-{
-	SuneerGroupUndo groupUndo(this);
-	if (m_updating || !m_doc) return;
-	m_doc->itemSelection_SetImageRotation(360 - val, tsel());
-	m_doc->changed();
-}
-
 void SuneerControlBar::onTextWrapShow()
 {
 	QPoint pos = m_textWrapBtn->mapToGlobal(QPoint(0, m_textWrapBtn->height()));
@@ -3683,74 +3672,6 @@ void SuneerControlBar::onTextFlowClip()
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc) return;
 	for (int i=0;i<wrapSel()->count();i++) wrapSel()->itemAt(i)->setTextFlowMode(PageItem::TextFlowUsesImageClipping);
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgRot90CCW()
-{
-	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || wrapSel()->isEmpty()) return;
-	for (int i = 0; i < wrapSel()->count(); i++) {
-		PageItem* item = wrapSel()->itemAt(i);
-		m_doc->rotateItem(-90.0, item);
-	}
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgRot90CW()
-{
-	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || wrapSel()->isEmpty()) return;
-	for (int i = 0; i < wrapSel()->count(); i++) {
-		PageItem* item = wrapSel()->itemAt(i);
-		m_doc->rotateItem(90.0, item);
-	}
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgToFront()
-{
-	if (!m_doc) return;
-	m_doc->bringItemSelectionToFront();
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgRaise()
-{
-	if (!m_doc) return;
-	m_doc->itemSelection_RaiseItem();
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgLower()
-{
-	if (!m_doc) return;
-	m_doc->itemSelection_LowerItem();
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgToBack()
-{
-	if (!m_doc) return;
-	m_doc->sendItemSelectionToBack();
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgFlipH()
-{
-	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || wrapSel()->isEmpty()) return;
-	// The document selection: a selected group flips as one object.
-	m_doc->itemSelection_FlipH();
-	m_doc->changed();
-}
-
-void SuneerControlBar::onImgFlipV()
-{
-	SuneerGroupUndo groupUndo(this);
-	if (!m_doc || wrapSel()->isEmpty()) return;
-	// The document selection: a selected group flips as one object.
-	m_doc->itemSelection_FlipV();
 	m_doc->changed();
 }
 
@@ -3865,7 +3786,7 @@ void SuneerControlBar::applyBgResult(PageItem* item, const QImage& result, const
                                      const QString& sourcePath, const QList<PageItem*>& helperShapes)
 {
 	using namespace SuneerBgRemove;
-	const QString outputPath = freshDerivedPath(sourcePath, "_rembg");
+	const QString outputPath = SuneerPhotoStore::redirectDerived(m_doc, freshDerivedPath(sourcePath, "_rembg"));
 	QImage toSave = result.convertToFormat(QImage::Format_ARGB32);
 	const int dpiX = item->pixm.imgInfo.xres > 0 ? item->pixm.imgInfo.xres : 72;
 	const int dpiY = item->pixm.imgInfo.yres > 0 ? item->pixm.imgInfo.yres : 72;
@@ -3880,7 +3801,7 @@ void SuneerControlBar::applyBgResult(PageItem* item, const QImage& result, const
 	QString cutPath;
 	if (!st.cut.isNull())
 	{
-		cutPath = freshDerivedPath(sourcePath, "_rembgcut");
+		cutPath = SuneerPhotoStore::redirectDerived(m_doc, freshDerivedPath(sourcePath, "_rembgcut"));
 		st.cut.save(cutPath, "PNG");
 		noteFeatherFile(m_doc, cutPath);
 	}
@@ -4142,6 +4063,12 @@ void SuneerControlBar::onPadReset()
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc || wrapSel()->isEmpty()) return;
+	// One undo step per click rather than one per selected frame (and caption).
+	UndoTransaction padTransaction;
+	if (UndoManager::undoEnabled())
+		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                                          Um::TextFrameDist, QString(), Um::IBorder);
+	auto commitPad = qScopeGuard([&padTransaction] { if (padTransaction) padTransaction.commit(); });
 	for (int i = 0; i < wrapSel()->count(); i++)
 		wrapSel()->itemAt(i)->setWrapOffsets(0, 0, 0, 0);
 	m_doc->changed();
@@ -4271,6 +4198,12 @@ void SuneerControlBar::onPadAllChanged(double delta)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc || wrapSel()->isEmpty()) return;
+	// One undo step per click rather than one per selected frame (and caption).
+	UndoTransaction padTransaction;
+	if (UndoManager::undoEnabled())
+		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                                          Um::TextFrameDist, QString(), Um::IBorder);
+	auto commitPad = qScopeGuard([&padTransaction] { if (padTransaction) padTransaction.commit(); });
 	double step = delta * MM2PT;
 	for (int i = 0; i < wrapSel()->count(); i++)
 	{
@@ -4333,6 +4266,12 @@ void SuneerControlBar::onPadSideChanged(int side, double delta)
 {
 	SuneerGroupUndo groupUndo(this);
 	if (!m_doc || wrapSel()->isEmpty()) return;
+	// One undo step per click rather than one per selected frame (and caption).
+	UndoTransaction padTransaction;
+	if (UndoManager::undoEnabled())
+		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                                          Um::TextFrameDist, QString(), Um::IBorder);
+	auto commitPad = qScopeGuard([&padTransaction] { if (padTransaction) padTransaction.commit(); });
 	double step = delta * MM2PT;
 	for (int i = 0; i < wrapSel()->count(); i++)
 	{
@@ -4374,6 +4313,147 @@ void SuneerControlBar::onPadSideChanged(int side, double delta)
 	m_doc->invalidateAll();
 	m_doc->regionsChanged()->update(QRectF());
 	if (ScCore->primaryMainWindow() && ScCore->primaryMainWindow()->view) {
+		ScCore->primaryMainWindow()->view->DrawNew();
+		ScCore->primaryMainWindow()->view->update();
+	}
+}
+
+// ── Gap sides panel ─────────────────────────────────────────────────────────
+
+void SuneerControlBar::showGapPopup(bool text)
+{
+	if (!m_gapPopup)
+	{
+		m_gapPopup = new SuneerGapPopup(this);
+		m_gapPopup->readValues = [this]() {
+			SuneerGapPopup::Values v;
+			const bool internal = m_gapPopupText && m_internalPadChk && m_internalPadChk->isChecked();
+			if (m_gapPopupText)
+				v.title = internal ? tr("Text inset (inside the frame)") : tr("Text wrap gap (outside the frame)");
+			else
+				v.title = tr("Text wrap gap around the frame");
+			if (!m_doc)
+				return v;
+			Selection* padSel = (m_gapPopupText && internal) ? sel() : wrapSel();
+			PageItem* item = nullptr;
+			for (int i = 0; i < padSel->count() && !item; ++i)
+			{
+				PageItem* it = padSel->itemAt(i);
+				if (!m_gapPopupText || it->isTextFrame() || (!internal && it->isGroup()))
+					item = it;
+			}
+			if (!item)
+				return v;
+			v.valid = true;
+			if (internal)
+			{
+				v.mm[0] = item->textToFrameDistTop() / MM2PT;
+				v.mm[1] = item->textToFrameDistBottom() / MM2PT;
+				v.mm[2] = item->textToFrameDistLeft() / MM2PT;
+				v.mm[3] = item->textToFrameDistRight() / MM2PT;
+			}
+			else
+			{
+				v.mm[0] = item->wrapOffsetTop() / MM2PT;
+				v.mm[1] = item->wrapOffsetBottom() / MM2PT;
+				v.mm[2] = item->wrapOffsetLeft() / MM2PT;
+				v.mm[3] = item->wrapOffsetRight() / MM2PT;
+			}
+			// the image row's buttons move contour points in contour editing: no values to show
+			if (!m_gapPopupText && item->textFlowMode() == PageItem::TextFlowUsesContourLine
+			    && !item->ContourLine.empty() && m_doc->nodeEdit.isContourLine())
+			{
+				v.editable = false;
+				v.title = tr("Contour line gap (the - / + buttons move the contour)");
+			}
+			return v;
+		};
+		// The toolbar's own slots: the same change and undo step as its buttons.
+		m_gapPopup->stepSide = [this](int side, double deltaMm) {
+			if (m_gapPopupText)
+				side < 0 ? onTextPadAllChanged(deltaMm) : onTextPadSideChanged(side, deltaMm);
+			else
+				side < 0 ? onPadAllChanged(deltaMm) : onPadSideChanged(side, deltaMm);
+		};
+		m_gapPopup->setSide = [this](int side, double mm) { onGapSideSet(m_gapPopupText, side, mm); };
+		m_gapPopup->reset = [this]() {
+			if (m_gapPopupText)
+				onTextPadReset();
+			else
+				onPadReset();
+		};
+	}
+	m_gapPopupText = text;
+	// default step = the step of the toolbar's own + / - (text 0.5 mm, image 1 mm)
+	m_gapPopup->setStepKey(text ? QStringLiteral("text") : QStringLiteral("image"), text ? 0.5 : 1.0);
+	m_gapPopup->popupBelow(text ? m_textGapSidesBtn : m_gapSidesBtn);
+}
+
+void SuneerControlBar::onGapSideSet(bool text, int side, double mm)
+{
+	SuneerGroupUndo groupUndo(this);
+	if (!m_doc)
+		return;
+	const bool internal = text && m_internalPadChk && m_internalPadChk->isChecked();
+	Selection* padSel = internal ? sel() : wrapSel();
+	if (padSel->isEmpty())
+		return;
+	const double v = qMax(0.0, mm) * MM2PT;
+	auto pick = [side, v](double& t, double& b, double& l, double& r) {
+		if (side < 0 || side == 0) t = v;
+		if (side < 0 || side == 1) b = v;
+		if (side < 0 || side == 2) l = v;
+		if (side < 0 || side == 3) r = v;
+	};
+	// One undo step per typed value.
+	UndoTransaction padTransaction;
+	if (UndoManager::undoEnabled())
+		padTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
+		                                                          Um::TextFrameDist, QString(), Um::IBorder);
+	for (int i = 0; i < padSel->count(); i++)
+	{
+		PageItem* item = padSel->itemAt(i);
+		if (text && !item->isTextFrame() && (internal || !item->isGroup()))
+			continue;
+		if (internal)
+		{
+			double l = item->textToFrameDistLeft(), r = item->textToFrameDistRight();
+			double t = item->textToFrameDistTop(),  b = item->textToFrameDistBottom();
+			pick(t, b, l, r);
+			item->setTextToFrameDist(l, r, t, b);
+			if (item->isTextFrame())
+				item->asTextFrame()->invalidateLayout(true);
+		}
+		else
+		{
+			double t = item->wrapOffsetTop(),  b = item->wrapOffsetBottom();
+			double l = item->wrapOffsetLeft(), r = item->wrapOffsetRight();
+			pick(t, b, l, r);
+			item->setWrapOffsets(t, b, l, r);
+			// all sides of a picture: its caption frame follows, as with the toolbar +/-
+			if (!text && side < 0 && item->isImageFrame())
+			{
+				const QString captName = QString("caption_%1").arg(item->itemName());
+				for (PageItem* pi : m_doc->DocItems)
+				{
+					if (pi->itemName() == captName && pi->isTextFrame())
+					{
+						pi->setWrapOffsets(v, v, v, v);
+						pi->update();
+						break;
+					}
+				}
+			}
+		}
+		item->update();
+	}
+	if (padTransaction)
+		padTransaction.commit();
+	m_doc->changed();
+	m_doc->invalidateAll();
+	m_doc->regionsChanged()->update(QRectF());
+	if (ScCore->primaryMainWindow() && ScCore->primaryMainWindow()->view)
+	{
 		ScCore->primaryMainWindow()->view->DrawNew();
 		ScCore->primaryMainWindow()->view->update();
 	}
@@ -4463,31 +4543,18 @@ void SuneerControlBar::iconSetChange()
 		m_cornerOptionsBtn->setIcon(QIcon("/usr/local/share/scribus/icons/1_7_0/corner-radius.png"));
 	m_cornerOptionsBtn->setText("");
 	m_cornerOptionsBtn->setIconSize(QSize(20, 20));
-	m_imgRotIconLbl->setPixmap(im.loadPixmap("object-rotation").scaled(16,16,Qt::KeepAspectRatio,Qt::SmoothTransformation));
 	m_imgRemoveBgBtn->setIcon(im.loadIcon("rembg"));
 	// DC button knife icon
 	if (!im.loadIcon("suneer-knife").isNull())
 		m_imgDrawContourBtn->setIcon(im.loadIcon("suneer-knife"));
 	else
 		m_imgDrawContourBtn->setText("DC");
-	m_imgFlipHBtn->setIcon(im.loadIcon("flip-object-horizontal"));
-	m_imgFlipVBtn->setIcon(im.loadIcon("flip-object-vertical"));
-	if (m_scmw && m_scmw->scrActions.contains("itemRaiseToTop"))
-		m_imgToFrontBtn->setIcon(m_scmw->scrActions["itemRaiseToTop"]->icon());
-	if (m_scmw && m_scmw->scrActions.contains("itemRaise"))
-		m_imgRaiseBtn->setIcon(m_scmw->scrActions["itemRaise"]->icon());
-	if (m_scmw && m_scmw->scrActions.contains("itemLower"))
-		m_imgLowerBtn->setIcon(m_scmw->scrActions["itemLower"]->icon());
-	if (m_scmw && m_scmw->scrActions.contains("itemLowerToBottom"))
-		m_imgToBackBtn->setIcon(m_scmw->scrActions["itemLowerToBottom"]->icon());
 	// Text flow icons
 	im.loadIcon("text-wrap-none").isNull() ? void() : m_textFlowNoneBtn->setIcon(im.loadIcon("text-wrap-none"));
 	m_textFlowShapeBtn->setIcon(im.loadIcon("text-wrap-shape"));
 	m_textFlowBBoxBtn->setIcon(im.loadIcon("text-wrap-boundingbox"));
 	m_textFlowContourBtn->setIcon(im.loadIcon("text-wrap-contour"));
 	m_textFlowClipBtn->setIcon(im.loadIcon("text-wrap-image-clip"));
-	m_imgRot90CCWBtn->setText("↺");
-	m_imgRot90CWBtn->setText("↻");
 	m_imgFitFrameBtn->setText("Fi");
 	m_imgFitFrameBtn->setToolTip("Fit Frame to Image");
 	m_imgFitImageBtn->setText("IF");

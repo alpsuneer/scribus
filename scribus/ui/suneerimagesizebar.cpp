@@ -15,6 +15,8 @@ for which a new license (GPL+exception) is in place.
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
+#include <QWidgetAction>
 #include <QRegularExpression>
 #include <QLocale>
 #include <QSettings>
@@ -43,22 +45,24 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 	m_unitCombo = new QComboBox(this);
 	m_unitCombo->addItems({ QStringLiteral("cm"), QStringLiteral("mm"), QStringLiteral("in") });
 	m_unitCombo->setToolTip(tr("Units of the width and height fields"));
-	m_unitCombo->setFixedWidth(46);
+	m_unitCombo->setFixedWidth(58);   // lives in the gear popup, room for "mm" + arrow
 	m_unitCombo->setCurrentIndex(qBound(0, SuneerImageResample::settingInt(QStringLiteral("barUnit"), 0), 2));
-	lay->addWidget(m_unitCombo);
+	// (the unit chooser sits in the gear popup: the fields show their unit as a suffix)
 
 	auto makeSpin = [this](const QString& tip) {
 		auto* s = new QDoubleSpinBox(this);
-		s->setRange(0.01, 5000);
+		s->setRange(0.01, 999.99);   // "999.99 cm" sets the field width (see fitFieldWidths)
 		s->setDecimals(2);
-		s->setFixedWidth(74);
 		s->setKeyboardTracking(false);
 		s->setToolTip(tip);
 		s->installEventFilter(this);
 		return s;
 	};
-	lay->addWidget(new QLabel(tr("W:"), this));
-	m_widthSpin = makeSpin(tr("Picture width on the page (Enter applies)"));
+	// "W:" / "H:" labels in front of the fields; the dpi field says "dpi"
+	// itself. The resample settings sit behind the gear button.
+	m_wLbl = new QLabel(tr("W:"), this);
+	lay->addWidget(m_wLbl);
+	m_widthSpin = makeSpin(tr("Picture width on the page (Enter or the arrows apply)"));
 	lay->addWidget(m_widthSpin);
 	m_chainBtn = new QToolButton(this);
 	m_chainBtn->setText(QStringLiteral("⚭"));
@@ -67,20 +71,20 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 	m_chainBtn->setFixedSize(22, 22);
 	m_chainBtn->setToolTip(tr("Constrain proportions"));
 	lay->addWidget(m_chainBtn);
-	lay->addWidget(new QLabel(tr("H:"), this));
-	m_heightSpin = makeSpin(tr("Picture height on the page (Enter applies)"));
+	m_hLbl = new QLabel(tr("H:"), this);
+	lay->addWidget(m_hLbl);
+	m_heightSpin = makeSpin(tr("Picture height on the page (Enter or the arrows apply)"));
 	lay->addWidget(m_heightSpin);
 
-	lay->addWidget(new QLabel(tr("DPI:"), this));
 	m_dpiSpin = new QSpinBox(this);
 	m_dpiSpin->setRange(10, 2400);
-	m_dpiSpin->setFixedWidth(56);
+	m_dpiSpin->setSuffix(QStringLiteral(" dpi"));
 	m_dpiSpin->setKeyboardTracking(false);
-	m_dpiSpin->setToolTip(tr("Effective resolution on the page (Enter applies)"));
+	m_dpiSpin->setToolTip(tr("Effective resolution on the page (Enter or the arrows apply)"));
 	m_dpiSpin->installEventFilter(this);
 	lay->addWidget(m_dpiSpin);
 
-	m_resampleCheck = new QCheckBox(tr("Resamp."), this);
+	m_resampleCheck = new QCheckBox(tr("Res."), this);
 	m_resampleCheck->setChecked(SuneerImageResample::settingInt(QStringLiteral("barResample"), 1) != 0);
 	m_resampleCheck->setToolTip(tr("On: a new size or dpi changes the picture's pixels (a new file is written from the original).\n"
 	                               "Off: the pixels stay; a new dpi gives a new size on the page, a new size gives a new dpi."));
@@ -93,17 +97,15 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 	m_qualityCombo->addItem(tr("Smoother"), int(Quality::Smoother));
 	m_qualityCombo->addItem(tr("Bicubic"), int(Quality::Bicubic));
 	m_qualityCombo->addItem(tr("Nearest"), int(Quality::Nearest));
-	m_qualityCombo->setFixedWidth(82);
+	m_qualityCombo->setFixedWidth(100);
 	m_qualityCombo->setToolTip(tr("Resample quality. Auto: Bicubic Sharper when reducing, Bicubic Smoother when enlarging"));
 	m_qualityCombo->setCurrentIndex(qualityIndexFromSetting());
-	lay->addWidget(m_qualityCombo);
 	m_sharpenSpin = new QSpinBox(this);
 	m_sharpenSpin->setRange(0, 100);
 	m_sharpenSpin->setSuffix(QStringLiteral("%"));
 	m_sharpenSpin->setFixedWidth(46);
 	m_sharpenSpin->setValue(SuneerImageResample::settingInt(QStringLiteral("sharpen"), 50));
 	m_sharpenSpin->setToolTip(tr("Sharpen amount for Bicubic Sharper (luminance only, never the alpha channel)"));
-	lay->addWidget(m_sharpenSpin);
 
 	m_enlargeBtn = new QToolButton(this);
 	m_enlargeBtn->setText(QStringLiteral("↑"));
@@ -111,15 +113,41 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 	m_enlargeBtn->setChecked(SuneerImageResample::settingInt(QStringLiteral("allowEnlarge"), 0) != 0);
 	m_enlargeBtn->setFixedSize(22, 22);
 	m_enlargeBtn->setToolTip(tr("Allow enlarge: let a resample ask for more pixels than the original file has"));
-	lay->addWidget(m_enlargeBtn);
 
-	m_autoCheck = new QCheckBox(tr("Auto"), this);
-	m_autoCheck->setToolTip(tr("After resizing the frame with the mouse, resample the picture to the dpi shown here"));
+	m_autoCheck = new QCheckBox(tr("Auto dpi"), this);
+	m_autoCheck->setToolTip(tr("Auto dpi: after resizing the frame with the mouse, resample the picture to the dpi shown here\n(not the Auto fit box on the second row, which scales the picture with the frame)"));
 	{
 		QSettings cfg(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools"));
 		m_autoCheck->setChecked(cfg.value(QStringLiteral("autoDpiEnabled"), false).toBool());
 	}
-	lay->addWidget(m_autoCheck);
+	// Resample settings (quality, sharpen, allow enlarge, auto dpi) behind one
+	// gear button: they are settings, not per-picture fields, and the toolbar
+	// row has to fit a 1366 px screen.
+	{
+		auto* optBtn = new QToolButton(this);
+		optBtn->setText(QStringLiteral("⚙"));
+		optBtn->setFixedSize(26, 22);
+		optBtn->setPopupMode(QToolButton::InstantPopup);
+		optBtn->setToolTip(tr("Resample settings: quality, sharpen, allow enlarge, auto dpi after a mouse resize"));
+		auto* menu = new QMenu(optBtn);
+		auto* box = new QWidget(menu);
+		auto* bl = new QHBoxLayout(box);
+		bl->setContentsMargins(8, 6, 8, 6);
+		bl->setSpacing(6);
+		bl->addWidget(new QLabel(tr("Unit:"), box));
+		bl->addWidget(m_unitCombo);
+		bl->addWidget(new QLabel(tr("Quality:"), box));
+		bl->addWidget(m_qualityCombo);
+		bl->addWidget(new QLabel(tr("Sharpen:"), box));
+		bl->addWidget(m_sharpenSpin);
+		bl->addWidget(m_enlargeBtn);
+		bl->addWidget(m_autoCheck);
+		auto* wa = new QWidgetAction(menu);
+		wa->setDefaultWidget(box);
+		menu->addAction(wa);
+		optBtn->setMenu(menu);
+		lay->addWidget(optBtn);
+	}
 
 	m_infoLabel = new QLabel(this);
 	m_infoLabel->setStyleSheet("color: #555; font-size: 11px;");
@@ -153,9 +181,18 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 		cfg.sync();
 		status(on ? tr("Auto: after a mouse resize the picture is resampled to %1 dpi").arg(m_dpiSpin->value()) : tr("Auto resample off"));
 	});
-	connect(m_widthSpin, &QDoubleSpinBox::editingFinished, this, [this]{ applySize(true); });
-	connect(m_heightSpin, &QDoubleSpinBox::editingFinished, this, [this]{ applySize(false); });
-	connect(m_dpiSpin, &QSpinBox::editingFinished, this, [this]{ applyDpi(); });
+	// Enter / focus-out apply at once. The spin arrows and the wheel only
+	// emit valueChanged (keyboard tracking is off, so typing does not), and
+	// those are applied once, 300 ms after the last step.
+	connect(m_widthSpin, &QDoubleSpinBox::editingFinished, this, [this]{ m_applyTimer.stop(); m_pending = 0; applySize(true); });
+	connect(m_heightSpin, &QDoubleSpinBox::editingFinished, this, [this]{ m_applyTimer.stop(); m_pending = 0; applySize(false); });
+	connect(m_dpiSpin, &QSpinBox::editingFinished, this, [this]{ m_applyTimer.stop(); m_pending = 0; applyDpi(); });
+	connect(m_widthSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) { scheduleApply(1); });
+	connect(m_heightSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double) { scheduleApply(2); });
+	connect(m_dpiSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int) { scheduleApply(3); });
+	m_applyTimer.setSingleShot(true);
+	m_applyTimer.setInterval(300);
+	connect(&m_applyTimer, &QTimer::timeout, this, &SuneerImageSizeBar::applyPending);
 	// Live preview while typing (the spin boxes only commit on Enter).
 	for (QAbstractSpinBox* sb : QList<QAbstractSpinBox*>{ m_widthSpin, m_heightSpin, m_dpiSpin })
 		connect(sb->findChild<QLineEdit*>(), &QLineEdit::textEdited, this, [this](const QString&) { updatePreview(); });
@@ -165,9 +202,45 @@ SuneerImageSizeBar::SuneerImageSizeBar(QWidget* parent) : QWidget(parent)
 	m_sharpenSpin->setEnabled(m_qualityCombo->currentData().toInt() != int(Quality::Nearest));
 
 	m_timer.setInterval(400);
-	connect(&m_timer, &QTimer::timeout, this, &SuneerImageSizeBar::refresh);
+	connect(&m_timer, &QTimer::timeout, this, [this]{ refresh(false); });
 	m_timer.start();
+	fitFieldWidths();
 	refresh();
+}
+
+// Field widths from the font: the widest value the field can show
+// ("999.99 cm", "2400 dpi") plus the spin arrows and the frame, so
+// "120.50 cm" is never clipped on any font or screen.
+void SuneerImageSizeBar::fitFieldWidths()
+{
+	for (QDoubleSpinBox* sb : { m_widthSpin, m_heightSpin })
+	{
+		sb->setFixedWidth(sb->sizeHint().width());
+		sb->updateGeometry();
+	}
+	m_dpiSpin->setFixedWidth(m_dpiSpin->sizeHint().width());
+	updateGeometry();
+}
+
+void SuneerImageSizeBar::scheduleApply(int what)
+{
+	if (m_busy)
+		return;
+	m_pending = what;
+	m_applyTimer.start();
+	updatePreview();
+}
+
+void SuneerImageSizeBar::applyPending()
+{
+	const int what = m_pending;
+	m_pending = 0;
+	if (what == 1)
+		applySize(true);
+	else if (what == 2)
+		applySize(false);
+	else if (what == 3)
+		applyDpi();
 }
 
 int SuneerImageSizeBar::qualityIndexFromSetting() const
@@ -184,9 +257,11 @@ bool SuneerImageSizeBar::eventFilter(QObject* obj, QEvent* ev)
 		auto* ke = static_cast<QKeyEvent*>(ev);
 		if (ke->key() == Qt::Key_Escape)
 		{
+			m_applyTimer.stop();
+			m_pending = 0;
 			if (auto* w = qobject_cast<QWidget*>(obj))
 				w->clearFocus();
-			refresh();
+			refresh(true);
 			return true;
 		}
 	}
@@ -227,13 +302,15 @@ double SuneerImageSizeBar::unitPerInch() const
 	}
 }
 
-void SuneerImageSizeBar::refresh()
+void SuneerImageSizeBar::refresh(bool force)
 {
 	if (m_busy)
 		return;
+	if (!force && m_applyTimer.isActive())
+		return;   // an arrow step is waiting to be applied
 	PageItem* item = currentImageItem();
 	const bool on = item != nullptr;
-	for (QWidget* w : QList<QWidget*>{ m_widthSpin, m_heightSpin, m_chainBtn, m_dpiSpin, m_unitCombo, m_resampleCheck, m_qualityCombo, m_sharpenSpin })
+	for (QWidget* w : QList<QWidget*>{ m_wLbl, m_hLbl, m_widthSpin, m_heightSpin, m_chainBtn, m_dpiSpin, m_unitCombo, m_resampleCheck, m_qualityCombo, m_sharpenSpin })
 		w->setEnabled(on);
 	if (!on)
 	{
@@ -242,10 +319,16 @@ void SuneerImageSizeBar::refresh()
 		m_shownDpi = 0;
 		return;
 	}
-	if (m_widthSpin->hasFocus() || m_heightSpin->hasFocus() || m_dpiSpin->hasFocus())
+	if (!force && (m_widthSpin->hasFocus() || m_heightSpin->hasFocus() || m_dpiSpin->hasFocus()))
 		return;   // never clobber what is being typed
 	const double upi = unitPerInch();
 	const QString su = QStringLiteral(" ") + m_unitCombo->currentText();
+	if (m_widthSpin->suffix() != su)
+	{
+		m_widthSpin->setSuffix(su);
+		m_heightSpin->setSuffix(su);
+		fitFieldWidths();
+	}
 	const double wIn = item->OrigW * item->imageXScale() / 72.0;
 	const double hIn = item->OrigH * item->imageYScale() / 72.0;
 	double effY = 0;
@@ -407,7 +490,7 @@ void SuneerImageSizeBar::runNoResample(PageItem* item, ScribusDoc* doc, double w
 	status(tr("%1 x %2 px kept; now %3 x %4 %5 at %6 dpi (no new file)").arg(item->OrigW).arg(item->OrigH)
 	       .arg(widthIn * upi, 0, 'f', 2).arg(heightIn * upi, 0, 'f', 2).arg(m_unitCombo->currentText()).arg(dpi));
 	m_busy = false;
-	refresh();
+	refresh(true);
 }
 
 void SuneerImageSizeBar::runResample(PageItem* item, ScribusDoc* doc, double widthIn, double heightIn, int dpi, bool setFrame)
@@ -419,14 +502,14 @@ void SuneerImageSizeBar::runResample(PageItem* item, ScribusDoc* doc, double wid
 	if (!orig.ok)
 	{
 		status(tr("The original picture file could not be read: %1").arg(originalPath), true);
-		refresh();
+		refresh(true);   // the field shows the picture's real size again
 		return;
 	}
 	if (!m_enlargeBtn->isChecked() && (newW > orig.width || newH > orig.height))
 	{
 		status(tr("Not done: %1 x %2 px would be more than the original %3 x %4 px. Lower the dpi, or allow enlarging (↑ button).")
 		       .arg(newW).arg(newH).arg(orig.width).arg(orig.height), true);
-		refresh();
+		refresh(true);   // the field shows the picture's real size again
 		return;
 	}
 	m_busy = true;
@@ -468,6 +551,6 @@ void SuneerImageSizeBar::runResample(PageItem* item, ScribusDoc* doc, double wid
 	}
 	busy.release();
 	m_busy = false;
-	refresh();
+	refresh(true);
 	suneerCursorSettle(doc->view(), "resample end");
 }

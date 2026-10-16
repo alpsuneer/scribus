@@ -46,6 +46,8 @@ public:
 signals:
 	//! The W/H display (value, unit, enabled state) was just refreshed.
 	void sizeDisplayChanged();
+	//! Suneer: rotation / flip / level display or enabled state changed (control bar mirror)
+	void arrangeDisplayChanged();
 
 private:
 	PageItem* currentItemFromSelection();

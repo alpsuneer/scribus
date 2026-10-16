@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "suneerimagelinks.h"
+#include "suneerphotostore.h"
 
 #include <QPen>
 #include <QPainter>
@@ -135,6 +136,9 @@ QList<SuneerImageLinks::Entry> SuneerImageLinks::collect(ScribusDoc* doc, bool o
 		// The flag says "was loaded"; the file may have gone since.
 		if (st == Linked && !QFileInfo::exists(item->Pfile))
 			st = Missing;
+		// a linked file inside "<doc>_photos/" is intended (relative path, moves with the document)
+		if (onlyProblems && st == Linked && SuneerPhotoStore::isInStore(doc, item->Pfile))
+			continue;
 		if (onlyProblems && st == Embedded)
 			continue;
 		Entry e;
@@ -221,6 +225,9 @@ int SuneerImageLinks::embedAll(ScribusDoc* doc, QStringList* failed)
 void SuneerImageLinks::embedPlaced(ScribusDoc* doc, PageItem* item)
 {
 	if (!doc || !item || doc->isLoading() || !alwaysEmbed())
+		return;
+	// News Browser photos live next to the document and stay linked.
+	if (SuneerPhotoStore::isNewsPhoto(item) || SuneerPhotoStore::isInStore(doc, item->Pfile))
 		return;
 	if (embedItem(doc, item))
 		doc->changed();

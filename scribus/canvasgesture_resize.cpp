@@ -205,35 +205,32 @@ void ResizeGesture::drawControls(QPainter* p)
 void ResizeGesture::mouseReleaseEvent(QMouseEvent *m)
 {
 	adjustBounds(m);
-	bool autoFitTurnedOff = false;
 	if (m_doc->m_Selection->count() != 0)
 	{
 		PageItem* currItem = m_doc->m_Selection->itemAt(0);
 		if (m_bounds != m_mousePressBounds)
 		{
 			const bool altHeld = m->modifiers() & Qt::AltModifier;
-			// Suneer: dragging a handle of an image frame that is set to "scale
-			// image to frame" (Auto fit) CROPS instead of rescaling: Auto fit is
-			// switched off first, so the image keeps its current scale and the
-			// free-scaling branch of doResize() keeps it still on the page while
-			// the edge moves (also for the left/top handles). Alt keeps the old
-			// behaviour: Auto fit stays on and the image follows the frame. The
-			// mode change is recorded inside the resize transaction, so Ctrl+Z
-			// restores the frame size AND re-ticks Auto fit in one step. Menu
-			// fits (Adjust Image to Frame, Adjust Frame to Image), Design/Column
-			// Styles and other programmatic resizes never pass through here.
-			if (!altHeld && !m_doc->m_Selection->isMultipleSelection()
-				&& currItem->isImageFrame() && currItem->imageIsAvailable && currItem->fitImageToFrame())
-			{
-				if (!m_transaction)
-					m_transaction = Um::instance()->beginTransaction(currItem->getUName(), currItem->getUPixmap(), Um::Resize, "", Um::IResize);
-				currItem->setImageScalingMode(true, currItem->keepAspectRatio());
-				autoFitTurnedOff = true;
-			}
+			const double oldW = currItem->width();
+			const double oldH = currItem->height();
 			doResize(altHeld);
 			m_doc->setRedrawBounding(currItem);
 			if (currItem->isImageFrame())
+			{
 				currItem->adjustPictScale();
+				// Suneer Auto fit (proportional): the dragged side drives the
+				// picture's scale, the other side follows so nothing is cropped
+				// and no gap is left. Inside m_transaction: one undo step.
+				if (!m_doc->m_Selection->isMultipleSelection())
+				{
+					double w = currItem->width(), h = currItem->height();
+					if (currItem->suneerAutoFitFrameSize(w, h, oldW, oldH))
+					{
+						m_doc->sizeItem(w, h, currItem, false, true, false);
+						m_bounds = m_bounds.united(currItem->getBoundingRect());
+					}
+				}
+			}
 		}
 		//add action itemResizeToMargin for right click on item`s handlers
 		else if (m->button() == Qt::RightButton)
@@ -271,13 +268,6 @@ void ResizeGesture::mouseReleaseEvent(QMouseEvent *m)
 	m_view->stopGesture();
 	//#12469: emit? update from selection even after resize? if removed, remove scribus.h include
 	m_view->m_ScMW->setStatusBarTextSelectedItemInfo();
-	if (autoFitTurnedOff)
-	{
-		// Properties > Image and the control bar re-read the item (the Auto fit
-		// box unticks), then a short note in the status bar.
-		m_view->m_ScMW->HaveNewSel();
-		m_view->m_ScMW->setStatusBarInfoText(tr("Auto fit turned off \u2014 image is cropped"));
-	}
 }
 
 

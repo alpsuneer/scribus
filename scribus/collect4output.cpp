@@ -5,6 +5,8 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "collect4output.h"
+#include "suneerphotostore.h"
+#include <QDirIterator>
 
 #include "scribusdoc.h"
 #include "scribuscore.h"
@@ -281,9 +283,34 @@ void CollectForOutput::processItem(PageItem *ite)
 			if (itf.exists())
 			{
 				const QString& oldFile = ofName;
-				ite->Pfile = collectFile(oldFile, itf.fileName());
-				ScCore->fileWatcher->removeFile(oldFile);
-				ScCore->fileWatcher->addFile(ite->Pfile);
+				// Suneer: a picture in "<doc>_photos/" keeps its place in a copied folder
+				// (original/ and edited/ with every side file), not images/.
+				const QString store = SuneerPhotoStore::folder(m_Doc);
+				if (!store.isEmpty() && SuneerPhotoStore::isInStore(m_Doc, oldFile))
+				{
+					const QString outStore = m_outputDirectory + QFileInfo(store).fileName();
+					if (!m_storeCopied)
+					{
+						m_storeCopied = true;
+						QDirIterator it(store, QDir::Files, QDirIterator::Subdirectories);
+						while (it.hasNext())
+						{
+							const QString src = it.next();
+							const QString dst = outStore + QStringLiteral("/") + QDir(store).relativeFilePath(src);
+							QDir().mkpath(QFileInfo(dst).absolutePath());
+							copyFileAtomic(src, dst);
+						}
+					}
+					SuneerPhotoStore::rewritePaths(ite, store, outStore);
+					ScCore->fileWatcher->removeFile(oldFile);
+					ScCore->fileWatcher->addFile(ite->Pfile);
+				}
+				else
+				{
+					ite->Pfile = collectFile(oldFile, itf.fileName());
+					ScCore->fileWatcher->removeFile(oldFile);
+					ScCore->fileWatcher->addFile(ite->Pfile);
+				}
 			}
 		}
 	}

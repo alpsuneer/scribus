@@ -12,6 +12,7 @@ for which a new license (GPL+exception) is in place.
 #include <QListWidget>
 #include <QVBoxLayout>
 
+#include "ui/suneerspacingdialog.h"
 #include "iconmanager.h"
 #include "pluginmanager.h"
 #include "prefs_pane.h"
@@ -75,6 +76,8 @@ PreferencesDialog::PreferencesDialog(QWidget* parent, ApplicationPrefs& prefsDat
 		prefs_Spelling = new Prefs_Spelling(prefsStackWidget, m_Doc);
 		prefs_UserInterface = new Prefs_UserInterface(prefsStackWidget, m_Doc);
 	}
+	// Faircode Layout: Spacing (application-wide file, shown for documents too)
+	prefs_SuneerSpacing = new Prefs_SuneerSpacing(prefsStackWidget, m_Doc);
 	createStackWidgetList();
 	if (!m_Doc)
 		addPluginsToStackWidgetList();
@@ -299,6 +302,11 @@ void PreferencesDialog::createStackWidgetList()
 	ptd.forPrefs = true;
 	ptd.forDoc = false;
 	ptd.prefsPane = dynamic_cast<Prefs_Pane*>(prefs_Experimental);
+	stackDataList.append(ptd);
+
+	ptd.forPrefs = true;
+	ptd.forDoc = true;
+	ptd.prefsPane = dynamic_cast<Prefs_Pane*>(prefs_SuneerSpacing);
 	stackDataList.append(ptd);
 }
 

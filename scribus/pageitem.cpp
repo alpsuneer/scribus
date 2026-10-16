@@ -11052,6 +11052,44 @@ void PageItem::adjustPictScale()
 		asImageFrame()->suneerSyncAutoContour();
 }
 
+bool PageItem::suneerAutoFitFrameSize(double& newW, double& newH, double oldW, double oldH) const
+{
+	if (itemType() != PageItem::ImageFrame || ScaleType || !AspectRatio)
+		return false;
+	if (!imageIsAvailable || OrigW <= 0 || OrigH <= 0 || newW <= 0 || newH <= 0)
+		return false;
+	// The picture's box in picture pixels, rotation inside the frame included.
+	double bw = OrigW, bh = OrigH;
+	if (fmod(m_imageRotation, 360.0) != 0.0)
+	{
+		QTransform m;
+		m.rotate(m_imageRotation);
+		const QRectF br = m.mapRect(QRectF(0, 0, OrigW, OrigH));
+		bw = br.width();
+		bh = br.height();
+	}
+	if (bw <= 0 || bh <= 0)
+		return false;
+	const double dW = (oldW > 0) ? qAbs(newW / oldW - 1.0) : 1.0;
+	const double dH = (oldH > 0) ? qAbs(newH / oldH - 1.0) : 1.0;
+	const bool wChanged = qAbs(newW - oldW) > 0.001;
+	const bool hChanged = qAbs(newH - oldH) > 0.001;
+	double scale;
+	if (wChanged && (!hChanged || dW >= dH))
+		scale = newW / bw;
+	else if (hChanged)
+		scale = newH / bh;
+	else
+		scale = qMin(newW / bw, newH / bh);
+	const double fitW = bw * scale;
+	const double fitH = bh * scale;
+	if (qAbs(fitW - newW) < 0.001 && qAbs(fitH - newH) < 0.001)
+		return false;
+	newW = fitW;
+	newH = fitH;
+	return true;
+}
+
 void PageItem::setExternalFile(const QString& filename, const QString& baseDir)
 {
 	Pfile = filename;

@@ -41,7 +41,8 @@ class SCRIBUS_API SuneerImageSizeBar : public QWidget
 	Q_OBJECT
 public:
 	explicit SuneerImageSizeBar(QWidget* parent = nullptr);
-	void refresh();
+	//! Re-read the selected picture. force: also while a field has focus (after an apply).
+	void refresh(bool force = false);
 
 protected:
 	bool eventFilter(QObject* obj, QEvent* ev) override;
@@ -58,6 +59,8 @@ private:
 	int qualityIndexFromSetting() const;
 
 	QComboBox* m_unitCombo { nullptr };
+	QLabel* m_wLbl { nullptr };
+	QLabel* m_hLbl { nullptr };
 	QDoubleSpinBox* m_widthSpin { nullptr };
 	QDoubleSpinBox* m_heightSpin { nullptr };
 	QToolButton* m_chainBtn { nullptr };
@@ -70,6 +73,11 @@ private:
 	QLabel* m_infoLabel { nullptr };
 	QLabel* m_previewLabel { nullptr };
 	QTimer m_timer;
+	QTimer m_applyTimer;   // spin arrows / wheel: apply once, 300 ms after the last step
+	int m_pending { 0 };    // 1 width, 2 height, 3 dpi
+	void scheduleApply(int what);
+	void applyPending();
+	void fitFieldWidths();
 	bool m_busy { false };
 	double m_shownW { 0 }, m_shownH { 0 };
 	int m_shownDpi { 0 };

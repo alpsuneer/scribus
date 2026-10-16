@@ -396,6 +396,18 @@ public: // Start public functions
 	 */
 	void adjustPictScale();
 
+	/**
+	 * Suneer "Auto fit" (Properties: scale image to frame + proportional):
+	 * given the frame size a resize asks for, returns the size the frame must
+	 * really take so the picture is neither cropped nor padded. The side the
+	 * user changed (compared with oldW/oldH) drives the scale and the other
+	 * side follows (both changed: the larger relative change drives; neither
+	 * changed: the picture is fitted and the slack side shrinks). Returns
+	 * false, leaving newW/newH alone, when the item is not an image frame in
+	 * proportional auto-fit mode or has no picture.
+	 */
+	bool suneerAutoFitFrameSize(double& newW, double& newH, double oldW, double oldH) const;
+
 
 
 	void updateGradientVectors(); //!< Update the gradient vectors, moved from the View

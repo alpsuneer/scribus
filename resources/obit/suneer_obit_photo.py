@@ -262,8 +262,15 @@ def process(item, job, session, i, n):
     #    the next model is tried; the cleanest result wins.
     first_box, _, _ = crop_box(face, np.zeros((H, W), np.uint8), W, H, job, size, out_h, min_px)
     bx = (int(round(first_box[0])), int(round(first_box[1])), int(round(first_box[0] + first_box[2])), int(round(first_box[1] + first_box[3])))
-    models = [job.get("model", "u2net_human_seg")] + [m for m in job.get("bgModels", ["isnet-general-use", "u2net"]) if m != job.get("model", "u2net_human_seg")]
-    best = None     # (opacity, cut, model)
+    # background policy: "auto" (AI), "ask" (AI, but a damaged result is not
+    # used), "manual" (no AI at all; the mask is made by hand in Edit photo)
+    policy = str(job.get("bgPolicy", "auto"))
+    if policy == "manual":
+        models = []
+        best = (0.0, img.convert("RGBA"), "manual")
+    else:
+        models = [job.get("model", "u2net_human_seg")] + [m for m in job.get("bgModels", ["isnet-general-use", "u2net"]) if m != job.get("model", "u2net_human_seg")]
+        best = None     # (opacity, cut, model)
     bg_errors = []
     for mi, mname in enumerate(models):
         try:
@@ -289,6 +296,33 @@ def process(item, job, session, i, n):
     bg_opacity, cut, bg_model = best
     bg_ok = bg_opacity <= 0.5
     alpha = clean_edge(np.asarray(cut)[:, :, 3])
+    # "Protect" / "Exclude" areas from the Edit photo dialog (Grayscale PNG,
+    # source size: 255 always kept, 0 always removed, 128 untouched): they
+    # win over the model, so a re-process never cuts a protected hand again.
+    pmask = item.get("protect") or ""
+    if pmask and os.path.isfile(pmask):
+        try:
+            pm = np.asarray(Image.open(pmask).convert("L"))
+            if pm.shape == alpha.shape:
+                alpha = np.where(pm > 128, 255, np.where(pm < 128, 0, alpha)).astype(np.uint8)
+        except Exception:
+            pass
+    # "Ask when quality is low": the AI keeps too little of the crop, or cuts
+    # through the face box -> the damaged result is not used (no removal),
+    # the photo is flagged "check BG".
+    ask_msg = ""
+    if policy == "ask":
+        ah, aw = alpha.shape[:2]
+        reg = alpha[max(0, bx[1]):min(ah, bx[3]), max(0, bx[0]):min(aw, bx[2])]
+        keep = float((reg > 128).mean()) if reg.size else 1.0
+        face_keep = 1.0
+        if face is not None:
+            fx, fy, fw, fh = [int(v) for v in face]
+            fr = alpha[max(0, fy):min(ah, fy + fh), max(0, fx):min(aw, fx + fw)]
+            face_keep = float((fr > 128).mean()) if fr.size else 1.0
+        if keep < 0.25 or face_keep < 0.6:
+            ask_msg = "AI kept %d%% of the crop, %d%% of the face - not used" % (round(100 * keep), round(100 * face_keep))
+            alpha = np.full_like(alpha, 255)
 
     # 2. tone matching of the person, then the uniform tone behind
     person = tone_match(np.asarray(cut.convert("RGB")).astype(np.float32), face, strength)
@@ -305,11 +339,23 @@ def process(item, job, session, i, n):
     info.update(cinfo)
     if not bg_ok and status == "ok":
         status = "bg"          # every model kept the background: check by hand
+    if ask_msg:
+        status = "bg"
+        info["askMsg"] = ask_msg
+        info["bgOk"] = False
+    if policy == "manual":
+        info["manual"] = True
     box = (int(round(left)), int(round(top)), int(round(left + frame_w_src)), int(round(top + frame_h_src)))
     canvas = Image.new("RGB", (box[2] - box[0], box[3] - box[1]), bg)
     canvas.paste(flat.crop((max(0, box[0]), max(0, box[1]), min(W, box[2]), min(H, box[3]))),
                  (max(0, -box[0]), max(0, -box[1])))
     canvas = canvas.resize((size, out_h), Image.LANCZOS)
+    # The same crop as a transparent cut-out: a later "Photo background
+    # colour" only composites it over the new tone, no rembg run again.
+    cutout = Image.new("RGBA", (box[2] - box[0], box[3] - box[1]), (0, 0, 0, 0))
+    cutout.paste(toned.crop((max(0, box[0]), max(0, box[1]), min(W, box[2]), min(H, box[3]))),
+                 (max(0, -box[0]), max(0, -box[1])))
+    cutout = cutout.resize((size, out_h), Image.LANCZOS)
     mm = float(job.get("mm", 30.3))
     # effective ppi of the printed frame = source pixels across the crop / frame width in inches
     info["cropPx"] = int(round(frame_w_src))
@@ -320,6 +366,10 @@ def process(item, job, session, i, n):
     if out.lower().endswith(".png"):
         # Lossless: the background tone is exactly the requested RGB in every file.
         canvas.save(tmp, "PNG", dpi=(503, 503), optimize=True)
+        try:
+            cutout.save(out[:-4] + ".cut.png", "PNG", dpi=(503, 503))
+        except Exception:
+            pass
     else:
         canvas.save(tmp, "JPEG", quality=quality, subsampling=0, dpi=(503, 503))
     os.replace(tmp, out)
@@ -327,8 +377,20 @@ def process(item, job, session, i, n):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--face":
+        # "Edit photo" dialog: the largest frontal face of one picture, JSON on stdout.
+        try:
+            from PIL import Image, ImageOps
+            import numpy as np
+            img = ImageOps.exif_transpose(Image.open(sys.argv[2])).convert("RGB")
+            face = detect_face(np.asarray(img)[:, :, ::-1].copy())
+            sys.stdout.write(json.dumps({"face": list(face) if face else None, "w": img.width, "h": img.height}) + "\n")
+            return 0
+        except Exception as e:
+            sys.stdout.write(json.dumps({"face": None, "error": "%s: %s" % (type(e).__name__, e)}) + "\n")
+            return 1
     if len(sys.argv) != 3 or sys.argv[1] != "--jobs":
-        sys.stderr.write("usage: suneer_obit_photo.py --jobs <job.json>\n")
+        sys.stderr.write("usage: suneer_obit_photo.py --jobs <job.json> | --face <image>\n")
         return 2
     with open(sys.argv[2], "r", encoding="utf-8") as f:
         job = json.load(f)
@@ -360,7 +422,9 @@ def main():
                            "bgOpacityPct": info.get("bgOpacityPct"), "bgOk": info.get("bgOk"),
                            "seconds": round(time.time() - t0, 2)}, f)
             msg = "%d ppi (%dx%d px)" % (info.get("ppi", 0), info.get("srcW", 0), info.get("srcH", 0))
-            if not info.get("bgOk", True):
+            if info.get("askMsg"):
+                msg += "; " + info.get("askMsg")
+            elif not info.get("bgOk", True):
                 msg += "; bg? background kept (%s, %d%% at the edges)" % (info.get("bgModel"), info.get("bgOpacityPct", 0))
             log(i, n, item_id, status, out, msg)
         except Exception as e:  # never stop the batch for one picture

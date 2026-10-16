@@ -16,24 +16,26 @@ SuneerFrameSizeBar::SuneerFrameSizeBar(QWidget* parent)
 {
 	setObjectName("SuneerFrameSizeBar");
 	QHBoxLayout* lay = new QHBoxLayout(this);
-	lay->setContentsMargins(4, 0, 4, 0);
-	lay->setSpacing(3);
+	lay->setContentsMargins(0, 0, 0, 0);
+	lay->setSpacing(2);
 
 	m_icon = new QLabel(this);
 	m_icon->setFixedSize(16, 16);
 	m_icon->setScaledContents(true);
-	lay->addWidget(m_icon);
+	m_icon->setVisible(false);   // compact bar: the two fields and the lock only
 
+	// Compact: no "W:"/"H:" labels on the bar (tooltips say which is which),
+	// so the whole group is ~215 px instead of ~300.
 	m_wLbl = new QLabel(this);
-	lay->addWidget(m_wLbl);
+	m_wLbl->setVisible(false);
 	m_w = new ScrSpinBox(this, SC_PT);
-	m_w->setFixedWidth(104);
+	m_w->setFixedWidth(86);
 	lay->addWidget(m_w);
 
 	m_hLbl = new QLabel(this);
-	lay->addWidget(m_hLbl);
+	m_hLbl->setVisible(false);
 	m_h = new ScrSpinBox(this, SC_PT);
-	m_h->setFixedWidth(104);
+	m_h->setFixedWidth(86);
 	lay->addWidget(m_h);
 
 	m_lock = new LinkButton(this);
@@ -64,8 +66,8 @@ void SuneerFrameSizeBar::languageChange()
 	m_wLbl->setText(tr("W:"));
 	m_hLbl->setText(tr("H:"));
 	m_icon->setToolTip(tr("Frame width / height (same as Properties → X, Y, Z)"));
-	m_w->setToolTip(tr("Frame width"));
-	m_h->setToolTip(tr("Frame height"));
+	m_w->setToolTip(tr("W: frame width"));
+	m_h->setToolTip(tr("H: frame height"));
 	m_lock->setToolTip(tr("Keep the frame's width and height ratio (shared with Properties)"));
 }
 
@@ -119,6 +121,8 @@ void SuneerFrameSizeBar::refresh()
 			m_unitIndex = unitIndex;
 			m_w->setNewUnit(unitIndex);
 			m_h->setNewUnit(unitIndex);
+			m_w->setDecimals(2);   // 2 decimals fit the compact field ("100.00 mm")
+			m_h->setDecimals(2);
 		}
 		// Same constants (page sizes etc.) and limits as the panel's own fields,
 		// so "10cm", "65+5" and the document constants behave identically.
@@ -126,10 +130,12 @@ void SuneerFrameSizeBar::refresh()
 		m_h->setConstants(&m_doc->constants());
 		double mn, mx, val;
 		int deci;
+		// 2 decimals on the bar (the compact field shows "100.00 mm"); the
+		// palette keeps its own precision.
 		m_pal->widthSpin->getValues(&mn, &mx, &deci, &val);
-		m_w->setValues(mn, mx, deci, val);
+		m_w->setValues(mn, mx, qMin(deci, 2), val);
 		m_pal->heightSpin->getValues(&mn, &mx, &deci, &val);
-		m_h->setValues(mn, mx, deci, val);
+		m_h->setValues(mn, mx, qMin(deci, 2), val);
 
 		// The panel is disabled as a whole with no selection; a single field is
 		// disabled for a locked item or a line's hidden height.
@@ -167,6 +173,8 @@ void SuneerFrameSizeBar::showDrawingSize(double wPt, double hPt)
 		m_unitIndex = unitIndex;
 		m_w->setNewUnit(unitIndex);
 		m_h->setNewUnit(unitIndex);
+		m_w->setDecimals(2);
+		m_h->setDecimals(2);
 	}
 	double ratio = m_doc->unitRatio();
 	m_drawing = true;

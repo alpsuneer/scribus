@@ -945,6 +945,16 @@ void ActionManager::initToolsMenuActions()
 	(*scrActions)["suneerAutoFitText"]->setCheckable(true);
 	name="suneerGetImage";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerEditPhoto";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerPhotoBackgroundColour";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerResizeImageToFrame";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerRedownloadMissingPhotos";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerRemoveUnusedPhotos";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerFocusFontCombo";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="itemImageScaleUp";
@@ -1203,6 +1213,8 @@ void ActionManager::initExtrasMenuActions()
 	name = "extrasCheckDuplicateShortcuts";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	connect( (*scrActions)["extrasEmbedAllImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerEmbedAllImages()) );
+	connect( (*scrActions)["suneerRedownloadMissingPhotos"], SIGNAL(triggered()), mainWindow, SLOT(suneerRedownloadMissingPhotos()) );
+	connect( (*scrActions)["suneerRemoveUnusedPhotos"], SIGNAL(triggered()), mainWindow, SLOT(suneerRemoveUnusedPhotos()) );
 	connect( (*scrActions)["extrasWarnLinkedImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleWarnLinkedImages()) );
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
@@ -1263,6 +1275,8 @@ void ActionManager::initHelpMenuActions()
 	scrActions->insert(name, new ScrAction(ScrAction::DataQString, QString(), QString(), "", defaultKey(name), mainWindow, "https://web.libera.chat/?channels=scribus"));
 	name = "helpCheckUpdates";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "helpResetPreferences";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 
 	(*scrActions)["helpTooltips"]->setToggleAction(true);
 	(*scrActions)["helpTooltips"]->setChecked(true);
@@ -1274,6 +1288,7 @@ void ActionManager::initHelpMenuActions()
 	connect( (*scrActions)["helpTooltips"], SIGNAL(triggered()), mainWindow, SLOT(ToggleTips()) );
 	connect( (*scrActions)["helpManual"], SIGNAL(triggered()), mainWindow, SLOT(slotOnlineHelp()) );
 	connect( (*scrActions)["helpCheckUpdates"], SIGNAL(triggered()), mainWindow, SLOT(slotHelpCheckUpdates()) );
+	connect( (*scrActions)["helpResetPreferences"], SIGNAL(triggered()), mainWindow, SLOT(slotHelpResetPreferences()) );
 	UrlLauncher& ul = UrlLauncher::instance();
 	connect( (*scrActions)["helpOnlineWWW"], SIGNAL(triggeredData(QString)), &ul, SLOT(launchUrlExt(QString)) );
 	connect( (*scrActions)["helpOnlineDocs"], SIGNAL(triggeredData(QString)), &ul, SLOT(launchUrlExt(QString)) );
@@ -2005,6 +2020,11 @@ void ActionManager::languageChange()
 	(*scrActions)["suneerAutoFitHeight"]->setTexts( tr("Auto Fit Frame Height"));
 	(*scrActions)["suneerAutoFitText"]->setTexts( tr("Auto Fit Text to Frame"));
 	(*scrActions)["suneerGetImage"]->setTexts( tr("Get Image"));
+	(*scrActions)["suneerEditPhoto"]->setTexts( tr("Edit Photo..."));
+	(*scrActions)["suneerPhotoBackgroundColour"]->setTexts( tr("Photo Background Colour..."));
+	(*scrActions)["suneerResizeImageToFrame"]->setTexts( tr("Resize Image File to Frame Resolution..."));
+	(*scrActions)["suneerRedownloadMissingPhotos"]->setTexts( tr("Re-download Missing Photos from Workflow"));
+	(*scrActions)["suneerRemoveUnusedPhotos"]->setTexts( tr("Remove Unused Photos..."));
 	(*scrActions)["suneerScaleUp"]->setTexts( tr("Scale Up / Font Size Up"));
 	(*scrActions)["suneerScaleDown"]->setTexts( tr("Scale Down / Font Size Down"));
 	(*scrActions)["itemImageScaleUp"]->setTexts( tr("Enlarge Image Frame Size"));
@@ -2117,6 +2137,7 @@ void ActionManager::languageChange()
 	(*scrActions)["helpOnlineWiki"]->setTexts( tr("Scribus Wiki"));
 	(*scrActions)["helpOnlineTutorial1"]->setTexts( tr("Getting Started with Scribus"));
 	(*scrActions)["helpCheckUpdates"]->setTexts( tr("Check for Updates..."));
+	(*scrActions)["helpResetPreferences"]->setTexts( tr("Reset Preferences..."));
 	(*scrActions)["helpChat"]->setTexts( tr("Chat with the Community"));
 
 	//GUI and specials
@@ -2814,6 +2835,8 @@ void ActionManager::createDefaultMenus()
 		<< "extrasImposition"
 		<< "extrasOptimizeImages"
 		<< "extrasEmbedAllImages"
+		<< "suneerRedownloadMissingPhotos"
+		<< "suneerRemoveUnusedPhotos"
 		<< "extrasWarnLinkedImages"
 		<< "extrasCheckDuplicateShortcuts"
 		<< "SRDuplicateNewsCheck";
@@ -2859,6 +2882,7 @@ void ActionManager::createDefaultMenus()
 		<< "helpOnlineWiki"
 		<< "helpOnlineTutorial1"
 		<< "helpCheckUpdates"
+		<< "helpResetPreferences"
 		<< "helpChat";
 	//Other
 // 	++itmenu;
@@ -3024,6 +3048,9 @@ void ActionManager::createDefaultNonMenuActions()
 	itnmenua->second << "suneerAutoFitHeight";
 	itnmenua->second << "suneerAutoFitText";
 	itnmenua->second << "suneerGetImage";
+	itnmenua->second << "suneerEditPhoto";
+	itnmenua->second << "suneerPhotoBackgroundColour";
+	itnmenua->second << "suneerResizeImageToFrame";
 	itnmenua->second << "alignLeft";
 	itnmenua->second << "alignCenter";
 	itnmenua->second << "alignRight";

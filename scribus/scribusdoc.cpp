@@ -15514,6 +15514,12 @@ bool ScribusDoc::sizeItem(double newW, double newH, PageItem *pi, bool fromMP, b
 	PageItem *currItem = pi;
 	if (currItem->locked())
 		return false;
+	// Suneer Auto fit (proportional): the picture is never cropped, so the
+	// side the user did not change follows the one they did. Not while
+	// loading, drawing a new frame, or replaying undo (the recorded size is
+	// restored as it was).
+	if (currItem->isImageFrame() && !isLoading() && !currItem->Sizing && appMode != modeEditClip && UndoManager::undoEnabled())
+		currItem->suneerAutoFitFrameSize(newW, newH, currItem->width(), currItem->height());
 	QRectF oldR(currItem->getBoundingRect());
 	//Uncomment for stopping resize in any direction
 	//and remove the height/width <0 tests in item sizing switch

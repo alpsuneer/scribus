@@ -54,6 +54,15 @@
 #include <QListWidgetItem>
 #include <QMenu>
 #include <QMessageBox>
+#include "suneerphotoedit.h"
+#include "suneerphotostore.h"
+#include "suneerspacing.h"
+#include "ui/suneerspacingdialog.h"
+#include <QTime>
+#include <QDesktopServices>
+#include <QClipboard>
+#include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QBrush>
 #include <QApplication>
 #include <QNetworkCookie>
@@ -328,11 +337,31 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	connect(m_fetchBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onFetchNews);
 	vl->addWidget(m_fetchBtn);
 
-	// Status
+	// Status: a progress bar while something runs, then ONE short line;
+	// everything long goes to the Details dialog (copyable).
+	m_statusBar = new QProgressBar(w);
+	m_statusBar->setFixedHeight(16);
+	m_statusBar->setTextVisible(true);
+	m_statusBar->setAlignment(Qt::AlignCenter);
+	m_statusBar->setStyleSheet("QProgressBar { font-size:10px; } ");
+	m_statusBar->setVisible(false);
+	vl->addWidget(m_statusBar);
+	QHBoxLayout* statusRow = new QHBoxLayout();
+	statusRow->setSpacing(4);
 	m_statusLabel = new QLabel("", w);
 	m_statusLabel->setStyleSheet("color:#666; font-size:11px;");
-	m_statusLabel->setWordWrap(true);
-	vl->addWidget(m_statusLabel);
+	m_statusLabel->setWordWrap(false);
+	m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	m_statusLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	statusRow->addWidget(m_statusLabel, 1);
+	m_statusDetailsBtn = new QToolButton(w);
+	m_statusDetailsBtn->setText(tr("Details\u2026"));
+	m_statusDetailsBtn->setAutoRaise(true);
+	m_statusDetailsBtn->setStyleSheet("font-size:10px;");
+	m_statusDetailsBtn->setToolTip(tr("The full log of the last actions: stories without a picture, low res / no face / bg? photos, check, re-pack, server errors. Copyable."));
+	connect(m_statusDetailsBtn, &QToolButton::clicked, this, &SuneerNewsPanel::onStatusDetails);
+	statusRow->addWidget(m_statusDetailsBtn, 0);
+	vl->addLayout(statusRow);
 
 	// Select all
 	m_newsList = new QListWidget();
@@ -440,6 +469,12 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_layoutModelCmb = new QComboBox(w);
 	m_layoutModelCmb->setToolTip(tr("Layout model for Place Selected: Normal (story + photo frames) or Obituary (photo + text modules in a masonry over the obit columns, short news in the last columns). Remembered per page type; an OBIT page starts with Obituary."));
 	fillLayoutModelCombo();
+	// compact, so Place Selected keeps its room on a narrow panel
+	QToolButton* spacingBtn = new QToolButton(w);
+	spacingBtn->setText(QStringLiteral("\u21D5"));
+	spacingBtn->setFixedWidth(26);
+	spacingBtn->setToolTip(tr("Spacing\u2026 (Faircode Layout): module gaps, gutter, wrap padding, caption and photo gaps for every layout model; live preview and Apply to this page"));
+	connect(spacingBtn, &QToolButton::clicked, this, &SuneerNewsPanel::onSpacing);
 	connect(m_layoutModelCmb, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
 		QSettings cfg("Faircode", "ScribusNews");
 		QString k = layoutModelKey().trimmed();
@@ -448,6 +483,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		updateLayoutModelInfo();
 	});
 	btnRow->addWidget(m_layoutModelCmb, 1);
+	btnRow->addWidget(spacingBtn);
 	m_layoutModelInfo = new QLabel(w);
 	m_layoutModelInfo->setStyleSheet("font-size:10px; color:#555;");
 	m_layoutModelInfo->setWordWrap(true);
@@ -488,6 +524,30 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_obitReprocessBtn->setStyleSheet("padding:4px;");
 	connect(m_obitReprocessBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitReprocess);
 	obitRow->addWidget(m_obitReprocessBtn, 1);
+	QHBoxLayout* photoRow2 = new QHBoxLayout();
+	QPushButton* editPhotoBtn = new QPushButton(tr("Edit photo\u2026"), w);
+	editPhotoBtn->setToolTip(tr("Crop, rotate, background and tone of the SELECTED photo on its original picture (also inside a module). Edited photos are never re-processed automatically."));
+	editPhotoBtn->setStyleSheet("padding:4px;");
+	connect(editPhotoBtn, &QPushButton::clicked, this, [this]() {
+		if (!m_doc) return;
+		PageItem* item = m_doc->m_Selection->count() == 1 ? m_doc->m_Selection->itemAt(0) : nullptr;
+		if (item && item->isGroup())
+		{
+			PageItem* found = nullptr;
+			for (PageItem* c : item->groupItemList)
+				if (c && c->isImageFrame() && !found) found = c;
+			item = found;
+		}
+		if (!item || !item->isImageFrame()) { setStatus(tr("Edit photo: select one photo (or its module)")); return; }
+		SuneerPhotoEdit::openDialog(m_doc, item, this);
+	});
+	photoRow2->addWidget(editPhotoBtn, 1);
+	QPushButton* bgColorBtn = new QPushButton(tr("Background colour\u2026"), w);
+	bgColorBtn->setToolTip(tr("One colour behind the selected cut-out photos, or every obituary photo of this page when nothing is selected; live preview; becomes the Obituary default."));
+	bgColorBtn->setStyleSheet("padding:4px;");
+	connect(bgColorBtn, &QPushButton::clicked, this, [this]() { if (m_doc) SuneerPhotoEdit::openBackgroundDialog(m_doc, this); });
+	photoRow2->addWidget(bgColorBtn, 1);
+	vl->addLayout(photoRow2);
 	vl->addLayout(btnRow);
 	vl->addLayout(markRow);
 	vl->addLayout(obitRow);
@@ -1018,13 +1078,103 @@ void SuneerNewsPanel::markPlaced(const QList<QJsonObject>& placedStories)
 	if (m_placeUsedSkipped > 0)
 		line += tr(" - %n used story(ies) skipped", "", m_placeUsedSkipped);
 	m_placeUsedSkipped = 0;
-	m_statusLabel->setText(line);
+	setStatus(line, !failed.isEmpty());
 	refreshPlacedMarks();
 	if (!failed.isEmpty())
-		QMessageBox::warning(this, tr("Place Selected"),
-			tr("Placed %n story(ies); %1 could not be marked used on the server:", "", placed).arg(failed.size())
-			+ "\n\n" + failed.join("\n")
-			+ "\n\n" + tr("They stay placed and are shown as 'Placed here - not marked on server'. Right-click such a row > Retry mark used, or press Check."));
+		setStatusDetails(tr("Not marked used on the server (they stay placed, shown as 'Placed here - not marked on server'; right-click the row > Retry mark used, or press Check):")
+		                 + "\n\u2022 " + failed.join("\n\u2022 "));
+}
+
+// ---------------------------------------------------------------------------
+// Status line: one short line under Fetch News, red when something failed,
+// the full text in the tooltip, everything in the Details log.
+// ---------------------------------------------------------------------------
+
+void SuneerNewsPanel::setStatus(const QString& text, bool failed)
+{
+	static const QRegularExpression failWords(QStringLiteral("could not|failed|Not done|not marked|refused|Error|NOT |not found|not readable|parked"), QRegularExpression::CaseInsensitiveOption);
+	m_statusFull = text;
+	if (m_statusBar)
+		m_statusBar->setVisible(false);
+	const bool red = failed || failWords.match(text).hasMatch();
+	QString first = text.section('\n', 0, 0).simplified();
+	if (m_statusLabel)
+	{
+		m_statusLabel->setStyleSheet(red ? QStringLiteral("color:#c62828; font-size:11px;") : QStringLiteral("color:#666; font-size:11px;"));
+		const int w = qMax(120, m_statusLabel->width() - 4);
+		m_statusLabel->setText(m_statusLabel->fontMetrics().elidedText(first, Qt::ElideRight, w));
+		m_statusLabel->setToolTip(text);
+	}
+	if (!text.trimmed().isEmpty())
+		m_statusLog << QTime::currentTime().toString(QStringLiteral("HH:mm:ss")) + QStringLiteral("  ") + text;
+	while (m_statusLog.size() > 400)
+		m_statusLog.removeFirst();
+}
+
+void SuneerNewsPanel::setStatusDetails(const QString& text)
+{
+	if (text.trimmed().isEmpty())
+		return;
+	m_statusLog << QTime::currentTime().toString(QStringLiteral("HH:mm:ss")) + QStringLiteral("  ") + text;
+	if (m_statusLabel)
+		m_statusLabel->setToolTip(m_statusFull + QStringLiteral("\n\n") + text);
+}
+
+void SuneerNewsPanel::statusProgress(const QString& step, int done, int total)
+{
+	if (!m_statusBar)
+		return;
+	m_statusBar->setVisible(true);
+	if (total > 0)
+	{
+		m_statusBar->setRange(0, total);
+		m_statusBar->setValue(qBound(0, done, total));
+		m_statusBar->setFormat(QStringLiteral("%1 %2/%3").arg(step).arg(done).arg(total));
+	}
+	else
+	{
+		m_statusBar->setRange(0, 0);
+		m_statusBar->setFormat(step + QStringLiteral("\u2026"));
+	}
+	if (m_statusLabel)
+		m_statusLabel->setText(QString());
+	QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+
+void SuneerNewsPanel::statusProgressDone()
+{
+	if (m_statusBar)
+		m_statusBar->setVisible(false);
+}
+
+void SuneerNewsPanel::onStatusDetails()
+{
+	QDialog dlg(this);
+	dlg.setWindowTitle(tr("News Browser - details"));
+	dlg.resize(760, 520);
+	QVBoxLayout* lay = new QVBoxLayout(&dlg);
+	QPlainTextEdit* txt = new QPlainTextEdit(&dlg);
+	txt->setReadOnly(true);
+	txt->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+	QFont f = txt->font();
+	f.setPointSizeF(f.pointSizeF() - 1);
+	txt->setFont(f);
+	txt->setPlainText(m_statusLog.join(QStringLiteral("\n")));
+	txt->moveCursor(QTextCursor::End);
+	lay->addWidget(txt);
+	QHBoxLayout* row = new QHBoxLayout();
+	QPushButton* copyBtn = new QPushButton(tr("Copy all"), &dlg);
+	connect(copyBtn, &QPushButton::clicked, &dlg, [txt]() { QApplication::clipboard()->setText(txt->toPlainText()); });
+	QPushButton* logBtn = new QPushButton(tr("Open api.log folder"), &dlg);
+	connect(logBtn, &QPushButton::clicked, &dlg, []() { QDesktopServices::openUrl(QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/news"))); });
+	QPushButton* closeBtn = new QPushButton(tr("Close"), &dlg);
+	connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+	row->addWidget(copyBtn);
+	row->addWidget(logBtn);
+	row->addStretch(1);
+	row->addWidget(closeBtn);
+	lay->addLayout(row);
+	dlg.exec();
 }
 
 // Inside the placement transaction: the server side of the undo record.
@@ -1073,7 +1223,7 @@ void SuneerNewsPanel::retryPendingMarks(const QStringList& which)
 			failed << tr("%1 - %2").arg(title, err);
 	}
 	refreshPlacedMarks();
-	m_statusLabel->setText(tr("Marked used: %1, still not marked: %2").arg(done.size()).arg(failed.size()));
+	setStatus(tr("Marked used: %1, still not marked: %2").arg(done.size()).arg(failed.size()));
 	if (!failed.isEmpty())
 		QMessageBox::warning(this, tr("Retry mark used"), tr("Still not marked used on the server:") + "\n\n" + failed.join("\n"));
 }
@@ -1126,7 +1276,7 @@ void SuneerNewsPanel::onReleaseRows()
 	}
 	if (rows.isEmpty())
 	{
-		m_statusLabel->setText(tr("Select a used (grey) story first"));
+		setStatus(tr("Select a used (grey) story first"));
 		return;
 	}
 	for (const QJsonObject& n : rows)
@@ -1150,10 +1300,10 @@ void SuneerNewsPanel::onReleaseRows()
 			if (markOnServer(QStringList() << sid, m_fetchPageId, "BALANCED", &err))
 			{
 				setRowStatus(sid, "BALANCED");
-				m_statusLabel->setText(tr("Marked unused on the server: %1").arg(title));
+				setStatus(tr("Marked unused on the server: %1").arg(title));
 			}
 			else
-				m_statusLabel->setText(tr("Error: server refused (%1)").arg(err));
+				setStatus(tr("Error: server refused (%1)").arg(err));
 		}
 		else if (removeBtn && box.clickedButton() == removeBtn)
 			removeStory(inDoc);
@@ -1189,9 +1339,9 @@ void SuneerNewsPanel::removeStory(PageItem* item)
 	if (m_mw)
 		m_mw->emitUpdateRequest(0);
 	if (marked)
-		m_statusLabel->setText(tr("Removed from page and marked unused on the server: %1").arg(storyId));
+		setStatus(tr("Removed from page and marked unused on the server: %1").arg(storyId));
 	else
-		m_statusLabel->setText(tr("Removed from page, but NOT marked unused on the server (%1) - use 'Mark unused' in News Browser later").arg(err));
+		setStatus(tr("Removed from page, but NOT marked unused on the server (%1) - use 'Mark unused' in News Browser later").arg(err));
 }
 
 // Shared by removeStory() and the bulk Mark unused: delete every item of
@@ -1262,14 +1412,14 @@ static QList<QJsonObject> suneerTickedRows(QListWidget* list, const QJsonArray& 
 void SuneerNewsPanel::onMarkUnusedTicked()
 {
 	const QList<QJsonObject> rows = suneerTickedRows(m_newsList, m_newsData, [](const QJsonObject& n) { return newsDtpStatus(n) != "UNUSED"; });
-	if (rows.isEmpty()) { m_statusLabel->setText(tr("Tick one or more used or balance stories first")); return; }
+	if (rows.isEmpty()) { setStatus(tr("Tick one or more used or balance stories first")); return; }
 	markStories(rows, unusedStatus());
 }
 
 void SuneerNewsPanel::onMarkBalanceTicked()
 {
 	const QList<QJsonObject> rows = suneerTickedRows(m_newsList, m_newsData, [](const QJsonObject& n) { return newsDtpStatus(n) != "BALANCED"; });
-	if (rows.isEmpty()) { m_statusLabel->setText(tr("Tick one or more free or used stories first")); return; }
+	if (rows.isEmpty()) { setStatus(tr("Tick one or more free or used stories first")); return; }
 	m_markingBalance = true;
 	markStories(rows, "BALANCED");
 	m_markingBalance = false;
@@ -1358,7 +1508,7 @@ void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString&
 		m_selectUsedChk->blockSignals(false);
 	}
 	const QString done = askedBalance ? tr("Marked balance: %1") : tr("Marked unused: %1");
-	m_statusLabel->setText(done.arg(released.size()) + (failed.isEmpty() ? QString() : tr(", refused: %1").arg(failed.size())));
+	setStatus(done.arg(released.size()) + (failed.isEmpty() ? QString() : tr(", refused: %1").arg(failed.size())));
 	if (!failed.isEmpty())
 	{
 		QMessageBox::warning(this, box.windowTitle(),
@@ -1391,19 +1541,19 @@ void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
 			// It never became USED on the server: nothing to put back.
 			m_pendingMarks.remove(sid);
 			setRowStatus(sid, prev);
-			m_statusLabel->setText(tr("Placement undone: %1 (it was not marked used on the server)").arg(story));
+			setStatus(tr("Placement undone: %1 (it was not marked used on the server)").arg(story));
 			return;
 		}
 		if (markOnServer(QStringList() << sid, pageId, want, &err, expect))
 		{
 			m_pendingMarks.remove(sid);
 			setRowStatus(sid, want);
-			m_statusLabel->setText(isUndo ? tr("Placement undone and the story is %1 again on the server: %2").arg(want, story)
+			setStatus(isUndo ? tr("Placement undone and the story is %1 again on the server: %2").arg(want, story)
 			                              : tr("Placed again and marked USED on the server: %1").arg(story));
 		}
 		else
 		{
-			m_statusLabel->setText(tr("Warning: placement %1, but the server status could not be set to %2 (%3)")
+			setStatus(tr("Warning: placement %1, but the server status could not be set to %2 (%3)")
 			                       .arg(isUndo ? tr("undone") : tr("redone"), want, err));
 			QMessageBox::warning(this, tr("Undo placement"),
 				tr("The frames were %1, but the story could not be set to %2 on the server:\n%3\n\nUse Check / Mark unused in the News Browser.")
@@ -1421,11 +1571,11 @@ void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
 	if (markOnServer(QStringList() << sid, pageId, want, &err))
 	{
 		setRowStatus(sid, want);
-		m_statusLabel->setText(isUndo ? tr("Story back on the page and marked used again: %1").arg(story)
+		setStatus(isUndo ? tr("Story back on the page and marked used again: %1").arg(story)
 		                              : tr("Story removed again and marked unused: %1").arg(story));
 	}
 	else
-		m_statusLabel->setText(tr("Warning: frames %1, but the server mark failed (%2)")
+		setStatus(tr("Warning: frames %1, but the server mark failed (%2)")
 		                       .arg(isUndo ? tr("restored") : tr("removed"), err));
 }
 
@@ -1450,7 +1600,7 @@ void SuneerNewsPanel::releaseStory(PageItem* item)
 	const QString pageId = attr(item, "news.pageId");
 	if (sid.isEmpty() || pageId.isEmpty())
 	{
-		m_statusLabel->setText(tr("This story carries no server id / page id"));
+		setStatus(tr("This story carries no server id / page id"));
 		return;
 	}
 	const QString name = attr(item, "news.story");
@@ -1462,10 +1612,10 @@ void SuneerNewsPanel::releaseStory(PageItem* item)
 	if (markOnServer(QStringList() << sid, pageId, unusedStatus(), &err, QStringLiteral("USED")))
 	{
 		setRowStatus(sid, unusedStatus());
-		m_statusLabel->setText(tr("Marked unused on the server: %1").arg(name));
+		setStatus(tr("Marked unused on the server: %1").arg(name));
 	}
 	else
-		m_statusLabel->setText(tr("Error: server refused (%1)").arg(err));
+		setStatus(tr("Error: server refused (%1)").arg(err));
 }
 
 void SuneerNewsPanel::balanceStory(PageItem* item)
@@ -1476,7 +1626,7 @@ void SuneerNewsPanel::balanceStory(PageItem* item)
 	const QString pageId = attr(item, "news.pageId");
 	if (sid.isEmpty() || pageId.isEmpty())
 	{
-		m_statusLabel->setText(tr("This story carries no server id / page id"));
+		setStatus(tr("This story carries no server id / page id"));
 		return;
 	}
 	const QString name = attr(item, "news.story");
@@ -1488,10 +1638,10 @@ void SuneerNewsPanel::balanceStory(PageItem* item)
 	if (markOnServer(QStringList() << sid, pageId, "BALANCED", &err, QStringLiteral("USED")))
 	{
 		setRowStatus(sid, "BALANCED");
-		m_statusLabel->setText(tr("Marked balance on the server: %1").arg(name));
+		setStatus(tr("Marked balance on the server: %1").arg(name));
 	}
 	else
-		m_statusLabel->setText(tr("Error: server refused (%1)").arg(err));
+		setStatus(tr("Error: server refused (%1)").arg(err));
 }
 
 QNetworkReply* SuneerNewsPanel::postBlocking(const QNetworkRequest& req, const QByteArray& body)
@@ -1631,7 +1781,7 @@ bool SuneerNewsPanel::fetchCurrentUser()
 	apiGet(QUrl(apiUrl("/users/me")), [this, &ok](QNetworkReply* reply) {
 		if (reply->error() != QNetworkReply::NoError)
 		{
-			m_statusLabel->setText(tr("Error: ") + tr("User profile: %1").arg(describeError(reply)));
+			setStatus(tr("Error: ") + tr("User profile: %1").arg(describeError(reply)));
 			return;
 		}
 		parseUser(QJsonDocument::fromJson(reply->readAll()).object()["data"].toObject());
@@ -1678,7 +1828,7 @@ void SuneerNewsPanel::startupSession()
 		m_editionCombo->addItem("FIX - Fixture", "FIX");
 		m_allowedShortNames.insert("FIX");
 		m_pageCombo->addItem("Fixture page", "fixture");
-		m_statusLabel->setText(tr("Fixture mode: Fetch News reads the file"));
+		setStatus(tr("Fixture mode: Fetch News reads the file"));
 		return;
 	}
 	ensureSecretsLoaded();
@@ -1831,7 +1981,7 @@ void SuneerNewsPanel::onLogin()
 	if (!loginDialog())
 		return;
 	setLocked(false);
-	m_statusLabel->setText(tr("Logged in as %1").arg(m_userName));
+	setStatus(tr("Logged in as %1").arg(m_userName));
 	onFetchStatic();
 }
 
@@ -1873,7 +2023,7 @@ void SuneerNewsPanel::onRefresh()
 // used; when that fails too, the short names from Settings.
 void SuneerNewsPanel::onFetchStatic()
 {
-	m_statusLabel->setText(tr("Loading editions from %1 ...").arg(QUrl(m_apiHost).host()));
+	setStatus(tr("Loading editions from %1 ...").arg(QUrl(m_apiHost).host()));
 	m_editionCombo->blockSignals(true);
 	m_editionCombo->clear();
 	QString note;
@@ -1889,7 +2039,7 @@ void SuneerNewsPanel::onFetchStatic()
 	{
 		m_editionCombo->blockSignals(false);
 		setEditionsEnabled(false);
-		m_statusLabel->setText(m_userInfoLoaded
+		setStatus(m_userInfoLoaded
 			? tr("No editions assigned to your account")
 			: tr("Error: Could not load your profile - use Refresh"));
 		return;
@@ -1931,7 +2081,7 @@ void SuneerNewsPanel::onFetchStatic()
 				m_editionGroupIds[sn] = m_editionGroupIds[ed["id"].toString()];
 		}
 		const int unmatched = m_allowedEditions.size() - matched.size();
-		m_statusLabel->setText(unmatched > 0
+		setStatus(unmatched > 0
 			? tr("%1 of your %2 editions available (%3 not in the public list)").arg(eds.size()).arg(m_allowedEditions.size()).arg(unmatched)
 			: tr("%1 editions available to you").arg(eds.size()));
 	}
@@ -1958,11 +2108,11 @@ void SuneerNewsPanel::onFetchStatic()
 		{
 			m_editionCombo->blockSignals(false);
 			setEditionsEnabled(false);
-			m_statusLabel->setText(tr("Warning: Edition list unavailable (%1) - short names for your editions unknown").arg(
+			setStatus(tr("Warning: Edition list unavailable (%1) - short names for your editions unknown").arg(
 				note.isEmpty() ? tr("no shortName in reply") : note));
 			return;
 		}
-		m_statusLabel->setText(tr("Warning: Edition list unavailable (%1) - using configured short names").arg(
+		setStatus(tr("Warning: Edition list unavailable (%1) - using configured short names").arg(
 			note.isEmpty() ? tr("no shortName in reply") : note));
 	}
 	int idx = m_lastEdition.isEmpty() ? -1 : m_editionCombo->findData(m_lastEdition);
@@ -1989,10 +2139,10 @@ void SuneerNewsPanel::onFetchPages()
 		return;
 	if (!editionAllowed(m_lastEdition))
 	{
-		m_statusLabel->setText(tr("Error: Edition %1 is not assigned to your account").arg(m_lastEdition));
+		setStatus(tr("Error: Edition %1 is not assigned to your account").arg(m_lastEdition));
 		return;
 	}
-	m_statusLabel->setText(tr("Loading pages for %1 ...").arg(m_lastEdition));
+	setStatus(tr("Loading pages for %1 ...").arg(m_lastEdition));
 	apiGet(QUrl(apiUrl("/external/edition-pages/" + m_lastEdition)), [this](QNetworkReply* reply) {
 		QString extErr;
 		if (reply->error() != QNetworkReply::NoError)
@@ -2028,7 +2178,7 @@ void SuneerNewsPanel::onFetchPages()
 		if (m_pages.isEmpty())
 		{
 			const QString msg = o["error"].toObject()["message"].toString();
-			m_statusLabel->setText(tr("Warning: No pages for edition %1%2").arg(m_lastEdition, (extErr.isEmpty() ? msg : extErr).isEmpty() ? QString() : ": " + (extErr.isEmpty() ? msg : extErr)));
+			setStatus(tr("Warning: No pages for edition %1%2").arg(m_lastEdition, (extErr.isEmpty() ? msg : extErr).isEmpty() ? QString() : ": " + (extErr.isEmpty() ? msg : extErr)));
 			return;
 		}
 		QList<QJsonObject> pages;
@@ -2053,7 +2203,7 @@ void SuneerNewsPanel::onFetchPages()
 			m_pageCombo->setCurrentIndex(idx);
 		m_pageCombo->blockSignals(false);
 		preselectLayoutModel();
-		m_statusLabel->setText(tr("%1: %2 pages").arg(m_lastEdition).arg(pages.size()));
+		setStatus(tr("%1: %2 pages").arg(m_lastEdition).arg(pages.size()));
 	});
 }
 
@@ -2061,7 +2211,7 @@ void SuneerNewsPanel::onFetchNews()
 {
 	if (m_pageCombo->count() == 0 || m_pageCombo->currentIndex() < 0)
 	{
-		m_statusLabel->setText(tr("Choose an edition and a page first"));
+		setStatus(tr("Choose an edition and a page first"));
 		return;
 	}
 	if (!qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
@@ -2075,19 +2225,19 @@ void SuneerNewsPanel::onFetchNews()
 			showNewsList();
 		}
 		else
-			m_statusLabel->setText(tr("Error: Fixture file not readable"));
+			setStatus(tr("Error: Fixture file not readable"));
 		return;
 	}
 	if (!editionAllowed(m_lastEdition))
 	{
-		m_statusLabel->setText(tr("Error: Edition %1 is not assigned to your account").arg(m_lastEdition));
+		setStatus(tr("Error: Edition %1 is not assigned to your account").arg(m_lastEdition));
 		return;
 	}
 	m_fetchPageId = m_pageCombo->currentData().toString();
 	m_fetchDate   = m_dateEdit->date().toString("yyyy-MM-dd");
 	m_lastPage    = m_pageCombo->currentText();
 	saveConfig();
-	m_statusLabel->setText(tr("Fetching news..."));
+	statusProgress(tr("Fetching"), 0, 0);
 	m_newsList->clear();
 	m_newsData = QJsonArray();
 	m_placeBtn->setEnabled(false);
@@ -2239,7 +2389,7 @@ void SuneerNewsPanel::onFetchNews()
 	apiLog(QStringLiteral("GET /external/edition-pages/..%1/news date %2 -> %3 stories%4").arg(m_fetchPageId.right(6), m_fetchDate).arg(external.size()).arg(extErr.isEmpty() ? QString() : " (" + extErr + ")"));
 	if (!extErr.isEmpty() && layout.isEmpty() && usedList.isEmpty() && balList.isEmpty())
 	{
-		m_statusLabel->setText(tr("Error: ") + tr("News: %1").arg(extErr));
+		setStatus(tr("Error: ") + tr("News: %1").arg(extErr));
 		m_fetchBtn->setEnabled(true);
 		return;
 	}
@@ -2345,7 +2495,7 @@ void SuneerNewsPanel::onFetchNews()
 	                 .arg(balList.size()).arg(balErr.isEmpty() ? QString() : "(err)");
 	showNewsList();          // status line: counts + m_fetchNote (applyListFilter)
 	if (m_newsData.isEmpty() && !m_fetchNote.isEmpty())
-		m_statusLabel->setText(m_statusLabel->text() + QStringLiteral(" · ") + m_fetchNote);
+		setStatus(statusText() + QStringLiteral(" · ") + m_fetchNote);
 	m_fetchBtn->setEnabled(true);
 }
 
@@ -2455,7 +2605,7 @@ void SuneerNewsPanel::showNewsList()
 	relabelNewsList();
 	refreshPlacedMarks();
 	if (m_newsData.isEmpty())
-		m_statusLabel->setText(tr("No news for %1 on %2").arg(m_pageCombo->currentText(), m_fetchDate));
+		setStatus(tr("No news for %1 on %2").arg(m_pageCombo->currentText(), m_fetchDate));
 	else
 		applyListFilter(true);     // "N stories - X USD, Y UNUSD, Z BAL (showing: f)" or "No f stories (N total) - change Show:"
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
@@ -2853,11 +3003,11 @@ void SuneerNewsPanel::onPlaceNews()
 			if (m_mw && m_mw->view && !r.isNull())
 				m_mw->view->setCanvasCenterPos(r.center().x(), r.center().y());
 			const int pg = m_doc->OnPage(it);
-			m_statusLabel->setText(pg >= 0 ? tr("Placed - on page %1 of this document, selected").arg(pg + 1)
+			setStatus(pg >= 0 ? tr("Placed - on page %1 of this document, selected").arg(pg + 1)
 			                               : tr("Placed - on the pasteboard of this document, selected"));
 		}
 		else
-			m_statusLabel->setText(tr("Placed on the server (maybe on another machine); not in this document"));
+			setStatus(tr("Placed on the server (maybe on another machine); not in this document"));
 		return;
 	}
 	double x = m_doc->currentPage()->xOffset() + m_doc->margins()->left();
@@ -2918,7 +3068,7 @@ void SuneerNewsPanel::onPlaceSelected()
 	}
 	if (stories.isEmpty())
 	{
-		m_statusLabel->setText(usedSkipped > 0
+		setStatus(usedSkipped > 0
 			? tr("Nothing to place: the %n ticked story(ies) is/are already used (use 'Mark unused' to release)", "", usedSkipped)
 			: tr("Tick the stories to place"));
 		return;
@@ -2988,7 +3138,7 @@ void SuneerNewsPanel::onPlaceSelected()
 			QList<PageItem*> items = placeNews(news, baseX, curY, false);
 			const QRectF r = itemsRect(items);
 			if (!r.isNull())
-				curY = r.bottom() + 3.0 * kMmToPt;
+				curY = r.bottom() + SuneerSpacing::forModel(spacingModel()).pt(SuneerSpacing::ModuleGapV);
 		}
 		recordPlaceUndo(stories);
 		if (tx)
@@ -3019,16 +3169,14 @@ void SuneerNewsPanel::storyGeometry(int cols, double& totalW, double& colGapPt) 
 	const double usableW = m_doc->pageWidth() - m_doc->margins()->left() - m_doc->margins()->right();
 	QSettings cfg("Faircode", "ScribusNews");
 	int gridCols = cfg.value("layout/gridColumns", 8).toInt();
-	double gutterPt = cfg.value("layout/gridGutterMm", 8.0).toDouble() * kMmToPt;
+	// the gutter comes from the one spacing store (Faircode Layout: Spacing); the page's
+	// column guides still give the column count
+	const double gutterPt = SuneerSpacing::forModel(spacingModel()).pt(SuneerSpacing::ModuleGapH);
 	if (ScPage* curPage = m_doc->currentPage())
 	{
 		const int guideCount = curPage->guides.verticalAutoCount();
 		if (guideCount > 0)
-		{
 			gridCols = guideCount + 1;
-			if (curPage->guides.verticalAutoGap() > 0)
-				gutterPt = curPage->guides.verticalAutoGap();
-		}
 	}
 	gridCols = qMax(1, gridCols);
 	cols = qBound(1, cols, gridCols);
@@ -3211,7 +3359,7 @@ void SuneerNewsPanel::placeOnPasteboard(const QList<QJsonObject>& stories, bool 
 	m_doc->regionsChanged()->update(QRectF());
 	if (m_mw)
 		m_mw->emitUpdateRequest(0);
-	m_statusLabel->setText(tr("Placed %1 stories on the %2 pasteboard").arg(placedStories.size()).arg(rightSide ? tr("right") : tr("left")));
+	setStatus(tr("Placed %1 stories on the %2 pasteboard").arg(placedStories.size()).arg(rightSide ? tr("right") : tr("left")));
 	showPlacedArea(stack);
 }
 
@@ -3424,9 +3572,9 @@ void SuneerNewsPanel::applyListFilter(bool setStatusLine)
 	// (marks, placing) are not wiped by a routine refresh.
 	const QString noteSuffix = m_fetchNote.isEmpty() ? QString() : QStringLiteral(" · ") + m_fetchNote;
 	if (m_newsList->count() > 0 && shown == 0 && f != "ALL")
-		m_statusLabel->setText(tr("No %1 stories (%n total) - change Show:", "", m_newsList->count()).arg(showing) + noteSuffix);
+		setStatus(tr("No %1 stories (%n total) - change Show:", "", m_newsList->count()).arg(showing) + noteSuffix);
 	else if (setStatusLine && m_newsList->count() > 0)
-		m_statusLabel->setText(tr("Unused %1 · Used %2 · Balance %3").arg(unused).arg(used).arg(bal)
+		setStatus(tr("Unused %1 · Used %2 · Balance %3").arg(unused).arg(used).arg(bal)
 		                       + (f == "ALL" ? QString() : tr(" · showing: %1").arg(showing)) + noteSuffix);
 	if (m_countLabel)
 	{
@@ -3483,8 +3631,7 @@ void SuneerNewsPanel::setWrap(PageItem* item, bool on)
 		item->setTextFlowMode(PageItem::TextFlowDisabled);
 		return;
 	}
-	QSettings cfg("Faircode", "ScribusNews");
-	const double gap = qMax(0.0, cfg.value("layout/wrapGapMm", 2.0).toDouble()) * kMmToPt;
+	const double gap = SuneerSpacing::forModel(spacingModel()).pt(SuneerSpacing::WrapPad);
 	item->setWrapOffsets(gap, gap, gap, gap);
 	item->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
 }
@@ -3504,7 +3651,12 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	QSettings cfg("Faircode", "ScribusNews");
 	const double defaultImgH = cfg.value("image/height", 60.0).toDouble() * kMmToPt;
 	const double maxImgH = cfg.value("layout/photoMaxHeightMm", 100.0).toDouble() * kMmToPt;
-	const double gap = qMax(0.0, cfg.value("layout/wrapGapMm", 2.0).toDouble()) * kMmToPt;
+	const SuneerSpacing::Values sp = SuneerSpacing::forModel(spacingModel());
+	const double gap = sp.pt(SuneerSpacing::WrapPad);              // headline block -> photo (the wrap starts there)
+	const double photoTextGap = sp.pt(SuneerSpacing::PhotoText);   // photo block <-> text (photo above / below)
+	const double captionGap = sp.pt(SuneerSpacing::CaptionGap);
+	const double captionTextGap = sp.pt(SuneerSpacing::CaptionText);
+	const double inset = sp.pt(SuneerSpacing::Inset);
 
 	const bool fullWidth = (pos == "top" || pos == "topAbove");
 	const int n = fullWidth ? cols : qBound(1, imgCols, cols);
@@ -3575,6 +3727,7 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 			PageItem* cap = (i < f.captions.size()) ? f.captions[i] : nullptr;
 			if (cap)
 			{
+				cy += captionGap;
 				cap->setXYPos(px, cy);
 				cap->setWidth(pw);
 				cap->updateClip();
@@ -3583,9 +3736,10 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 				else
 					cap->setHeight(10.0 * kMmToPt);
 				setWrap(cap, wrap);
-				cy = cap->yPos() + cap->height();
+				cy = cap->yPos() + cap->height() + captionTextGap;
 			}
-			cy += gap;
+			else
+				cy += photoTextGap;
 		}
 		return cy;
 	};
@@ -3594,8 +3748,8 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	f.text->setXYPos(x, y);
 	f.text->setWidth(totalW);
 	f.text->setColumns(cols);
-	f.text->setColumnGap(qMax(0.0, cfg.value("layout/colGapMm", 2.5).toDouble()) * kMmToPt);
-	f.text->setTextToFrameDist(0.0, 0.0, 0.0, 0.0);
+	f.text->setColumnGap(sp.pt(SuneerSpacing::ColumnGap));
+	f.text->setTextToFrameDist(inset, inset, inset, inset);
 	f.text->setTextFlowMode(PageItem::TextFlowDisabled);
 	f.text->updateClip();
 
@@ -3621,7 +3775,7 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	{
 		// Fit the text first, then the photos below it (no wrap needed).
 		fitFrame(f.text);
-		stackPhotos(f.text->yPos() + f.text->height() + gap);
+		stackPhotos(f.text->yPos() + f.text->height() + photoTextGap);
 		for (int i = 0; i < f.photos.size(); ++i)
 		{
 			if (f.photos[i]) setWrap(f.photos[i], false);
@@ -3648,7 +3802,7 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 // (6000 px and more) otherwise cost decode time and memory at every reload
 // and make canvas painting slow when the preview is set to full resolution.
 // The original stays in the cache. Returns the path to load.
-static QString suneerWorkingCopy(const QString& original, double placedWidthPt)
+static QString suneerWorkingCopy(ScribusDoc* doc, const QString& original, double placedWidthPt)
 {
 	if (original.isEmpty() || placedWidthPt <= 0)
 		return original;
@@ -3659,7 +3813,10 @@ static QString suneerWorkingCopy(const QString& original, double placedWidthPt)
 	const int needed = qRound(placedWidthPt / 72.0 * 300.0);
 	if (sz.width() <= needed * 1.15)
 		return original;
-	const QString copy = original + QStringLiteral(".w%1.jpg").arg(needed);
+	// next to the original in the cache, or in edited/ of a saved document
+	const QString editedDir = SuneerPhotoStore::editedDir(doc, true);
+	const QString copy = editedDir.isEmpty() ? original + QStringLiteral(".w%1.jpg").arg(needed)
+	                                         : editedDir + QStringLiteral("/") + QFileInfo(original).fileName() + QStringLiteral(".w%1.jpg").arg(needed);
 	if (QFile::exists(copy) && QFileInfo(copy).lastModified() >= QFileInfo(original).lastModified())
 		return copy;
 	reader.setAutoTransform(true);
@@ -3757,18 +3914,29 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 	{
 		if (placeTx)
 			placeTx.cancel();
-		m_statusLabel->setText(tr("Error: could not create the story frame"));
+		setStatus(tr("Error: could not create the story frame"));
 		return created;
 	}
 	f.text->setItemName(title.left(30).trimmed().isEmpty() ? tr("News story") : title.left(30).trimmed());
 	f.text->setColumns(cols);
-	f.text->setColumnGap(qMax(0.0, settingsString("layout/colGapMm", "2.5").toDouble()) * kMmToPt);
+	f.text->setColumnGap(SuneerSpacing::forModel(spacingModel()).pt(SuneerSpacing::ColumnGap));
 	setAttr(f.text, "news.role", "text");
 
 	// Kicker + headline block first, fitted, so its height is known.
 	if (!kicker.isEmpty())
 		addPara(f.text, kicker, kickerStyle);
 	addPara(f.text, title, titleStyle);
+	{
+		// optional extra space under the headline (0 = the paragraph styles decide)
+		const double extra = SuneerSpacing::forModel(spacingModel()).pt(SuneerSpacing::HeadlineBody);
+		if (extra > 0.0 && f.text->itemText.length() > 0)
+		{
+			const int lastPara = f.text->itemText.length() - 1;
+			ParagraphStyle ps;
+			ps.setGapAfter(f.text->itemText.paragraphStyle(lastPara).gapAfter() + extra);
+			f.text->itemText.applyStyle(lastPara, ps, false);
+		}
+	}
 	fitFrame(f.text);
 	f.headH = f.text->height();
 	setAttr(f.text, "news.headH", QString::number(f.headH, 'f', 3));
@@ -3809,10 +3977,11 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			if (capText.isEmpty() && mi == 0)
 				capText = collapseSpaces(news["caption"].toString());
 
-			m_statusLabel->setText(tr("Downloading picture %1 of %2...").arg(mi + 1).arg(media.size()));
+			setStatus(tr("Downloading picture %1 of %2...").arg(mi + 1).arg(media.size()));
 			QString why;
 			QString localImg = downloadImage(fileUrl, &why);
 			QString placeholder;
+			QString originalPath;
 			if (localImg.isEmpty())
 			{
 				failed << QStringLiteral("%1: %2").arg(QFileInfo(QUrl(fileUrl).path()).fileName(), why);
@@ -3820,9 +3989,15 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			}
 			else
 			{
+				// a saved document: the original next to it (never modified), the working copy in edited/
+				QString iwhy;
+				localImg = SuneerPhotoStore::importOriginal(m_doc, localImg, newsRefId(news).isEmpty() ? newsServerId(news) : newsRefId(news), mi, &iwhy);
+				if (!iwhy.isEmpty())
+					apiLog(QStringLiteral("photo store: %1").arg(iwhy));
+				originalPath = localImg;
 				const int n = (pos == "top" || pos == "topAbove") ? cols : qBound(1, imgCols, cols);
 				const double colW = (totalW - (cols - 1) * colGapPt) / cols;
-				localImg = suneerWorkingCopy(localImg, colW * n + (n - 1) * colGapPt);
+				localImg = suneerWorkingCopy(m_doc, localImg, colW * n + (n - 1) * colGapPt);
 			}
 
 			int ifIdx = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Rectangle,
@@ -3833,6 +4008,9 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			created << imgFrame;
 			setAttr(imgFrame, "news.role", "photo");
 			setAttr(imgFrame, "news.index", QString::number(mi));
+			setAttr(imgFrame, SuneerPhotoStore::AttrFileUrl, fileUrl);
+			if (!originalPath.isEmpty())
+				setAttr(imgFrame, SuneerPhotoStore::AttrOriginal, originalPath);
 			imgFrame->setFillColor(CommonStrings::None);
 			if (!localImg.isEmpty())
 			{
@@ -3841,7 +4019,7 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 				// whatever the document default; export still uses the full data.
 				if (imgFrame->pixm.imgInfo.lowResType == 0)
 					imgFrame->setResolution(1);
-				SuneerImageLinks::embedPlaced(m_doc, imgFrame);   // "always embed" pref
+				// never embedded: News Browser photos live in <doc>_photos/ (relative link)
 				imgFrame->setLineColor(CommonStrings::None);
 			}
 			else
@@ -3899,9 +4077,9 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 		m_mw->emitUpdateRequest(0);
 
 	if (!missing.isEmpty())
-		m_statusLabel->setText(tr("Warning: placed, but: %1").arg(missing.join("; ")));
+		setStatus(tr("Warning: placed, but: %1").arg(missing.join("; ")));
 	else
-		m_statusLabel->setText(tr("Placed: %1").arg(title.left(60)));
+		setStatus(tr("Placed: %1").arg(title.left(60)));
 	return created;
 }
 
@@ -3952,7 +4130,7 @@ void SuneerNewsPanel::rearrangeStory(PageItem* item, const QString& posIn, int i
 	}
 	if (!f.text)
 	{
-		m_statusLabel->setText(tr("Error: this story has no story frame to re-arrange"));
+		setStatus(tr("Error: this story has no story frame to re-arrange"));
 		return;
 	}
 	f.headH = attr(f.text, "news.headH").toDouble();
@@ -3977,7 +4155,7 @@ void SuneerNewsPanel::rearrangeStory(PageItem* item, const QString& posIn, int i
 	m_doc->regionsChanged()->update(before.united(itemsRect(items)));
 	if (m_mw)
 		m_mw->emitUpdateRequest(0);
-	m_statusLabel->setText(tr("Photo %1, %2 columns: %3").arg(photoPositionLabel(pos)).arg(imgCols).arg(id));
+	setStatus(tr("Photo %1, %2 columns: %3").arg(photoPositionLabel(pos)).arg(imgCols).arg(id));
 }
 
 // Scroll and zoom so the stack and the current page are both in view.
@@ -4381,7 +4559,80 @@ QByteArray SuneerNewsPanel::convertWebpToPng(const QByteArray& webp, QString& ho
 // reply that really decodes as a picture is kept; a 0-byte or unreadable
 // cache entry is thrown away and fetched again. Every step is logged
 // (URL path, status, size - never the token).
-QString SuneerNewsPanel::downloadImage(const QString& fileUrl, QString* why)
+// "Re-download original from Workflow": the picture is fetched again (cache
+// bypassed), goes into original/ (the old file kept as *_prev) and every
+// frame that showed the original is reloaded. For a missing file (document
+// moved, share offline) the same, without a _prev.
+int SuneerNewsPanel::redownloadPhotos(const QList<PageItem*>& items, bool force, QString* report)
+{
+	int done = 0;
+	QStringList lines;
+	int n = 0;
+	for (PageItem* item : items)
+	{
+		statusProgress(tr("Re-downloading"), ++n, items.size());
+		if (!item || !SuneerPhotoStore::isNewsPhoto(item))
+			continue;
+		const QString url = attr(item, SuneerPhotoStore::AttrFileUrl);
+		if (url.isEmpty())
+		{
+			lines << tr("%1: no Workflow URL stored on the frame").arg(item->itemName());
+			continue;
+		}
+		QString why;
+		const QString cached = downloadImage(url, &why, force);
+		if (cached.isEmpty())
+		{
+			lines << tr("%1: %2").arg(item->itemName(), why);
+			continue;
+		}
+		const int idx = attr(item, SuneerPhotoStore::AttrMediaIndex).toInt();
+		const QString key = SuneerPhotoStore::storyKey(item);
+		QString target = attr(item, SuneerPhotoStore::AttrOriginal);
+		if (target.isEmpty() || SuneerPhotoStore::originalDir(m_doc, false).isEmpty())
+			target = SuneerPhotoStore::importOriginal(m_doc, cached, key, idx, &why);
+		else
+		{
+			if (force && QFileInfo::exists(target))
+			{
+				const QString prev = QFileInfo(target).absolutePath() + QStringLiteral("/") + QFileInfo(target).completeBaseName() + QStringLiteral("_prev.") + QFileInfo(target).suffix();
+				QFile::remove(prev);
+				QFile::rename(target, prev);
+			}
+			QFile::remove(target);
+			const QString tmp = target + QStringLiteral(".part");
+			QFile::remove(tmp);
+			if (!QFile::copy(cached, tmp) || !QFile::rename(tmp, target))
+			{
+				lines << tr("%1: could not write %2").arg(item->itemName(), target);
+				continue;
+			}
+		}
+		setAttr(item, SuneerPhotoStore::AttrOriginal, target);
+		if (item->Pfile.isEmpty() || !QFileInfo::exists(item->Pfile) || QFileInfo(item->Pfile).absoluteFilePath() == QFileInfo(target).absoluteFilePath())
+		{
+			m_doc->loadPict(target, item, true, true);
+			item->adjustPictScale();
+			item->update();
+		}
+		++done;
+		apiLog(QStringLiteral("re-download: %1 -> %2").arg(url, target));
+	}
+	statusProgressDone();
+	if (report)
+		*report = lines.join(QStringLiteral("\n"));
+	if (done)
+	{
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
+	setStatus(tr("Re-downloaded %1 of %2 photo(s)").arg(done).arg(items.size()) + (lines.isEmpty() ? QString() : QStringLiteral(" \u00b7 ") + tr("%n problem(s)", "", lines.size())), !lines.isEmpty());
+	if (!lines.isEmpty())
+		setStatusDetails(lines.join(QStringLiteral("\n")));
+	return done;
+}
+
+QString SuneerNewsPanel::downloadImage(const QString& fileUrl, QString* why, bool force)
 {
 	// A local file (fixture tests, pre-downloaded pictures) needs no download.
 	if (fileUrl.startsWith('/') && QFileInfo(fileUrl).isFile())
@@ -4444,6 +4695,11 @@ QString SuneerNewsPanel::downloadImage(const QString& fileUrl, QString* why)
 	}
 
 	// A cached copy counts only when it decodes as a picture.
+	if (force)
+	{
+		QFile::remove(localPath);
+		QFile::remove(metaPath);
+	}
 	bool haveCached = QFile::exists(localPath) && QFileInfo(localPath).size() > 0;
 	QString cachedFmt;
 	if (haveCached)
@@ -4761,12 +5017,14 @@ void SuneerNewsPanel::onSettings()
 	QDoubleSpinBox* gutterSpin = new QDoubleSpinBox(layoutTab);
 	gutterSpin->setRange(0.0, 30.0);
 	gutterSpin->setSuffix(" mm");
-	gutterSpin->setValue(s.value("layout/gridGutterMm", 8.0).toDouble());
+	gutterSpin->setValue(SuneerSpacing::store().global.v[SuneerSpacing::ModuleGapH]);
+	gutterSpin->setToolTip(tr("Global value of Faircode Layout: Spacing (models can override it there)"));
 	fl2->addRow(tr("Page grid gutter:"), gutterSpin);
 	QDoubleSpinBox* innerGapSpin = new QDoubleSpinBox(layoutTab);
 	innerGapSpin->setRange(0.0, 20.0);
 	innerGapSpin->setSuffix(" mm");
-	innerGapSpin->setValue(s.value("layout/colGapMm", 2.5).toDouble());
+	innerGapSpin->setValue(SuneerSpacing::store().global.v[SuneerSpacing::ColumnGap]);
+	innerGapSpin->setToolTip(tr("Global value of Faircode Layout: Spacing (models can override it there)"));
 	fl2->addRow(tr("Column gap inside the story frame:"), innerGapSpin);
 	QDoubleSpinBox* maxPhotoSpin = new QDoubleSpinBox(layoutTab);
 	maxPhotoSpin->setRange(20.0, 400.0);
@@ -4776,7 +5034,8 @@ void SuneerNewsPanel::onSettings()
 	QDoubleSpinBox* wrapGapSpin = new QDoubleSpinBox(layoutTab);
 	wrapGapSpin->setRange(0.0, 10.0);
 	wrapGapSpin->setSuffix(" mm");
-	wrapGapSpin->setValue(s.value("layout/wrapGapMm", 2.0).toDouble());
+	wrapGapSpin->setValue(SuneerSpacing::store().global.v[SuneerSpacing::WrapPad]);
+	wrapGapSpin->setToolTip(tr("Global value of Faircode Layout: Spacing (models can override it there)"));
 	fl2->addRow(tr("Text wrap gap around photos:"), wrapGapSpin);
 	QComboBox* targetCmb = new QComboBox(layoutTab);
 	targetCmb->addItem(tr("Pasteboard left of the page (story spike)"), "left");
@@ -4849,6 +5108,13 @@ void SuneerNewsPanel::onSettings()
 	obitShapeCmb->addItem(tr("Portrait (%1 x %2 mm)").arg(om.photoMm).arg(om.portraitHeightMm), "portrait");
 	obitShapeCmb->setCurrentIndex(qMax(0, obitShapeCmb->findData(om.frameShape)));
 	flo->addRow(tr("Photo frame:"), obitShapeCmb);
+	QComboBox* obitBgPolicyCmb = new QComboBox(obitTab);
+	obitBgPolicyCmb->addItem(tr("Auto"), "auto");
+	obitBgPolicyCmb->addItem(tr("Ask when quality is low"), "ask");
+	obitBgPolicyCmb->addItem(tr("Manual by default"), "manual");
+	obitBgPolicyCmb->setCurrentIndex(qMax(0, obitBgPolicyCmb->findData(om.bgPolicy)));
+	obitBgPolicyCmb->setToolTip(tr("Auto: AI removes every background. Ask: when the AI keeps less than 25% of the crop or cuts through the face, the photo is placed unremoved and flagged \"check BG\". Manual: no AI; photos are placed as they are and marked Manual for Edit photo."));
+	flo->addRow(tr("Background removal:"), obitBgPolicyCmb);
 	QLabel* obitNote = new QLabel(tr("Changes apply to the next Place and to \"Re-process photos\". Model file: %1").arg(SuneerObitModel::filePath()), obitTab);
 	obitNote->setWordWrap(true);
 	obitNote->setStyleSheet("color:#666; font-size:11px;");
@@ -4950,9 +5216,14 @@ void SuneerNewsPanel::onSettings()
 	s.setValue("layout/placeTarget", targetCmb->currentData().toString());
 	s.setValue("layout/photoPosition", posCmb->currentData().toString());
 	s.setValue("layout/photoPositionPanel", posCmb->currentData().toString());
-	s.setValue("layout/colGapMm", innerGapSpin->value());
+	{
+		SuneerSpacing::Store st = SuneerSpacing::store();
+		st.global.v[SuneerSpacing::ColumnGap] = innerGapSpin->value();
+		st.global.v[SuneerSpacing::ModuleGapH] = gutterSpin->value();
+		st.global.v[SuneerSpacing::WrapPad] = wrapGapSpin->value();
+		SuneerSpacing::save(st);
+	}
 	s.setValue("layout/gridColumns", gridColsSpin->value());
-	s.setValue("layout/gridGutterMm", gutterSpin->value());
 	s.setValue("layout/photoMaxHeightMm", maxPhotoSpin->value());
 	if (m_photoPosCmb)
 	{
@@ -4960,7 +5231,6 @@ void SuneerNewsPanel::onSettings()
 		if (pi >= 0)
 			m_photoPosCmb->setCurrentIndex(pi);
 	}
-	s.setValue("layout/wrapGapMm", wrapGapSpin->value());
 	{
 		SuneerObitModel om2 = SuneerObitModel::load();
 		const QString bg = obitBgCmb->currentText().trimmed();
@@ -4971,9 +5241,10 @@ void SuneerNewsPanel::onSettings()
 		om2.toneStrength = obitToneSlider->value();
 		om2.faceW = obitFillCmb->currentData().toDouble();
 		om2.frameShape = obitShapeCmb->currentData().toString();
+		om2.bgPolicy = obitBgPolicyCmb->currentData().toString();
 		QString err;
 		if (!om2.save(&err))
-			m_statusLabel->setText(err);
+			setStatus(err);
 		updateLayoutModelInfo();
 	}
 	s.setValue("image/height", imgHspin->value());
@@ -4985,7 +5256,7 @@ void SuneerNewsPanel::onSettings()
 	s.setValue("style/bodyStyle", bodyStyleEdit->text().trimmed());
 	s.setValue("style/captionStyle", captionStyleEdit->text().trimmed());
 	s.setValue("style/datelineStyle", datelineStyleEdit->text().trimmed());
-	m_statusLabel->setText(tr("Settings saved"));
+	setStatus(tr("Settings saved"));
 	if (hostChanged)
 	{
 		// A session from one server means nothing to another.

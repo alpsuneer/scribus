@@ -16,6 +16,7 @@
 #include <QCheckBox>
 #include <QPolygon>
 #include <QTimer>
+#include <QSet>
 #include "fpointarray.h"
 
 #include "alignselect.h"
@@ -32,6 +33,7 @@ class SMPShadeWidget;
 class QPushButton;
 class Selection;
 struct SuneerGroupUndo;
+class SuneerGapPopup;
 
 //! What the Frame Border popup writes to a frame, read once from its widgets.
 struct SuneerBorderSettings
@@ -106,21 +108,12 @@ private slots:
 	void onLineSpacingChanged(double val);
 	void onLineSpModeChanged(int mode);
 	// Image
-	void onImgRotChanged(double val);
 	void onTextWrapShow();
 	void onTextFlowNone();
 	void onTextFlowShape();
 	void onTextFlowBBox();
 	void onTextFlowContour();
 	void onTextFlowClip();
-	void onImgRot90CCW();
-	void onImgRot90CW();
-	void onImgToFront();
-	void onImgRaise();
-	void onImgLower();
-	void onImgToBack();
-	void onImgFlipH();
-	void onImgFlipV();
 	void onImgFitFrame();
 	void onImgFitImage();
 	void onImgCropApply();
@@ -181,6 +174,10 @@ private slots:
 	void onPadReset();
 	void onPadAllChanged(double delta);
 	void onPadSideChanged(int side, double delta);
+	//! Gap sides panel: \a text = text frame row (inset or wrap gap, per "In"), else the image row's wrap gap.
+	void showGapPopup(bool text);
+	//! Sets one side (0 top, 1 bottom, 2 left, 3 right; -1 all) to \a mm, one undo step.
+	void onGapSideSet(bool text, int side, double mm);
 	void onTextColorChanged();
 	void onBgColorChanged();
 	void onParaStyleChanged(int idx);
@@ -280,14 +277,7 @@ public:
 	QToolButton*    m_padResetBtn         {nullptr};
 	QToolButton*    m_padAllPlusBtn       {nullptr};
 	QToolButton*    m_padAllMinusBtn      {nullptr};
-	QToolButton*    m_padTopPlusBtn       {nullptr};
-	QToolButton*    m_padTopMinusBtn      {nullptr};
-	QToolButton*    m_padBottomPlusBtn    {nullptr};
-	QToolButton*    m_padBottomMinusBtn   {nullptr};
-	QToolButton*    m_padLeftPlusBtn      {nullptr};
-	QToolButton*    m_padLeftMinusBtn     {nullptr};
-	QToolButton*    m_padRightPlusBtn     {nullptr};
-	QToolButton*    m_padRightMinusBtn    {nullptr};
+	QToolButton*    m_gapSidesBtn         {nullptr};   // opens m_gapPopup (image frame row)
 	ColorButton*    m_textColorBtn        {nullptr};
 	ColorButton*    m_bgColorBtn          {nullptr};
 	ColorButton*    m_txtLineColorBtn     {nullptr};
@@ -319,16 +309,6 @@ public:
 	QComboBox*      m_lineSpModeCombo     {nullptr};
 
 	// ── Image ──────────────────────────────────
-	QLabel*         m_imgRotIconLbl       {nullptr};
-	QDoubleSpinBox* m_imgRotSpin          {nullptr};
-	QToolButton*    m_imgRot90CCWBtn      {nullptr};
-	QToolButton*    m_imgRot90CWBtn       {nullptr};
-	QToolButton*    m_imgToFrontBtn       {nullptr};
-	QToolButton*    m_imgRaiseBtn         {nullptr};
-	QToolButton*    m_imgLowerBtn         {nullptr};
-	QToolButton*    m_imgToBackBtn        {nullptr};
-	QToolButton*    m_imgFlipHBtn         {nullptr};
-	QToolButton*    m_imgFlipVBtn         {nullptr};
 	QToolButton*    m_imgFitFrameBtn      {nullptr};
 	// Shape
 	QToolButton*    m_textFlowNoneBtn     {nullptr};
@@ -346,6 +326,8 @@ public:
 	QToolButton*    m_imgEmbedBtn          {nullptr};
 	QToolButton*    m_imgDrawContourBtn    {nullptr};
 	QToolButton*    m_imgContourEditBtn    {nullptr};
+	QToolButton*    m_imgEditPhotoBtn {nullptr};
+	QToolButton*    m_imgBgColorBtn {nullptr};
 	QToolButton*    m_imgRemoveBgBtn       {nullptr};
 	QToolButton*    m_imgFitImageBtn      {nullptr};
 	// Caption auto-update timer
@@ -368,6 +350,9 @@ public:
 	QToolButton*      m_imgCropEnableChk   {nullptr};
 	QToolButton*    m_autoContourBtn      {nullptr};
 	QCheckBox*      m_autoFitChk          {nullptr};
+	QToolButton*    m_autoFitModeBtn      {nullptr};
+	QAction*        m_autoFitPropAct      {nullptr};
+	QAction*        m_autoFitStretchAct   {nullptr};
 	QDoubleSpinBox* m_cornerRadiusSpin    {nullptr};
 	QToolButton*    m_cornerOptionsBtn    {nullptr};
 	QWidget*        m_cornerPopup         {nullptr};
@@ -439,15 +424,10 @@ public:
 	// ── Text-frame gap buttons (row2) ──────────────────────────────
 	QToolButton*    m_textPadAllPlusBtn    {nullptr};
 	QToolButton*    m_textPadAllMinusBtn   {nullptr};
+	QToolButton*    m_textGapSidesBtn      {nullptr};   // opens m_gapPopup (text frame row)
+	SuneerGapPopup* m_gapPopup            {nullptr};
+	bool            m_gapPopupText         {false};     // which gap the popup edits
 	QToolButton*    m_textPadResetBtn      {nullptr};
-	QToolButton*    m_textPadTopPlusBtn    {nullptr};
-	QToolButton*    m_textPadTopMinusBtn   {nullptr};
-	QToolButton*    m_textPadBottomPlusBtn {nullptr};
-	QToolButton*    m_textPadBottomMinusBtn{nullptr};
-	QToolButton*    m_textPadLeftPlusBtn   {nullptr};
-	QToolButton*    m_textPadLeftMinusBtn  {nullptr};
-	QToolButton*    m_textPadRightPlusBtn  {nullptr};
-	QToolButton*    m_textPadRightMinusBtn {nullptr};
 	// Session-wide toggle: checked → pad buttons adjust internal text distance
 	// (textToFrameDist*); unchecked (default) → external wrap boundary (wrapOffset*)
 	QCheckBox*      m_internalPadChk       {nullptr};
@@ -462,12 +442,28 @@ public:
 	QDoubleSpinBox* m_fillOpacitySpin      {nullptr};
 	QDoubleSpinBox* m_imgLineOpacitySpin   {nullptr};
 	class SuneerImageSizeBar* m_imageSizeBar {nullptr};
-	// Frame W/H + ratio lock, first on the bar as its own toolbar action so
-	// QToolBar's overflow (">>") takes the big row container before it.
+	// Frame W/H + ratio lock: the last widget of row 2, so showing or hiding
+	// it never moves another control (only the empty space right of it).
 	class SuneerFrameSizeBar* m_frameSizeBar {nullptr};
-	QAction* m_frameSizeAction {nullptr};
-	QAction* m_frameSizeSepAction {nullptr};
+	QWidget* m_frameSizeSep {nullptr};
+	// Rotation / flip / arrange, last on row 1; same visibility rule as the W/H bar.
+	class SuneerArrangeBar* m_arrangeBar {nullptr};
+	QWidget* m_arrangeSep {nullptr};
 	void updateFrameSizeVisibility();
+	QHBoxLayout* m_row1 {nullptr};
+	QHBoxLayout* m_row2 {nullptr};
+	void logToolbarWidth();
+
+	// "Show advanced text/image buttons" (toolbar right-click menu, default
+	// off): Underline, Underline words, Strike out, Sub/Superscript, Tracking,
+	// Baseline offset, Vertical scale, Fit image/frame. The widgets stay in
+	// their rows and in m_textWidgets/m_imageWidgets; the show*Widgets()
+	// passes just keep them hidden while the setting is off.
+	QSet<QWidget*> m_advancedWidgets;
+	bool m_showAdvanced {false};
+	QAction* m_showAdvancedAction {nullptr};
+	void setShowAdvanced(bool on);
+	void contextMenuEvent(QContextMenuEvent* ev) override;
 public:
 	//! Live size while a new frame is being drawn with the mouse (read-only), and its end.
 	void showDrawingFrameSize(double wPt, double hPt);
@@ -476,8 +472,6 @@ private:
 	QDoubleSpinBox* m_imgWidthSpin         {nullptr};
 	QDoubleSpinBox* m_imgHeightSpin        {nullptr};
 	QComboBox*      m_imgLineStyleCombo    {nullptr};
-	QToolButton*    m_imgLineStyleEditBtn  {nullptr};
-	QToolButton*    m_imgLineStyleAddBtn   {nullptr};
 	ColorButton*    m_lineColorBtn         {nullptr};
 	ColorButton*    m_lineMaskBtn          {nullptr};
 	QComboBox*      m_lineNamedStyleCombo  {nullptr};

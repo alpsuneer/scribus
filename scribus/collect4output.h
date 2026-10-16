@@ -53,6 +53,7 @@ class CollectForOutput : public QObject
 		/*! Collect icc profiles too. See the constructor */
 		bool m_withProfiles;
 		/*! User defined directory via GUI */
+	bool m_storeCopied { false };   // Suneer: "<doc>_photos" copied once
 		QString m_outputDirectory;
 		/*! Name of the moved file with the new directory path */
 		QString newName;

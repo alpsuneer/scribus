@@ -1401,6 +1401,12 @@ void PageItem_TextFrame::adjustParagraphEndings ()
 	}
 }
 
+static bool suneerLayoutDebug()
+{
+	static const bool on = qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG");
+	return on;
+}
+
 void PageItem_TextFrame::layout()
 {
 //	qDebug() << "==Layout==" << itemName() ;
@@ -1526,14 +1532,25 @@ void PageItem_TextFrame::layout()
 
 	if (itLen != 0)
 	{
-		// determine layout area — skip during drag for performance
-		if (m_Doc->view() && m_Doc->view()->m_canvas &&
-		    m_Doc->view()->m_canvas->isItemMoving())
+		// Suneer: an earlier guard skipped the whole layout while an item is
+		// being dragged and marked the frame valid - every frame that was
+		// still unlaid (lazy layout: frames are laid out when first drawn)
+		// and came into view through the drag's autoscroll was then drawn
+		// EMPTY until the next invalidation ("the page falls apart" while
+		// dragging). Frames that are already laid out never get here during
+		// a drag (nothing moves before the mouse is released), so the layout
+		// now runs; the Span + image-wrap loop the guard was meant for is
+		// caught by the re-entrancy limit below instead.
+		if (m_suneerLayoutDepth > 2)
 		{
-			// Skip full layout during drag — avoids infinite loop with Span+ImageWrap
+			if (suneerLayoutDebug())
+				fprintf(stderr, "LAYOUTDBG '%s': re-entered %d times - stopped\n", qPrintable(itemName().left(24)), m_suneerLayoutDepth);
 			invalid = false;
 			return;
 		}
+		struct DepthGuard { int& d; DepthGuard(int& x) : d(x) { ++d; } ~DepthGuard() { --d; } } depthGuard(m_suneerLayoutDepth);
+		if (suneerLayoutDebug() && m_Doc->view() && m_Doc->view()->m_canvas && m_Doc->view()->m_canvas->isItemMoving())
+			fprintf(stderr, "LAYOUTDBG '%s' laid out during a drag (%d chars)\n", qPrintable(itemName().left(24)), itemText.length());
 		m_availableRegion = calcAvailableRegion();
 		// spanSafeRegion: simple clip for span columns (avoids image wrap infinite loop)
 		spanSafeRegion = (m_availableRegion.rectCount() > 1) ? QRegion(this->Clip) : m_availableRegion;

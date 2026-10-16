@@ -408,6 +408,8 @@ public slots:
 	void suneerGetImage();
 	//! Extras > Embed All Images (also the page context menu)
 	void suneerEmbedAllImages();
+	void suneerRedownloadMissingPhotos();
+	void suneerRemoveUnusedPhotos();
 	//! View > Image Frames > Show Linked Image Badges
 	void suneerToggleImageLinkBadges();
 	//! Extras > Warn About Linked Images in This Document
@@ -535,6 +537,8 @@ public slots:
     void slotHelpAboutQt();
 	void slotHelpActionSearch();
 	void slotHelpCheckUpdates();
+	//! Help > Reset Preferences: back up the prefs folder, restart on defaults.
+	void slotHelpResetPreferences();
 	void slotRaiseOnlineHelp();
 	void slotOnlineHelp(const QString& jumpToSection = QString(), const QString& jumpToFile = QString());
 	void slotOnlineHelpClosed();

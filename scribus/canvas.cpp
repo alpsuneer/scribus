@@ -25,6 +25,7 @@
 
 #include "appmodes.h"
 #include "canvas.h"
+#include <QElapsedTimer>
 #include "canvasmode.h"
 #include "framelinkrouter.h"
 #include "pageitem_textframe.h"
@@ -39,6 +40,7 @@
 #include "ui/hruler.h"
 #include "ui/vruler.h"
 #include "ui/suneerduplicatenewsdialog.h"
+#include "ui/suneer_obit_model.h"
 #include "util_math.h"
 #include "units.h"
 
@@ -842,12 +844,18 @@ void Canvas::fillBuffer(QPaintDevice* buffer, QPoint bufferOrigin, QRect clipRec
   - controls (selection, mode specific mrks, guides if above)
   For export we only need the contents.
 */
+static const bool suneerDragDebug = qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG");
+
 void Canvas::paintEvent ( QPaintEvent * p )
 {
 //	qDebug()<<"Canvas::paintEvent"<<p->rect()<<m_viewMode.forceRedraw<<m_viewMode.operItemSelecting;
 // 	printBacktrace(62);
 	if (m_doc->isLoading() || !m_doc->DoDrawing)
 		return;
+	QElapsedTimer dbgT;
+	const bool dbgForce = m_viewMode.forceRedraw;
+	if (suneerDragDebug)
+		dbgT.start();
 // #define SHOW_ME_WHAT_YOU_GET_IN_D_CANVA
 #ifdef SHOW_ME_WHAT_YOU_GET_IN_D_CANVA
 	QTime t;
@@ -980,10 +988,17 @@ void Canvas::paintEvent ( QPaintEvent * p )
 #endif
 	// Suneer: Duplicate News Checker marks. Drawn on the widget over the page
 	// buffer, so they never reach print, PDF, export or page thumbnails.
+	const qint64 dbgT1 = suneerDragDebug ? dbgT.elapsed() : 0;
 	SuneerDupHighlights::paint(&qp, this, m_doc);
+	suneerPaintObitFlags(&qp, this, m_doc);
+	const qint64 dbgT2 = suneerDragDebug ? dbgT.elapsed() : 0;
 	// does mode specific rendering, currently selection in legacymode and nodes in nodeedit
 	m_view->m_canvasMode->drawControls(&qp);
 	m_view->m_canvasMode->drawSnapLine(&qp);
+	if (suneerDragDebug)
+		fprintf(stderr, "DRAGDBG paint rect=%dx%d+%d+%d mode=%d force=%d moving=%d buffer=%lld ms dup=%lld ms controls=%lld ms total=%lld ms\n",
+		        p->rect().width(), p->rect().height(), p->rect().x(), p->rect().y(), int(m_renderMode), int(dbgForce), int(m_viewMode.operItemMoving),
+		        (long long)dbgT1, (long long)(dbgT2 - dbgT1), (long long)(dbgT.elapsed() - dbgT2), (long long)dbgT.elapsed());
 #ifdef SHOW_ME_WHAT_YOU_GET_IN_D_CANVA
 	t6 = t.elapsed();
 	qDebug()<<dmode<<t1<<t2<<t3<<t4<<t5<<t6<<"-" <<t1+t2+t3+t4+t5+t6;

@@ -1,6 +1,8 @@
 #ifndef SUNEER_NEWS_PANEL_H
 #define SUNEER_NEWS_PANEL_H
 
+#include <QPointer>
+#include "suneerspacing.h"
 #include <functional>
 
 #include <QDockWidget>
@@ -60,6 +62,10 @@ class SuneerNewsPanel : public QDockWidget, public UndoObject
 {
 	Q_OBJECT
 public:
+	//! Fetch the Workflow originals of \a items again (force: cache bypassed, old file kept as *_prev). Returns the count done.
+	int redownloadPhotos(const QList<PageItem*>& items, bool force, QString* report = nullptr);
+	//! Extra lines for the Details log / tooltip (no-photo list, checks, server errors).
+	void setStatusDetails(const QString& text);
 	explicit SuneerNewsPanel(ScribusMainWindow* parent);
 	void setDocument(ScribusDoc* doc);
 
@@ -108,7 +114,18 @@ private:
 	QString probeUrl(const QString& url);
 	//! http(s) URL with a host; *why says what is wrong.
 	static bool validServerUrl(const QString& url, QString* why);
-	QLabel*      m_statusLabel   {nullptr};
+	QLabel*      m_statusLabel   {nullptr};   // ONE short line (full text in the tooltip and in Details)
+	class QProgressBar* m_statusBar {nullptr};   // shown while fetching / downloading / processing / placing
+	class QToolButton*  m_statusDetailsBtn {nullptr};
+	QString      m_statusFull;                 // the current full message
+	QStringList  m_statusLog;                  // every message since start, with time, for the Details dialog
+	//! Short status line; the full text goes to the tooltip and the Details log. failed: red.
+	void setStatus(const QString& text, bool failed = false);
+	QString statusText() const { return m_statusFull; }
+	//! Progress bar with a short step text ("Photos 12/26"); total 0 = busy.
+	void statusProgress(const QString& step, int done, int total);
+	void statusProgressDone();
+	void onStatusDetails();
 	QLabel*      m_userLabel     {nullptr};
 	QLabel*      m_lockLabel     {nullptr};
 	QPushButton* m_loginBtn      {nullptr};
@@ -334,7 +351,8 @@ private:
 	void showPlacedArea(const QRectF& stackRect);
 	//! Downloads into the per-user cache. Empty on failure; \a why then says
 	//! what happened ("HTTP 403 …", "cache not writable"), with no secrets.
-	QString downloadImage(const QString& fileUrl, QString* why = nullptr);
+	QString downloadImage(const QString& fileUrl, QString* why = nullptr, bool force = false);
+	QHash<QString, QString> m_obitPhotoUrl;      // story id -> Workflow file URL
 	//! The story's pictures, whatever the reply shape: newsMedia[].media,
 	//! newsMedia[] flat, mediaFiles[], media[], images[], the edition clone's
 	//! newsMedia, obitHeadshotUrl / imageUrl. Every entry comes back as
@@ -382,6 +400,21 @@ private:
 	QString obitRuninStyle(const SuneerObitModel& model);
 	//! Re-applies the current photo settings to the selected placed obit photos.
 	void onObitReprocess();
+	//! "Spacing...": Faircode Layout spacing dialog with live preview on the current page.
+	void onSpacing();
+	//! The spacing model of what is being placed ("obituary" while the Obituary model places, else "normal").
+	QString spacingModel() const { return m_placingModel.isEmpty() ? QStringLiteral("normal") : m_placingModel; }
+	//! The model the current page was placed with (obituary modules on it -> "obituary").
+	QString pageSpacingModel() const;
+	struct SpacingSnap { QPointer<PageItem> item; double x, y; double wrap[4]; double dist[4]; double colGap; };
+	QList<SpacingSnap> m_spacingSnap;
+	void spacingSnapshot();
+	void spacingRestore();
+	//! Re-space the placed modules of the current page (final: one undo step + separator rules). Returns the modules touched.
+	int applySpacingToPage(const SuneerSpacing::Values& v, bool final);
+	//! Separator rules between stacked modules of the current page (deleted and drawn again; none when the width is 0).
+	void respaceRules(const SuneerSpacing::Values& v);
+	QString m_placingModel;
 	//! "Re-pack page": obit modules up in their columns, then the gap / empty-area check. Returns the report lines.
 	QStringList obitRepackPage(int* moved = nullptr, bool* changed = nullptr);
 	void onObitRepack();

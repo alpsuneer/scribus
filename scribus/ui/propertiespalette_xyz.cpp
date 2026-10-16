@@ -150,6 +150,7 @@ void PropertiesPalette_XYZ::setDoc(ScribusDoc *d)
 	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));
 	connect(m_doc             , SIGNAL(docChanged())      , this, SLOT(handleSelectionChanged()));
 	emit sizeDisplayChanged();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unsetDoc()
@@ -184,6 +185,7 @@ void PropertiesPalette_XYZ::unsetDoc()
 	basePointWidget->setAngle(0);
 	setEnabled(false);
 	emit sizeDisplayChanged();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unsetItem()
@@ -380,6 +382,7 @@ void PropertiesPalette_XYZ::setCurrentItem(PageItem *item)
 		setEnabled(true);
 	}
 	updateSpinBoxConstants();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::handleAppModeChanged(int oldMode, int mode)
@@ -547,6 +550,7 @@ void PropertiesPalette_XYZ::handleSelectionChanged()
 	}
 	updateGeometry();
 	emit sizeDisplayChanged();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::unitChange()
@@ -563,6 +567,7 @@ void PropertiesPalette_XYZ::unitChange()
 	heightSpin->setNewUnit( m_unitIndex );
 	m_haveItem = tmp;
 	emit sizeDisplayChanged();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::localeChange()
@@ -712,6 +717,7 @@ void PropertiesPalette_XYZ::showWH(double x, double y)
 	widthSpin->blockSignals(sigBlocked1);
 	heightSpin->blockSignals(sigBlocked2);
 	emit sizeDisplayChanged();
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::showRotation(double r)
@@ -724,6 +730,7 @@ void PropertiesPalette_XYZ::showRotation(double r)
 	bool sigBlocked = rotationSpin->blockSignals(true);
 	rotationSpin->setValue(fabs(rr));
 	rotationSpin->blockSignals(sigBlocked);
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::handleNewX()
@@ -1473,6 +1480,7 @@ void PropertiesPalette_XYZ::iconSetChange()
 	a3.addPixmap(im.loadPixmap("frame-no-resize"), QIcon::Normal, QIcon::On);
 	a3.addPixmap(im.loadPixmap("frame-resize"), QIcon::Normal, QIcon::Off);
 	noResize->setIcon(a3);
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::languageChange()
@@ -1520,6 +1528,7 @@ void PropertiesPalette_XYZ::showLocked(bool isLocked)
 	rotationSpin->setPalette(pal);
 
 	doLock->setChecked(isLocked);
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::showSizeLocked(bool isSizeLocked)
@@ -1542,11 +1551,13 @@ void PropertiesPalette_XYZ::showSizeLocked(bool isSizeLocked)
 void PropertiesPalette_XYZ::showFlippedH(bool isFlippedH)
 {
 	flipH->setChecked(isFlippedH);
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::showFlippedV(bool isFlippedV)
 {
 	flipV->setChecked(isFlippedV);
+	emit arrangeDisplayChanged();
 }
 
 void PropertiesPalette_XYZ::handleGrouping()

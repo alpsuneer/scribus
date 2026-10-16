@@ -1205,3 +1205,42 @@ scribus
 ### 70. Cursor — crop/BG/DC-ന് ശേഷം resize/move cursor പോകുന്ന bug
 - DC contour mode canvas widget-ൽ തന്നെ cursor set ചെയ്തിരുന്നത് (Arrow) പിന്നീട് എല്ലാ resize/move cursor-ഉം മറയ്ക്കുമായിരുന്നു — ശരിയാക്കി. Override cursor-കൾ RAII guard-ൽ;
   BG/crop/feather/resample/DC കഴിഞ്ഞാൽ cursor ഉടൻ ശരിയാകും; stuck override ഉണ്ടെങ്കിൽ clear. Debug: `SCRIBUS_DEBUG_CURSOR=1 scribus`. Commit `cb2c6e4`.
+
+### 71. Toolbar — control bar / arrange bar / image size bar re-pack, auto-fit, resize
+- Control bar 1366 px-ൽ ഒതുങ്ങും (text / editing / image states). Arrange bar (`suneerarrangebar`), frame size bar, image size bar പുതുക്കി; style select,
+  Properties XYZ, resize gesture, page item auto-fit മാറ്റങ്ങൾ.
+- Image row-ലെ "Edit current selected style" / "Add new line style" ബട്ടണുകൾ നീക്കി (Edit → Styles, Properties palette-ൽ ഉണ്ട്).
+- Gap + / − (all sides): ബട്ടൺ size മാറ്റാതെ വലിയ bold glyph (SVG, theme നിറം, disabled മങ്ങിയത്, HiDPI crisp).
+- 8 per-side gap ബട്ടണുകൾക്ക് പകരം **Gap sides ▾** popup (`suneergappopup`): frame diagram, ഓരോ side-നും − / value (mm, Enter) / +,
+  Link all sides, Step (text 0.5 mm, image 1 mm, ഓർക്കും), Reset; പഴയ slots, ഒരു click / typed value = ഒരു undo. Toolbar row 2: 167 px കുറഞ്ഞു.
+
+### 72. Drag redraw + News Browser status bar
+- Drag ചെയ്യുമ്പോൾ text frame layout ഒഴിവാക്കിയിരുന്നത് മാറ്റി (re-entrancy limit മാത്രം); obit flags canvas overlay; News Browser-ൽ status, progress bar,
+  Details… dialog. Debug: `SUNEER_DRAG_DEBUG=1`.
+
+### 73. Edit Photo, Photo background colour, photo store
+- **Item › Image › Edit Photo…** (`suneerphotoedit`, dialog): ORIGINAL picture-ൽ non-destructive crop / rotate / flip / auto face / background remove
+  (crop-region rembg, cache), lasso, smooth brushes, refine edge, Restore/Remove selection, Smart restore, Protect/Exclude mask, view modes (M),
+  Background: Auto (AI) / Manual / None, feather 0–20 px. Sidecar `<edited>.json`; reopen → അതേ state.
+- **Photo Background Colour…** (BGc): തിരഞ്ഞെടുത്ത cut-out photos-ന് പിന്നിൽ ഒരു നിറം, live preview, screen picker.
+- **Resize Image File to Frame Resolution…**
+- **Photo store**: `<sla>_photos/original|edited`, relative links, News photos embed ചെയ്യില്ല; Save As folder copy; `_images` migrate;
+  open-ൽ missing photos ചോദ്യം; Extras › Re-download Missing Photos / Remove Unused Photos…; Collect for Output folder copy.
+- Obituary: background removal policy auto / ask / manual (Settings), "M" badge, "check BG" flag; re-process manual / none തൊടില്ല.
+
+### 74. Layout spacing — ഒരിടത്ത്
+- `<prefs>/layout-spacing.json` (`suneerspacing`): module gap V/H, photo–text, wrap pad, caption gap, caption–text, headline–body, inset,
+  column gap, separator rule (none / 0.25 / 0.5 pt) + colour; model override (Normal, Obituary 2.3 / 3.0, Auto Layout).
+- Preferences → **Faircode Layout: Spacing**, News Browser-ൽ ⇕ ബട്ടൺ: live preview, Apply to this page (ഒറ്റ undo), Cancel restore, Export / Import.
+- Normal / Obituary placement, re-pack, gap check (module gap + 1.7 mm) എല്ലാം ഈ values ഉപയോഗിക്കുന്നു.
+
+### 75. "File → New-ൽ page കാണുന്നില്ല" — prefs self-repair
+- കാരണം: `prefs172.xml`-ലെ palette layout (`ads_dockstate`)-ൽ document area ഇല്ലാതായത്. Scribus തുറന്നിരിക്കെ logout / shutdown ചെയ്യുമ്പോൾ window
+  രണ്ടാമതും close ആയി ഒഴിഞ്ഞ layout save ആയിരുന്നു. ഇനി രണ്ടാമത്തെ close ഒന്നും save ചെയ്യില്ല; document area ഇല്ലാത്ത layout save / restore ചെയ്യില്ല
+  (default layout).
+- Startup repair (update കഴിഞ്ഞ് ആദ്യ start-ൽ തനിയെ): duplicate PageSets നീക്കും, കേടായ layout ഒഴിവാക്കും, undo history 0 → 100 (user 0 വെച്ചതല്ലെങ്കിൽ),
+  invalid page layout → Single Page, grid / scale / pasteboard values. ഉടനെ save ചെയ്യും; `~/.config/scribus/prefs-repair.log`-ൽ ഒരു വരി.
+- Preferences → OK ഇനി values മാറ്റില്ല (20 → 20.001, PolygonFactor 0.502, markLength 20.0013 ഇല്ല); PDF JPEG compression ഇനി restart-ൽ Automatic ആകില്ല;
+  UseDocBleeds, show-splash ശരിയായി ഓർക്കും.
+- **Help → Reset Preferences…**: `~/.config/scribus` → `scribus.bak-<date>`, defaults-ൽ Scribus വീണ്ടും തുടങ്ങും.
+- Test: `tests/suneer/prefs_roundtrip.sh <profile> 20` — 20 തവണ load + Preferences OK + save, warm-up-ന് ശേഷം files byte for byte ഒന്ന്.
