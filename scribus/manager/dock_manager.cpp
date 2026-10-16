@@ -173,11 +173,44 @@ CDockAreaWidget *DockManager::addDockFromPlugin(CDockWidget *dock, bool closed)
 	return a;
 }
 
+static QByteArray suneerDefaultWorkspaceState();
+
 void DockManager::restoreWorkspaceFromPrefs()
 {
 	QByteArray ba = PrefsManager::instance().appPrefs.uiPrefs.adsDockState;
 
-	if(ba.isEmpty())
+	// A saved layout without the document area restores a window with no page
+	// (an office PC, 2026-10-15); PrefsManager drops such a state on
+	// load, this catches one set later.
+	if (!ba.isEmpty() && !PrefsManager::dockStateHasCentralWidget(ba))
+	{
+		PrefsManager::instance().logRepair("palette layout without the document area ignored (default layout used)");
+		ba.clear();
+	}
+	if (ba.isEmpty())
+		ba = suneerDefaultWorkspaceState();
+	this->restoreState(ba);
+	ensureCentralWidget();
+}
+
+bool DockManager::centralWidgetShown() const
+{
+	return dockCenter && dockCenter->dockAreaWidget() && !dockCenter->isClosed();
+}
+
+bool DockManager::ensureCentralWidget()
+{
+	if (centralWidgetShown())
+		return false;
+	PrefsManager::instance().logRepair("document area was not in the palette layout; default layout restored");
+	this->restoreState(suneerDefaultWorkspaceState());
+	if (!centralWidgetShown() && dockCenter)
+		dockCenter->toggleView(true);
+	return true;
+}
+
+static QByteArray suneerDefaultWorkspaceState()
+{
 	{
 		// Fresh install (no saved prefs): apply the Faircode default layout —
 		// Paragraph Styles docked front-tab with Content Properties (366px),
@@ -194,14 +227,20 @@ void DockManager::restoreWorkspaceFromPrefs()
 			"bmNumGGFYbtHSG0tsTpv0oG/r7AX6/4tAj1rhmC0GcLZMqTPdD4f7YtUcLxjBlxaI/l0AEOBRu/Q"
 			"WIHVCC84XLqCxaSRcMSkVTsGxieCY3mPukRr6iQIgS+BB5BnEJDyafNun7ewCP9s5613AcvJaT2D"
 			"YPm/8ecPIfwze+S39Vyddc08dBfi926ke2j+C9M6efUbYVLTgw==";
-		ba = QByteArray::fromBase64(defaultWorkspaceState);
+		return QByteArray::fromBase64(defaultWorkspaceState);
 	}
-
-	this->restoreState(ba);
 }
 
 void DockManager::saveWorkspaceToPrefs()
 {
+	// Never store a layout without the document area: restored, it shows no
+	// page. It happened when the window was closed a second time after every
+	// dock had already been removed (logout / shutdown with Scribus open).
+	if (!centralWidgetShown())
+	{
+		qWarning("DockManager: palette layout not saved (the document area is not in it)");
+		return;
+	}
 	PrefsManager::instance().appPrefs.uiPrefs.adsDockState = this->saveState();
 }
 

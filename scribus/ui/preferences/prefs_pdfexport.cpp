@@ -18,6 +18,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusview.h"
 #include "ui/createrange.h"
 #include "ui/preferences/prefs_pdfexport.h"
+#include "ui/preferences/suneer_keptvalue.h"
 #include "ui/scrspinbox.h"
 #include "units.h"
 #include "util.h"
@@ -659,9 +660,12 @@ void Prefs_PDFExport::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefsData->pdfPrefs.registrationMarks = printRegistrationMarksCheckBox->isChecked();
 	prefsData->pdfPrefs.colorMarks = printColorBarsCheckBox->isChecked();
 	prefsData->pdfPrefs.docInfoMarks = printPageInfoCheckBox->isChecked();
-	prefsData->pdfPrefs.markLength   = markLengthSpinBox->value() / unitRatio;
-	prefsData->pdfPrefs.markOffset   = markOffsetSpinBox->value() / unitRatio;
-	prefsData->pdfPrefs.useDocBleeds = useDocumentBleedsCheckBox->isChecked();
+	prefsData->pdfPrefs.markLength   = suneerKeptValue(markLengthSpinBox, prefsData->pdfPrefs.markLength, unitRatio);
+	prefsData->pdfPrefs.markOffset   = suneerKeptValue(markOffsetSpinBox, prefsData->pdfPrefs.markOffset, unitRatio);
+	// The box is only shown when exporting a document; hidden it is unchecked
+	// and used to overwrite the stored choice with false.
+	if (m_doc != nullptr && exportingPDF)
+		prefsData->pdfPrefs.useDocBleeds = useDocumentBleedsCheckBox->isChecked();
 	prefsData->pdfPrefs.bleeds = bleedsWidget->margins();
 	prefsData->pdfPrefs.doClip = clipToPrinterMarginsCheckBox->isChecked();
 	if (useEncryptionCheckBox->isChecked())

@@ -10,9 +10,11 @@ for which a new license (GPL+exception) is in place.
 #include <QColorDialog>
 #include <QScreen>
 #include <QPainter>
+#include <QSignalBlocker>
 
 #include "iconmanager.h"
 #include "prefs_display.h"
+#include "suneer_keptvalue.h"
 #include "prefsstructs.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
@@ -182,7 +184,11 @@ void Prefs_Display::restoreDefaults(struct ApplicationPrefs *prefsData)
 
 	displayScale = prefsData->displayPrefs.displayScale;
 
-	adjustDisplaySlider->setValue(qRound(100 * displayScale) - 150);
+	{
+		// the slider's slot rounds displayScale to 1/100: only a user move may do that
+		QSignalBlocker blockSlider(adjustDisplaySlider);
+		adjustDisplaySlider->setValue(qRound(100 * displayScale) - 150);
+	}
 	displayDPI->setText(QString::number(qRound(displayScale * 72.0))+ tr(" dpi"));
 	rulerUnitComboBox->clear();
 	rulerUnitComboBox->addItems(unitGetTextUnitList());
@@ -414,12 +420,13 @@ void Prefs_Display::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefsData->displayPrefs.showVerifierWarningsOnCanvas = showVerifierWarningsOnCanvasCheckBox->isChecked();
 
 	double unitRatio = unitGetRatioFromIndex(prefsData->docSetupPrefs.docUnitIndex);
-	prefsData->displayPrefs.scratch.setLeft(scratchSpaceLeftSpinBox->value() / unitRatio);
-	prefsData->displayPrefs.scratch.setRight(scratchSpaceRightSpinBox->value() / unitRatio);
-	prefsData->displayPrefs.scratch.setTop(scratchSpaceTopSpinBox->value() / unitRatio);
-	prefsData->displayPrefs.scratch.setBottom(scratchSpaceBottomSpinBox->value() / unitRatio);
-	prefsData->displayPrefs.pageGapHorizontal = pageGapHorizontalSpinBox->value() / unitRatio;
-	prefsData->displayPrefs.pageGapVertical = pageGapVerticalSpinBox->value() / unitRatio;
+	// suneerKeptValue: an untouched box keeps the exact stored value (no 20 -> 20.001 drift)
+	prefsData->displayPrefs.scratch.setLeft(suneerKeptValue(scratchSpaceLeftSpinBox, prefsData->displayPrefs.scratch.left(), unitRatio));
+	prefsData->displayPrefs.scratch.setRight(suneerKeptValue(scratchSpaceRightSpinBox, prefsData->displayPrefs.scratch.right(), unitRatio));
+	prefsData->displayPrefs.scratch.setTop(suneerKeptValue(scratchSpaceTopSpinBox, prefsData->displayPrefs.scratch.top(), unitRatio));
+	prefsData->displayPrefs.scratch.setBottom(suneerKeptValue(scratchSpaceBottomSpinBox, prefsData->displayPrefs.scratch.bottom(), unitRatio));
+	prefsData->displayPrefs.pageGapHorizontal = suneerKeptValue(pageGapHorizontalSpinBox, prefsData->displayPrefs.pageGapHorizontal, unitRatio);
+	prefsData->displayPrefs.pageGapVertical = suneerKeptValue(pageGapVerticalSpinBox, prefsData->displayPrefs.pageGapVertical, unitRatio);
 
 	prefsData->displayPrefs.paperColor = colorPaper;
 	prefsData->displayPrefs.scratchColor = colorScratch;

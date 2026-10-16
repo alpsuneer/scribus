@@ -9,6 +9,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsstructs.h"
 #include "ui/scrspinbox.h"
 #include "ui/preferences/prefs_operatortools.h"
+#include "ui/preferences/suneer_keptvalue.h"
 #include "units.h"
 
 #include "scribusdoc.h"
@@ -69,8 +70,8 @@ void Prefs_OperatorTools::saveGuiToPrefs(struct ApplicationPrefs *prefsData) con
 	prefsData->opToolPrefs.magMax = zoomMaximumSpinBox->value();
 	prefsData->opToolPrefs.magStep = zoomSteppingSpinBox->value();
 	double unitRatio = unitGetRatioFromIndex(prefsData->docSetupPrefs.docUnitIndex);
-	prefsData->opToolPrefs.dispX = itemDuplicateXDispSpinBox->value() / unitRatio;
-	prefsData->opToolPrefs.dispY = itemDuplicateYDispSpinBox->value() / unitRatio;
+	prefsData->opToolPrefs.dispX = suneerKeptValue(itemDuplicateXDispSpinBox, prefsData->opToolPrefs.dispX, unitRatio);
+	prefsData->opToolPrefs.dispY = suneerKeptValue(itemDuplicateYDispSpinBox, prefsData->opToolPrefs.dispY, unitRatio);
 	prefsData->opToolPrefs.constrain = rotationConstraintSpinBox->value();
 }
 

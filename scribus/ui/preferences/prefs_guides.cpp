@@ -13,6 +13,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "ui/scrspinbox.h"
 #include "ui/preferences/prefs_guides.h"
+#include "ui/preferences/suneer_keptvalue.h"
 #include "units.h"
 
 Prefs_Guides::Prefs_Guides(QWidget* parent, ScribusDoc* doc)
@@ -193,8 +194,8 @@ void Prefs_Guides::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefsData->guidesPrefs.gridShown = visibilityGridCheckBox->isChecked();
 	prefsData->guidesPrefs.baselineGridShown = visibilityBaselineGridCheckBox->isChecked();
 	double unitRatio = unitGetRatioFromIndex(prefsData->docSetupPrefs.docUnitIndex);
-	prefsData->guidesPrefs.majorGridSpacing = majorGridSpacingSpinBox->value() / unitRatio;
-	prefsData->guidesPrefs.minorGridSpacing = minorGridSpacingSpinBox->value() / unitRatio;
+	prefsData->guidesPrefs.majorGridSpacing = suneerKeptValue(majorGridSpacingSpinBox, prefsData->guidesPrefs.majorGridSpacing, unitRatio);
+	prefsData->guidesPrefs.minorGridSpacing = suneerKeptValue(minorGridSpacingSpinBox, prefsData->guidesPrefs.minorGridSpacing, unitRatio);
 	prefsData->guidesPrefs.valueBaselineGrid = baselineGridSpacingSpinBox->value();
 	prefsData->guidesPrefs.offsetBaselineGrid = baselineGridOffsetSpinBox->value();
 	prefsData->guidesPrefs.guideColor = colorGuides;

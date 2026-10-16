@@ -87,6 +87,12 @@ public:
 	\retval QString Location of the user's preferences
 	*/
 	void setupPreferencesLocation();
+	//! Moves the prefs folder to <folder>.bak-<date> when requestReset() was called.
+	void applyResetRequest();
+	//! historylength 0 that the user did not choose, or negative: 100.
+	void sanitizeUndoLength();
+	//! Writes what the repair changed (one line) to stderr and prefs-repair.log.
+	void writeRepairNotes();
 	/*!
 	\author Craig Bradney
 	\date Sun 09 Jan 2005
@@ -194,6 +200,21 @@ public:
 
 	ApplicationPrefs* applicationPrefs();
 	void setNewPrefs(const ApplicationPrefs& newPrefs);
+
+	// ---- Faircode: profile self-repair (an office PC, 2026-10-15) ----
+	//! The page sets with every name once (first one kept, user sets included).
+	static QList<PageSet> dedupePageSets(const QList<PageSet>& sets, int* removed = nullptr);
+	//! False for a saved palette layout (CDockManager::saveState()) whose docked
+	//! container has no open document area: restoring it shows no page.
+	static bool dockStateHasCentralWidget(const QByteArray& state);
+	//! <prefs>/prefs-repair.log: one line per startup that changed something.
+	QString repairLogPath() const;
+	//! Writes \a note now (stderr and prefs-repair.log), for repairs made after startup.
+	void logRepair(const QString& note);
+	//! Help > Reset Preferences: mark the folder to be moved aside at the next start.
+	void requestReset();
+	void cancelResetRequest();
+	QString resetRequestPath() const;
 	PrefsFile* applicationPrefsFile();
 
 	//! \brief Return the last error reported by a PrefsManager method

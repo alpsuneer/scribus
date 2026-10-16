@@ -204,11 +204,13 @@ void Prefs_DocumentSetup::restoreDefaults(struct ApplicationPrefs *prefsData)
 	changeAutoDir->setEnabled(!prefsData->docSetupPrefs.AutoSaveLocation);
 	showAutosaveClockOnCanvasCheckBox->setChecked(prefsData->displayPrefs.showAutosaveClockOnCanvas);
 	undoCheckBox->setChecked(PrefsManager::instance().prefsFile->getContext("undo")->getBool("enabled", true));
-	int undoLength = UndoManager::instance()->getHistoryLength();
-	if (undoLength == -1)
+	// The stored length, not the current stack's: with no document open the
+	// stack is unsized (0 = unlimited), and OK then wrote 0 into the prefs.
+	int undoLength = PrefsManager::instance().prefsFile->getContext("undo")->getInt("historylength", 100);
+	if (UndoManager::instance()->getHistoryLength() == -1)
 		undoLengthSpinBox->setEnabled(false);
-	else
-		undoLengthSpinBox->setValue(undoLength);
+	undoLengthSpinBox->setValue(undoLength);
+	undoLengthSpinBox->setProperty("suneerLoadedValue", undoLength);
 	unitChange();
 }
 
@@ -238,8 +240,15 @@ void Prefs_DocumentSetup::saveGuiToPrefs(struct ApplicationPrefs *prefsData) con
 	if (!undoActive)
 		UndoManager::instance()->clearStack();
 	UndoManager::instance()->setUndoEnabled(undoActive);
-	UndoManager::instance()->setAllHistoryLengths(undoLengthSpinBox->value());
 	static PrefsContext *undoPrefs = PrefsManager::instance().prefsFile->getContext("undo");
+	// Only a value the user changed is written; a 0 typed here (unlimited) is
+	// marked so the startup repair keeps it.
+	const int newUndoLength = undoLengthSpinBox->value();
+	if (undoLengthSpinBox->isEnabled() && newUndoLength != undoLengthSpinBox->property("suneerLoadedValue").toInt())
+	{
+		UndoManager::instance()->setAllHistoryLengths(newUndoLength);
+		undoPrefs->set("historylength_user", newUndoLength == 0);
+	}
 	undoPrefs->set("enabled", undoActive);
 }
 

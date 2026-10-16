@@ -121,6 +121,9 @@ void PolygonWidget::restoreDefaults(const ItemToolPrefs *prefsData)
 	innerRotationSpinBox->setValue(static_cast<int>(prefsData->polyInnerRot));
 	innerRotationSlider->setValue(static_cast<int>(prefsData->polyInnerRot));
 	updatePreview();
+	// updatePreview() recomputes PFactor from the whole-percent box (0.500 ->
+	// 0.502); keep the stored factor until the user moves the factor control.
+	PFactor = prefsData->polyFactor;
 	connectSignals(true);
 }
 

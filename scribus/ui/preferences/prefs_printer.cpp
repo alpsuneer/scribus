@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include "prefsstructs.h"
 #include "ui/newmarginwidget.h"
 #include "ui/preferences/prefs_printer.h"
+#include "ui/preferences/suneer_keptvalue.h"
 #include "units.h"
 #include "util_printer.h"
 
@@ -136,8 +137,8 @@ void Prefs_Printer::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefs->set("BleedBottom", bleeds.bottom());
 	prefs->set("BleedRight", bleeds.right());
 	prefs->set("BleedLeft", bleeds.left());
-	prefs->set("markLength", markLengthSpinBox->value() / unitRatio);
-	prefs->set("markOffset", markOffsetSpinBox->value() / unitRatio);
+	prefs->set("markLength", suneerKeptValue(markLengthSpinBox, prefs->getDouble("markLength", 20.0), unitRatio));
+	prefs->set("markOffset", suneerKeptValue(markOffsetSpinBox, prefs->getDouble("markOffset", 0.0), unitRatio));
 	prefs->set("cropMarks", cropMarksCheckBox->isChecked());
 	prefs->set("bleedMarks", bleedMarksCheckBox->isChecked());
 	prefs->set("registrationMarks", registrationMarksCheckBox->isChecked());

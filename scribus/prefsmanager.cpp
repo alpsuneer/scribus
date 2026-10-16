@@ -18,18 +18,24 @@ for which a new license (GPL+exception) is in place.
 *																		 *
 ***************************************************************************/
 
+#include <cmath>
+
 #include <QColor>
 #include <QDebug>
+#include <QDateTime>
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
+#include <QFileInfo>
 #include <QList>
 #include <QMessageBox>
 #include <QProcess>
 #include <QScreen>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QStyleFactory>
+#include <QSysInfo>
 #include <QTransform>
 #include <QWindow>
 
@@ -67,6 +73,9 @@ for which a new license (GPL+exception) is in place.
 #include "ui/modetoolbar.h"
 #include "ui/preferences/prefs_keyboardshortcuts.h"
 
+//! What the startup repair changed; written as one line to prefs-repair.log.
+static QStringList s_prefsRepairNotes;
+
 extern bool emergencyActivated;
 
 PrefsManager::PrefsManager(QObject *parent) : QObject(parent)
@@ -95,6 +104,141 @@ ApplicationPrefs* PrefsManager::applicationPrefs()
 	return &appPrefs;
 }
 
+QList<PageSet> PrefsManager::dedupePageSets(const QList<PageSet>& sets, int* removed)
+{
+	QList<PageSet> unique;
+	QSet<QString> names;
+	for (const PageSet& set : sets)
+	{
+		if (names.contains(set.Name))
+			continue;
+		names.insert(set.Name);
+		unique.append(set);
+	}
+	if (removed)
+		*removed = sets.count() - unique.count();
+	return unique;
+}
+
+bool PrefsManager::dockStateHasCentralWidget(const QByteArray& state)
+{
+	// CDockManager::saveState(): qCompress()ed XML (a 4-byte length, then zlib).
+	// The document area must be a widget of the docked (non-floating) container.
+	if (state.isEmpty())
+		return true;
+	const QByteArray xml = qUncompress(state);
+	const QByteArray data = xml.isEmpty() ? state : xml;
+	QDomDocument dom;
+	if (!dom.setContent(data))
+		return false;
+	const QDomElement root = dom.documentElement();
+	const QString central = root.attribute("CentralWidget");
+	if (central.isEmpty())
+		return true;   // a layout without a central widget is not ours to judge
+	for (QDomElement c = root.firstChildElement("Container"); !c.isNull(); c = c.nextSiblingElement("Container"))
+	{
+		if (c.attribute("Floating") == "1")
+			continue;
+		const QDomNodeList widgets = c.elementsByTagName("Widget");
+		for (int i = 0; i < widgets.count(); ++i)
+		{
+			const QDomElement w = widgets.at(i).toElement();
+			if (w.attribute("Name") == central && w.attribute("Closed", "0") != "1")
+				return true;
+		}
+	}
+	return false;
+}
+
+void PrefsManager::sanitizeUndoLength()
+{
+	// 0 = unlimited. Upstream wrote 0 whenever Preferences was closed with OK
+	// and no document open (the dialog read the size of an unsized stack).
+	// Keep 0 only when the user typed it ("historylength_user" set by the
+	// dialog); anything else invalid becomes the default 100.
+	PrefsContext* undoContext = prefsFile ? prefsFile->getContext("undo") : nullptr;
+	if (!undoContext)
+		return;
+	const int length = undoContext->getInt("historylength", 100);
+	const bool userSet = undoContext->getBool("historylength_user", false);
+	if (length < 0 || (length == 0 && !userSet))
+	{
+		undoContext->set("historylength", 100);
+		s_prefsRepairNotes << QString("undo history length %1 reset to 100").arg(length);
+	}
+}
+
+QString PrefsManager::repairLogPath() const
+{
+	return m_prefsLocation + "prefs-repair.log";
+}
+
+void PrefsManager::writeRepairNotes()
+{
+	if (s_prefsRepairNotes.isEmpty())
+		return;
+	const QString line = QString("%1 %2 Scribus prefs repaired: %3")
+		.arg(QDateTime::currentDateTime().toString(Qt::ISODate), QSysInfo::machineHostName(), s_prefsRepairNotes.join("; "));
+	qWarning("%s", line.toLocal8Bit().constData());
+	QFile log(repairLogPath());
+	if (log.open(QIODevice::Append | QIODevice::Text))
+	{
+		log.write(line.toUtf8());
+		log.write("\n");
+	}
+	s_prefsRepairNotes.clear();
+}
+
+void PrefsManager::logRepair(const QString& note)
+{
+	s_prefsRepairNotes << note;
+	writeRepairNotes();
+}
+
+QString PrefsManager::resetRequestPath() const
+{
+	// Next to the folder, not in it: the folder is what gets moved away.
+	QString dir = m_prefsLocation;
+	while (dir.endsWith('/') || dir.endsWith('\\'))
+		dir.chop(1);
+	return dir + ".reset-request";
+}
+
+void PrefsManager::requestReset()
+{
+	QFile marker(resetRequestPath());
+	if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		marker.write(QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8());
+}
+
+void PrefsManager::cancelResetRequest()
+{
+	QFile::remove(resetRequestPath());
+}
+
+void PrefsManager::applyResetRequest()
+{
+	// Help > Reset Preferences: the previous run left a marker and quit; the
+	// folder is moved aside here, before anything reads it, and Scribus starts
+	// on defaults.
+	const QString marker = resetRequestPath();
+	if (!QFile::exists(marker))
+		return;
+	QFile::remove(marker);
+	QString dir = m_prefsLocation;
+	while (dir.endsWith('/') || dir.endsWith('\\'))
+		dir.chop(1);
+	QString backup = dir + ".bak-" + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+	if (QFileInfo::exists(dir) && !QDir().rename(dir, backup))
+	{
+		qWarning("Scribus prefs reset: could not move %s to %s", qPrintable(dir), qPrintable(backup));
+		return;
+	}
+	QDir().mkpath(dir);
+	s_prefsRepairNotes << QString("preferences reset; the old folder is %1").arg(backup);
+	writeRepairNotes();
+}
+
 void PrefsManager::setNewPrefs(const ApplicationPrefs& newPrefs)
 {
 	appPrefs = newPrefs;
@@ -108,6 +252,7 @@ PrefsFile* PrefsManager::applicationPrefsFile()
 void PrefsManager::setup()
 {
 	setupPreferencesLocation();
+	applyResetRequest();
 
 	copyOldAppConfigAndData();
 	prefsFile = new PrefsFile( m_prefsLocation + "prefs172.xml" );
@@ -1099,8 +1244,27 @@ void PrefsManager::readPrefsXML()
 		}
 		appPrefs.uiPrefs.mainWinState = QByteArray::fromBase64(userprefsContext->get("mainwinstate", "").toLatin1());
 		appPrefs.uiPrefs.adsDockState = QByteArray::fromBase64(userprefsContext->get("ads_dockstate", "").toLatin1());
+		// A workspace without the document area shows no page at all (an
+		// office PC, 2026-10-15). Drop it: the default layout is used.
+		if (!appPrefs.uiPrefs.adsDockState.isEmpty() && !dockStateHasCentralWidget(appPrefs.uiPrefs.adsDockState))
+		{
+			appPrefs.uiPrefs.adsDockState.clear();
+			userprefsContext->set("ads_dockstate", QString());
+			s_prefsRepairNotes << QString("palette layout without the document area discarded (default layout restored)");
+		}
 		//continue here...
 		//Prefs."blah blah" =...
+	}
+	sanitizeUndoLength();
+	if (!s_prefsRepairNotes.isEmpty())
+	{
+		writeRepairNotes();
+		// Store the repaired profile now, not only at quit: a PC that is always
+		// switched off with Scribus open would otherwise repair it on every start
+		// and never keep it.
+		prefsFile->write();
+		if (!writePref(m_prefsLocation + "scribus172.rc"))
+			qWarning("Scribus prefs repair: could not write %s", qPrintable(m_prefsLocation + "scribus172.rc"));
 	}
 	if (prefsFile->hasContext("print_options"))
 	{
@@ -1781,7 +1945,8 @@ bool PrefsManager::writePref(const QString& filePath)
 
 
 	QDomElement pageSetAttr = docu.createElement("PageSets");
-	for (const PageSet& pageSet : std::as_const(appPrefs.pageSets))
+	const QList<PageSet> uniquePageSets = dedupePageSets(appPrefs.pageSets);
+	for (const PageSet& pageSet : uniquePageSets)
 	{
 		QDomElement pgst = docu.createElement("Set");
 		pgst.setAttribute("Name", pageSet.Name);
@@ -2244,7 +2409,7 @@ bool PrefsManager::readPref(const QString& filePath)
 			appPrefs.uiPrefs.paletteFontSize = dc.attribute("PaletteFontSize", "10").toInt();
 			appPrefs.uiPrefs.recentDocCount = dc.attribute("RecentDocumentCount", "5").toUInt();
 			appPrefs.uiPrefs.showStartupDialog = static_cast<bool>(dc.attribute("ShowStartupDialog", "1").toInt());
-			appPrefs.uiPrefs.showSplashOnStartup = static_cast<bool>(dc.attribute("UI_SHOWSPLASHSCREEN", "1").toInt());
+			appPrefs.uiPrefs.showSplashOnStartup = static_cast<bool>(dc.attribute("ShowSplashOnStartup", dc.attribute("UI_SHOWSPLASHSCREEN", "1")).toInt());   // written as ShowSplashOnStartup
 			appPrefs.uiPrefs.useSmallWidgets = dc.attribute("UseSmallWidgets").toInt();
 			appPrefs.uiPrefs.showLabels = dc.attribute("ShowLabels").toInt();
 			appPrefs.uiPrefs.showLabelsOfInactiveTabs = dc.attribute("ShowLabelsOfInactiveTabs").toInt();
@@ -2640,7 +2805,15 @@ bool PrefsManager::readPref(const QString& filePath)
 				}
 			}
 			if (!newPageSets.isEmpty())
-				appPrefs.pageSets = newPageSets;
+			{
+				// Faircode: a profile from the office carried the four default
+				// sets 21 times. Keep the first set of every name (user-defined
+				// sets included) and say so once.
+				int removed = 0;
+				appPrefs.pageSets = dedupePageSets(newPageSets, &removed);
+				if (removed > 0)
+					s_prefsRepairNotes << QString("PageSets: %1 duplicate entries removed").arg(removed);
+			}
 		}
 
 		if (dc.tagName() == "ColorManagement")
@@ -2870,7 +3043,7 @@ bool PrefsManager::readPref(const QString& filePath)
 			appPrefs.pdfPrefs.Articles = static_cast<bool>(dc.attribute("Articles").toInt());
 			appPrefs.pdfPrefs.Thumbnails = static_cast<bool>(dc.attribute("Thumbnails").toInt());
 			appPrefs.pdfPrefs.Compress = static_cast<bool>(dc.attribute("Compress").toInt());
-			appPrefs.pdfPrefs.CompressMethod = (PDFOptions::PDFCompression) dc.attribute("CompressMethod", "0").toInt();
+			appPrefs.pdfPrefs.CompressMethod = (PDFOptions::PDFCompression) dc.attribute("CompressionMethod", dc.attribute("CompressMethod", "0")).toInt();   // written as CompressionMethod
 			appPrefs.pdfPrefs.Quality = dc.attribute("Quality", "0").toInt();
 			appPrefs.pdfPrefs.embedPDF  = dc.attribute("EmbedPDF", "0").toInt();
 			appPrefs.pdfPrefs.RecalcPic = static_cast<bool>(dc.attribute("RecalcPic").toInt());
@@ -3144,7 +3317,27 @@ bool PrefsManager::readPref(const QString& filePath)
 	// Some sanity checks
 	appPrefs.colorPrefs.DColors.ensureDefaultColors();
 	if ((appPrefs.docSetupPrefs.pagePositioning  < 0) || (appPrefs.docSetupPrefs.pagePositioning >= appPrefs.pageSets.count()))
+	{
+		s_prefsRepairNotes << QString("page layout %1 invalid, Single Page used").arg(appPrefs.docSetupPrefs.pagePositioning);
 		appPrefs.docSetupPrefs.pagePositioning = 0;
+	}
+	// Faircode: values that make the canvas or grid unusable
+	auto clampPositive = [](double& v, double fallback, const char* what) {
+		if (!(v > 0.0) || !std::isfinite(v))
+		{
+			s_prefsRepairNotes << QString("%1 %2 reset to %3").arg(what).arg(v).arg(fallback);
+			v = fallback;
+		}
+	};
+	clampPositive(appPrefs.guidesPrefs.minorGridSpacing, 20.0, "minor grid spacing");
+	clampPositive(appPrefs.guidesPrefs.majorGridSpacing, 100.0, "major grid spacing");
+	clampPositive(appPrefs.displayPrefs.displayScale, 1.0, "display scale");
+	if (appPrefs.displayPrefs.scratch.left() < 0 || appPrefs.displayPrefs.scratch.right() < 0
+	    || appPrefs.displayPrefs.scratch.top() < 0 || appPrefs.displayPrefs.scratch.bottom() < 0)
+	{
+		s_prefsRepairNotes << QString("negative pasteboard reset to 100/100/20/20 pt");
+		appPrefs.displayPrefs.scratch.set(20, 100, 20, 100);
+	}
 	if ((appPrefs.docSetupPrefs.docUnitIndex < UNITMIN) || (appPrefs.docSetupPrefs.docUnitIndex > UNITMAX))
 		appPrefs.docSetupPrefs.docUnitIndex = int(SC_POINTS);
 

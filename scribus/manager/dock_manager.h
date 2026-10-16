@@ -107,6 +107,11 @@ public slots:
 	 * @brief Save current workspace to local preferences file
 	 */
 	void saveWorkspaceToPrefs();
+	//! The document area is docked and open (else no page can be seen).
+	bool centralWidgetShown() const;
+	//! When the document area is missing from the layout, restore the default
+	//! palette layout and log it. Returns true if it had to.
+	bool ensureCentralWidget();
 
 	void iconSetChange();
 	/**
