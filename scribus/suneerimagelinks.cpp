@@ -13,8 +13,11 @@ for which a new license (GPL+exception) is in place.
 #include <QHash>
 #include <QFontMetrics>
 #include <QFont>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QObject>
+#include <QRegularExpression>
 #include <QSet>
 
 #include "filewatcher.h"
@@ -27,6 +30,7 @@ for which a new license (GPL+exception) is in place.
 #include "undomanager.h"
 #include "undostate.h"
 #include "undotransaction.h"
+#include "util_file.h"
 
 namespace
 {
@@ -86,17 +90,162 @@ namespace
 			addWithChildren(item, out, seen);
 		for (auto it = doc->FrameItems.constBegin(); it != doc->FrameItems.constEnd(); ++it)
 			addWithChildren(it.value(), out, seen);
+		for (auto it = doc->docPatterns.constBegin(); it != doc->docPatterns.constEnd(); ++it)
+			for (PageItem* item : it.value().items)
+				addWithChildren(item, out, seen);
 		return out;
+	}
+
+	QString attrOf(const PageItem* item, const QString& name)
+	{
+		if (!item)
+			return QString();
+		const QList<ObjectAttribute> l = item->getObjectAttributes(name);
+		return l.isEmpty() ? QString() : l.first().value;
+	}
+
+	void setAttrOf(PageItem* item, const QString& name, const QString& value)
+	{
+		ObjAttrVector attrs = *item->getObjectAttributes();
+		for (int i = 0; i < attrs.size(); ++i)
+			if (attrs[i].name == name)
+			{
+				attrs[i].value = value;
+				item->setObjectAttributes(&attrs);
+				return;
+			}
+		ObjectAttribute a;
+		a.name = name;
+		a.type = QStringLiteral("string");
+		a.value = value;
+		attrs.append(a);
+		item->setObjectAttributes(&attrs);
+	}
+
+	PageItem* topLevelOf(const PageItem* item)
+	{
+		const PageItem* top = item;
+		while (top && top->Parent)
+			top = top->Parent;
+		return const_cast<PageItem*>(top);
+	}
+
+	bool sameBytes(const QString& a, const QString& b)
+	{
+		QFile fa(a), fb(b);
+		if (fa.size() != fb.size() || !fa.open(QIODevice::ReadOnly) || !fb.open(QIODevice::ReadOnly))
+			return false;
+		while (!fa.atEnd())
+			if (fa.read(1 << 20) != fb.read(1 << 20))
+				return false;
+		return true;
 	}
 
 	QString pageOf(ScribusDoc* doc, const PageItem* item)
 	{
-		if (!item->OnMasterPage.isEmpty())
-			return QObject::tr("Master: %1").arg(item->OnMasterPage);
-		if (item->OwnPage >= 0 && item->OwnPage < doc->DocPages.count())
-			return QString::number(item->OwnPage + 1);
-		return QString("-");
+		return SuneerImageLinks::placeOf(doc, item);
 	}
+
+	QString frameLabel(ScribusDoc* doc, const PageItem* item)
+	{
+		const QString place = SuneerImageLinks::placeOf(doc, item);
+		bool isNumber = false;
+		place.toInt(&isNumber);
+		return QObject::tr("%1 (%2)").arg(item->itemName(), isNumber ? QObject::tr("page %1").arg(place) : place);
+	}
+}
+
+const char* const SuneerImageLinks::AttrEmbeddedFrom = "suneer.embeddedFrom";
+
+QString SuneerImageLinks::placeOf(ScribusDoc* doc, const PageItem* item)
+{
+	if (!doc || !item)
+		return QString("-");
+	const PageItem* top = topLevelOf(item);
+	if (top->isEmbedded)
+		return QObject::tr("in text");
+	if (!top->OnMasterPage.isEmpty())
+		return QObject::tr("Master: %1").arg(top->OnMasterPage);
+	if (doc->DocItems.contains(const_cast<PageItem*>(top)))
+	{
+		if (top->OwnPage >= 0 && top->OwnPage < doc->DocPages.count())
+			return QString::number(top->OwnPage + 1);
+		return QObject::tr("pasteboard");
+	}
+	for (auto it = doc->docPatterns.constBegin(); it != doc->docPatterns.constEnd(); ++it)
+		if (it.value().items.contains(const_cast<PageItem*>(top)))
+			return QObject::tr("pattern %1").arg(it.key());
+	return QString("-");
+}
+
+QString SuneerImageLinks::kindOf(ScribusDoc* doc, const PageItem* item)
+{
+	QStringList k;
+	if (!item)
+		return QString();
+	if (SuneerPhotoStore::isNewsPhoto(item))
+		k << QStringLiteral("News");
+	if (!attrOf(item, QStringLiteral("suneer.photoEditOutput")).isEmpty() || !attrOf(item, QStringLiteral("SuneerImgOriginal")).isEmpty())
+		k << QStringLiteral("edited");
+	if (!attrOf(item, QStringLiteral("suneer.photoEditCut")).isEmpty() || !attrOf(item, QStringLiteral("SuneerBgCut")).isEmpty()
+	    || !attrOf(item, QStringLiteral("SuneerBgSource")).isEmpty()
+	    || (!attrOf(item, QStringLiteral("obit.out")).isEmpty() && item->Pfile.endsWith(QLatin1String(".png"), Qt::CaseInsensitive)))
+		k << QStringLiteral("BG removed");
+	if (attrOf(item, QStringLiteral("news.model")) == QLatin1String("obituary") || !attrOf(item, QStringLiteral("obit.src")).isEmpty())
+		k << QStringLiteral("obit");
+	if (!item->isImageInline() && doc && SuneerPhotoStore::isInStore(doc, item->Pfile))
+		k << QStringLiteral("_photos");
+	if (item->Parent)
+		k << QStringLiteral("group '%1'").arg(item->Parent->itemName());
+	if (item->effectsInUse.count() > 0)
+		k << QStringLiteral("effects %1").arg(item->effectsInUse.count());
+	return k.join(QStringLiteral(", "));
+}
+
+QList<PageItem*> SuneerImageLinks::imageFrames(ScribusDoc* doc)
+{
+	QList<PageItem*> out;
+	if (!doc)
+		return out;
+	const QList<PageItem*> items = allItems(doc);
+	for (PageItem* item : items)
+		if (statusOf(item) != NotAnImage)
+			out.append(item);
+	return out;
+}
+
+QList<PageItem*> SuneerImageLinks::imageFramesIn(const QList<PageItem*>& items)
+{
+	QList<PageItem*> all;
+	QSet<PageItem*> seen;
+	for (PageItem* item : items)
+		addWithChildren(item, all, seen);
+	QList<PageItem*> out;
+	for (PageItem* item : std::as_const(all))
+		if (statusOf(item) != NotAnImage)
+			out.append(item);
+	return out;
+}
+
+QStringList SuneerImageLinks::describeAll(ScribusDoc* doc)
+{
+	QStringList lines;
+	const QList<PageItem*> items = imageFrames(doc);
+	for (PageItem* item : items)
+	{
+		Status st = statusOf(item);
+		QString state = statusText(st);
+		if (st == Linked && !QFileInfo::exists(item->Pfile))
+			state = statusText(Missing);
+		if (st == Embedded && !QFileInfo::exists(item->Pfile))
+			state = QStringLiteral("Embedded, copy LOST");
+		const QString file = st == Embedded ? attrOf(item, QString::fromLatin1(AttrEmbeddedFrom)) : item->Pfile;
+		lines << QStringLiteral("%1 | %2 | %3 | %4 | %5x%6 | %7")
+		         .arg(placeOf(doc, item), item->itemName(), state, kindOf(doc, item))
+		         .arg(item->pixm.width()).arg(item->pixm.height())
+		         .arg(file.isEmpty() ? QStringLiteral("-") : QFileInfo(file).fileName());
+	}
+	return lines;
 }
 
 SuneerImageLinks::Status SuneerImageLinks::statusOf(const PageItem* item)
@@ -152,13 +301,15 @@ QList<SuneerImageLinks::Entry> SuneerImageLinks::collect(ScribusDoc* doc, bool o
 	return result;
 }
 
-bool SuneerImageLinks::embedItem(ScribusDoc* doc, PageItem* item)
+bool SuneerImageLinks::embedItem(ScribusDoc* doc, PageItem* item, qint64* bytes)
 {
 	if (!doc || statusOf(item) != Linked)
 		return false;
 	const QString oldPath = item->Pfile;
 	if (!QFileInfo::exists(oldPath))
 		return false;
+	if (bytes)
+		*bytes = QFileInfo(oldPath).size();
 	FileWatcher* fw = ScCore->fileWatcher;
 	const bool watched = fw && fw->isWatching(oldPath);
 	if (watched)
@@ -182,8 +333,209 @@ bool SuneerImageLinks::embedItem(ScribusDoc* doc, PageItem* item)
 		ss->set("NEW_PATH", item->Pfile);
 		UndoManager::instance()->action(item, ss);
 	}
+	// where it came from: "Unembed / Extract" names the file after it, and
+	// the photo folder's relocation / Save As keep it pointing at the folder
+	setAttrOf(item, QString::fromLatin1(AttrEmbeddedFrom), QFileInfo(oldPath).absoluteFilePath());
 	item->update();
 	return true;
+}
+
+SuneerImageLinks::EmbedReport SuneerImageLinks::embedItems(ScribusDoc* doc, const QList<PageItem*>& items,
+                                                           const std::function<void(int, int)>& progress)
+{
+	EmbedReport rep;
+	if (!doc)
+		return rep;
+	QList<PageItem*> todo;
+	QSet<PageItem*> seen;
+	for (PageItem* item : items)
+	{
+		const Status st = statusOf(item);
+		if (st == NotAnImage || st == Empty || seen.contains(item))
+			continue;
+		seen.insert(item);
+		todo.append(item);
+	}
+	rep.total = todo.count();
+	UndoTransaction transaction;
+	if (UndoManager::undoEnabled())
+		transaction = UndoManager::instance()->beginTransaction(QObject::tr("Document"), Um::IDocument, QObject::tr("Embed all images"), QString(), Um::IGetImage);
+	FileWatcher* fw = ScCore->fileWatcher;
+	for (int i = 0; i < todo.count(); ++i)
+	{
+		PageItem* item = todo.at(i);
+		if (progress)
+			progress(i, todo.count());
+		if (item->isImageInline())
+		{
+			if (QFileInfo::exists(item->Pfile))
+			{
+				++rep.already;
+				continue;
+			}
+			// The temp copy behind an embedded picture is gone (a /tmp clean-up
+			// while Scribus ran): Save would write the frame without ImageData.
+			const QString from = attrOf(item, QString::fromLatin1(AttrEmbeddedFrom));
+			if (!from.isEmpty() && QFileInfo::exists(from))
+			{
+				item->Pfile = from;
+				item->isInlineImage = false;
+				item->isTempFile = false;
+				item->makeImageInline();
+				if (item->isImageInline())
+				{
+					if (fw)
+						fw->addFile(item->Pfile);
+					++rep.repaired;
+					continue;
+				}
+			}
+			rep.skipped << QObject::tr("%1: embedded copy lost and no file to take it from again").arg(frameLabel(doc, item));
+			continue;
+		}
+		if (!QFileInfo::exists(item->Pfile))
+		{
+			rep.skipped << QObject::tr("%1: missing file %2").arg(frameLabel(doc, item), QFileInfo(item->Pfile).fileName());
+			continue;
+		}
+		if (!item->imageIsAvailable)
+		{
+			// the file is there now (folder mounted / restored after loading): load it first
+			const bool fho = item->imageFlippedH();
+			const bool fvo = item->imageFlippedV();
+			doc->loadPict(item->Pfile, item, true, false);
+			item->setImageFlippedH(fho);
+			item->setImageFlippedV(fvo);
+			if (!item->imageIsAvailable)
+			{
+				rep.skipped << QObject::tr("%1: the file cannot be read: %2").arg(frameLabel(doc, item), QFileInfo(item->Pfile).fileName());
+				continue;
+			}
+		}
+		qint64 b = 0;
+		if (embedItem(doc, item, &b))
+		{
+			++rep.embedded;
+			rep.bytes += b;
+		}
+		else
+			rep.skipped << QObject::tr("%1: could not copy %2").arg(frameLabel(doc, item), QFileInfo(item->Pfile).fileName());
+	}
+	if (progress)
+		progress(todo.count(), todo.count());
+	if (transaction.isStarted())
+	{
+		if (rep.embedded > 0)
+			transaction.commit();
+		else
+			transaction.cancel();
+	}
+	if (rep.embedded > 0 || rep.repaired > 0)
+	{
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+	}
+	return rep;
+}
+
+SuneerImageLinks::ExtractReport SuneerImageLinks::extractItems(ScribusDoc* doc, const QList<PageItem*>& items,
+                                                               const std::function<void(int, int)>& progress)
+{
+	ExtractReport rep;
+	if (!doc)
+		return rep;
+	rep.folder = SuneerPhotoStore::editedDir(doc, true);
+	QList<PageItem*> todo;
+	for (PageItem* item : items)
+		if (statusOf(item) == Embedded && !todo.contains(item))
+			todo.append(item);
+	if (rep.folder.isEmpty())
+	{
+		for (PageItem* item : std::as_const(todo))
+			rep.skipped << QObject::tr("%1: the document has no photos folder yet - save it first").arg(frameLabel(doc, item));
+		return rep;
+	}
+	UndoTransaction transaction;
+	if (UndoManager::undoEnabled())
+		transaction = UndoManager::instance()->beginTransaction(QObject::tr("Document"), Um::IDocument, QObject::tr("Extract embedded images"), QString(), Um::IGetImage);
+	FileWatcher* fw = ScCore->fileWatcher;
+	const QString marker = QStringLiteral("_photos/edited/");
+	for (int i = 0; i < todo.count(); ++i)
+	{
+		PageItem* item = todo.at(i);
+		if (progress)
+			progress(i, todo.count());
+		const QString temp = item->Pfile;
+		if (!QFileInfo::exists(temp))
+		{
+			rep.skipped << QObject::tr("%1: the embedded copy is gone").arg(frameLabel(doc, item));
+			continue;
+		}
+		// the name it had when it was embedded (sub-folder of edited/ kept), else the frame name
+		const QString from = attrOf(item, QString::fromLatin1(AttrEmbeddedFrom));
+		QString rel;
+		if (!from.isEmpty())
+		{
+			const int pos = from.indexOf(marker);
+			rel = pos >= 0 ? from.mid(pos + marker.length()) : QFileInfo(from).fileName();
+		}
+		if (rel.isEmpty())
+		{
+			QString stem = item->itemName();
+			stem.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+			rel = stem + QStringLiteral(".") + QFileInfo(temp).suffix();
+		}
+		QString target = rep.folder + QStringLiteral("/") + rel;
+		if (QFileInfo::exists(target) && !sameBytes(temp, target))
+		{
+			// a different picture already has this name: <stem>2.<ext>, <stem>3.<ext> ...
+			const QFileInfo fi(target);
+			for (int n = 2; n < 10000 && QFileInfo::exists(target) && !sameBytes(temp, target); ++n)
+				target = fi.absolutePath() + QStringLiteral("/") + fi.completeBaseName() + QString::number(n) + QStringLiteral(".") + fi.suffix();
+		}
+		if (!QFileInfo::exists(target))
+		{
+			QDir().mkpath(QFileInfo(target).absolutePath());
+			if (!copyFile(temp, target))
+			{
+				rep.skipped << QObject::tr("%1: could not write %2").arg(frameLabel(doc, item), target);
+				continue;
+			}
+		}
+		if (fw && fw->isWatching(temp))
+			fw->removeFile(temp);
+		// The temp copy stays on disk: undo makes the frame embedded again from it.
+		item->Pfile = QDir::fromNativeSeparators(target);
+		item->isInlineImage = false;
+		item->isTempFile = false;
+		if (fw)
+			fw->addFile(item->Pfile);
+		if (UndoManager::undoEnabled())
+		{
+			auto* ss = new SimpleState(QObject::tr("Extract image"), QFileInfo(target).fileName(), Um::IGetImage);
+			ss->set("SUNEER_IMAGE_EXTRACT");
+			ss->set("OLD_PATH", item->Pfile);
+			ss->set("NEW_PATH", temp);
+			UndoManager::instance()->action(item, ss);
+		}
+		item->update();
+		++rep.extracted;
+	}
+	if (progress)
+		progress(todo.count(), todo.count());
+	if (transaction.isStarted())
+	{
+		if (rep.extracted > 0)
+			transaction.commit();
+		else
+			transaction.cancel();
+	}
+	if (rep.extracted > 0)
+	{
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+	}
+	return rep;
 }
 
 int SuneerImageLinks::embedAll(ScribusDoc* doc, QStringList* failed)

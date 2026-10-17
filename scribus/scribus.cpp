@@ -60,6 +60,7 @@ for which a new license (GPL+exception) is in place.
 #include <QDateTime>
 #include <QFileInfo>
 #include <QLocale>
+#include <QTextStream>
 #include <QMdiArea>
 #include <QMdiSubWindow>
 #include <QMessageBox>
@@ -4599,6 +4600,8 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 	// paint before the dialog appears.
 	if (ret && HaveDoc && doc)
 		QTimer::singleShot(0, this, [this, loadedFormatID] { suneerMaybeOfferLegacyOverflowFix(loadedFormatID); });
+	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST"))
+		QTimer::singleShot(3000, this, [this] { suneerEmbedSelfTest(); });
 	// Carry the lock decision onto the document now that it exists.
 	if (ret && doc)
 	{
@@ -5155,30 +5158,266 @@ void ScribusMainWindow::suneerRemoveUnusedPhotos()
 	ScMessageBox::information(this, tr("Remove Unused Photos"), tr("%1 of %2 file(s) deleted.").arg(removed).arg(unused.size()));
 }
 
+// Image toolbar > Embed > "Embed in SLA", Extras > Embed All Images and the
+// page context menu. An explicit command: EVERY picture goes into the .sla,
+// News Browser photos in "<doc>_photos/" included (only the automatic
+// embedding at placement leaves those linked). With image frames selected it
+// asks whether to do just those.
 void ScribusMainWindow::suneerEmbedAllImages()
 {
 	if (!HaveDoc || !doc)
 		return;
-	const QList<SuneerImageLinks::Entry> all = SuneerImageLinks::collect(doc, false);
-	int already = 0;
-	for (const auto& e : all)
-		if (e.status == SuneerImageLinks::Embedded)
-			++already;
-	QStringList failed;
-	const int embedded = SuneerImageLinks::embedAll(doc, &failed);
+	const bool interactive = ScCore->usingGUI() && !scriptIsRunning();
+	const QList<PageItem*> all = SuneerImageLinks::imageFrames(doc);
+	QList<PageItem*> targets = all;
+	const QList<PageItem*> selected = SuneerImageLinks::imageFramesIn(doc->m_Selection->items());
+	if (interactive && !selected.isEmpty() && selected.count() < all.count())
+	{
+		QMessageBox box(QMessageBox::Question, tr("Embed Images"),
+		                tr("%n image frame(s) selected. Embed only those, or every image of the document?", nullptr, selected.count()),
+		                QMessageBox::NoButton, this);
+		QPushButton* selBtn = box.addButton(tr("Selected only (%1)").arg(selected.count()), QMessageBox::AcceptRole);
+		QPushButton* allBtn = box.addButton(tr("All %1 images in document").arg(all.count()), QMessageBox::AcceptRole);
+		box.addButton(QMessageBox::Cancel);
+		box.setDefaultButton(allBtn);
+		box.exec();
+		if (box.clickedButton() == selBtn)
+			targets = selected;
+		else if (box.clickedButton() != allBtn)
+			return;
+	}
+
+	SuneerImageLinks::EmbedReport rep;
+	{
+		QProgressDialog progress(tr("Embedding images..."), QString(), 0, qMax(1, targets.count()), this);
+		progress.setWindowTitle(tr("Embed Images"));
+		progress.setWindowModality(Qt::WindowModal);
+		progress.setMinimumDuration(interactive ? 300 : 1000000);
+		progress.setAutoClose(true);
+		QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
+		rep = SuneerImageLinks::embedItems(doc, targets, [&](int done, int total) {
+			progress.setMaximum(qMax(1, total));
+			progress.setValue(done);
+			progress.setLabelText(tr("Embedding images... %1 of %2").arg(done).arg(total));
+			if (interactive)
+				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		});
+		QApplication::restoreOverrideCursor();
+	}
 	view->DrawNew();
 
-	QString msg = tr("Embedded %1 image(s).").arg(embedded);
-	if (already > 0)
-		msg += "\n" + tr("%1 were already embedded.").arg(already);
-	if (!failed.isEmpty())
-		msg += "\n\n" + tr("%1 could not be embedded because the file is missing (page / frame: file):").arg(failed.count())
-		     + "\n" + failed.join("\n");
-	if (embedded > 0)
-		msg += "\n\n" + tr("One Undo takes all of them back. Save the document to write them into the file.");
-	setStatusBarInfoText(tr("Embedded %1 image(s), %2 failed.").arg(embedded).arg(failed.count()));
-	if (ScCore->usingGUI() && !scriptIsRunning())
-		ScMessageBox::information(this, tr("Embed All Images"), msg);
+	const QString size = QLocale().toString(rep.bytes / (1024.0 * 1024.0), 'f', 1);
+	QString msg = tr("Embedded %n image(s) (+%1 MB).", nullptr, rep.embedded).arg(size);
+	if (!rep.skipped.isEmpty())
+		msg += " " + tr("%n skipped:", nullptr, rep.skipped.count()) + "\n" + rep.skipped.join("\n");
+	if (rep.already > 0)
+		msg += "\n\n" + tr("%n were already embedded.", nullptr, rep.already);
+	if (rep.repaired > 0)
+		msg += "\n" + tr("%n embedded picture(s) had lost their temporary copy and were embedded again from their file.", nullptr, rep.repaired);
+	if (rep.embedded > 0)
+		msg += "\n\n" + tr("One Undo takes all of them back. Save the document to write them into the file. "
+		                    "The files in the _photos folder stay where they are; Edit photo still opens the original.");
+	setStatusBarInfoText(tr("Embedded %1 image(s) (+%2 MB), %3 skipped.").arg(rep.embedded).arg(size).arg(rep.skipped.count()));
+	if (interactive)
+	{
+		if (rep.skipped.isEmpty())
+			ScMessageBox::information(this, tr("Embed Images"), msg);
+		else
+			ScMessageBox::warning(this, tr("Embed Images"), msg);
+	}
+}
+
+// Image toolbar > Embed > "Unembed / Extract": the embedded pictures go back
+// out as files into "<doc>_photos/edited/" and the frames link to them.
+void ScribusMainWindow::suneerExtractImages()
+{
+	if (!HaveDoc || !doc)
+		return;
+	const bool interactive = ScCore->usingGUI() && !scriptIsRunning();
+	auto embeddedOf = [](const QList<PageItem*>& list) {
+		QList<PageItem*> out;
+		for (PageItem* item : list)
+			if (SuneerImageLinks::statusOf(item) == SuneerImageLinks::Embedded)
+				out.append(item);
+		return out;
+	};
+	const QList<PageItem*> all = embeddedOf(SuneerImageLinks::imageFrames(doc));
+	const QList<PageItem*> selected = embeddedOf(SuneerImageLinks::imageFramesIn(doc->m_Selection->items()));
+	if (all.isEmpty())
+	{
+		if (interactive)
+			ScMessageBox::information(this, tr("Unembed / Extract"), tr("The document has no embedded images."));
+		return;
+	}
+	if (SuneerPhotoStore::folder(doc).isEmpty())
+	{
+		if (interactive)
+			ScMessageBox::warning(this, tr("Unembed / Extract"), tr("Save the document first: the pictures are written to the \"<document name>_photos/edited\" folder next to it."));
+		return;
+	}
+	QList<PageItem*> targets = selected.isEmpty() ? all : selected;
+	if (interactive)
+	{
+		QMessageBox box(QMessageBox::Question, tr("Unembed / Extract"),
+		                tr("Write the embedded pictures to\n%1\nand link the frames to those files?").arg(SuneerPhotoStore::editedDir(doc, false)),
+		                QMessageBox::NoButton, this);
+		QPushButton* selBtn = nullptr;
+		if (!selected.isEmpty() && selected.count() < all.count())
+			selBtn = box.addButton(tr("Selected only (%1)").arg(selected.count()), QMessageBox::AcceptRole);
+		QPushButton* allBtn = box.addButton(tr("All %1 embedded images").arg(all.count()), QMessageBox::AcceptRole);
+		box.addButton(QMessageBox::Cancel);
+		box.setDefaultButton(selBtn ? selBtn : allBtn);
+		box.exec();
+		if (selBtn && box.clickedButton() == selBtn)
+			targets = selected;
+		else if (box.clickedButton() == allBtn)
+			targets = all;
+		else
+			return;
+	}
+	SuneerImageLinks::ExtractReport rep;
+	{
+		QProgressDialog progress(tr("Extracting images..."), QString(), 0, qMax(1, targets.count()), this);
+		progress.setWindowTitle(tr("Unembed / Extract"));
+		progress.setWindowModality(Qt::WindowModal);
+		progress.setMinimumDuration(interactive ? 300 : 1000000);
+		rep = SuneerImageLinks::extractItems(doc, targets, [&](int done, int total) {
+			progress.setValue(done);
+			progress.setLabelText(tr("Extracting images... %1 of %2").arg(done).arg(total));
+			if (interactive)
+				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+		});
+	}
+	view->DrawNew();
+	QString msg = tr("Extracted %n image(s) to %1.", nullptr, rep.extracted).arg(rep.folder);
+	if (!rep.skipped.isEmpty())
+		msg += " " + tr("%n skipped:", nullptr, rep.skipped.count()) + "\n" + rep.skipped.join("\n");
+	if (rep.extracted > 0)
+		msg += "\n\n" + tr("One Undo embeds them again.");
+	setStatusBarInfoText(tr("Extracted %1 image(s), %2 skipped.").arg(rep.extracted).arg(rep.skipped.count()));
+	if (interactive)
+		ScMessageBox::information(this, tr("Unembed / Extract"), msg);
+}
+
+// Unattended test of Embed All (tests/suneer/embed_all_images.sh), started
+// after a document load when SUNEER_EMBED_SELFTEST=<report file> is set.
+// SUNEER_EMBED_MODE: "embed" (list, embed all, undo check, redo, save as
+// SUNEER_EMBED_SAVEAS), "check" (list, render page 1 to SUNEER_EMBED_PNG),
+// "extract" (extract all, list, save as SUNEER_EMBED_SAVEAS). Then quits.
+void ScribusMainWindow::suneerEmbedSelfTest()
+{
+	const QString outPath = qEnvironmentVariable("SUNEER_EMBED_SELFTEST");
+	const QString mode = qEnvironmentVariable("SUNEER_EMBED_MODE", QStringLiteral("embed"));
+	QFile out(outPath);
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text) || !HaveDoc || !doc)
+	{
+		qApp->exit(3);
+		return;
+	}
+	QTextStream ts(&out);
+	auto list = [&](const QString& title) {
+		ts << "== " << title << "\n";
+		const QStringList lines = SuneerImageLinks::describeAll(doc);
+		for (const QString& l : lines)
+			ts << "  " << l << "\n";
+		int emb = 0, lnk = 0, mis = 0, lost = 0, avail = 0;
+		for (PageItem* item : SuneerImageLinks::imageFrames(doc))
+		{
+			const auto st = SuneerImageLinks::statusOf(item);
+			if (st == SuneerImageLinks::Embedded)
+				(QFileInfo::exists(item->Pfile) ? emb : lost)++;
+			else if (st == SuneerImageLinks::Linked && QFileInfo::exists(item->Pfile))
+				++lnk;
+			else if (st != SuneerImageLinks::Empty)
+				++mis;
+			if (st != SuneerImageLinks::Empty && item->imageIsAvailable && item->pixm.width() > 0)
+				++avail;
+		}
+		ts << "COUNT " << title << ": embedded " << emb << ", linked " << lnk << ", missing " << mis << ", embedded-lost " << lost
+		   << ", showing " << avail << "\n";
+	};
+	list(QStringLiteral("before"));
+	bool ok = true;
+	const QString saveAs = qEnvironmentVariable("SUNEER_EMBED_SAVEAS");
+	if (mode == QLatin1String("embed"))
+	{
+		const QList<PageItem*> frames = SuneerImageLinks::imageFrames(doc);
+		// Edit photo opens SuneerPhotoEdit::sourcePathOf(): note it for every frame
+		// with an original before embedding, it must be the same file afterwards
+		QHash<PageItem*, QString> sourceBefore;
+		for (PageItem* item : frames)
+		{
+			const QString src = SuneerPhotoEdit::sourcePathOf(item);
+			if (!src.isEmpty() && src != item->Pfile)
+				sourceBefore.insert(item, src);
+		}
+		const auto rep = SuneerImageLinks::embedItems(doc, frames);
+		int sameSource = 0;
+		for (auto it = sourceBefore.constBegin(); it != sourceBefore.constEnd(); ++it)
+		{
+			const QString now = SuneerPhotoEdit::sourcePathOf(it.key());
+			if (now == it.value() && QFileInfo::exists(now))
+				++sameSource;
+			else
+				ts << "  EDIT-SOURCE " << it.key()->itemName() << ": " << it.value() << " -> " << now << "\n";
+		}
+		ts << (sameSource == sourceBefore.count() ? "PASS" : "FAIL") << " edit photo source: " << sameSource << " of " << sourceBefore.count()
+		   << " frames with an original still open it after embedding\n";
+		ok = ok && sameSource == sourceBefore.count();
+		ts << "EMBED total " << rep.total << " embedded " << rep.embedded << " already " << rep.already << " repaired " << rep.repaired
+		   << " bytes " << rep.bytes << " skipped " << rep.skipped.count() << "\n";
+		for (const QString& sk : rep.skipped)
+			ts << "  SKIP " << sk << "\n";
+		list(QStringLiteral("after embed"));
+		// one undo step takes every one back, redo embeds them again
+		int linkedBefore = 0;
+		for (PageItem* item : frames)
+			if (SuneerImageLinks::statusOf(item) == SuneerImageLinks::Linked)
+				++linkedBefore;
+		m_undoManager->undo(1);
+		int linkedAfterUndo = 0;
+		for (PageItem* item : frames)
+			if (SuneerImageLinks::statusOf(item) == SuneerImageLinks::Linked)
+				++linkedAfterUndo;
+		m_undoManager->redo(1);
+		int linkedAfterRedo = 0;
+		for (PageItem* item : frames)
+			if (SuneerImageLinks::statusOf(item) == SuneerImageLinks::Linked)
+				++linkedAfterRedo;
+		const bool undoOk = linkedAfterUndo == linkedBefore + rep.embedded && linkedAfterRedo == linkedBefore;
+		ts << (undoOk ? "PASS" : "FAIL") << " undo: linked before undo " << linkedBefore << ", after one undo " << linkedAfterUndo
+		   << ", after redo " << linkedAfterRedo << "\n";
+		ok = ok && undoOk;
+	}
+	else if (mode == QLatin1String("extract"))
+	{
+		const QList<PageItem*> frames = SuneerImageLinks::imageFrames(doc);
+		const auto rep = SuneerImageLinks::extractItems(doc, frames);
+		ts << "EXTRACT extracted " << rep.extracted << " to " << rep.folder << " skipped " << rep.skipped.count() << "\n";
+		for (const QString& sk : rep.skipped)
+			ts << "  SKIP " << sk << "\n";
+		list(QStringLiteral("after extract"));
+	}
+	if (!saveAs.isEmpty())
+	{
+		const bool saved = DoFileSave(saveAs);
+		ts << (saved ? "PASS" : "FAIL") << " save as " << saveAs << " (" << QFileInfo(saveAs).size() << " bytes)\n";
+		ok = ok && saved;
+	}
+	const QString png = qEnvironmentVariable("SUNEER_EMBED_PNG");
+	if (!png.isEmpty())
+	{
+		for (int p = 0; p < doc->DocPages.count(); ++p)
+		{
+			const QImage img = view->PageToPixmap(p, 2400, Pixmap_DrawBackground);
+			const QString name = doc->DocPages.count() == 1 ? png : QString(png).replace(QStringLiteral(".png"), QStringLiteral("-%1.png").arg(p + 1));
+			ts << "PNG page " << (p + 1) << " " << name << " " << img.width() << "x" << img.height() << (img.save(name) ? " saved" : " NOT saved") << "\n";
+		}
+	}
+	ts << (ok ? "RESULT PASS" : "RESULT FAIL") << "\n";
+	out.close();
+	doc->setModified(false);
+	qApp->exit(ok ? 0 : 1);
 }
 
 void ScribusMainWindow::suneerToggleImageLinkBadges()
@@ -11248,6 +11487,8 @@ void ScribusMainWindow::suneerMaybeOfferLegacyOverflowFix(int loadedFormatID)
 {
 	if (!HaveDoc || !doc || !view || m_suneerLegacyOverflowAsked)
 		return;
+	if (qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST"))
+		return;                          // the unattended Embed All test: no question
 	// Native SLA format ids run newest to oldest (171 = 45 ... 12x = 50), so a
 	// file written by an older Scribus sorts *above* the current id. Past the
 	// native range is a foreign importer, which is not a legacy Scribus file.

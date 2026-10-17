@@ -1244,3 +1244,16 @@ scribus
   UseDocBleeds, show-splash ശരിയായി ഓർക്കും.
 - **Help → Reset Preferences…**: `~/.config/scribus` → `scribus.bak-<date>`, defaults-ൽ Scribus വീണ്ടും തുടങ്ങും.
 - Test: `tests/suneer/prefs_roundtrip.sh <profile> 20` — 20 തവണ load + Preferences OK + save, warm-up-ന് ശേഷം files byte for byte ഒന്ന്.
+
+### 82. Embed All — document-ലെ എല്ലാ images-ഉം .sla-യുടെ ഉള്ളിലേക്ക്
+- Image toolbar 📦 → **Embed in SLA / Embed All**, Extras → Embed All Images: ഇപ്പോൾ എല്ലാ images-ഉം embed ചെയ്യും — News Browser photos
+  (`<sla name>_photos/original`, `edited`), Edit photo ഫലം, BG remove ചെയ്ത PNG (transparency അതുപോലെ), obituary photos, groups / modules-ന്
+  ഉള്ളിലുള്ളവ, master pages, pasteboard, text-ലെ inline frames, patterns. മുമ്പ് `_photos` folder-ലെ files ഒന്നും പറയാതെ ഒഴിവാക്കിയിരുന്നു.
+  (Place ചെയ്യുമ്പോഴുള്ള automatic embed News Browser photos-നെ ഇപ്പോഴും link ആയി തന്നെ വിടും.)
+- Image frames select ചെയ്തിട്ടുണ്ടെങ്കിൽ ചോദിക്കും: "Selected only" / "All N images in document". Progress bar; ഒറ്റ undo.
+- Message: "Embedded 34 image(s) (+12.4 MB). 2 skipped:" — missing files frame name + page സഹിതം.
+- Frame-ന്റെ attributes (original, edited, settings) മാറില്ല: embed ചെയ്ത ശേഷവും Edit photo original തുറക്കും. പുതിയ attribute
+  `suneer.embeddedFrom` = embed ചെയ്ത file.
+- പുതിയത്: 📦 → **Unembed / Extract to _photos/edited** — embedded pictures `<sla name>_photos/edited/`-ലേക്ക് എഴുതി frame link ചെയ്യും
+  (ഒരേ file ഉണ്ടെങ്കിൽ അത് തന്നെ ഉപയോഗിക്കും). Selected only / All; ഒറ്റ undo.
+- Test: `tests/suneer/embed_all_images.sh page.sla` — embed → save → .sla മാത്രം മറ്റൊരു folder-ലേക്ക് → തുറന്ന് render (pixel താരതമ്യം) → extract.

@@ -408,6 +408,10 @@ public slots:
 	void suneerGetImage();
 	//! Extras > Embed All Images (also the page context menu)
 	void suneerEmbedAllImages();
+	//! Image toolbar > Embed > Unembed / Extract: embedded pictures to "<doc>_photos/edited/", relinked
+	void suneerExtractImages();
+	//! SUNEER_EMBED_SELFTEST: unattended Embed All / Extract test, see scribus.cpp
+	void suneerEmbedSelfTest();
 	void suneerRedownloadMissingPhotos();
 	void suneerRemoveUnusedPhotos();
 	//! View > Image Frames > Show Linked Image Badges

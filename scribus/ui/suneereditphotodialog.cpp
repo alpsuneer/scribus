@@ -203,7 +203,14 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 	// folder when the picture came from the Workflow, else the frame's own
 	// file. Nothing here touches the network; only "Re-download original" does.
 	m_sourcePath = sourcePathOf(item);
-	const QString expectedOriginal = item ? (item->getObjectAttributes(QString::fromLatin1(SuneerPhotoStore::AttrOriginal)).isEmpty() ? QString() : item->getObjectAttributes(QString::fromLatin1(SuneerPhotoStore::AttrOriginal)).first().value) : QString();
+	QString expectedOriginal = item ? (item->getObjectAttributes(QString::fromLatin1(SuneerPhotoStore::AttrOriginal)).isEmpty() ? QString() : item->getObjectAttributes(QString::fromLatin1(SuneerPhotoStore::AttrOriginal)).first().value) : QString();
+	// An embedded, already edited picture whose original is not on this PC
+	// (the .sla was copied without its _photos folder): the frame's own file
+	// is the edited RESULT. Start from it with fresh settings, otherwise the
+	// stored crop / rotation / cut-out would be applied to it a second time.
+	const bool editedResultOnly = expectedOriginal.isEmpty() && item && item->isImageInline()
+	    && !item->getObjectAttributes(QString::fromLatin1(AttrSettings)).isEmpty()
+	    && QFileInfo(m_sourcePath).absoluteFilePath() == QFileInfo(item->Pfile).absoluteFilePath();
 	m_sourceMissing = !expectedOriginal.isEmpty() && !QFileInfo::exists(expectedOriginal);
 	QString err;
 	m_source = m_sourceMissing ? QImage() : loadSource(m_sourcePath, &err);
@@ -211,7 +218,7 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 		err = tr("The local original is missing: %1").arg(expectedOriginal);
 	setWindowTitle(tr("Edit photo \u2014 %1").arg(m_sourceMissing ? QFileInfo(expectedOriginal).fileName() : QFileInfo(m_sourcePath).fileName()));
 	const bool haveSettings = item && !item->getObjectAttributes(QString::fromLatin1(AttrSettings)).isEmpty();
-	m_s = haveSettings ? settingsOf(item) : (m_isObit ? obitPreset(doc) : Settings());
+	m_s = (haveSettings && !editedResultOnly) ? settingsOf(item) : (m_isObit && !editedResultOnly ? obitPreset(doc) : Settings());
 	if (!haveSettings && item && !item->getObjectAttributes(QString::fromLatin1(AttrBgMode)).isEmpty())
 	{
 		const QString mode = item->getObjectAttributes(QString::fromLatin1(AttrBgMode)).first().value;

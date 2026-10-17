@@ -7,6 +7,8 @@ for which a new license (GPL+exception) is in place.
 #ifndef SUNEERIMAGELINKS_H
 #define SUNEERIMAGELINKS_H
 
+#include <functional>
+
 #include <QImage>
 #include <QList>
 #include <QPointer>
@@ -53,13 +55,62 @@ namespace SuneerImageLinks
 	//! it was loaded is reported as Missing.
 	SCRIBUS_API QList<Entry> collect(ScribusDoc* doc, bool onlyProblems = true);
 
-	//! Embed one linked image. Undoable. False when it is not a linked image
-	//! or the file cannot be copied.
-	SCRIBUS_API bool embedItem(ScribusDoc* doc, PageItem* item);
+	/*! Item attribute written when a picture is embedded: the file it was
+	    linked to (absolute while loaded, re-based like the other photo-folder
+	    paths). "Unembed / Extract" takes its file name from it. */
+	extern const char* const AttrEmbeddedFrom;
 
-	//! Embed every linked image as ONE undo step. Returns the number embedded;
-	//! \a failed gets "page / frame: path" for each one that could not be.
+	//! Embed one linked image. Undoable. False when it is not a linked image
+	//! or the file cannot be copied. \a bytes gets the size of the file.
+	SCRIBUS_API bool embedItem(ScribusDoc* doc, PageItem* item, qint64* bytes = nullptr);
+
+	/*! Embed the linked images of collect(doc, true) - the ones the "linked
+	    images" check before Save / PDF / Print lists - as ONE undo step.
+	    Photos in "<doc>_photos/" are not among them. Returns the number
+	    embedded; \a failed gets "page / frame: path" for each one that could not be. */
 	SCRIBUS_API int embedAll(ScribusDoc* doc, QStringList* failed = nullptr);
+
+	//! Every image frame of the document: pages, pasteboard, master pages,
+	//! inside groups (nested), inline frames and pattern items.
+	SCRIBUS_API QList<PageItem*> imageFrames(ScribusDoc* doc);
+	//! The image frames among \a items, group members included.
+	SCRIBUS_API QList<PageItem*> imageFramesIn(const QList<PageItem*>& items);
+	//! "3", "Master: Normal", "pasteboard", "in text" or "pattern".
+	SCRIBUS_API QString placeOf(ScribusDoc* doc, const PageItem* item);
+	//! What kind of picture it is: "News, edited, BG removed, obit, group 'x'" ...
+	SCRIBUS_API QString kindOf(ScribusDoc* doc, const PageItem* item);
+
+	struct EmbedReport
+	{
+		int total { 0 };        //!< image frames looked at (empty frames not counted)
+		int embedded { 0 };     //!< embedded now
+		int already { 0 };      //!< were embedded before
+		int repaired { 0 };     //!< embedded, but the temp copy was gone: copied again
+		qint64 bytes { 0 };     //!< size of the files embedded now
+		QStringList skipped;    //!< "frame (page N): reason"
+	};
+	/*! The explicit "Embed All" command: embed EVERY image of \a items, linked
+	    files in the document's photos folder included (News Browser originals,
+	    Edit photo / BG removal results, obituary photos). The file embedded is
+	    the one the frame shows. Missing files are skipped and listed. One undo
+	    step. \a progress is called with (done, total) after each frame. */
+	SCRIBUS_API EmbedReport embedItems(ScribusDoc* doc, const QList<PageItem*>& items,
+	                                   const std::function<void(int, int)>& progress = {});
+
+	struct ExtractReport
+	{
+		int extracted { 0 };
+		QString folder;
+		QStringList skipped;    //!< "frame (page N): reason"
+	};
+	/*! "Unembed / Extract": write each embedded picture of \a items to
+	    "<doc>_photos/edited/" (file name from AttrEmbeddedFrom, else the frame
+	    name) and link the frame to it. Needs a saved document. One undo step. */
+	SCRIBUS_API ExtractReport extractItems(ScribusDoc* doc, const QList<PageItem*>& items,
+	                                       const std::function<void(int, int)>& progress = {});
+
+	//! One line per image frame: place, name, status, kind, file. For the self-test and reports.
+	SCRIBUS_API QStringList describeAll(ScribusDoc* doc);
 
 	//! Called right after an image was placed by the user: embeds it when the
 	//! "Always embed placed images" preference is on.

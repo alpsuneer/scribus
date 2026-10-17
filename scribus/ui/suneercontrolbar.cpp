@@ -546,7 +546,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_imgEmbedBtn->setToolTip("Image Embed Options");
 	m_imgEmbedBtn->setPopupMode(QToolButton::InstantPopup);
 	QMenu* embedMenu = new QMenu(m_imgEmbedBtn);
-	embedMenu->addAction("Embed in SLA (Base64)", this, [this]{ onEmbedInSLA(); });
+	embedMenu->addAction("Embed in SLA / Embed All (Base64)", this, [this]{ onEmbedInSLA(); });
+	embedMenu->addAction("Unembed / Extract to _photos/edited", this, [this]{ if (m_doc && m_scmw) m_scmw->suneerExtractImages(); });
 	embedMenu->addAction("Embed Link",            this, [this]{ onEmbedLink(); });
 	embedMenu->addAction("Collect to Folder",     this, [this]{ onCollectToFolder(); });
 	m_imgEmbedBtn->setMenu(embedMenu);
@@ -4581,8 +4582,9 @@ void SuneerControlBar::languageChange()
 
 void SuneerControlBar::onEmbedInSLA()
 {
-	// Same code as Extras > Embed All Images: every linked image of the
-	// document (pages, master pages, groups, inline frames), one undo step.
+	// Same code as Extras > Embed All Images: every image of the document
+	// (pages, pasteboard, master pages, groups, inline frames, News Browser
+	// photos in the _photos folder too), or only the selected ones; one undo step.
 	if (m_doc && m_scmw)
 		m_scmw->suneerEmbedAllImages();
 }

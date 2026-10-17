@@ -5430,6 +5430,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreImageScaleMode(ss, isUndo);
 		else if (ss->contains("SUNEER_IMAGE_INLINE"))
 			restoreSuneerImageInline(ss, isUndo);
+		else if (ss->contains("SUNEER_IMAGE_EXTRACT"))
+			restoreSuneerImageInline(ss, !isUndo);   // the reverse of embedding: OLD_PATH linked, NEW_PATH the temp copy
 		else if (ss->contains("SUNEER_ITEM_ATTRIBUTES"))
 		{
 			// Suneer: item attributes changed by a command (Text Effects keeps its

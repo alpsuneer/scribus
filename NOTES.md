@@ -2551,3 +2551,21 @@ Code: `ui/suneercontrolbar.cpp` - `onImgEdgeFeather()` (image frame: PIL writes 
 - ImageMagick preserves profile/EXIF/colorspace by default; `-channel RGB -unsharp` would sharpen
   alpha-free but not luminance-only - the Lab L channel route is used for RGB.
 - The toolbar row is full at 1600 px: the live result line goes to the status bar + field tooltips.
+
+## Embed All includes the _photos folder (2026-10-17, tested by the user)
+- Cause of "Embed All does not embed everything": suneerEmbedAllImages() → SuneerImageLinks::embedAll() → collect(doc, onlyProblems=true),
+  and collect() drops every Linked file inside "<doc>_photos/" (isInStore) — that filter is right for the warn-before-Save/PDF dialog
+  (those files are intended links) but made the explicit command skip all News Browser, obit, Edit photo and BG-removed pictures silently.
+- Now: suneerEmbedAllImages() → SuneerImageLinks::embedItems(imageFrames(doc)) (all frames incl. patterns); embedAll() is unchanged and
+  only used by the linked-images dialog. embedPlaced() still skips News photos (automatic embedding only).
+- Embedding copies the file bytes (makeImageInline → temp file → saver writes qCompress+base64 of the file): PNG alpha is kept as is;
+  feather and eraser mask are ImageEffects, saved separately. Edit photo finds the original via attributes (news.original,
+  SuneerImgOriginal, SuneerBgSource, obit.src), which embedding does not touch. suneer.embeddedFrom is in pathAttributes() (relocated,
+  rewritten on Save As, counted as referenced so "Remove Unused Photos" keeps the file).
+- Extract (suneerExtractImages / extractItems): edited/<sub path or name of embeddedFrom>, identical file reused, temp copy kept for
+  undo (SUNEER_IMAGE_EXTRACT = restoreSuneerImageInline with isUndo inverted).
+- Trap: an embedded item whose /tmp copy is deleted while Scribus runs saves WITHOUT ImageData (saver silently skips an unreadable file).
+  embedItems() re-copies it from suneer.embeddedFrom when that still exists ("repaired"), else lists it.
+- Trap: Edit photo on an embedded, edited picture with no original on this PC: the frame file is the RESULT; the dialog now starts with
+  fresh settings instead of applying the stored crop a second time.
+- Regression: tests/suneer/embed_all_images.sh page.sla (SUNEER_EMBED_SELFTEST / _MODE / _SAVEAS / _PNG, ScribusMainWindow::suneerEmbedSelfTest).
