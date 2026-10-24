@@ -225,6 +225,7 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 		m_s.removeBg = mode != QLatin1String("none");
 		m_s.bgMode = mode;
 	}
+	const bool wantedAuto = m_s.removeBg && m_s.bgMode == QLatin1String("auto");
 	if (item)
 	{
 		const QString cutPath = item->getObjectAttributes(QString::fromLatin1(AttrCut)).isEmpty() ? QString() : item->getObjectAttributes(QString::fromLatin1(AttrCut)).first().value;
@@ -253,6 +254,13 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 			if (m_protect.size() != m_source.size())
 				m_protect = QImage();
 		}
+	}
+	// The AI never runs on open: Auto without a SAVED cut-out opens as "None"
+	// (the plain photo); "Remove background" runs it on request.
+	if (wantedAuto && m_cut.isNull())
+	{
+		m_s.removeBg = false;
+		m_s.bgMode = QStringLiteral("none");
 	}
 	m_undo = new QUndoStack(this);
 	m_undo->setUndoLimit(40);
@@ -353,9 +361,14 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 	const int mi = m_modelCombo->findData(m_s.model);
 	m_modelCombo->setCurrentIndex(mi < 0 ? 0 : mi);
 	rmRow->addWidget(m_removeBgChk); rmRow->addWidget(m_modelCombo);
-	m_modelCombo->setToolTip(tr("AI model (Auto mode)"));
-	m_modelCombo->setEnabled(autoMode());
+	m_modelCombo->setToolTip(tr("AI model. Changing it does not run anything: click \"Remove background\" to apply."));
 	bl->addLayout(rmRow);
+	auto* runRow = new QHBoxLayout();
+	m_removeBgBtn = new QPushButton(QStringLiteral("\u2702 ") + tr("Remove background"), bgBox);
+	m_removeBgBtn->setToolTip(tr("Run the AI now with the chosen model. With a selection (Lasso / Polygon / Rect / Ellipse) only the inside is processed, everything outside stays as it is. Without a selection: the crop area."));
+	m_removeBgBtn->setStyleSheet("font-weight:bold; padding:4px 10px;");
+	runRow->addWidget(m_removeBgBtn, 1);
+	bl->addLayout(runRow);
 	auto* refineRow = new QHBoxLayout();
 	m_refineChk = new QCheckBox(tr("Refine edge (hair)"), bgBox);
 	m_refineChk->setChecked(m_s.refine > 0);
@@ -512,9 +525,15 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 			m_applyBtn->setEnabled(!m_source.isNull());
 			rebuildTransform();
 			resetCrop(m_s.autoFace);
-			updatePreview();
 			if (autoMode())
-				runRemoval();
+			{
+				m_s.removeBg = false;
+				m_s.bgMode = QStringLiteral("none");
+				QSignalBlocker bm(m_bgModeCombo);
+				m_bgModeCombo->setCurrentIndex(qMax(0, m_bgModeCombo->findData(QStringLiteral("none"))));
+			}
+			updatePreview();
+			updateRemoveButton();
 			m_status->setText(tr("Original re-downloaded: %1").arg(QFileInfo(m_sourcePath).fileName()));
 		});
 	}
@@ -549,7 +568,8 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 	connect(m_removeBgChk, &QCheckBox::toggled, this, &SuneerEditPhotoDialog::onRemoveBg);
 	connect(m_bgModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SuneerEditPhotoDialog::onBgModeChanged);
 	connect(m_modelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SuneerEditPhotoDialog::onModelChanged);
-	connect(m_refineChk, &QCheckBox::toggled, this, [this](bool on) { m_s.refine = on ? m_refineSlider->value() : 0; schedulePreview(); });
+	connect(m_removeBgBtn, &QPushButton::clicked, this, &SuneerEditPhotoDialog::onRemoveBgClicked);
+	connect(m_refineChk, &QCheckBox::toggled, this, [this](bool on) { m_s.refine = on ? m_refineSlider->value() : 0; schedulePreview(); if (on && !maskReady()) m_status->setText(tr("Refine edge works on the result: click Remove background to apply.")); });
 	connect(m_refineSlider, &QSlider::valueChanged, this, &SuneerEditPhotoDialog::onRefineChanged);
 	connect(m_bgColorChk, &QCheckBox::toggled, this, [this](bool on) { if (!on) onBgNone(); else if (m_s.bgColor.isEmpty()) onBgPick(); else schedulePreview(); updateBgButton(); });
 	connect(m_bgColorBtn, &QPushButton::clicked, this, &SuneerEditPhotoDialog::onBgPick);
@@ -587,12 +607,16 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 	m_rerunTimer = new QTimer(this);
 	m_rerunTimer->setSingleShot(true);
 	m_rerunTimer->setInterval(600);
-	connect(m_rerunTimer, &QTimer::timeout, this, [this]() { if (autoMode()) runRemoval(); });
+	connect(m_rerunTimer, &QTimer::timeout, this, [this]() {
+		if (autoMode() && !m_cut.isNull())
+			m_status->setText(tr("The crop is outside the removed region: click Remove background again to process it."));
+	});
 	m_remover = new SuneerBgRemover(this);
 	connect(m_remover, &SuneerBgRemover::finished, this, &SuneerEditPhotoDialog::onRemovalFinished);
 	connect(m_remover, &SuneerBgRemover::failed, this, &SuneerEditPhotoDialog::onRemovalFailed);
 	updateBgButton();
 	updateMaskButtons();
+	updateRemoveButton();
 
 	if (m_source.isNull())
 	{
@@ -606,9 +630,9 @@ SuneerEditPhotoDialog::SuneerEditPhotoDialog(ScribusDoc* doc, PageItem* item, QW
 	else if (m_s.autoFace && m_s.face.isNull())
 		resetCrop(true);
 	updatePreview();
-	if (autoMode() && m_cut.isNull())
-		runRemoval();
-	m_status->setText(m_isObit && !haveSettings ? tr("Obituary photo: the obituary settings are preselected.") : QString());
+	m_status->setText(!m_cut.isNull() && autoMode() ? tr("Saved background result shown (no AI run). Brushes and selections edit it.")
+	                  : m_isObit && !haveSettings ? tr("Obituary photo: crop as preset. Click Remove background when ready (draw a selection first to limit it).")
+	                  : tr("Original photo. Draw a selection if you want, then click Remove background."));
 }
 
 void SuneerEditPhotoDialog::showEvent(QShowEvent* e)
@@ -746,7 +770,9 @@ void SuneerEditPhotoDialog::updatePreview()
 		return;
 	Settings s = m_s;
 	if (s.removeBg && s.bgMode != QLatin1String("manual") && m_cut.isNull())
-		s.removeBg = false;   // AI not finished yet: the picture as it is
+		s.removeBg = false;   // AI not run yet: the picture as it is
+	if (!s.removeBg)
+		s.tone = 0;           // tone match and background colour belong to the result only
 	QSize fullSize;
 	m_previewBase = renderWhole(m_source, m_cut, QImage(), s, true, &fullSize);
 	m_fullSize = fullSize;
@@ -868,7 +894,7 @@ void SuneerEditPhotoDialog::onToolPress(const QPointF& p, Qt::MouseButton b)
 	{
 		if (!maskReady())
 		{
-			m_status->setText(tr("Choose Background: Manual (or Auto and wait for the AI) first."));
+			m_status->setText(tr("Brushes edit the result: click Remove background first (or Background: Manual)."));
 			return;
 		}
 		ensureBrush();
@@ -892,11 +918,6 @@ void SuneerEditPhotoDialog::onToolPress(const QPointF& p, Qt::MouseButton b)
 	}
 	if (t == RectSel || t == EllipseSel)
 	{
-		if (!maskReady())
-		{
-			m_status->setText(tr("Choose Background: Manual (or Auto and wait for the AI) first."));
-			return;
-		}
 		m_lassoActive = true;
 		m_lassoPoly = false;
 		m_lassoPts.clear();
@@ -906,11 +927,6 @@ void SuneerEditPhotoDialog::onToolPress(const QPointF& p, Qt::MouseButton b)
 	}
 	if (t == LassoFree || t == LassoPoly)
 	{
-		if (!maskReady())
-		{
-			m_status->setText(tr("Choose Background: Manual (or Auto and wait for the AI) first."));
-			return;
-		}
 		const qint64 now = QDateTime::currentMSecsSinceEpoch();
 		const bool dbl = m_lassoActive && (now - m_lastClickMs) < 350 && QLineF(p, m_lastClickScene).length() < 6.0 / qMax(0.05, m_view->transform().m11());
 		m_lastClickMs = now;
@@ -1056,7 +1072,8 @@ void SuneerEditPhotoDialog::onToolRelease(const QPointF& p)
 			else
 				m_sel = full;
 			m_sel.setFillRule(Qt::WindingFill);
-			m_status->setText(tr("Selection ready: Restore / Remove / Smart restore / Protect / Exclude."));
+			m_status->setText(maskReady() ? tr("Selection ready: Restore / Remove / Smart restore / Protect / Exclude.")
+			                              : tr("Selection ready: click Remove background to remove it only inside the selection."));
 		}
 		refreshSelItem();
 		updateMaskButtons();
@@ -1228,8 +1245,12 @@ void SuneerEditPhotoDialog::updateMaskButtons()
 	m_undoBtn->setEnabled(m_undo->canUndo());
 	m_redoBtn->setEnabled(m_undo->canRedo());
 	const bool hasSel = !m_sel.isEmpty();
-	for (auto* b : { m_selEraseBtn, m_selRestoreBtn, m_selSmartBtn, m_selProtectBtn, m_selExcludeBtn, m_selKeepBtn, m_selInvertBtn, m_selClearBtn })
-		b->setEnabled(hasSel);
+	for (auto* b : { m_selEraseBtn, m_selRestoreBtn, m_selSmartBtn, m_selProtectBtn, m_selExcludeBtn, m_selKeepBtn })
+		b->setEnabled(hasSel && maskReady());
+	m_selInvertBtn->setEnabled(hasSel);
+	m_selClearBtn->setEnabled(hasSel);
+	if (m_removeBgBtn)
+		updateRemoveButton();
 	m_brushInfo->setText(tr("%1 px, hard %2 %, stab %3").arg(m_brushSize->value()).arg(m_hardSlider->value()).arg(m_stabiliser));
 }
 
@@ -1295,7 +1316,8 @@ void SuneerEditPhotoDialog::finishLasso(bool close)
 		else
 			m_sel = full;
 		m_sel.setFillRule(Qt::WindingFill);
-		m_status->setText(tr("Selection ready: Erase, Restore or Keep inside (Shift+lasso adds, Alt+lasso subtracts)."));
+		m_status->setText(maskReady() ? tr("Selection ready: Erase, Restore or Keep inside (Shift+lasso adds, Alt+lasso subtracts).")
+		                              : tr("Selection ready: click Remove background to remove it only inside the selection."));
 	}
 	m_lassoPts.clear();
 	refreshSelItem();
@@ -1437,7 +1459,7 @@ void SuneerEditPhotoDialog::onBgModeChanged(int idx)
 		m_s.removeBg = true;
 		m_s.bgMode = QStringLiteral("auto");
 		if (m_cut.isNull() || m_cutModel != m_s.model)
-			runRemoval();
+			m_status->setText(tr("Click Remove background to apply."));
 	}
 	else
 	{
@@ -1450,7 +1472,7 @@ void SuneerEditPhotoDialog::onBgModeChanged(int idx)
 		QSignalBlocker b(m_removeBgChk);
 		m_removeBgChk->setChecked(m_s.removeBg);
 	}
-	m_modelCombo->setEnabled(autoMode());
+	updateRemoveButton();
 	updatePreview();
 }
 
@@ -1552,17 +1574,45 @@ void SuneerEditPhotoDialog::onAutoFace(bool on)
 void SuneerEditPhotoDialog::onRemoveBg(bool on)
 {
 	m_s.removeBg = on;
-	if (autoMode() && (m_cut.isNull() || m_cutModel != m_s.model))
-		runRemoval();
-	else
-		schedulePreview();
+	schedulePreview();
+	updateRemoveButton();
 }
 
 void SuneerEditPhotoDialog::onModelChanged()
 {
 	m_s.model = m_modelCombo->currentData().toString();
-	if (autoMode() && m_cutModel != m_s.model)
-		runRemoval();
+	if (m_cutModel != m_s.model)
+		m_status->setText(tr("Model %1 chosen. Click Remove background to apply.").arg(m_s.model));
+	updateRemoveButton();
+}
+
+// The ONLY place the AI is started from the dialog.
+void SuneerEditPhotoDialog::onRemoveBgClicked()
+{
+	if (m_source.isNull() || m_remover->isRunning())
+		return;
+	if (m_lassoActive)
+		finishLasso(true);
+	if (!m_s.removeBg || m_s.bgMode != QLatin1String("auto"))
+	{
+		m_s.removeBg = true;
+		m_s.bgMode = QStringLiteral("auto");
+		QSignalBlocker bm(m_bgModeCombo), bc(m_removeBgChk);
+		m_bgModeCombo->setCurrentIndex(qMax(0, m_bgModeCombo->findData(QStringLiteral("auto"))));
+		m_removeBgChk->setChecked(true);
+	}
+	runRemoval();
+	updateRemoveButton();
+}
+
+void SuneerEditPhotoDialog::updateRemoveButton()
+{
+	if (!m_removeBgBtn)
+		return;
+	const bool running = m_remover && m_remover->isRunning();
+	m_removeBgBtn->setEnabled(!running && !m_source.isNull());
+	m_removeBgBtn->setText(running ? tr("Removing...") : !m_sel.isEmpty() ? QStringLiteral("\u2702 ") + tr("Remove background (selection)") : QStringLiteral("\u2702 ") + tr("Remove background"));
+	m_modelCombo->setEnabled(!running);
 }
 
 // rembg sees only the crop + 10 % margin, downscaled to a long side of
@@ -1572,12 +1622,22 @@ void SuneerEditPhotoDialog::runRemoval()
 {
 	if (m_source.isNull())
 		return;
-	const QRect region = cropRegionInSource(m_s, m_source.size());
-	if (!m_cut.isNull() && m_cutModel == m_s.model && !m_cutRegion.isNull() && m_cutRegion.contains(region))
+	QRect region = cropRegionInSource(m_s, m_source.size());
+	m_pendingSel = QPainterPath();
+	m_pendingFeather = featherPx();
+	if (!m_sel.isEmpty())
 	{
-		m_status->setText(tr("Cut-out from the cache (%1 x %2 px region, %3).").arg(m_cutRegion.width()).arg(m_cutRegion.height()).arg(m_cutModel));
-		schedulePreview();
-		return;
+		// only inside the selection: the model sees the selection's box (+ margin), the
+		// rest of the picture keeps its pixels
+		m_pendingSel = m_toTransformedFull.inverted().map(m_sel);
+		QRectF b = m_pendingSel.boundingRect();
+		const double mx = b.width() * 0.1 + 8, my = b.height() * 0.1 + 8;
+		region = b.adjusted(-mx, -my, mx, my).toAlignedRect().intersected(QRect(QPoint(0, 0), m_source.size()));
+		if (region.width() < 4 || region.height() < 4)
+		{
+			m_status->setText(tr("The selection is too small."));
+			return;
+		}
 	}
 	m_remover->cancel();
 	QImage part = m_source.copy(region);
@@ -1589,6 +1649,7 @@ void SuneerEditPhotoDialog::runRemoval()
 	m_rembgTimer.start();
 	setBusy(true, tr("Removing the background (%1, %2 x %3 px region -> %4 x %5 for the model)...").arg(m_s.model).arg(region.width()).arg(region.height()).arg(part.width()).arg(part.height()));
 	m_remover->start(part, part.rect(), m_s.model, 0);
+	updateRemoveButton();
 }
 
 void SuneerEditPhotoDialog::onRemovalFinished(const QImage& cutSmall)
@@ -1607,8 +1668,32 @@ void SuneerEditPhotoDialog::onRemovalFinished(const QImage& cutSmall)
 			a[x] = uchar(qAlpha(l[x]));
 	}
 	const QImage alpha = alphaSmall.size() == region.size() ? alphaSmall : alphaSmall.scaled(region.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-	QImage cut(m_source.size(), QImage::Format_ARGB32);
-	cut.fill(Qt::transparent);
+	const bool limited = !m_pendingSel.isEmpty();
+	QImage cut;
+	QImage cov;
+	if (limited)
+	{
+		// outside the selection nothing changes: the previous result when there is
+		// one, else the untouched picture (opaque)
+		if (!m_cut.isNull() && m_cut.size() == m_source.size())
+			cut = m_cut.copy();
+		else
+		{
+			cut = m_source.convertToFormat(QImage::Format_ARGB32);
+			for (int y = 0; y < cut.height(); ++y)
+			{
+				QRgb* cl = reinterpret_cast<QRgb*>(cut.scanLine(y));
+				for (int x = 0; x < cut.width(); ++x)
+					cl[x] = cl[x] | 0xff000000;
+			}
+		}
+		cov = pathCoverage(m_pendingSel, m_source.size(), m_pendingFeather);
+	}
+	else
+	{
+		cut = QImage(m_source.size(), QImage::Format_ARGB32);
+		cut.fill(Qt::transparent);
+	}
 	for (int y = 0; y < region.height(); ++y)
 	{
 		const int sy = region.y() + y;
@@ -1617,21 +1702,33 @@ void SuneerEditPhotoDialog::onRemovalFinished(const QImage& cutSmall)
 		const QRgb* sl = reinterpret_cast<const QRgb*>(m_source.constScanLine(sy));
 		QRgb* cl = reinterpret_cast<QRgb*>(cut.scanLine(sy));
 		const uchar* al = alpha.constScanLine(y);
+		const uchar* cv = limited ? cov.constScanLine(sy) : nullptr;
 		for (int x = 0; x < region.width(); ++x)
 		{
 			const int sx = region.x() + x;
 			if (sx < 0 || sx >= m_source.width())
 				continue;
-			cl[sx] = qRgba(qRed(sl[sx]), qGreen(sl[sx]), qBlue(sl[sx]), al[x]);
+			int a = al[x];
+			if (limited)
+			{
+				const int c = cv[sx];
+				if (c == 0)
+					continue;
+				a = (a * c + qAlpha(cl[sx]) * (255 - c)) / 255;
+			}
+			cl[sx] = qRgba(qRed(sl[sx]), qGreen(sl[sx]), qBlue(sl[sx]), a);
 		}
 	}
 	m_cut = cut;
-	m_cutRegion = region;
+	m_cutRegion = limited ? QRect(QPoint(0, 0), m_source.size()) : region;
+	m_pendingSel = QPainterPath();
 	m_cutModel = m_s.model;
 	m_s.cutRect = region;
 	m_s.cutModel = m_cutModel;
-	m_status->setText(tr("Background removed in %1 s (%2 x %3 px region, model input %4 px). Erase / Restore / Lasso refine the result.")
+	m_status->setText((limited ? tr("Background removed inside the selection in %1 s (%2 x %3 px region, model input %4 px). Outside is unchanged.")
+	                           : tr("Background removed in %1 s (%2 x %3 px region, model input %4 px). Erase / Restore / Lasso refine the result."))
 	                  .arg(ms / 1000.0, 0, 'f', 1).arg(region.width()).arg(region.height()).arg(qRound(qMax(region.width(), region.height()) * m_regionScale)));
+	updateRemoveButton();
 	if (qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG"))
 		fprintf(stderr, "EDITDBG rembg region %dx%d scaled %.3f -> %d ms (source %dx%d)\n", region.width(), region.height(), m_regionScale, (int)ms, m_source.width(), m_source.height());
 	schedulePreview();
@@ -1640,7 +1737,9 @@ void SuneerEditPhotoDialog::onRemovalFinished(const QImage& cutSmall)
 void SuneerEditPhotoDialog::onRemovalFailed(const QString& err)
 {
 	setBusy(false);
+	m_pendingSel = QPainterPath();
 	m_status->setText(tr("Background removal failed: %1").arg(err));
+	updateRemoveButton();
 }
 
 void SuneerEditPhotoDialog::onBgNone()
@@ -1713,6 +1812,7 @@ void SuneerEditPhotoDialog::setBusy(bool on, const QString& text)
 	if (!text.isEmpty())
 		m_status->setText(text);
 	m_applyBtn->setEnabled(!on && !m_source.isNull());
+	updateRemoveButton();
 }
 
 // ---- buttons --------------------------------------------------------------
@@ -1721,11 +1821,19 @@ void SuneerEditPhotoDialog::onApply()
 {
 	if (!m_item || !m_doc || m_source.isNull())
 		return;
-	if (autoMode() && m_cut.isNull())
+	if (m_remover->isRunning())
 	{
 		m_status->setText(tr("The background removal has not finished yet."));
 		return;
 	}
+	if (removalPending())
+	{
+		// Auto chosen but never run: the photo is applied without a background change
+		m_s.removeBg = false;
+		m_s.bgMode = QStringLiteral("none");
+	}
+	if (!m_s.removeBg)
+		m_s.tone = 0;   // tone match belongs to the result only
 	setBusy(true, tr("Rendering at full resolution..."));
 	QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 	if (m_s.removeBg && !m_s.bgColor.isEmpty() && m_s.bgName.isEmpty() && m_isObit)
@@ -1781,12 +1889,14 @@ void SuneerEditPhotoDialog::onResetAutomatic()
 	{
 		QSignalBlocker bm(m_bgModeCombo);
 		m_bgModeCombo->setCurrentIndex(qMax(0, m_bgModeCombo->findData(m_s.removeBg ? m_s.bgMode : QStringLiteral("none"))));
-		m_modelCombo->setEnabled(autoMode());
 	}
-	if (autoMode() && (m_cut.isNull() || m_cutModel != m_s.model))
-		runRemoval();
-	else
-		schedulePreview();
+	if (autoMode() && m_cut.isNull())
+	{
+		// the preset asks for the AI: shown as pending, the button runs it
+		m_status->setText(tr("Automatic settings restored. Click Remove background to run the AI."));
+	}
+	updateRemoveButton();
+	schedulePreview();
 }
 
 void SuneerEditPhotoDialog::onResetOriginal()

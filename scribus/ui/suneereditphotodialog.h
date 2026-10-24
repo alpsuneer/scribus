@@ -95,6 +95,7 @@ private slots:
 	void onFineChanged(int v);
 	void onAutoFace(bool on);
 	void onRemoveBg(bool on);
+	void onRemoveBgClicked();
 	void onModelChanged();
 	void onBgNone();
 	void onBgPick();
@@ -132,6 +133,9 @@ private:
 	bool autoMode() const { return m_s.removeBg && m_s.bgMode == QLatin1String("auto"); }
 	double featherPx() const;
 	void runRemoval();
+	//! Auto mode chosen but the AI has not been asked yet (the button runs it)
+	bool removalPending() const { return autoMode() && m_cut.isNull(); }
+	void updateRemoveButton();
 	void ensureBrush();
 	//! stamps from the last point to scenePos (spacing 10 % of the diameter), stabilised
 	void brushTo(const QPointF& scenePos, bool first);
@@ -169,6 +173,8 @@ private:
 	QString m_cutModel;         // model the cut was made with
 	QRect m_cutRegion;          // SOURCE pixels the cut covers (crop + 10 % margin); null = whole
 	QRect m_pendingRegion;      // region of the removal that is running
+	QPainterPath m_pendingSel;  // SOURCE-px selection the running removal is limited to (empty = whole region)
+	double m_pendingFeather { 0.0 };
 	double m_regionScale { 1.0 };   // model input px / source px of the pending run
 	QTimer* m_rerunTimer { nullptr };   // crop moved outside the cached region: run again
 	QElapsedTimer m_rembgTimer;
@@ -233,6 +239,7 @@ private:
 	QCheckBox* m_removeBgChk;   // hidden; the mode combo drives m_s.removeBg / m_s.bgMode
 	QComboBox* m_bgModeCombo { nullptr };
 	QComboBox* m_modelCombo;
+	QPushButton* m_removeBgBtn { nullptr };
 	QToolButton *m_cropToolBtn, *m_eraseBtn, *m_restoreBtn, *m_lassoBtn, *m_polyBtn, *m_rectBtn, *m_ellipseBtn, *m_protectBrushBtn, *m_excludeBrushBtn;
 	QPushButton *m_selSmartBtn, *m_selProtectBtn, *m_selExcludeBtn;
 	QToolButton* m_viewBtn;
