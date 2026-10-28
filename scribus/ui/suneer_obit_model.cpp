@@ -1,4 +1,5 @@
 #include "suneer_obit_model.h"
+#include "suneerlayoutmodel.h"
 #include "pageitem_group.h"
 #include "pageitem.h"
 #include "scribusdoc.h"
@@ -168,6 +169,8 @@ void SuneerObitModel::fromJson(const QJsonObject& o)
 SuneerObitModel SuneerObitModel::load(QString* note)
 {
 	SuneerObitModel m;
+	// obituary.json is the Obituary Layout Model; its "obituary" part is ours
+	SuneerLayoutModels::ensureMigrated();
 	const QString path = filePath();
 	QFile f(path);
 	if (!f.exists())
@@ -193,9 +196,16 @@ SuneerObitModel SuneerObitModel::load(QString* note)
 			*note = QStringLiteral("%1: %2 (defaults used)").arg(path, pe.errorString());
 		return m;
 	}
-	m.fromJson(doc.object());
+	const bool modelFile = doc.object().contains(QLatin1String("format"));
+	const QJsonObject part = modelFile ? doc.object()["obituary"].toObject() : doc.object();
+	if (modelFile && part.isEmpty())
+	{
+		m.save();                           // a fresh model file: write our defaults into it
+		return m;
+	}
+	m.fromJson(part);
 	// Persist a migrated default (old Obit BG values) so the file shows the truth.
-	const QJsonObject photo = doc.object()["photo"].toObject();
+	const QJsonObject photo = part["photo"].toObject();
 	const QJsonArray oldBg = photo["bgCMYK"].toArray();
 	const QJsonArray oldRgb = photo["bgRGB"].toArray();
 	int oldCmyk[4] { -1, -1, -1, -1 };
@@ -229,6 +239,19 @@ bool SuneerObitModel::save(QString* error) const
 {
 	const QString path = filePath();
 	QDir().mkpath(QFileInfo(path).absolutePath());
+	// inside the Obituary Layout Model file: replace only our part
+	QJsonObject root;
+	{
+		QFile in(path);
+		if (in.open(QIODevice::ReadOnly))
+			root = QJsonDocument::fromJson(in.readAll()).object();
+	}
+	QJsonObject out = toJson();
+	if (root.contains(QLatin1String("format")))
+	{
+		root["obituary"] = out;
+		out = root;
+	}
 	QFile f(path);
 	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
 	{
@@ -236,7 +259,9 @@ bool SuneerObitModel::save(QString* error) const
 			*error = QStringLiteral("cannot write ") + path;
 		return false;
 	}
-	f.write(QJsonDocument(toJson()).toJson(QJsonDocument::Indented));
+	f.write(QJsonDocument(out).toJson(QJsonDocument::Indented));
+	f.close();
+	SuneerLayoutModels::reload();
 	return true;
 }
 

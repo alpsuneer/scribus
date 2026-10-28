@@ -361,6 +361,11 @@ void ContextMenu::createMenuItems_Selection()
 			m_ScMW->scrActions["itemFitCaptionFrame"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["itemFitCaptionFrame"]);
 		}
+		if (currItem->isTextFrame() || currItem->isGroup())
+		{
+			m_ScMW->scrActions["extrasCleanEmptyLines"]->setEnabled(true);
+			addAction(m_ScMW->scrActions["extrasCleanEmptyLines"]);
+		}
 		if (selectedItemCount == 1 && currItem->isTextFrame() && currItem->itemText.isNotEmpty())
 		{
 			m_ScMW->scrActions["itemFillTextWithImage"]->setEnabled(true);
@@ -383,6 +388,18 @@ void ContextMenu::createMenuItems_Selection()
 			m_ScMW->scrActions["suneerTextToTable"]->setEnabled(true);
 			addAction(m_ScMW->scrActions["suneerTextToTable"]);
 		}
+		// A page model placeholder: the ticked story into it / the empty slots away.
+		if (selectedItemCount == 1 && SuneerNewsPanel::isSlotPlaceholder(currItem) && m_ScMW->m_suneerNewsPanel)
+		{
+			SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+			PageItem* ph = currItem;
+			QAction* fillAct = addAction(tr("Place selected story here"));
+			fillAct->setToolTip(tr("The one story ticked in the News Browser is built inside this slot"));
+			connect(fillAct, &QAction::triggered, panel, [panel, ph]() { panel->placeTickedStoryInto(ph); });
+			QAction* rmAct = addAction(tr("Remove empty slots"));
+			connect(rmAct, &QAction::triggered, panel, [panel]() { panel->removeEmptySlots(true); });
+			addSeparator();
+		}
 		// A story placed by the News Browser: re-arrange its photos in place.
 		if (selectedItemCount == 1 && SuneerNewsPanel::isNewsStory(currItem) && m_ScMW->m_suneerNewsPanel)
 		{
@@ -404,12 +421,16 @@ void ContextMenu::createMenuItems_Selection()
 				QAction* a = posMenu->addAction(SuneerNewsPanel::photoPositionLabel(key));
 				connect(a, &QAction::triggered, panel, [panel, story, key]() { panel->rearrangeStory(story, key, -1); });
 			}
+			QAction* gapAct = addAction(tr("Adjust gaps..."));
+			gapAct->setToolTip(tr("Headline, kicker, column, photo and caption gaps of this story (or of every story on the page), live, one undo step"));
+			connect(gapAct, &QAction::triggered, panel, [panel, story]() { panel->adjustGaps(story); });
 			QMenu* colMenu = addMenu(tr("Photo columns"));
 			for (int n = 1; n <= 6; ++n)
 			{
 				QAction* a = colMenu->addAction(QString::number(n));
 				connect(a, &QAction::triggered, panel, [panel, story, n]() { panel->rearrangeStory(story, QString(), n); });
 			}
+	addRelayoutMenu();
 		}
 
 
@@ -835,6 +856,25 @@ void ContextMenu::createMenuItems_Selection()
 	//-->
 }
 
+// "Re-layout page with ▸ <model>": the stories placed on the current page arranged by another layout model.
+bool ContextMenu::addRelayoutMenu()
+{
+	SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+	if (!panel || !m_doc || !m_doc->currentPage())
+		return false;
+	QMenu* menu = addMenu(tr("Re-layout page with"));
+	const QString active = panel->activeModelId();
+	for (const auto& choice : panel->pageModelChoices())
+	{
+		QAction* a = menu->addAction(choice.second);
+		a->setCheckable(true);
+		a->setChecked(choice.first == active);
+		const QString id = choice.first;
+		connect(a, &QAction::triggered, panel, [panel, id]() { panel->relayoutPage(id); });
+	}
+	return true;
+}
+
 void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 {
 	int selectedItemCount = m_Sel.count();
@@ -868,10 +908,18 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 		addSeparator();
 	}
 
+	if (m_ScMW->m_suneerNewsPanel && m_doc->currentPage())
+	{
+		addAction(m_ScMW->scrActions["suneerApplyLayoutModel"]);
+		addAction(m_ScMW->scrActions["suneerPageModules"]);
+	}
+	if (addRelayoutMenu())
+		addSeparator();
 	addAction(m_ScMW->scrActions["editUndoAction"]);
 	addAction(m_ScMW->scrActions["editRedoAction"]);
 	addSeparator();
 	addAction(m_ScMW->scrActions["extrasEmbedAllImages"]);
+	addAction(m_ScMW->scrActions["extrasCleanEmptyLines"]);
 	addSeparator();
 	addAction(m_ScMW->scrActions["viewShowMargins"]);
 	addAction(m_ScMW->scrActions["viewShowFrames"]);

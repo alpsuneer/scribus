@@ -1850,6 +1850,8 @@ void Scribus171Format::WritePages(ScribusDoc *doc, ScXmlStreamWriter& docu, QPro
 		docu.writeAttribute("PageNumber",page->pageNr());
 		docu.writeAttribute("PageName",page->pageName());
 		docu.writeAttribute("MasterPageName",page->masterPageName());
+		if (!page->suneerGroup().isEmpty())
+			docu.writeAttribute("SuneerGroup", page->suneerGroup());   // Faircode Page Models: the page's group
 		docu.writeAttribute("Size", page->size());
 		docu.writeAttribute("Orientation", page->orientation());
 		docu.writeAttribute("LeftPage", page->LeftPg);

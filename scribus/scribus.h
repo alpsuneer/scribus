@@ -412,6 +412,13 @@ public slots:
 	void suneerExtractImages();
 	//! SUNEER_EMBED_SELFTEST: unattended Embed All / Extract test, see scribus.cpp
 	void suneerEmbedSelfTest();
+	//! Extras > Clean Empty Lines & Fit Frames: the selected text frames, or the News Browser /
+	//! Layout Model frames of the current page. One undo step. Returns the summary ("Cleaned 23 frames ...").
+	QString suneerCleanEmptyLines(bool quiet = false, int* cleanedOut = nullptr);
+	//! SUNEER_CLEAN_SELFTEST: unattended test of the command on every page, see scribus.cpp
+	void suneerCleanSelfTest();
+	//! SUNEER_PAGEMODEL_ANALYZE: unattended analysis / bulk import of old pages, see scribus.cpp
+	void suneerPageModelAnalyzeTest();
 	void suneerRedownloadMissingPhotos();
 	void suneerRemoveUnusedPhotos();
 	//! View > Image Frames > Show Linked Image Badges

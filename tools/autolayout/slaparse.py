@@ -19,18 +19,29 @@ def clean_len(s):
     return len(s.replace('\xad','').replace('‌','').replace('‍',''))
 
 class Page:
-    def __init__(self, path):
+    def __init__(self, path, page_index=0):
         self.path = path
         root = ET.parse(path).getroot()
+        self.version = root.get('Version') or ''
         self.doc = root[0]
         self.new = self.doc.tag == 'Document'
+        self.index = page_index
+        self.layers = {}
+        for l in self.doc.findall('Layers' if self.new else 'LAYERS'):
+            self.layers[A(l, 'NUMMER', 'Number')] = A(l, 'NAME', 'Name') or ''
         self.styles = {}
         for s in self.doc.findall('ParagraphStyle' if self.new else 'STYLE'):
             self.styles[A(s,'NAME','Name')] = s.attrib
         self.cstyles = {}
         for s in self.doc.findall('CharacterStyle' if self.new else 'CHARSTYLE'):
             self.cstyles[A(s,'CNAME','Name')] = s.attrib
-        pg = self.doc.find('Page' if self.new else 'PAGE')
+        pages = self.doc.findall('Page' if self.new else 'PAGE')
+        if not pages:
+            raise ValueError('no page in ' + path)
+        self.npages = len(pages)
+        pg = pages[min(max(0, page_index), len(pages) - 1)]
+        self.page_num = int(A(pg, 'NUM', 'Number', default=page_index))
+        self.master = A(pg, 'MNAM', 'MasterPageName') or ''
         self.px = float(A(pg,'PAGEXPOS','PageXPosition'))/PT
         self.py = float(A(pg,'PAGEYPOS','PageYPosition'))/PT
         self.w = float(A(pg,'PAGEWIDTH','PageWidth'))/PT
@@ -71,7 +82,10 @@ class Page:
                   x=float(A(a,'XPOS','XPos','XPosition'))/PT - self.px, y=float(A(a,'YPOS','YPos','YPosition'))/PT - self.py,
                   w=float(A(a,'WIDTH','Width'))/PT, h=float(A(a,'HEIGHT','Height'))/PT,
                   page=int(A(a,'OwnPage', default=-1)), group=group, locked=A(a,'LOCK','Locked') == '1',
-                  layer=A(a,'LAYER','Layer','LayerID'), rot=float(A(a,'ROT','Rotation', default=0)))
+                  layer=A(a,'LAYER','Layer','LayerID'), rot=float(A(a,'ROT','Rotation', default=0)),
+                  printable=A(a,'PRINTABLE','Printable', default='1') != '0', linew=float(A(a,'PWIDTH','LineWidth', default=0) or 0),
+                  fill=A(a,'PCOLOR','FillColor') or '', line=A(a,'PCOLOR2','LineColor') or '')
+        it['layername'] = self.layers.get(it['layer'], '')
         if t == 4:
             it['cols'] = int(A(a,'COLUMNS','Columns', default=1)); it['colgap'] = float(A(a,'COLGAP','ColumnGap', default=0))/PT
             it['next'] = A(a,'NEXTITEM','NextItem'); it['back'] = A(a,'BACKITEM','BackItem')
@@ -105,7 +119,8 @@ class Page:
                                 para_after=float(A(ch,'NACH','SpaceBelow', default=0) or 0) if ch is not None else 0))
         for ch in st:
             if ch.tag in ('ITEXT','Content'):
-                t = ch.get('CH','') if ch.tag=='ITEXT' else (ch.text or '')
+                # 1.5: <ITEXT CH="...">; 1.7: <Content Chars="..."/> (the text is an attribute, not element text)
+                t = ch.get('CH','') if ch.tag=='ITEXT' else (ch.get('Chars') or ch.text or '')
                 buf.append(t)
                 fs = A(ch,'FONTSIZE','FontSize'); fn = A(ch,'FONT','Font')
                 if fs and t.strip(): sizes.append(float(fs))

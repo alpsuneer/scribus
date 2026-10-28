@@ -41,6 +41,7 @@ class ContextMenu : public QMenu
 	protected:
 		void processSelection();
 		void createMenuItems_Selection();
+		bool addRelayoutMenu();
 		void createMenuItems_NoSelection(double mx, double my);
 
 		Selection m_Sel;

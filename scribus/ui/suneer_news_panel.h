@@ -3,9 +3,14 @@
 
 #include <QPointer>
 #include "suneerspacing.h"
+#include "suneerlayoutmodel.h"
+#include "ui/suneerlayoutmodels.h"
 #include <functional>
+#include <optional>
 
 #include <QDockWidget>
+#include <QListWidget>
+#include <QMimeData>
 #include "undoobject.h"
 #include <QPointer>
 #include <QColor>
@@ -58,6 +63,10 @@ class UndoState;
 class SimpleState;
 struct SuneerObitModel;
 class SuneerObitPhotoWorker;
+namespace SuneerLayout { struct StoryIn; }
+struct SuneerPageModel;
+struct SuneerPageGroup;
+class QToolButton;
 class SuneerNewsPanel : public QDockWidget, public UndoObject
 {
 	Q_OBJECT
@@ -73,6 +82,79 @@ public:
 	//! Tags are dropped, <p>/<br>/<div>/<li> ends become paragraph breaks and
 	//! entities are decoded. The text itself is not normalised.
 	static QStringList contentToParagraphs(const QString& content);
+	/*! The desk's column count for a story: the News Browser override ("_colsOverride", right-click
+	    Place as N columns), else Workflow's "Columns" field (News.noOfColumns, 1..8). 0 = not set. */
+	static int requestedColumns(const QJsonObject& news);
+	//! Headline style for a story \a cols wide: the model's headline rule, else the house table (autolayout-rules.json modes); empty = the panel's style
+	QString headlineStyleForWidth(int cols) const;
+	//! Per-story "Place with…" overrides stored on the story JSON (_headStyle / _photoPos); empty = automatic
+	static QString requestedHeadStyle(const QJsonObject& news) { return news.value(QStringLiteral("_headStyle")).toString(); }
+	static QString requestedPhotoPos(const QJsonObject& news) { return news.value(QStringLiteral("_photoPos")).toString(); }
+	//! The row badge ("3 col* · 36 M · Left") for the story's column count / "Place with" overrides
+	static QString overrideBadge(const QJsonObject& news);
+	void relabelOverrideBadge(QListWidgetItem* row, const QJsonObject& news);
+
+	//! Layout > Layout Models...: the model editor (page hooks for "Apply spacing to this page").
+	void openLayoutModels();
+	//! Layout > Auto Layout... / News Browser "Gallery...": the current page arranged by every model.
+	void openLayoutGallery();
+	//! Layout > Page Models...: groups, cards, create from old pages, skeleton on this page (ui/suneer_news_pagemodels.cpp).
+	void openPageModelGallery();
+	/*! The skeleton of a page model on the current page: one non-printing placeholder frame per slot and an outline per ad
+	    space on the layer "Page model"; nothing on the page is moved or deleted. \a interactive asks "Replace skeleton?".
+	    One undo step. Returns the report; empty = cancelled. */
+	QString makePageSkeleton(const SuneerPageModel& model, const SuneerPageGroup& group, bool interactive);
+	//! A story built exactly inside the placeholder (headline by slot width, photo by slot, text fitted, overflow / short marked); the placeholder goes.
+	QString fillSlot(PageItem* placeholder, QJsonObject news);
+	//! Canvas drop of News Browser row \a newsIndex (m_newsData) on \a item: fills the slot when \a item is a placeholder.
+	bool dropStoryOnItem(PageItem* item, int newsIndex);
+	//! Right-click on a placeholder: the one ticked story into it (Place Selected with the placeholder selected).
+	void placeTickedStoryInto(PageItem* placeholder);
+	//! Layout > Remove Empty Slots: every placeholder / ad outline left on the current page. Returns how many.
+	int removeEmptySlots(bool interactive);
+	static bool isSlotPlaceholder(const PageItem* item);
+	QList<PageItem*> skeletonItems(int pageIdx) const;
+	//! The ads on a page now (mm, page relative).
+	QList<QRectF> pageAdRectsMm(int pageIdx) const;
+	//! A story known only from the server's list has no body: fetch the full record (GET /news/:id) first. False: not loaded (told).
+	bool ensureFullStory(QJsonObject& news);
+	void runPageModelSelfTest(const QString& outPath);
+	void newsItemDiagnostics(int pageIdx, const std::function<void(const QString&)>& line);
+	/*! The top of a text frame that follows a photo, caption or name frame: first line offset = font ascent
+	    (the first baseline is then the font's ascent below the top inset, not a whole line or the glyphs'
+	    own height), top inset \a topPt, no space before on the first paragraph, no empty first lines. */
+	void tidyTextTop(PageItem* text, double topPt, bool withUndo);
+	/*! Obituary module (photo + name/caption/text frames stacked): every text frame fitted to its last line
+	    with a 0 bottom inset, each next frame \a gapPt under the previous one; the first stays where it is.
+	    Returns the number of frames moved or resized. */
+	int stackObitFrames(const QList<PageItem*>& items, double gapPt, bool withUndo);
+	QString m_lastSlotReport;                      //!< fillSlot's last report line (tests)
+	//! Place Selected with exactly one placeholder selected on the page: the one ticked story goes into it. False: not that case.
+	bool placeIntoSelectedSlot(const QList<QJsonObject>& stories);
+	//! SUNEER_PAGEMODEL_IMPORT=<files/folders;...>: the import dialog run unattended, every page's group written to the report.
+	void runPageModelImportTest(const QString& outPath);
+	//! Re-arranges the stories placed on the current page with \a modelId (hand-placed frames stay). One undo step; the report is shown.
+	void relayoutPage(const QString& modelId);
+	//! Layout > Page Modules...: the modules of the current page as outlines, merge / split / keep fixed.
+	void openPageModules();
+	//! Gallery Apply: the current page arranged with \a modelId the way the card showed it (\a keep, the new stories). Returns the report.
+	QString arrangePage(const QString& modelId, int keep, bool withNew, bool selectionOnly = false);
+	/*!
+	 \brief A Layout Gallery card: the current page copied into a hidden document and arranged there
+	 with \a modelId by arrangePage() - the code Apply runs - then drawn \a widthPx wide. The real
+	 document is not touched (no undo step, no network while the copy is arranged).
+	 */
+	SuneerLayoutGallery::Preview previewArrange(const QString& modelId, int keep, bool selectionOnly, const QList<PageItem*>& selection, int widthPx);
+	/*!
+	 \brief Regression test (SUNEER_LAYOUT_SELFTEST=<report file>, run once after a document is opened):
+	 for every layout model the Gallery card, Apply on the real page (compared with the card), then Undo
+	 (the page must be exactly as before). Writes one line per model and quits Scribus (exit 0 = all passed).
+	 */
+	void runLayoutSelfTest(const QString& outPath);
+	//! Every layout model (id, name), for the Re-layout menus.
+	QList<QPair<QString, QString>> pageModelChoices() const;
+	//! The active layout model (the dropdown, or the one being applied).
+	QString activeModelId() const;
 
 public slots:
 	//! The configuration dialog (server, layout, styles). Also reachable from
@@ -100,8 +182,6 @@ private:
 
 	QComboBox*   m_editionCombo  {nullptr};
 	QComboBox*   m_pageCombo     {nullptr};
-	QComboBox*   m_titleStyleCmb {nullptr};
-	QComboBox*   m_photoPosCmb   {nullptr};
 	QDateEdit*   m_dateEdit      {nullptr};
 	QListWidget* m_newsList      {nullptr};
 	QPushButton* m_fetchBtn      {nullptr};
@@ -210,7 +290,8 @@ public:
 	static QString elideGraphemes(const QString& text, const QFontMetrics& fm, int width);
 private:
 	void showPreview(const QJsonObject& news);
-	void fillTitleStyleCombo();
+	//! The headline style of the News Browser settings ("style/titleStyle"): the fallback when no width rule applies
+	QString panelTitleStyle() const;
 
 	// ---- placement ---------------------------------------------------------
 	//! Places one story (headline frame, body frame, photos, captions) with
@@ -248,6 +329,31 @@ public:
 	void rearrangeStory(PageItem* item, const QString& pos, int imgCols);
 	//! Selects every item of the story \a item belongs to.
 	void selectWholeStory(PageItem* item);
+	//! Right-click "Adjust gaps...": the gaps of the placed story \a item belongs to (or of every
+	//! story on the page), live on the page, one undo step. See suneer_news_gaps.cpp.
+	void adjustGaps(PageItem* item);
+	//! The gaps a placed story uses now: its own (layout.gaps, after "Adjust gaps"), else its model's.
+	SuneerSpacing::Values storyGaps(const PageItem* storyText, QString* modelId = nullptr) const;
+	struct GapResult
+	{
+		int stories {0};          //!< stories re-laid
+		int moved {0};            //!< modules moved by the story-to-story gaps
+		QStringList overflow;     //!< stories whose text no longer fits (overflow marker)
+		QStringList parked;       //!< stories with no room left on the page: moved to the pasteboard
+	};
+	/*!
+	 Re-lays the placed stories \a storyTexts (their text frames) in place with the gaps \a v:
+	 headline / kicker space, column gutter, photo / caption gaps. With \a pageGaps the story-to-story
+	 gaps too: every story on the current page to the grid with the horizontal gap, then stacked with
+	 the vertical one. A story never runs into another frame: its text frame stops there (overflow
+	 marker). \a remember writes layout.model / layout.gaps / layout.gapsUser on the stories.
+	 No undo transaction of its own (the caller makes one).
+	 */
+	GapResult applyGaps(const QList<PageItem*>& storyTexts, const SuneerSpacing::Values& v, bool pageGaps, bool remember);
+	//! The text frames of the placed News Browser stories on the current page (not locked / pinned / parked).
+	QList<PageItem*> storyTextsOnPage() const;
+	//! SUNEER_GAPS_SELFTEST=<report>: Adjust gaps on every story of the page, overlap / undo checks, then quits.
+	void runGapSelfTest(const QString& outPath);
 	static QStringList photoPositionKeys();
 	static QStringList placePhotoPositionKeys();
 	static QString photoPositionLabel(const QString& key);
@@ -259,6 +365,46 @@ private:
 	QString tagStoryItems(const QList<PageItem*>& items, const QString& title, const QString& pos, int imgCols, int cols, const QString& serverId);
 	// ---- "placed" state: the SERVER's news_pages.dtp_status is the truth ----
 	QSet<QString> m_pendingMarks;              // server ids placed locally but not yet marked USED
+public:
+	/*! Deleting placed story frames from the page marks the story unused on the server by itself
+	    (pref news/markUnusedOnDelete, default on): the document calls noteDeleting() with the frames
+	    about to go (ScribusDoc::itemSelection_DeleteItem - the Delete key, Cut, Delete page), a check
+	    ~2 s later marks every story that has no frame left anywhere in the document (pages and
+	    pasteboard) in ONE request per page. Frames cut to the clipboard are held until they are pasted
+	    or the clipboard changes. Undo / redo re-evaluates: frames back -> USED again, gone again ->
+	    UNUSED. A failed request is retried every minute (up to 10 times) with a warning shown. */
+	void noteDeleting(const QList<PageItem*>& items);
+	bool markOnServerBatch(const QStringList& newsIds, const QString& pageId, const QString& dtpStatus, QString* error, const QString& expected);
+	//! Redraw the used / unused badges of the list after a status change.
+	void refreshUsedBadges();
+	void noteCut(const QList<PageItem*>& items);
+	void notePasted();
+	//! Save: failed automatic marks are sent again (the retry queue is also tried on the next delete).
+	void noteSaved();
+	static bool markUnusedOnDeletePref();
+private slots:
+	void checkDeletedStories();
+	void retryAutoMarks();
+private:
+	struct DeletedStory { QString storyId, serverId, pageId, title; bool marked { false }; };
+	QHash<QString, DeletedStory> m_deleted;     // story id -> what was deleted (pending the check)
+	QSet<QString> m_cutStories;                 // story ids whose frames sit on the clipboard
+	QTimer* m_deleteCheckTimer {nullptr};       // the one timer: a single-shot debounce of ~2 s after the last delete
+	QHash<QString, DeletedStory> m_autoUnused;  // story id -> marked UNUSED by a delete (re-marked USED when its frames come back)
+	QHash<QString, DeletedStory> m_autoRetry;   // story id -> failed server mark, retried on the next delete / Save
+	QHash<QString, QSet<PageItem*>> m_storyIndex;   // story id -> its live frames (see indexBuild)
+	ScribusDoc* m_storyIndexDoc {nullptr};
+	qint64 m_autoHookNs {0};                    // UI time spent in noteDeleting + checkDeletedStories (tests)
+	void indexBuild();
+	void indexAdd(const QList<PageItem*>& items);
+	void indexRemove(const QList<PageItem*>& items);
+	int indexCount(const QString& storyId);
+	void indexResync(const QString& storyId);
+	void autoMarkStories(const QList<DeletedStory>& stories, const QString& status, const QString& expected, const QString& why);
+	QStringList m_autoMarkLog;                  // tests: "want status why ids" per batch decision
+	//! tests/suneer/mark_unused_on_delete.sh: the delete scenarios on the opened page (fixture mode), report to \a outPath
+	void runUnusedSelfTest(const QString& outPath);
+	void reevaluateAfterUndo();
 	QPushButton* m_checkBtn {nullptr};
 	QPushButton* m_releaseBtn {nullptr};
 	QTimer* m_placedTimer {nullptr};           // unused (kept for ABI of this class only)
@@ -289,6 +435,8 @@ private:
 	QString serverStatus(const QString& newsId, const QString& pageId, QString* who = nullptr, QString* error = nullptr);
 	//! Request/response trail for the status calls (no tokens): ~/.cache/scribus/news/api.log
 	void apiLog(const QString& line) const;
+	//! api.log: which API fields of \a news had blank lines / zero-width characters at the ends (once per story)
+	void logTextJunk(const QJsonObject& news) const;
 	//! Per-story outcome of the last markOnServer(): fresh from-status and error text.
 	QHash<QString, QString> m_lastFrom, m_lastMarkError;
 	//! Undo states of the placement in progress (SUNEER_NEWS_PLACE), so the
@@ -400,10 +548,57 @@ private:
 	QString obitRuninStyle(const SuneerObitModel& model);
 	//! Re-applies the current photo settings to the selected placed obit photos.
 	void onObitReprocess();
-	//! "Spacing...": Faircode Layout spacing dialog with live preview on the current page.
+	//! "Spacing...": the Layout Models editor with live preview / apply on the current page.
 	void onSpacing();
+	//! The stories of the current page not yet placed: the ticked rows, else every free row.
+	QList<SuneerLayout::StoryIn> galleryNewStories(QString* note);
+	//! The cached download of a picture URL (no download), empty when not cached.
+	QString cachedImagePath(const QString& fileUrl) const;
 	//! The spacing model of what is being placed ("obituary" while the Obituary model places, else "normal").
-	QString spacingModel() const { return m_placingModel.isEmpty() ? QStringLiteral("normal") : m_placingModel; }
+	QString spacingModel() const { return m_placingModel.isEmpty() ? activeModelId() : m_placingModel; }
+	SuneerLayoutModel activeModel() const;
+	//! The Obituary-engine model in use: the active model when it is one, else the built-in "obituary".
+	QString activeObitModelId() const;
+	SuneerObitModel obitModel(QString* note = nullptr) const;
+	SuneerLayout::StoryIn storyInFromNews(const QJsonObject& news, const QString& key) const;
+	QList<QJsonObject> galleryNewStoryJsons(QString* note);
+	//! The real arrangement: Job to the end, then placed stories moved / re-laid, new stories placed, the rest to the pasteboard.
+	QString arrangeCore(const SuneerLayoutModel& model, int keep, QList<QJsonObject> fresh, bool* changed, bool selectionOnly = false);
+	void relayoutPlacedStory(const SuneerLayout::StoryIn& s, double x, double y, int cols, int imgCols, const QString& pos, const QString& headStyle);
+	void parkOnPasteboard(const QList<QList<PageItem*>>& stories);
+	void selectModelInCombo(const QString& id);
+	QStringList m_restoreFailures;             // stories whose server status failed in this undo / redo step
+	QString m_modelOverride;                   // the model being applied (wins over the dropdown)
+	//! "Adjust gaps" / a story's own gaps: wins over the model's spacing while set (spacingValues()).
+	std::optional<SuneerSpacing::Values> m_gapOverride;
+	//! The spacing placement uses: m_gapOverride, else the model being placed / the active model.
+	SuneerSpacing::Values spacingValues() const;
+	//! Headline -> body and kicker -> headline space on the story frame's head paragraphs (style + extra, undoable).
+	void applyHeadGaps(PageItem* text, const SuneerSpacing::Values& v);
+	//! Writes layout.model / layout.gaps (/ layout.gapsUser) on every item of a story.
+	void rememberGaps(const QList<PageItem*>& items, const QString& modelId, const SuneerSpacing::Values& v, bool user);
+	// Gallery cards: arrangePage() runs on a scratch copy of the page (m_doc points at it meanwhile)
+	bool m_preview {false};
+	QList<QJsonObject> m_previewFresh;         // the new stories, read and their pictures fetched before the copy
+	struct ArrangeOut
+	{
+		SuneerLayoutModel model;
+		bool obitEngine {false};
+		bool obitPacked {false};               // a news model on an obituary page: column packing with the obituary gaps
+		bool refused {false};                  // checkModel / checkArrange said no: nothing was changed
+		int total {0}, fit {0}, parked {0};
+		int obits {0}, news {0};               // Obituary engine: obit modules / 2-column news arranged
+		QStringList notFit;
+		QRectF content;
+		QList<double> colX;
+		double colW {0}, gapV {0};
+	};
+	ArrangeOut* m_arrangeOut {nullptr};
+	int m_forceCols {0};
+	int m_forceImgCols {0};
+	QString m_forcePos;
+	QString m_forceTitle;
+	QToolButton* m_relayoutBtn {nullptr};
 	//! The model the current page was placed with (obituary modules on it -> "obituary").
 	QString pageSpacingModel() const;
 	struct SpacingSnap { QPointer<PageItem> item; double x, y; double wrap[4]; double dist[4]; double colGap; };
@@ -433,5 +628,18 @@ private:
 	//! Background tone for the obit photos: a document colour (added when
 	//! needed) and its RGB;  fillName receives the colour name.
 	QColor obitBackgroundColor(const SuneerObitModel& model, QString* fillName) const;
+};
+
+/*! The News Browser list: rows can be dragged onto the canvas (mime "application/x-suneer-news" = the row's
+    m_newsData index); a drop on a page model placeholder builds the story in that slot (ScribusView). */
+class SCRIBUS_API SuneerNewsListWidget : public QListWidget
+{
+public:
+	static const char* mimeType() { return "application/x-suneer-news"; }
+	explicit SuneerNewsListWidget(QWidget* parent = nullptr);
+protected:
+	QStringList mimeTypes() const override;
+	QMimeData* mimeData(const QList<QListWidgetItem*>& items) const override;
+	Qt::DropActions supportedDropActions() const override { return Qt::CopyAction; }
 };
 #endif

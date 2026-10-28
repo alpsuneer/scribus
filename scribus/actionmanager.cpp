@@ -1191,6 +1191,18 @@ void ActionManager::initExtrasMenuActions()
 
 	name = "SRDuplicateNewsCheck";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerLayoutModels";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerAutoLayout";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerApplyLayoutModel";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerPageModules";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerPageModelGallery";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerRemoveEmptySlots";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasAutoflowToNewPages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasFixOverflowFrames";
@@ -1205,6 +1217,8 @@ void ActionManager::initExtrasMenuActions()
 	name = "extrasOptimizeImages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasEmbedAllImages";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "extrasCleanEmptyLines";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasWarnLinkedImages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
@@ -2106,6 +2120,18 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasGenerateTableOfContents"]->setTexts( tr("&Generate Table Of Contents and Indexes"));
 	(*scrActions)["extrasUpdateDocument"]->setTexts( tr("&Update Document"));
 	(*scrActions)["SRDuplicateNewsCheck"]->setTexts( tr("Duplicate News Checker..."));
+	(*scrActions)["suneerLayoutModels"]->setTexts( tr("Layout Models..."));
+	(*scrActions)["suneerLayoutModels"]->setStatusTip( tr("Edit the layout models: grid, structure, story and photo rules, every spacing value"));
+	(*scrActions)["suneerAutoLayout"]->setTexts( tr("Auto Layout..."));
+	(*scrActions)["suneerAutoLayout"]->setStatusTip( tr("Layout Gallery: the current page arranged by every layout model"));
+	(*scrActions)["suneerApplyLayoutModel"]->setTexts( tr("Apply Layout Model..."));
+	(*scrActions)["suneerApplyLayoutModel"]->setStatusTip( tr("Arrange the stories of the current page (placed or made by hand) with a layout model"));
+	(*scrActions)["suneerPageModules"]->setTexts( tr("Page Modules..."));
+	(*scrActions)["suneerPageModules"]->setStatusTip( tr("The modules of the current page as outlines: merge, split, keep fixed"));
+	(*scrActions)["suneerPageModelGallery"]->setTexts( tr("Page Models..."));
+	(*scrActions)["suneerPageModelGallery"]->setStatusTip( tr("Whole-page layouts saved from old pages, in page groups; put one's skeleton on the current page"));
+	(*scrActions)["suneerRemoveEmptySlots"]->setTexts( tr("Remove Empty Slots"));
+	(*scrActions)["suneerRemoveEmptySlots"]->setStatusTip( tr("Delete every page model placeholder and ad outline left on the current page"));
 	(*scrActions)["SRDuplicateNewsCheck"]->setToolTip( tr("Duplicate News Checker: find the same headline or the same story printed more than once"));
 	(*scrActions)["SRDuplicateNewsCheck"]->setStatusTip( tr("Find the same headline or the same story printed more than once"));
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
@@ -2115,6 +2141,8 @@ void ActionManager::languageChange()
 	(*scrActions)["extrasImposition"]->setTexts( tr("Impose Pages..."));
 	(*scrActions)["extrasOptimizeImages"]->setTexts( tr("Optimize Images..."));
 	(*scrActions)["extrasEmbedAllImages"]->setTexts( tr("Embed All Images"));
+	(*scrActions)["extrasCleanEmptyLines"]->setTexts( tr("Clean Empty Lines && Fit Frames"));
+	(*scrActions)["extrasCleanEmptyLines"]->setStatusTip( tr("Remove empty lines at the start / end of the selected text frames (or the News Browser frames of this page) and fit the frames to the last line"));
 	(*scrActions)["extrasWarnLinkedImages"]->setTexts( tr("Warn About Linked Images in This Document"));
 	(*scrActions)["extrasCheckDuplicateShortcuts"]->setTexts( tr("Check Duplicate Shortcuts..."));
 	(*scrActions)["extrasCheckDuplicateShortcuts"]->setStatusTip( tr("List every shortcut key that is assigned more than once"));
@@ -2835,11 +2863,18 @@ void ActionManager::createDefaultMenus()
 		<< "extrasImposition"
 		<< "extrasOptimizeImages"
 		<< "extrasEmbedAllImages"
+		<< "extrasCleanEmptyLines"
 		<< "suneerRedownloadMissingPhotos"
 		<< "suneerRemoveUnusedPhotos"
 		<< "extrasWarnLinkedImages"
 		<< "extrasCheckDuplicateShortcuts"
-		<< "SRDuplicateNewsCheck";
+		<< "SRDuplicateNewsCheck"
+		<< "suneerLayoutModels"
+		<< "suneerAutoLayout"
+		<< "suneerApplyLayoutModel"
+		<< "suneerPageModules"
+		<< "suneerPageModelGallery"
+		<< "suneerRemoveEmptySlots";
 	//Windows
 	++itmenu;
 	itmenu->second

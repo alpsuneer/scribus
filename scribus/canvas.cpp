@@ -25,6 +25,7 @@
 
 #include "appmodes.h"
 #include "canvas.h"
+#include "ui/suneermodulepanel.h"
 #include <QElapsedTimer>
 #include "canvasmode.h"
 #include "framelinkrouter.h"
@@ -991,6 +992,7 @@ void Canvas::paintEvent ( QPaintEvent * p )
 	const qint64 dbgT1 = suneerDragDebug ? dbgT.elapsed() : 0;
 	SuneerDupHighlights::paint(&qp, this, m_doc);
 	suneerPaintObitFlags(&qp, this, m_doc);
+	SuneerModulePanel::paintOverlay(&qp, this, m_doc);
 	const qint64 dbgT2 = suneerDragDebug ? dbgT.elapsed() : 0;
 	// does mode specific rendering, currently selection in legacymode and nodes in nodeedit
 	m_view->m_canvasMode->drawControls(&qp);

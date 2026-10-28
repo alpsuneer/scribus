@@ -1917,6 +1917,8 @@ void Scribus170Format::WritePages(ScribusDoc *doc, ScXmlStreamWriter& docu, QPro
 		docu.writeAttribute("NUM",page->pageNr());
 		docu.writeAttribute("NAM",page->pageName());
 		docu.writeAttribute("MNAM",page->masterPageName());
+		if (!page->suneerGroup().isEmpty())
+			docu.writeAttribute("SuneerGroup", page->suneerGroup());
 		docu.writeAttribute("Size", page->size());
 		docu.writeAttribute("Orientation", page->orientation());
 		docu.writeAttribute("LEFT", page->LeftPg);

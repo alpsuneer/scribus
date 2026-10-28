@@ -5430,6 +5430,33 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreImageScaleMode(ss, isUndo);
 		else if (ss->contains("SUNEER_IMAGE_INLINE"))
 			restoreSuneerImageInline(ss, isUndo);
+		else if (ss->contains("SUNEER_ATTR"))
+		{
+			// one item attribute (layout.gaps ...): set back to the old / new value, removed when empty
+			const QString name = ss->get("NAME");
+			const QString value = ss->get(isUndo ? "OLD" : "NEW");
+			ObjAttrVector attrs = pageItemAttributes;
+			bool found = false;
+			for (int i = 0; i < attrs.size(); ++i)
+				if (attrs[i].name == name)
+				{
+					if (value.isEmpty())
+						attrs.remove(i);
+					else
+						attrs[i].value = value;
+					found = true;
+					break;
+				}
+			if (!found && !value.isEmpty())
+			{
+				ObjectAttribute a;
+				a.name = name;
+				a.type = QStringLiteral("string");
+				a.value = value;
+				attrs.append(a);
+			}
+			pageItemAttributes = attrs;
+		}
 		else if (ss->contains("SUNEER_IMAGE_EXTRACT"))
 			restoreSuneerImageInline(ss, !isUndo);   // the reverse of embedding: OLD_PATH linked, NEW_PATH the temp copy
 		else if (ss->contains("SUNEER_ITEM_ATTRIBUTES"))

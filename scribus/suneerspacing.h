@@ -7,19 +7,19 @@ for which a new license (GPL+exception) is in place.
 #ifndef SUNEERSPACING_H
 #define SUNEERSPACING_H
 
-#include <QHash>
-#include <QMap>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
 #include "scribusapi.h"
 
 /*!
- \brief Layout spacing for every News Browser layout model, from ONE place:
- ~/.config/scribus/layout-spacing.json (global values + per-model overrides).
+ \brief Layout spacing values. They live in the Layout Models
+ (~/.config/scribus/layout-models/<id>.json, see suneerlayoutmodel.h); the
+ old one-file store layout-spacing.json is migrated into them once.
 
- Every placement path (Normal, Obituary, re-pack, gap check, the coming Auto
- Layout) asks forModel(<model>) and never uses its own numbers.
+ Every placement path (Normal, Obituary, re-pack, gap check) asks
+ forModel(<model id>) and never uses its own numbers.
  */
 namespace SuneerSpacing
 {
@@ -35,6 +35,7 @@ namespace SuneerSpacing
 		Inset,            //!< mm inner padding of text frames
 		ColumnGap,        //!< mm between text columns inside a story frame
 		RuleWidth,        //!< pt separator rule between modules (0 = none)
+		KickerHeadline,   //!< mm extra space after the kicker / subheading, before the headline (0 = the styles decide)
 		KeyCount
 	};
 
@@ -46,29 +47,30 @@ namespace SuneerSpacing
 		double pt(Key k) const { return k == RuleWidth ? v[k] : v[k] * 72.0 / 25.4; }   //!< in points
 	};
 
-	//! "normal", "obituary", "auto" (the models the dialog shows; any other key works too)
-	SCRIBUS_API QStringList models();
-	SCRIBUS_API QString modelTitle(const QString& model);
 	SCRIBUS_API QString keyName(Key k);        //!< JSON key
 	SCRIBUS_API QString keyTitle(Key k);       //!< label
 	SCRIBUS_API QString keyUnit(Key k);        //!< "mm" / "pt"
 
-	struct Store
-	{
-		Values global;
-		QHash<QString, QMap<int, double>> overrides;   //!< model -> key -> value (absent = global)
-		Values forModel(const QString& model) const;
-	};
+	/*! The house value of \a k: resources/autolayout/autolayout-rules.json (installed in
+	    <share>/autolayout/), measured from our own pages; the built-in default when the
+	    file has no number for it. \a source gets "house rules" or "built-in default". */
+	SCRIBUS_API double houseDefault(Key k, QString* source = nullptr);
+	SCRIBUS_API Values houseDefaults();
 
-	SCRIBUS_API QString filePath();
-	SCRIBUS_API Store defaults();
-	//! The file, cached; written with defaults (migrated from the old settings) when missing.
-	SCRIBUS_API const Store& store();
-	SCRIBUS_API bool save(const Store& s, QString* error = nullptr);
-	SCRIBUS_API bool exportTo(const QString& path, QString* error = nullptr);
-	SCRIBUS_API bool importFrom(const QString& path, QString* error = nullptr);
-	//! The values a model places with.
-	SCRIBUS_API Values forModel(const QString& model);
+	//! The gaps a placed story / module can change ("Adjust gaps", Layout Model "Gaps"), in display order.
+	SCRIBUS_API QList<Key> gapKeys();
+	//! Gaps inside one story (the rest - story to story - belong to the page).
+	SCRIBUS_API bool isStoryGap(Key k);
+	//! Short label for the Gaps lists ("Headline → body text").
+	SCRIBUS_API QString gapLabel(Key k);
+
+	//! JSON of the gap values ({"headlineBody": 1.5, ...}, mm) - the layout.gaps item attribute.
+	SCRIBUS_API QString gapsToString(const Values& v);
+	//! \a base with the keys found in \a json; false when \a json is not a gaps object.
+	SCRIBUS_API bool gapsFromString(const QString& json, Values& base);
+
+	//! The values a Layout Model places with (Layout > Layout Models...); an unknown id gives the Normal model's.
+	SCRIBUS_API Values forModel(const QString& modelId);
 }
 
 #endif

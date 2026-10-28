@@ -407,6 +407,11 @@ void PropertyWidget_Distance::handleTextDistances()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
+	// Suneer: the text distance boxes are hidden in this build, so nobody can have typed a value: their
+	// valuesChanged comes from setPageHeight()/setPageWidth() clamping the previous frame's values to
+	// this frame's size, and wrote 0 pt bottom distances into short caption frames on selection.
+	if (!distanceWidget->isVisibleTo(this))
+		return;
 
 	PageItem *textItem = m_item;
 	if (m_doc->appMode == modeEditTable)

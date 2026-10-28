@@ -6,81 +6,134 @@ for which a new license (GPL+exception) is in place.
 */
 #include "suneerspacing.h"
 
-#include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSettings>
+#include <QObject>
 
-#include "prefsmanager.h"
-#include "ui/suneer_obit_model.h"
+#include "scpaths.h"
+#include "suneerlayoutmodel.h"
 
 namespace SuneerSpacing
 {
 namespace {
-Store s_store;
-bool s_loaded = false;
+const char* const kNames[KeyCount] = { "moduleGapV", "moduleGapH", "photoText", "wrapPad", "captionGap", "captionText", "headlineBody", "inset", "columnGap", "ruleWidth", "kickerHeadline" };
 
-const char* const kNames[KeyCount] = { "moduleGapV", "moduleGapH", "photoText", "wrapPad", "captionGap", "captionText", "headlineBody", "inset", "columnGap", "ruleWidth" };
-const double kDefaults[KeyCount] = { 4.8, 8.0, 0.0, 2.0, 0.0, 2.0, 0.0, 0.0, 2.5, 0.0 };
+// built-in defaults (the Normal model's), used when the house rules file has no number
+const double kBuiltIn[KeyCount] = { 4.8, 8.0, 0.0, 2.0, 0.0, 2.0, 0.0, 0.0, 2.5, 0.0, 0.0 };
 
-QJsonObject valuesJson(const double* v, const QString& ruleColor)
+QJsonObject houseRules()
+{
+	static QJsonObject cached;
+	static bool loaded = false;
+	if (loaded)
+		return cached;
+	loaded = true;
+	const QStringList candidates = { ScPaths::instance().shareDir() + QStringLiteral("autolayout/autolayout-rules.json"),
+	                                 ScPaths::instance().shareDir() + QStringLiteral("../../resources/autolayout/autolayout-rules.json") };
+	for (const QString& path : candidates)
+	{
+		QFile f(path);
+		if (f.open(QIODevice::ReadOnly))
+		{
+			cached = QJsonDocument::fromJson(f.readAll()).object();
+			if (!cached.isEmpty())
+				break;
+		}
+	}
+	return cached;
+}
+
+// a number at "a/b/c" in the house rules, or NaN
+double houseNumber(const QString& path)
+{
+	QJsonValue v = houseRules();
+	for (const QString& part : path.split(QLatin1Char('/')))
+		v = v.toObject().value(part);
+	return v.isDouble() ? v.toDouble() : qQNaN();
+}
+}
+
+double houseDefault(Key k, QString* source)
+{
+	// where each gap was measured (autolayout-rules.json, tools/autolayout/analyze.py)
+	QString path;
+	switch (k)
+	{
+		case ModuleGapH: path = QStringLiteral("grid/gutter"); break;
+		case ModuleGapV: path = QStringLiteral("gaps/vertical_between_modules/median"); break;
+		case ColumnGap: path = QStringLiteral("story_frame/column_gap"); break;
+		case WrapPad: path = QStringLiteral("engine_defaults_proposed/wrap_offset_mm"); break;
+		default: break;
+	}
+	const double v = path.isEmpty() ? qQNaN() : houseNumber(path);
+	if (!qIsNaN(v) && v >= 0.0)
+	{
+		if (source)
+			*source = QObject::tr("house rules (%1)").arg(path);
+		return v;
+	}
+	if (source)
+		*source = QObject::tr("built-in default");
+	return kBuiltIn[k];
+}
+
+Values houseDefaults()
+{
+	Values v {};
+	for (int k = 0; k < KeyCount; ++k)
+		v.v[k] = houseDefault(Key(k));
+	return v;
+}
+
+QList<Key> gapKeys()
+{
+	return { HeadlineBody, KickerHeadline, ColumnGap, WrapPad, PhotoText, CaptionGap, CaptionText, ModuleGapH, ModuleGapV };
+}
+
+bool isStoryGap(Key k)
+{
+	return k != ModuleGapH && k != ModuleGapV && k != RuleWidth;
+}
+
+QString gapLabel(Key k)
+{
+	switch (k)
+	{
+		case HeadlineBody: return QObject::tr("Headline \u2192 body text");
+		case KickerHeadline: return QObject::tr("Subheading / kicker \u2192 headline");
+		case ColumnGap: return QObject::tr("Body column gutter");
+		case WrapPad: return QObject::tr("Photo \u2192 text, beside (wrap)");
+		case PhotoText: return QObject::tr("Photo \u2192 text, above / below");
+		case CaptionGap: return QObject::tr("Photo \u2192 caption");
+		case CaptionText: return QObject::tr("Caption \u2192 text");
+		case ModuleGapH: return QObject::tr("Story to story, horizontal");
+		case ModuleGapV: return QObject::tr("Story to story, vertical");
+		default: return keyTitle(k);
+	}
+}
+
+QString gapsToString(const Values& v)
 {
 	QJsonObject o;
+	for (Key k : gapKeys())
+		o.insert(keyName(k), qRound(v.v[k] * 100.0) / 100.0);
+	return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+bool gapsFromString(const QString& json, Values& base)
+{
+	const QJsonDocument d = QJsonDocument::fromJson(json.toUtf8());
+	if (!d.isObject())
+		return false;
+	const QJsonObject o = d.object();
 	for (int k = 0; k < KeyCount; ++k)
-		o[QString::fromLatin1(kNames[k])] = v[k];
-	o["ruleColor"] = ruleColor;
-	return o;
-}
-
-Store fromJson(const QJsonObject& root)
-{
-	Store s = defaults();
-	const QJsonObject g = root["global"].toObject();
-	for (int k = 0; k < KeyCount; ++k)
-		if (g.contains(QString::fromLatin1(kNames[k])))
-			s.global.v[k] = qMax(0.0, g[QString::fromLatin1(kNames[k])].toDouble());
-	if (!g["ruleColor"].toString().isEmpty())
-		s.global.ruleColor = g["ruleColor"].toString();
-	const QJsonObject ov = root["models"].toObject();
-	s.overrides.clear();
-	for (auto it = ov.constBegin(); it != ov.constEnd(); ++it)
 	{
-		const QJsonObject m = it.value().toObject();
-		QMap<int, double> map;
-		for (int k = 0; k < KeyCount; ++k)
-			if (m.contains(QString::fromLatin1(kNames[k])))
-				map[k] = qMax(0.0, m[QString::fromLatin1(kNames[k])].toDouble());
-		s.overrides[it.key()] = map;
+		const QJsonValue jv = o.value(keyName(Key(k)));
+		if (jv.isDouble() && jv.toDouble() >= 0.0 && jv.toDouble() <= 100.0)
+			base.v[k] = jv.toDouble();
 	}
-	return s;
-}
-
-QJsonObject toJson(const Store& s)
-{
-	QJsonObject models;
-	for (auto it = s.overrides.constBegin(); it != s.overrides.constEnd(); ++it)
-	{
-		QJsonObject m;
-		for (auto kt = it.value().constBegin(); kt != it.value().constEnd(); ++kt)
-			m[QString::fromLatin1(kNames[kt.key()])] = kt.value();
-		models[it.key()] = m;
-	}
-	return QJsonObject{{"version", 1},
-	                   {"_comment", "Faircode Layout spacing for every News Browser layout model. mm, except ruleWidth (pt). A key under models.<name> overrides the global value."},
-	                   {"global", valuesJson(s.global.v, s.global.ruleColor)}, {"models", models}};
-}
-} // namespace
-
-QStringList models() { return { QStringLiteral("normal"), QStringLiteral("obituary"), QStringLiteral("auto") }; }
-
-QString modelTitle(const QString& model)
-{
-	if (model == QLatin1String("normal")) return QObject::tr("Normal (4+3)");
-	if (model == QLatin1String("obituary")) return QObject::tr("Obituary");
-	if (model == QLatin1String("auto")) return QObject::tr("Auto Layout");
-	return model;
+	return true;
 }
 
 QString keyName(Key k) { return QString::fromLatin1(kNames[k]); }
@@ -89,131 +142,25 @@ QString keyTitle(Key k)
 {
 	switch (k)
 	{
-		case ModuleGapV: return QObject::tr("Module gap vertical");
-		case ModuleGapH: return QObject::tr("Module gap horizontal (gutter)");
+		case ModuleGapV: return QObject::tr("Gap between modules, vertical");
+		case ModuleGapH: return QObject::tr("Gap between modules, horizontal (gutter)");
 		case PhotoText: return QObject::tr("Photo-to-text gap");
 		case WrapPad: return QObject::tr("Photo text-wrap padding");
-		case CaptionGap: return QObject::tr("Caption gap (photo → caption)");
+		case CaptionGap: return QObject::tr("Photo-to-caption gap");
 		case CaptionText: return QObject::tr("Caption-to-text gap");
-		case HeadlineBody: return QObject::tr("Headline-to-body extra space");
+		case HeadlineBody: return QObject::tr("Headline-to-body gap");
 		case Inset: return QObject::tr("Text-frame inset");
 		case ColumnGap: return QObject::tr("Text column gap (inside a story)");
 		case RuleWidth: return QObject::tr("Separator rule between modules");
+		case KickerHeadline: return QObject::tr("Kicker-to-headline gap");
 		default: return QString();
 	}
 }
 
 QString keyUnit(Key k) { return k == RuleWidth ? QStringLiteral("pt") : QStringLiteral("mm"); }
 
-Values Store::forModel(const QString& model) const
+Values forModel(const QString& modelId)
 {
-	Values v = global;
-	const auto it = overrides.constFind(model);
-	if (it != overrides.constEnd())
-		for (auto kt = it.value().constBegin(); kt != it.value().constEnd(); ++kt)
-			v.v[kt.key()] = kt.value();
-	return v;
-}
-
-QString filePath()
-{
-	QString base = PrefsManager::instance().preferencesLocation();
-	if (base.isEmpty())
-		base = QDir::homePath() + QStringLiteral("/.config/scribus");
-	while (base.endsWith('/'))
-		base.chop(1);
-	return base + QStringLiteral("/layout-spacing.json");
-}
-
-Store defaults()
-{
-	Store s;
-	for (int k = 0; k < KeyCount; ++k)
-		s.global.v[k] = kDefaults[k];
-	s.overrides[QStringLiteral("obituary")] = QMap<int, double>{ {ModuleGapV, 2.3}, {ModuleGapH, 3.0} };
-	s.overrides[QStringLiteral("normal")] = QMap<int, double>();
-	s.overrides[QStringLiteral("auto")] = QMap<int, double>();
-	return s;
-}
-
-const Store& store()
-{
-	if (s_loaded)
-		return s_store;
-	s_loaded = true;
-	QFile f(filePath());
-	if (f.open(QIODevice::ReadOnly))
-	{
-		s_store = fromJson(QJsonDocument::fromJson(f.readAll()).object());
-		return s_store;
-	}
-	// First run: the defaults, carrying over what the old settings had.
-	s_store = defaults();
-	QSettings cfg("Faircode", "ScribusNews");
-	s_store.global.v[ModuleGapH] = cfg.value("layout/gridGutterMm", kDefaults[ModuleGapH]).toDouble();
-	s_store.global.v[WrapPad] = cfg.value("layout/wrapGapMm", kDefaults[WrapPad]).toDouble();
-	s_store.global.v[ColumnGap] = cfg.value("layout/colGapMm", kDefaults[ColumnGap]).toDouble();
-	const SuneerObitModel om = SuneerObitModel::load();
-	s_store.overrides[QStringLiteral("obituary")][ModuleGapV] = om.moduleGapMm;
-	s_store.overrides[QStringLiteral("obituary")][ModuleGapH] = om.gridGapMm;
-	if (qAbs(om.newsColGapMm - s_store.global.v[ColumnGap]) > 0.01)
-		s_store.overrides[QStringLiteral("obituary")][ColumnGap] = om.newsColGapMm;
-	save(s_store);
-	return s_store;
-}
-
-bool save(const Store& s, QString* error)
-{
-	const QString path = filePath();
-	QDir().mkpath(QFileInfo(path).absolutePath());
-	QFile f(path);
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-	{
-		if (error)
-			*error = QObject::tr("cannot write %1").arg(path);
-		return false;
-	}
-	f.write(QJsonDocument(toJson(s)).toJson(QJsonDocument::Indented));
-	s_store = s;
-	s_loaded = true;
-	return true;
-}
-
-bool exportTo(const QString& path, QString* error)
-{
-	QFile f(path);
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
-	{
-		if (error)
-			*error = QObject::tr("cannot write %1").arg(path);
-		return false;
-	}
-	f.write(QJsonDocument(toJson(store())).toJson(QJsonDocument::Indented));
-	return true;
-}
-
-bool importFrom(const QString& path, QString* error)
-{
-	QFile f(path);
-	if (!f.open(QIODevice::ReadOnly))
-	{
-		if (error)
-			*error = QObject::tr("cannot read %1").arg(path);
-		return false;
-	}
-	QJsonParseError pe;
-	const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
-	if (pe.error != QJsonParseError::NoError || !doc.object().contains("global"))
-	{
-		if (error)
-			*error = QObject::tr("%1 is not a spacing file").arg(path);
-		return false;
-	}
-	return save(fromJson(doc.object()), error);
-}
-
-Values forModel(const QString& model)
-{
-	return store().forModel(model);
+	return SuneerLayoutModels::byId(modelId).spacing();
 }
 } // namespace SuneerSpacing

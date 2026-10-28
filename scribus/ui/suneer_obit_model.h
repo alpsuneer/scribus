@@ -39,6 +39,10 @@ struct SuneerObitModel
 	int    obitLastCol   {8};
 	int    newsFirstCol  {9};
 	int    newsLastCol   {10};
+	//! suneer 2026-10-26: the news columns are reserved for the stories with this workflow column
+	//! count (News.noOfColumns or the "Place as" override); nothing else goes there, and those
+	//! stories never go into the obit columns (SuneerNewsPanel::obitRole, SuneerLayout::Job).
+	static constexpr int kBandCount = 2;
 	// obit module
 	double photoMm       {30.3};     // square photo frame
 	double moduleGapMm   {2.3};      // vertical gap between modules

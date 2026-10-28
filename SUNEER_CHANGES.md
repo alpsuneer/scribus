@@ -1245,6 +1245,65 @@ scribus
 - **Help → Reset Preferences…**: `~/.config/scribus` → `scribus.bak-<date>`, defaults-ൽ Scribus വീണ്ടും തുടങ്ങും.
 - Test: `tests/suneer/prefs_roundtrip.sh <profile> 20` — 20 തവണ load + Preferences OK + save, warm-up-ന് ശേഷം files byte for byte ഒന്ന്.
 
+### 76. Layout Models — Spacing page-ന് പകരം (Phase 1)
+- ഓരോ layout model-ഉം ഒരു JSON file: `~/.config/scribus/layout-models/<id>.json` (`suneerlayoutmodel`): name, page types, grid (columns,
+  column width, gutter, margins), structure (decks, left / right rail, lead position + width), story width by body length, headline style
+  by width, photo width / position / max height, എല്ലാ spacing values-ഉം, Obituary model-ന്റെ photo / face / background / alignment.
+- Built-in: **Normal (4+3)**, **Obituary**, **Pradeshikam (learned)** (`autolayout-rules.json`-ലെ അളവുകൾ). പഴയ `layout-spacing.json`, `obituary.json`
+  ആദ്യ start-ൽ ഇവയിലേക്ക് മാറും (പഴയവ `.migrated-<date>` / `.pre-models-<date>.bak` ആയി സൂക്ഷിക്കും).
+- **Layout → Layout Models…** (News Browser ⇕): New / Duplicate / Rename / Delete / Export / Import / Restore defaults; spacing diagram
+  (ഓരോ gap-ഉം dimension line + value, mm, 0.1 step); real text engine-ൽ Malayalam sample page preview; Apply spacing to this page.
+- **Layout → Auto Layout…** (News Browser ▦): Layout Gallery — page type filter, Keep (Placed frames / Every frame on the page / Only new stories),
+  ഓരോ model-നും current page-ന്റെ thumbnail + "24 of 34 fit · 38 pt free"; background-ൽ render ചെയ്യും. Apply = ആ page type-ന് model ഓർക്കും
+  (placed stories re-arrange Phase 2-ൽ).
+- Preferences → Faircode Layout: Spacing page നീക്കി.
+
+### 77. Layout Models — എല്ലായിടത്തും (Phase 2)
+- News Browser dropdown-ൽ page type-ന് ചേരുന്ന എല്ലാ layout models-ഉം (ഓർക്കുന്നത് page type അനുസരിച്ച്). Place / Place Selected ആ model ഉപയോഗിക്കും:
+  Normal = പഴയ പോലെ (story spike / page stack), Obituary engine models = obit placement, മറ്റ് news models = page-ൽ നേരിട്ട് arrange.
+- **Re-layout page with…** (News Browser ബട്ടൺ, page / story right-click): page-ലെ stories മറ്റൊരു model-ൽ — text, photos, captions
+  അതേപടി; കൈകൊണ്ട് വെച്ചവയും Pin ചെയ്തവയും നിൽക്കും; fit ആകാത്തവ pasteboard-ൽ, list ചെയ്യും; ഒറ്റ undo. Gallery-യിലെ Apply ഇതുതന്നെ ചെയ്യും.
+- Headline: News Browser / model style ആണെങ്കിൽ മാത്രം model-ന്റെ width style (undo ചെയ്യാം); user മാറ്റിയ style തൊടില്ല.
+- Grid, story / photo width, photo max height, spacing, pasteboard gaps, obit values: active model-ൽ നിന്ന് മാത്രം.
+
+### 78. Archive variants — നമ്മുടെ പഴയ pages-ൽ നിന്ന് models (Phase 3)
+- Layout Gallery → **Generate from archive…**: ഒരു folder-ലെ .sla pages (file name filter optional) വായിച്ച്
+  (`tools/autolayout/learn_models.py`, analyze.py-യുടെ അളവുകൾ; network / AI ഇല്ല) grid കണ്ടെത്തും, pages-നെ structure അനുസരിച്ച്
+  (lead position, rails, decks) groups ആക്കും, ഓരോ group-ഉം ഒരു model (`archive-<type>-a/b/c.json`, origin "archive") — Gallery-യിൽ extra cards.
+- Width by length, headline style by width, lead headline, photo width / position / max height, vertical gap, column gap: ആ pages-ൽ നിന്ന് അളന്നത്.
+- Obituary pages-ഉം ഇനി പഠിക്കും (Phase 3+): `analyze.py` obit modules (photo + പേര് / സ്ഥലം / വിവരം) തിരിച്ചറിയും — styles വഴി,
+  പഴയ pages-ൽ geometry വഴി. Obit pages-ൽ നിന്ന് Obituary engine model (columns, obit / news columns, photo size / shape, gaps, styles,
+  alignment); photo processing settings ഇപ്പോഴത്തെ Obituary model-ൽ നിന്ന്. 1.7 SLA-യിലെ text ഇപ്പോൾ ശരിയായി വായിക്കും.
+
+### 79. Layout Model ഏത് page-നും, place ചെയ്ത ശേഷവും
+- **Layout → Apply Layout Model…** (News Browser / login / network വേണ്ട), page-ൽ right-click → Apply Layout Model… / Page Modules…,
+  News Browser **Re-layout…** (Layout Gallery, Page Modules, models). Gallery-യിൽ **Apply to selection only** (തിരഞ്ഞെടുത്ത stories, അവയുടെ
+  ഇപ്പോഴത്തെ area-ക്കുള്ളിൽ), **Compare** (ഇപ്പോഴത്തെ page / പുതിയത്), **Check modules…**.
+- കൈകൊണ്ട് ഉണ്ടാക്കിയ / പഴയ SLA pages-ൽ modules തനിയെ കണ്ടെത്തും: body frame + headline frames + photos + captions; groups, obits;
+  locked, ads, masthead / folio, rules, master items, chains ഒരിക്കലും നീക്കില്ല. **Layout → Page Modules…**: നിറമുള്ള outlines + എണ്ണം,
+  Merge / Split / Keep fixed; frames-ൽ `layout.module` attributes ആയി ഓർക്കും.
+- Re-layout: text / photo edits മാറില്ല; frames, columns, photo, caption, spacing model അനുസരിച്ച്; fit ആകാത്തവ pasteboard-ൽ (list); ഒറ്റ undo.
+
+### 80. Layout Gallery — ഓരോ card-ഉം page-ന്റെ ഒരു copy-യിൽ ശരിക്കും arrange ചെയ്തത്
+- ഓരോ card: page-ന്റെ ഒരു മറച്ച copy (Scribus copy / paste, layer തിരിച്ച്; styles, colours, guides, text settings) — Apply ഓടിക്കുന്ന
+  അതേ code (`arrangePage`) ആ copy-യിൽ ഓടിക്കും, ആ copy വരച്ചതാണ് thumbnail. Fit line ("6 of 9 fit · 339 pt free · N overflow") ആ copy-യിലെ
+  ശരിയായ frames-ൽ നിന്ന്. Undo ഇല്ല, network ഇല്ല (പുതിയ stories-ന്റെ pictures copy ഉണ്ടാക്കും മുമ്പ് എടുക്കും).
+- Apply കഴിഞ്ഞാൽ report: "✔ The page now matches the card exactly" — അല്ലെങ്കിൽ എത്ര frames വ്യത്യാസം.
+- Cards ഒന്നൊന്നായി (spinner: arranging… / waiting…); cache (page state + model + Keep) — വീണ്ടും തുറക്കുമ്പോൾ ഉടൻ.
+- രണ്ട് models ഒരേ ഫലം തന്നാൽ "Same result as …"; page മാറുന്നില്ലെങ്കിൽ "No change to the page".
+- Keep = "Every frame on the page", പുതിയ stories ഇല്ല: എല്ലാ cards-ഉം ഒരുപോലെ ആകും — ഇപ്പോൾ ചുവപ്പിൽ കാരണം പറയും.
+- Copy / paste ചില texts കൃത്യമായി കൊണ്ടുപോകില്ലായിരുന്നു (അവസാന paragraph / default style) — copy-യിലെ text page-ൽ നിന്ന് നേരിട്ട് എടുക്കും.
+  പഴയ Scribus line breaking (`SuneerClusterLevel=chars`) copy-ക്കും അളക്കലിനും.
+
+### 81. Layout Gallery Apply crash — ശരിയാക്കി
+- Gallery card-നുള്ള page copy ഉണ്ടാക്കുമ്പോൾ Guide Manager palette-ന് ആ copy കൊടുത്തിരുന്നു; copy delete ചെയ്ത ശേഷവും palette അത്
+  ഓർത്തു, പിന്നെ delete ആയ memory-യിൽ എഴുതി → കുറച്ച് കഴിഞ്ഞ് മറ്റെവിടെയെങ്കിലും crash (Apply കഴിഞ്ഞ്). ഇനി copy palettes-ലേക്ക് പോകില്ല.
+- News Browser-ൽ പുതിയ stories ഉള്ളപ്പോൾ Gallery cards ഉണ്ടാക്കുമ്പോൾ crash (copy-ക്ക് hyphenator ഇല്ല) — ശരിയാക്കി.
+- Apply-ക്ക് മുമ്പ് model-ഉം modules-ഉം പരിശോധിക്കും (grid, margins, gaps, frames ഉണ്ടോ); പ്രശ്നമുണ്ടെങ്കിൽ ഒന്നും മാറ്റാതെ വ്യക്തമായ message.
+- Card-ഉം Apply ഫലവും ഇപ്പോൾ എല്ലാ models-ലും കൃത്യമായി ഒന്ന് (captions, fonts, obit blocks, settle order).
+- Undo ഇപ്പോൾ caption-ന്റെ bottom text distance-ഉം തിരികെ കൊണ്ടുവരും. Text distance box (മറച്ചത്) selection-ൽ frame-ലേക്ക് എഴുതില്ല.
+- Test: `tests/suneer/layout_models_apply.sh` — ഓരോ model-ഉം ഓരോ page-ൽ: card → Apply → card-ഉമായി താരതമ്യം → Undo → page പഴയപടി.
+
 ### 82. Embed All — document-ലെ എല്ലാ images-ഉം .sla-യുടെ ഉള്ളിലേക്ക്
 - Image toolbar 📦 → **Embed in SLA / Embed All**, Extras → Embed All Images: ഇപ്പോൾ എല്ലാ images-ഉം embed ചെയ്യും — News Browser photos
   (`<sla name>_photos/original`, `edited`), Edit photo ഫലം, BG remove ചെയ്ത PNG (transparency അതുപോലെ), obituary photos, groups / modules-ന്
@@ -1257,6 +1316,65 @@ scribus
 - പുതിയത്: 📦 → **Unembed / Extract to _photos/edited** — embedded pictures `<sla name>_photos/edited/`-ലേക്ക് എഴുതി frame link ചെയ്യും
   (ഒരേ file ഉണ്ടെങ്കിൽ അത് തന്നെ ഉപയോഗിക്കും). Selected only / All; ഒറ്റ undo.
 - Test: `tests/suneer/embed_all_images.sh page.sla` — embed → save → .sla മാത്രം മറ്റൊരു folder-ലേക്ക് → തുറന്ന് render (pixel താരതമ്യം) → extract.
+
+### 83. Gaps — ഓരോ Layout Model-നും, place ചെയ്ത ശേഷവും
+- Layout Models editor-ൽ പുതിയ **Gaps** tab: Headline → body text, Subheading / kicker → headline (പുതിയത്), Body column gutter,
+  Photo → text (beside / above-below), Photo → caption, Caption → text, Story to story (horizontal / vertical). ഓരോന്നും 0.1 mm
+  step, ഓരോന്നിനും ↺ "Reset to house default" (`autolayout-rules.json`-ൽ നിന്ന്; അതിൽ ഇല്ലാത്തവ built-in default). Model JSON-ൽ save.
+- Gallery-യിൽ നിന്ന് Layout Models… തുറന്ന് gap മാറ്റുമ്പോൾ ആ model-ന്റെ card ഉടൻ വീണ്ടും വരയ്ക്കും (save ചെയ്യാതെയും).
+- Place ചെയ്ത story-യിൽ right-click → **Adjust gaps…**: മാറ്റം page-ൽ ഉടൻ കാണാം, OK = ഒറ്റ undo step, Cancel = page പഴയപടി.
+  "Apply to all stories on this page" (story-to-story gaps ഉൾപ്പെടെ), "Save these gaps to the model".
+- Story-കൾ അവയുടെ model-ഉം gaps-ഉം ഓർക്കും (`layout.model`, `layout.gaps`, `layout.gapsUser`); Re-layout user-ന്റെ gaps നിലനിർത്തും.
+- Gap കാരണം ഒരിക്കലും overlap ഇല്ല: story അടുത്ത frame-ന് മുമ്പ് നിൽക്കും, text കയറാതെ വന്നാൽ overflow marker; page-ൽ സ്ഥലമില്ലെങ്കിൽ pasteboard-ലേക്ക് (list).
+- Test: `tests/suneer/layout_gaps.sh page.sla`.
+
+### 84. Empty lines at the end of news text — cleaning on import, frames fitted to the last line
+
+- API text-ന്റെ അവസാനത്തെ Enter / ഒഴിഞ്ഞ paragraphs / zero-width characters (`\n​`), spaces, `<br>`, `<p>&nbsp;</p>` എല്ലാം
+  place ചെയ്യുമ്പോൾ തന്നെ മാറ്റും — News Browser placement, Obituary model, Layout Gallery / Apply Layout Model, Re-layout —
+  headline, kicker, byline, place, caption, body എല്ലാ fields-ഉം. ഉള്ളിലെ 2+ ഒഴിഞ്ഞ paragraphs → ഒരു paragraph break.
+  Soft hyphens-ഉം അക്ഷരത്തിനുള്ളിലെ ZWJ/ZWNJ-ഉം തൊടില്ല.
+- Story frame-ന്റെ അവസാനത്തെ paragraph mark-ഉം (ഒരു ഒഴിഞ്ഞ വരി) ഇനി ഇല്ല; frame അവസാന വരിയിൽ fit ആകും
+  (bottom text distance ഉൾപ്പെടെ; പഴയ Fit Frame Height അത് രണ്ടാമതും + 2 pt കൂട്ടിയിരുന്നു).
+- **Extras → Clean Empty Lines & Fit Frames** (page-ലെ right-click-ലും, text frame-ന്റെ right-click-ലും): select ചെയ്ത text frames,
+  അല്ലെങ്കിൽ ഒന്നും select ചെയ്തില്ലെങ്കിൽ ഈ page-ലെ News Browser / Layout Model frames. ഒഴിഞ്ഞ വരികൾ മാറ്റി, frame-ന്റെ
+  ഉയരം താഴത്തെ വരിയിലേക്ക് ചുരുക്കും — ഓരോ വരിയും ഉള്ളിടത്ത് തന്നെ (columns വീണ്ടും balance ചെയ്യില്ല, text വെട്ടില്ല, overflow
+  ഉള്ള frame വലുതാക്കില്ല). ഒറ്റ undo. Message "Cleaned 23 frames …".
+- api.log-ൽ "text clean ..id: content (end: LF U+200B) | title (end: SP)" — ഏത് API field-ൽ എന്ത് ഉണ്ടായിരുന്നു.
+- Test: `tests/suneer/clean_empty_lines.sh page.sla`.
+
+### 85. Page Models — പഴയ page-കളുടെ layout മുഴുവനായി model ആക്കി, page group-കളിൽ; പുതിയ page-ൽ skeleton, slot-ൽ story
+
+- **Layout → Page Models…** (Layout Gallery-യിലും "Page Models…" / "Create Page Model…" buttons). ഇടത്ത് page group list
+  (Page-1 … Page-24, Obituary, Editorial, Sports, Business, Supplement — "Page-N count…" കൊണ്ട് എണ്ണം മാറ്റാം; New / Rename /
+  Note / grid / Delete / ▲▼), വലത്ത് ആ group-ലെ page model-കൾ വലിയ card-കളായി (name, stories · photos · ad size,
+  "fits current ads" filter). Card-ൽ right-click: Rename, Move to group, Duplicate, Delete (confirm), Export this model.
+  Export… / Import…: ഒരു group അല്ലെങ്കിൽ എല്ലാ group-കളും ഒറ്റ JSON file (മറ്റ് office PC-കളിലേക്ക്). Group-ന് note-ഉം grid type-ഉം:
+  normal = 8 column (34.25 mm, gutter 8 mm); Obituary = 10 × 30.3 mm obit grid.
+- **Create Page Model…**: പഴയ .sla file-കൾ (ഒന്നോ പലതോ, അല്ലെങ്കിൽ folder മുഴുവൻ; 1.4 / 1.5 / 1.7) → "Read pages" → review list:
+  thumbnail | file / page (multi-page file-ൽ ഓരോ page-ഉം ഒരു വരി, വേണ്ടാത്തത് untick) | group (dropdown) | model name | content →
+  "Import ticked pages" (progress bar). Group auto-suggest: page-ലെ obituary module-കൾ (≥ 6 → Obituary), file name ("21page1" →
+  Page-1, "…Obit…" → Obituary, "SPO" → Sports, "edit" → Editorial …), multi-page file-ലെ page number. ഒരേ group-ൽ ഏതാണ്ട് ഒരേ model
+  (≥ 90 %) ഉണ്ടെങ്കിൽ ചോദിക്കും: Skip / Keep both / Skip all / Keep all.
+- Model-ൽ ഉള്ളത്: ഓരോ story-യും grid-ലെ ഒരു **slot** (columns, top / height mm, headline style · size · lines, body columns, photo
+  slot size · position), importance order (slot 1 = lead), obituary modules, ad areas ("ad space" മാത്രം), fixed items (masthead /
+  folio), rules, boxes. **Slot-കൾ ഒരിക്കലും overlap ആകില്ല** (ഒരു photo ഒരു story-ക്ക് മാത്രം; overlap വന്നാൽ താഴ്ന്ന slot വെട്ടും).
+  **പഴയ text-ഉം photo-ഉം ഒരിക്കലും save ചെയ്യില്ല**; thumbnail grey box-കൾ മാത്രം. Reader: `tools/autolayout/page_models.py` (വേറെ process).
+- **Skeleton on this page** (card button): page-ൽ ഓരോ slot-നും ഒരു placeholder frame (light grey, dashed border, ഉള്ളിൽ
+  "Slot 3 – 4 col + photo 3 col"), model-ന്റെ ad space outline മാത്രം — എല്ലാം non-printing layer **"Page model"**-ൽ (print / PDF-ൽ
+  വരില്ല). Page-ൽ ഉള്ള frames / ads ഒന്നും നീക്കുകയോ delete ചെയ്യുകയോ ഇല്ല. Skeleton ഉണ്ടെങ്കിൽ "Replace skeleton?" ചോദിക്കും. ഒറ്റ undo.
+  Group name page-ൽ save (`SuneerGroup`) — അടുത്ത തവണ gallery ആ group-ൽ തുറക്കും.
+- **Slot നിറയ്ക്കൽ**: News Browser list-ൽ നിന്ന് story placeholder-ലേക്ക് **drag** ചെയ്യുക, അല്ലെങ്കിൽ placeholder select ചെയ്ത് ഒരു story
+  tick ചെയ്ത് **Place Selected** (placeholder-ൽ right-click → "Place selected story here"-ഉം). Headline / body / photo / caption
+  ആ slot rectangle-ൽ തന്നെ: headline style slot-ന്റെ വീതി അനുസരിച്ച് house rule (Normal / Obituary layout model), photo columns-ഉം
+  position-ഉം ഉയരവും slot-ൽ നിന്ന്, text fit (അവസാനത്തെ ഒഴിഞ്ഞ വരികൾ നീക്കി). നീളം കൂടിയാൽ frame slot-ൽ വെട്ടി **ചുവപ്പ്** outline
+  (text കളയില്ല, overflow ആയി നിൽക്കും); 8 mm-ൽ കൂടുതൽ കുറവ് → **മഞ്ഞ** outline. Slot-ന് പുറത്തേക്ക് ഒരിക്കലും പോകില്ല. Placeholder
+  അപ്പോൾ മാറും. ഓരോ slot-ഉം ഒറ്റ undo.
+- **Layout → Remove Empty Slots** (gallery-യിലും, placeholder right-click-ലും): ബാക്കി placeholder-കളും ad outline-കളും delete.
+- Storage: `~/.config/scribus/layout-models/pages/<group>/<model>.json` + `<model>.png`; `groups.json`.
+- Tests: `tests/suneer/page_models_import.sh <folder>` (overlap check ഉൾപ്പെടെ); `tests/suneer/page_models_apply.sh --models <pages dir>
+  --model <group>/<id> --tick N page.sla fixture.json` (skeleton → N slots fill → remove → undo).
+
 ### 92. Obituary photo — ശരിയായ മുഖം, മുടി മുറിയില്ല, എല്ലാ photo-യിലും ഒരേ മുഖ വലുപ്പം
 - ഷർട്ടിനെയോ കൈയെയോ മുഖമായി എടുത്ത് താടി/ഷർട്ട് മാത്രം കാണിച്ചിരുന്നത് ശരിയാക്കി: ഏറ്റവും വലിയ box അല്ല, കണ്ണ്, skin,
   രണ്ട് detector-ഉം സമ്മതിക്കുന്നത് നോക്കി മുഖം തിരഞ്ഞെടുക്കും. Edit photo-യുടെ face guide-ഉം ഇതേ മുഖം.

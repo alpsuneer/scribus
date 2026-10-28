@@ -104,6 +104,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/storyeditor.h"
 #include "ui/viewtoolbar.h"
 #include "ui/vruler.h"
+#include "ui/suneer_news_panel.h"
 #include "undomanager.h"
 #include "util.h"
 #include "util_formats.h"
@@ -535,6 +536,7 @@ void ScribusView::contentsDragEnterEvent(QDragEnterEvent *e)
 	}
 
 	bool hasSupportedFormat = !text.isEmpty();
+	hasSupportedFormat |= e->mimeData()->hasFormat(SuneerNewsListWidget::mimeType());   // a News Browser story onto a page model slot
 	hasSupportedFormat |= e->mimeData()->hasFormat("text/inline");
 	hasSupportedFormat |= e->mimeData()->hasFormat("text/symbol");
 	hasSupportedFormat |= e->mimeData()->hasUrls();
@@ -612,6 +614,24 @@ void ScribusView::contentsDropEvent(QDropEvent *e)
 	
 	FPoint dropPosDoc = m_canvas->globalToCanvas(widget()->mapToGlobal(e->position()));
 	QPointF dropPosDocQ(dropPosDoc.x(), dropPosDoc.y());
+
+	// A News Browser story dropped on a page model placeholder (any layer): built inside that slot.
+	if (e->mimeData()->hasFormat(SuneerNewsListWidget::mimeType()))
+	{
+		const int newsIndex = e->mimeData()->data(SuneerNewsListWidget::mimeType()).toInt();
+		PageItem* hit = nullptr;
+		for (int i = m_doc->Items->count() - 1; i >= 0 && !hit; --i)
+		{
+			PageItem* item = m_doc->Items->at(i);
+			if (SuneerNewsPanel::isSlotPlaceholder(item) && m_canvas->frameHitTest(dropPosDocQ, item) >= Canvas::INSIDE)
+				hit = item;
+		}
+		if (hit && m_ScMW && m_ScMW->m_suneerNewsPanel)
+			m_ScMW->m_suneerNewsPanel->dropStoryOnItem(hit, newsIndex);
+		else if (m_ScMW)
+			m_ScMW->setStatusBarInfoText(tr("Drop the story on a page model slot (a grey placeholder frame)"));
+		return;
+	}
 
 	//Loop through all items and see which one(s) were under the drop point on the current layer
 	//Should make a nice function for this.

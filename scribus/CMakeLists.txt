@@ -161,6 +161,8 @@ if(HAVE_OSG)
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
+		ui/suneer_news_models.cpp
+		ui/suneer_news_gaps.cpp
 		ui/suneer_obit_model.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
@@ -172,7 +174,10 @@ if(HAVE_OSG)
 		ui/suneerbgremovedialog.cpp
 		ui/suneereditphotodialog.cpp
 		ui/suneerphotobgdialog.cpp
-		ui/suneerspacingdialog.cpp
+		ui/suneerlayoutmodels.cpp
+		ui/suneerpagemodels.cpp
+		ui/suneer_news_pagemodels.cpp
+		ui/suneermodulepanel.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
 		ui/suneerframesizebar.cpp
@@ -236,6 +241,10 @@ if(HAVE_OSG)
 		suneerphotoedit.cpp
 		suneerphotostore.cpp
 		suneerspacing.cpp
+		suneerlayoutmodel.cpp
+		suneerlayoutengine.cpp
+		suneerpagemodel.cpp
+		suneertextclean.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp
@@ -277,6 +286,8 @@ else()
 		util/suneeralphawrap.cpp
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
+		ui/suneer_news_models.cpp
+		ui/suneer_news_gaps.cpp
 		ui/suneer_obit_model.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
@@ -288,7 +299,10 @@ else()
 		ui/suneerbgremovedialog.cpp
 		ui/suneereditphotodialog.cpp
 		ui/suneerphotobgdialog.cpp
-		ui/suneerspacingdialog.cpp
+		ui/suneerlayoutmodels.cpp
+		ui/suneerpagemodels.cpp
+		ui/suneer_news_pagemodels.cpp
+		ui/suneermodulepanel.cpp
 		ui/suneeroptimizeimagesdialog.cpp
 		ui/suneerimagesizebar.cpp
 		ui/suneerframesizebar.cpp
@@ -352,6 +366,10 @@ else()
 		suneerphotoedit.cpp
 		suneerphotostore.cpp
 		suneerspacing.cpp
+		suneerlayoutmodel.cpp
+		suneerlayoutengine.cpp
+		suneerpagemodel.cpp
+		suneertextclean.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp

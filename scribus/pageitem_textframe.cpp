@@ -6872,6 +6872,7 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo)
 	if (clampedByFont)
 		newH = layoutMin;
 
+	// through the setter when recorded: Undo gives the caption its bottom distance back (it stayed 0)
 	m_textDistanceMargins.setBottom(0.0);
 	setHeight(newH);
 	updateClip();

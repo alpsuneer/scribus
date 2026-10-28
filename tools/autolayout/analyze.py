@@ -1,4 +1,4 @@
-import sys, json, glob, os, statistics as stt
+import sys, json, glob, os, re, statistics as stt
 sys.path.insert(0, os.path.dirname(__file__))
 from slaparse import Page, classify, PT, HEADLINE_RE
 
@@ -16,11 +16,72 @@ def grid_of(page):
 def cols_for_width(w, g):  return max(1, round((w + g['gutter'])/g['pitch']))
 def col_index(x, g):       return round((x - g['x0'])/g['pitch'])
 
-def analyze(path):
-    pg = Page(path); g = grid_of(pg)
-    onpage = [it for it in pg.items if it['page'] == 0 and it['type'] in (2,4) and it['x'] < pg.w and it['y'] < pg.h]
+OBIT_NAME_RE = re.compile(r'obit ?name|^9[14] ', re.I)
+OBIT_PLACE_RE = re.compile(r'obit ?place|^9[25] ', re.I)
+OBIT_BODY_RE = re.compile(r'obit ?body|^9[36] ', re.I)
+
+
+def find_obits(pg, texts, images):
+    """Obituary modules: a narrow text frame (name / place / short notice) with its photo directly above.
+    By the house styles (91 Obit Name, 92 ObitPlace, 93 ObitBody, the no-pic 94-96); on older pages with
+    local formatting only, by geometry: a narrow, short text frame right under a photo of the same width."""
+    obits = []
+    used_t = set(); used_i = set()
+    for t in sorted(texts, key=lambda t: (t['y'], t['x'])):
+        paras = [p for p in t['paras'] if p['chars'] > 0 or p['style']]
+        if not paras:
+            continue
+        styles = [p['style'] for p in paras]
+        by_style = any(OBIT_NAME_RE.search(s or '') for s in styles[:2])
+        chars = sum(p['chars'] for p in paras)
+        photo = None
+        for im in images:
+            if im['id'] in used_i:
+                continue
+            gap = t['y'] - (im['y'] + im['h'])
+            if abs(im['x'] - t['x']) < 2.5 and abs(im['w'] - t['w']) < 3.0 and -1.0 <= gap < 8.0:
+                photo = im
+                break
+        by_geometry = (photo is not None and 18 <= t['w'] <= 45 and 0.75 <= photo['h'] / max(1.0, photo['w']) <= 1.5
+                       and chars < 700 and paras[0]['chars'] < 45 and not any(HEADLINE_RE.match(s or '') for s in styles)
+                       and not any(classify(s or '') == 'caption' for s in styles))   # a news photo with its caption is no obit
+        if not (by_style or by_geometry):
+            continue
+        used_t.add(t['id'])
+        if photo:
+            used_i.add(photo['id'])
+        name = paras[0]
+        place = paras[1] if len(paras) > 1 else None
+        body = paras[2:] if len(paras) > 2 else []
+        top = photo['y'] if photo else t['y']
+        bottom = t['y'] + t['h']
+        align = pg.style_attr(name['style'], 'ALIGN', 'Alignment') if name['style'] else None
+        obits.append(dict(x=round(t['x'], 1), y=round(top, 1), w=round(t['w'], 1), h=round(bottom - top, 1),
+                          text_y=round(t['y'], 1), text_h=round(t['h'], 1),
+                          photo=dict(w=round(photo['w'], 1), h=round(photo['h'], 1)) if photo else None,
+                          text_gap=round(t['y'] - (photo['y'] + photo['h']), 1) if photo else None,
+                          name_chars=name['chars'], name_words=len(name.get('text', '').split()),
+                          place_chars=place['chars'] if place else 0, body_chars=sum(p['chars'] for p in body),
+                          name_style=name['style'], place_style=place['style'] if place else '',
+                          body_style=body[0]['style'] if body else '', align=align, by='style' if by_style else 'geometry'))
+    return obits, used_t, used_i
+
+
+def pages_in(path):
+    """How many pages the file has."""
+    import xml.etree.ElementTree as ET
+    doc = ET.parse(path).getroot()[0]
+    return len(doc.findall('Page' if doc.tag == 'Document' else 'PAGE'))
+
+def analyze(path, page_index=0, page=None):
+    pg = page or Page(path, page_index); g = grid_of(pg)
+    onpage = [it for it in pg.items if (it['page'] == pg.index or it['group']) and it['type'] in (2,4) and -5 < it['x'] < pg.w and -5 < it['y'] < pg.h]
     texts = [it for it in onpage if it['type']==4]
     images = [it for it in onpage if it['type']==2]
+    # obituary modules first; their frames are not part of any story
+    obits, obit_t, obit_i = find_obits(pg, texts, images)
+    texts = [t for t in texts if t['id'] not in obit_t]
+    images = [i for i in images if i['id'] not in obit_i]
     # chains: story = head frame + followers
     heads = [t for t in texts if t.get('back') in (None,'-1')]
     def chain(t):
@@ -181,7 +242,7 @@ def analyze(path):
     loose_imgs = [dict(x=round(i['x'],1), y=round(i['y'],1), w=round(i['w'],1), h=round(i['h'],1), file=os.path.basename(i['file'])) for i in images if i['id'] not in used_imgs and i['w']*i['h']>200]
     return dict(file=os.path.basename(path), page_w=round(pg.w,2), page_h=round(pg.h,2), margins={k:round(v,2) for k,v in pg.margins.items()},
                 grid={k:round(v,3) if isinstance(v,float) else v for k,v in g.items()},
-                modules=modules, vgaps=vgaps, hgaps=hgaps, other_text=other_items, loose_images=loose_imgs,
+                modules=modules, obits=obits, vgaps=vgaps, hgaps=hgaps, other_text=other_items, loose_images=loose_imgs,
                 n_text=len(texts), n_images=len(images))
 
 if __name__ == '__main__':
@@ -193,7 +254,7 @@ if __name__ == '__main__':
     json.dump(out, open(os.path.join(os.path.dirname(__file__), '..', 'analysis.json'), 'w'), ensure_ascii=False, indent=1)
     for f, a in out.items():
         if 'error' in a: print(f, 'ERROR', a['error']); continue
-        print(f"== {f}: {len(a['modules'])} modules, {a['n_text']} text, {a['n_images']} images; margins {a['margins']}, colw {a['grid']['colw']:.2f}")
+        print(f"== {f}: {len(a['modules'])} modules, {len(a['obits'])} obits, {a['n_text']} text, {a['n_images']} images; margins {a['margins']}, colw {a['grid']['colw']:.2f}")
         for m in a['modules']:
             ph = ','.join(f"{p['cols']}c{p['pos_h'][0]}{p['pos_v'][0]}" for p in m['photos'])
             print(f"   {m['cols']}col@{m['col0']} {m['w']:.0f}x{m['h']:.0f} y={m['y']:.0f} {'SPLIT' if m['split'] else 'one  '} head={m['headline']['style']}({m['headline']['lines']}L,{m['headline']['chars']}ch,w{m['head_w']:.0f}) k={m['kicker'] or '-'} b={int(m['byline'])} d={int(m['dateline'])} body={m['body_chars']} cpcm={m['chars_per_colmm']} photos=[{ph}] fc={m['frame_cols']} fr={m['frames']}")

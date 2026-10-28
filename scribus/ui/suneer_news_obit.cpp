@@ -23,7 +23,11 @@
 #include "suneerphotoedit.h"
 #include "suneerphotostore.h"
 #include "suneerspacing.h"
-#include "ui/suneerspacingdialog.h"
+#include "suneertextclean.h"
+#include "suneerlayoutengine.h"
+#include "suneerlayoutmodel.h"
+#include "ui/suneerlayoutmodels.h"
+#include "ui/suneermodulepanel.h"
 
 #include "commonstrings.h"
 #include "hyphenator.h"
@@ -46,6 +50,10 @@
 #include "undotransaction.h"
 
 #include <QComboBox>
+#include <QUrl>
+#include <QListWidget>
+#include <QJsonArray>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
 #include <QImageReader>
@@ -62,8 +70,8 @@ const double kMm = 72.0 / 25.4;
 
 QString obitCollapse(const QString& s)
 {
-	static const QRegularExpression ws(QStringLiteral("\\s+"));
-	return QString(s).replace(ws, QStringLiteral(" ")).trimmed();
+	// one line, blank ends removed (zero-width characters, NBSP, HTML leftovers)
+	return SuneerTextClean::oneLine(s);
 }
 
 //! Place line of an obit: dateline / place field, else a short first line of
@@ -111,13 +119,21 @@ void SuneerNewsPanel::fillLayoutModelCombo()
 {
 	if (!m_layoutModelCmb)
 		return;
+	// the models for this page type (Layout > Layout Models... > Page types), and the one in use
+	const QString key = layoutModelKey();
+	const QString remembered = SuneerLayoutModels::lastModelFor(key);
 	m_layoutModelCmb->blockSignals(true);
 	m_layoutModelCmb->clear();
-	m_layoutModelCmb->addItem(tr("Normal (current 4-col + 3-col photo)"), QStringLiteral("normal"));
-	m_layoutModelCmb->addItem(QStringLiteral("Obituary (ചരമം)"), QStringLiteral("obituary"));
+	for (const SuneerLayoutModel& m : SuneerLayoutModels::all())
+	{
+		if (!m.appliesTo(key) && m.id != remembered && m.id != QLatin1String("normal"))
+			continue;
+		const QString label = m.isObituary() ? m.name + QStringLiteral(" (\u0D1A\u0D30\u0D2E\u0D02)") : m.name;
+		m_layoutModelCmb->addItem(label, m.id);
+		m_layoutModelCmb->setItemData(m_layoutModelCmb->count() - 1, m.description, Qt::ToolTipRole);
+	}
 	m_layoutModelCmb->blockSignals(false);
 }
-
 QString SuneerNewsPanel::layoutModelKey() const
 {
 	if (!m_pageCombo)
@@ -134,12 +150,21 @@ void SuneerNewsPanel::updateLayoutModelInfo()
 {
 	if (!m_layoutModelInfo)
 		return;
-	if (!m_layoutModelCmb || m_layoutModelCmb->currentData().toString() != QLatin1String("obituary"))
+	if (!activeModel().isObituary())
 	{
-		m_layoutModelInfo->clear();
+		const SuneerLayoutModel am = activeModel();
+		QStringList parts;
+		parts << (am.fixedColumns > 0 ? tr("%1-col stories").arg(am.fixedColumns) : tr("width by length"));
+		if (am.leadPosition != QLatin1String("none"))
+			parts << tr("lead %1 col").arg(am.leadColumns);
+		if (am.leftRail || am.rightRail)
+			parts << tr("rail");
+		parts << tr("gap %1 mm").arg(am.gapVMm, 0, 'f', 1);
+		m_layoutModelInfo->setText(parts.join(QStringLiteral(" \u00b7 ")));
+		m_layoutModelInfo->setToolTip(tr("Layout model %1: %2").arg(am.name, SuneerLayoutModels::filePath(am.id)));
 		return;
 	}
-	const SuneerObitModel m = SuneerObitModel::load();
+	const SuneerObitModel m = obitModel();
 	QStringList parts;
 	parts << (m.textAlign == QLatin1String("left") ? tr("Left") : tr("Centred"));
 	if (m.runInPlace)
@@ -154,13 +179,21 @@ void SuneerNewsPanel::preselectLayoutModel()
 {
 	if (!m_layoutModelCmb)
 		return;
+	fillLayoutModelCombo();
 	const QString key = layoutModelKey();
-	QSettings s("Faircode", "ScribusNews");
-	QString model = s.value(obitSettingsKey(key)).toString();
-	if (model.isEmpty())
+	QString model = SuneerLayoutModels::lastModelFor(key);
+	if (model.isEmpty() || m_layoutModelCmb->findData(model) < 0)
 	{
+		// no choice yet for this page type: an OBIT page starts with an Obituary model, else Normal
 		const QString probe = (key + ' ' + (m_pageCombo ? m_pageCombo->currentText() : QString())).toLower();
-		model = (probe.contains(QLatin1String("obit")) || probe.contains(QStringLiteral("ചരമ"))) ? QStringLiteral("obituary") : QStringLiteral("normal");
+		const bool obitPage = probe.contains(QLatin1String("obit")) || probe.contains(QStringLiteral("\u0D1A\u0D30\u0D2E"));
+		model = QStringLiteral("normal");
+		for (const SuneerLayoutModel& m : SuneerLayoutModels::all())
+			if (m.isObituary() == obitPage && m_layoutModelCmb->findData(m.id) >= 0 && (obitPage || m.id == QLatin1String("normal")))
+			{
+				model = m.id;
+				break;
+			}
 	}
 	const int idx = m_layoutModelCmb->findData(model);
 	m_layoutModelCmb->blockSignals(true);
@@ -168,17 +201,16 @@ void SuneerNewsPanel::preselectLayoutModel()
 	m_layoutModelCmb->blockSignals(false);
 	updateLayoutModelInfo();
 }
-
 // ---------------------------------------------------------------------------
 // Classification and paths
 // ---------------------------------------------------------------------------
 
 bool SuneerNewsPanel::obitIsObituary(const QJsonObject& news, const SuneerObitModel& model)
 {
-	const QString rawTitle = news["title"].toString().trimmed();
+	const QString rawTitle = news["title"].toString();
 	const QString title = obitCollapse(rawTitle);
-	if (rawTitle.contains('\n'))
-		return false;                       // a two-line headline
+	if (SuneerTextClean::paragraphs(rawTitle).size() > 1)
+		return false;                       // a two-line headline (a trailing Enter / U+200B line is not one)
 	if (title.split(' ', Qt::SkipEmptyParts).size() > model.titleMaxWords)
 		return false;
 	if (title.length() > model.titleMaxChars)
@@ -263,7 +295,7 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		return;
 	}
 	QString note;
-	const SuneerObitModel model = SuneerObitModel::load(&note);
+	const SuneerObitModel model = obitModel(&note);
 	if (!note.isEmpty())
 		apiLog(QStringLiteral("obituary.json: %1").arg(note));
 
@@ -398,14 +430,14 @@ void SuneerNewsPanel::obitPlaceNow()
 	ScPage* page = m_doc->currentPage();
 	if (!page)
 		return;
-	const SuneerObitModel model = SuneerObitModel::load();
+	const SuneerObitModel model = obitModel();
 	QString fillName;
 	obitBackgroundColor(model, &fillName);
 	statusProgress(tr("Placing"), 0, stories.size());
 	// spacing from the one store (Faircode Layout: Spacing), Obituary values
-	m_placingModel = QStringLiteral("obituary");
+	m_placingModel = activeObitModelId();
 	struct PlacingGuard { QString& m; ~PlacingGuard() { m.clear(); } } placingGuard { m_placingModel };
-	const SuneerSpacing::Values sp = SuneerSpacing::forModel(QStringLiteral("obituary"));
+	const SuneerSpacing::Values sp = SuneerSpacing::forModel(activeObitModelId());
 
 	// -- geometry -----------------------------------------------------------
 	const double pageX = page->xOffset();
@@ -527,7 +559,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	int lastParaStart = 0;
 	QString lastParaStyle;
 	auto addPara = [&](PageItem* frame, const QString& text, const QString& styleName) {
-		if (!frame || text.trimmed().isEmpty())
+		if (!frame || SuneerTextClean::trimBlank(text).isEmpty())
 			return;
 		StoryText& story = frame->itemText;
 		const int startPos = story.length();
@@ -669,6 +701,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	for (const QJsonObject& n : stories)
 	{
 		const QString sid = newsServerId(n);
+		logTextJunk(n);
 		const QString title = obitCollapse(n["title"].toString());
 		QStringList paras = contentToParagraphs(n["content"].toString());
 		const bool isObit = obitIsObituary(n, model);
@@ -730,6 +763,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				continue;
 			}
 			text->setTextToFrameDist(inset, inset, qMax(inset, model.textTopDistPt), inset);
+			text->setFirstLineOffset(FLOPFontAscent);   // the name's baseline = font ascent under the top inset (the reference pages)
 			text->setColumns(1);
 			text->setItemName(title.left(30).isEmpty() ? tr("Obituary") : title.left(30));
 			setAttr(text, "news.role", "text");
@@ -925,13 +959,25 @@ void SuneerNewsPanel::obitPlaceNow()
 			if (!newsPhotoPath.isEmpty() || !placeholder.isEmpty())
 			{
 				double pw = colW, ph = colW;                        // square when the size is unknown
+				double naturalH = ph;
+				bool cropped = false;
+				// the obituary model's "Photo height at most" (Layout Models > Photos): taller pictures are cropped
+				const double maxPhotoH = SuneerLayoutModels::byId(activeObitModelId()).photoMaxHeightMm * kMm;
 				if (!newsPhotoPath.isEmpty())
 				{
 					QImageReader rd(newsPhotoPath);
 					rd.setAutoTransform(true);
 					const QSize sz = rd.size();
 					if (sz.isValid() && sz.width() > 0 && sz.height() > 0)
-						ph = qBound(pw * 0.7, pw * sz.height() / double(sz.width()), pw * 1.3);   // wider/taller pictures are cropped
+					{
+						// the frame takes the picture's height at the column width: no empty band above / below
+						naturalH = ph = pw * sz.height() / double(sz.width());
+						if (maxPhotoH > 0 && ph > maxPhotoH)
+						{
+							ph = maxPhotoH;
+							cropped = true;
+						}
+					}
 				}
 				const double px = x + w - colW;
 				const int pi = m_doc->itemAdd(PageItem::ImageFrame, PageItem::Rectangle, px, photoTop, pw, ph, 0, CommonStrings::None, CommonStrings::None);
@@ -949,6 +995,19 @@ void SuneerNewsPanel::obitPlaceNow()
 						if (photo->pixm.imgInfo.lowResType == 0)
 							photo->setResolution(1);
 						setAttr(photo, SuneerPhotoStore::AttrOriginal, newsPhotoPath);
+						if (cropped)
+						{
+							// like layoutStory: free scaling, the width filled, the picture moved up by half the overhang
+							photo->setImageScalingMode(true, true);
+							photo->setImageXYOffset(0, 0);
+							const double shownW = photo->width() * ph / naturalH;
+							if (shownW > 0.1)
+							{
+								const double k = pw / shownW;
+								photo->setImageXYScale(photo->imageXScale() * k, photo->imageYScale() * k);
+								photo->setImageXYOffset(0, -((naturalH - ph) / 2.0) / photo->imageYScale());
+							}
+						}
 					}
 					else
 					{
@@ -978,15 +1037,23 @@ void SuneerNewsPanel::obitPlaceNow()
 							setAttr(caption, "news.index", "0");
 							addPara(caption, capText, captionStyle);
 							trimTrailingParSep(caption);
+							SuneerTextClean::cleanStory(caption, false);    // no empty lines at either end
 							hyphenate(caption);
-							fitFrame(caption);
+							// fitted to the ink of its last line (like layoutStory), not to the font box + 2 pt
+							if (!caption->asTextFrame()->suneerFitCaptionHeight(false))
+								fitFrame(caption);
 							setWrap(caption, true);
-							photoBlockH += caption->height();
+							// caption -> the text under it: the model's "caption -> text" gap (else the wrap pad)
+							if (sp.pt(SuneerSpacing::CaptionText) > 0)
+								caption->setWrapOffsetBottom(sp.pt(SuneerSpacing::CaptionText));
+							photoBlockH += sp.pt(SuneerSpacing::CaptionGap) + caption->height();
 						}
 					}
 				}
 			}
 			hyphenate(text);
+			applyHeadGaps(text, sp);            // headline -> body: the model's gap on the head paragraphs
+			tidyTextTop(text, text->textToFrameDistTop(), false);   // font ascent first line, no space before, no empty first line
 			text->invalidateLayout();
 			fitFrame(text);
 			Q_UNUSED(photoAbove);
@@ -1299,8 +1366,8 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 	ScPage* page = m_doc->currentPage();
 	if (!page)
 		return report;
-	const SuneerObitModel model = SuneerObitModel::load();
-	const SuneerSpacing::Values sp = SuneerSpacing::forModel(QStringLiteral("obituary"));
+	const SuneerObitModel model = obitModel();
+	const SuneerSpacing::Values sp = SuneerSpacing::forModel(activeObitModelId());
 	const double pageX = page->xOffset();
 	const double pageY = page->yOffset();
 	const double usableW = page->width() - page->Margins.left() - page->Margins.right();
@@ -1662,7 +1729,7 @@ void SuneerNewsPanel::onObitReprocess()
 		setStatus(tr("Re-process photos: select placed obituary photos (or nothing for all); none found"));
 		return;
 	}
-	const SuneerObitModel model = SuneerObitModel::load();
+	const SuneerObitModel model = obitModel();
 	QString fillName;
 	const QColor bg = obitBackgroundColor(model, &fillName);
 	QList<SuneerObitPhotoWorker::Item> items;
@@ -1891,7 +1958,7 @@ int SuneerNewsPanel::applySpacingToPage(const SuneerSpacing::Values& v, bool fin
 	if (!final)
 		UndoManager::instance()->setUndoEnabled(false);
 	const bool obit = pageSpacingModel() == QLatin1String("obituary");
-	const SuneerObitModel om = SuneerObitModel::load();
+	const SuneerObitModel om = obitModel();
 	const double wrap = v.pt(SuneerSpacing::WrapPad), inset = v.pt(SuneerSpacing::Inset), colGap = v.pt(SuneerSpacing::ColumnGap);
 	QList<PageItem*> mods = spacingModules(m_doc, pageRect);
 	// 1. inside the modules: wrap padding, insets, text column gaps
@@ -1999,7 +2066,12 @@ void SuneerNewsPanel::respaceRules(const SuneerSpacing::Values& v)
 
 void SuneerNewsPanel::onSpacing()
 {
-	SuneerSpacingDialog::PageHooks hooks;
+	openLayoutModels();
+}
+
+void SuneerNewsPanel::openLayoutModels()
+{
+	SuneerLayoutModelEditor::PageHooks hooks;
 	if (m_doc && m_doc->currentPage())
 	{
 		hooks.pageModel = [this]() { return pageSpacingModel(); };
@@ -2007,7 +2079,109 @@ void SuneerNewsPanel::onSpacing()
 		hooks.restore = [this]() { spacingRestore(); };
 		hooks.apply = [this](const SuneerSpacing::Values& v, bool final) { return applySpacingToPage(v, final); };
 	}
-	SuneerSpacingDialog dlg(hooks, this);
+	QString select = SuneerLayoutModels::lastModelFor(layoutModelKey());
+	if (select.isEmpty() || !SuneerLayoutModels::exists(select))
+		select = (m_doc && m_doc->currentPage()) ? pageSpacingModel() : QStringLiteral("normal");
+	SuneerLayoutModelEditor dlg(m_doc, select, hooks, this);
 	dlg.exec();
 	m_spacingSnap.clear();
+	updateLayoutModelInfo();
+}
+
+void SuneerNewsPanel::openLayoutGallery()
+{
+	SuneerLayoutGallery::Source src;
+	src.doc = m_doc;
+	src.pageIndex = (m_doc && m_doc->currentPage()) ? m_doc->currentPageNumber() : -1;
+	src.pageKey = layoutModelKey();
+	src.titleStyle = panelTitleStyle();
+	src.newStories = [this](QString* note) { return galleryNewStories(note); };
+	src.applied = [this](const QString&) { preselectLayoutModel(); };
+	src.apply = [this](const QString& id, int keep, bool selectionOnly, const QStringList& expect) {
+		if (!m_doc || !m_doc->currentPage())
+			return tr("No page");
+		const int pageIdx = m_doc->currentPageNumber();
+		const QList<PageItem*> before = SuneerLayout::pageTopItems(m_doc, pageIdx);
+		QString report = arrangePage(id, keep, true, selectionOnly);
+		if (!expect.isEmpty() && m_doc)
+		{
+			// the page now against the card (the same code ran on a copy of it)
+			const QStringList now = SuneerLayout::resultSignature(m_doc, pageIdx, before);
+			const int diff = SuneerLayout::signatureDiff(expect, now);
+			report += QStringLiteral("\n") + (diff == 0 ? tr("\u2714 The page now matches the card exactly (%n frame(s) compared).", "", now.size())
+			                                             : tr("\u26A0 %n frame(s) differ from the card (the page changed after the card was made, or a picture / font differs).", "", diff));
+			apiLog(QStringLiteral("layout model %1: page against the card: %2 of %3 entries differ").arg(id).arg(diff).arg(now.size()));
+			if (SuneerLayout::debugOn())
+			{
+				fprintf(stderr, "LAYOUT-APPLY %s: page against the card: %d of %d entries differ\n", qPrintable(id), diff, (int) now.size());
+				for (int i = 0; i < qMax(now.size(), expect.size()); ++i)
+					if (i >= now.size() || i >= expect.size() || now[i] != expect[i])
+						fprintf(stderr, "LAYOUT-APPLY %s:   page %s  card %s\n", qPrintable(id), i < now.size() ? qPrintable(now[i]) : "-", i < expect.size() ? qPrintable(expect[i]) : "-");
+			}
+		}
+		return report;
+	};
+	if (m_doc)
+		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+			src.selection << m_doc->m_Selection->itemAt(i);
+	const QList<PageItem*> selection = src.selection;
+	src.preview = [this, selection](const QString& id, int keep, bool selectionOnly, int widthPx) {
+		return previewArrange(id, keep, selectionOnly, selection, widthPx);
+	};
+	src.stateKey = [this]() {
+		if (!m_doc || !m_doc->currentPage())
+			return QString();
+		// the new stories count too: they are arranged with the page
+		QString note;
+		QStringList ids;
+		for (const QJsonObject& n : galleryNewStoryJsons(&note))
+			ids << newsServerId(n) + QLatin1Char(':') + n["updatedAt"].toString();
+		return SuneerLayout::pageStateKey(m_doc, m_doc->currentPageNumber()) + QLatin1Char('|') + ids.join(QLatin1Char(','));
+	};
+	src.checkModules = [this]() { openPageModules(); };
+	src.openPageModels = [this]() { openPageModelGallery(); };
+	SuneerLayoutGallery dlg(src, this);
+	dlg.exec();
+}
+
+void SuneerNewsPanel::openPageModules()
+{
+	if (m_mw && m_doc)
+		SuneerModulePanel::openFor(m_mw, m_doc, this);
+}
+
+QString SuneerNewsPanel::cachedImagePath(const QString& fileUrl) const
+{
+	if (fileUrl.startsWith('/') && QFileInfo(fileUrl).isFile())
+		return fileUrl;
+	if (fileUrl.trimmed().isEmpty())
+		return QString();
+	// the same cache key as downloadImage()
+	const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/news/";
+	QString base = QFileInfo(QUrl(fileUrl).path()).fileName();
+	static const QRegularExpression unsafe(QStringLiteral("[^A-Za-z0-9._-]"));
+	base.replace(unsafe, "_");
+	if (base.isEmpty() || base == "." || base == "..")
+		base = QStringLiteral("image.jpg");
+	const QString hash = QString::fromLatin1(QCryptographicHash::hash(fileUrl.toUtf8(), QCryptographicHash::Sha1).toHex().left(10));
+	QString stem = base;
+	if (stem.contains('.'))
+		stem = stem.left(stem.lastIndexOf('.'));
+	const QStringList found = QDir(cacheDir).entryList({ hash + "-" + stem + ".*" }, QDir::Files);
+	for (const QString& f : found)
+		if (!f.endsWith(".meta"))
+			return cacheDir + f;
+	return QString();
+}
+
+QList<SuneerLayout::StoryIn> SuneerNewsPanel::galleryNewStories(QString* note)
+{
+	QList<SuneerLayout::StoryIn> out;
+	const QList<QJsonObject> jsons = galleryNewStoryJsons(note);
+	for (int i = 0; i < jsons.size(); ++i)
+	{
+		const QString sid = newsServerId(jsons[i]);
+		out << storyInFromNews(jsons[i], QStringLiteral("new:") + (sid.isEmpty() ? QString::number(i) : sid));
+	}
+	return out;
 }

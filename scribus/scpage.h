@@ -95,6 +95,9 @@ public:
 	void clearMasterPageName();
 	const QString& size() const {return m_pageSize;}
 	void setSize(const QString& newSize);
+	//! Faircode Page Models: the page group this page belongs to ("page-1", "obituary", ...); saved as SuneerGroup
+	const QString& suneerGroup() const { return m_suneerGroup; }
+	void setSuneerGroup(const QString& g) { m_suneerGroup = g; }
 	void restore(UndoState* state, bool isUndo);
 
 	QRectF bleedRect() const;
@@ -131,6 +134,7 @@ protected:
 	QString m_masterPageName;
 	QString m_pageSize;
 	QString m_pageSectionNumber;
+	QString m_suneerGroup;
 	ScribusDoc* m_Doc {nullptr};
 };
 

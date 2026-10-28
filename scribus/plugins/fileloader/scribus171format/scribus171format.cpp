@@ -4901,6 +4901,8 @@ bool Scribus171Format::readPage(ScribusDoc* doc, ScXmlStreamReader& reader)
 	else
 		mpName = attrs.valueAsString("MasterPageName", "Normal");
 	newPage->setMasterPageName(m_Doc->masterPageMode() ? QString() : mpName);
+	if (attrs.hasAttribute("SuneerGroup"))
+		newPage->setSuneerGroup(attrs.valueAsString("SuneerGroup"));   // Faircode Page Models: the page's group
 	if (attrs.hasAttribute("Size"))
 		newPage->setSize(attrs.valueAsString("Size"));
 	if (attrs.hasAttribute("Orientation"))

@@ -199,6 +199,9 @@ for which a new license (GPL+exception) is in place.
 #include "suneerfilltextimage.h"
 #include "suneertexteffects.h"
 #include "suneerposterstack.h"
+#include "suneertextclean.h"
+#include "suneerpagemodel.h"
+#include "text/boxes.h"
 #include "suneerphotoedit.h"
 #include "suneerphotostore.h"
 #include <QPlainTextEdit>
@@ -308,6 +311,8 @@ for which a new license (GPL+exception) is in place.
 #include "ui/viewtoolbar.h"
 #include "ui/factories/scribusproxystyle.h"
 #include "undogui.h"
+#include <QScrollArea>
+#include <QTabWidget>
 #include "undomanager.h"
 #include "undostate.h"
 #include "units.h"
@@ -361,6 +366,16 @@ static void suneerStripMdiCloseKey(QMdiSubWindow* sub)
 			a->setShortcut(QKeySequence());
 }
 
+
+// The unattended regression tests (tests/suneer/*.sh): no question may stop them.
+static bool suneerUnattendedTest()
+{
+	return qEnvironmentVariableIsSet("SUNEER_LAYOUT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_GAPS_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE") || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_IMPORT_REPORT") || qEnvironmentVariableIsSet("SUNEER_UNUSED_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST");
+}
 
 ScribusMainWindow::ScribusMainWindow() :
 	m_documentLogManager(DocumentLogManager::instance()),
@@ -957,6 +972,65 @@ void ScribusMainWindow::initPalettes()
 		if (m_suneerNewsPanel && paragraphStylesPanelTabs)
 			paragraphStylesPanelTabs->showExtraTab(m_suneerNewsPanel->widget());
 	});
+	// suneer: SUNEER_DOCK_WIDTH_DEBUG prints the minimum width of every tab of the Styles docker
+	// (Styles / Design Style / News Browser) so a tab can never widen the dock unnoticed
+	if (qEnvironmentVariableIsSet("SUNEER_DOCK_WIDTH_DEBUG"))
+		QTimer::singleShot(6000, this, [this]() {
+			QTabWidget* tw = paragraphStylesPanelTabs ? paragraphStylesPanelTabs->findChild<QTabWidget*>() : nullptr;
+			if (!tw) return;
+			for (int i = 0; i < tw->count(); ++i)
+			{
+				QWidget* pg = tw->widget(i);
+				QWidget* inner = qobject_cast<QScrollArea*>(pg) ? static_cast<QScrollArea*>(pg)->widget() : pg;
+				fprintf(stderr, "DOCKWIDTH tab %d '%s': page min %d hint %d, inner min %d hint %d, current %d\n", i, qPrintable(tw->tabText(i)),
+				        pg->minimumSizeHint().width(), pg->sizeHint().width(), inner ? inner->minimumSizeHint().width() : -1, inner ? inner->sizeHint().width() : -1, pg->width());
+			}
+			fprintf(stderr, "DOCKWIDTH panel min %d, width %d\n", paragraphStylesPanelTabs->minimumSizeHint().width(), paragraphStylesPanelTabs->width());
+			// every row of the News Browser page (its stacked pages' layouts) with its minimum width
+			for (int i = 0; i < tw->count(); ++i)
+			{
+				QScrollArea* sa = qobject_cast<QScrollArea*>(tw->widget(i));
+				QStackedWidget* stk = sa && sa->widget() ? sa->widget()->findChild<QStackedWidget*>() : nullptr;
+				if (!stk) continue;
+				for (int pg = 0; pg < stk->count(); ++pg)
+				{
+					QLayout* L = stk->widget(pg)->layout();
+					if (!L) continue;
+					fprintf(stderr, "DOCKWIDTH page %d layout min %d\n", pg, L->minimumSize().width());
+					for (int r = 0; r < L->count(); ++r)
+					{
+						QLayoutItem* it = L->itemAt(r);
+						QString what = it->layout() ? QStringLiteral("row-layout") : (it->widget() ? QString::fromLatin1(it->widget()->metaObject()->className()) : QStringLiteral("spacer"));
+						fprintf(stderr, "DOCKWIDTH   row %d %s min %d\n", r, qPrintable(what), it->minimumSize().width());
+						if (it->layout())
+							for (int c = 0; c < it->layout()->count(); ++c)
+							{
+								QLayoutItem* ci = it->layout()->itemAt(c);
+								QString t;
+								if (ci->widget()) { if (auto* b = qobject_cast<QAbstractButton*>(ci->widget())) t = b->text(); else if (auto* l = qobject_cast<QLabel*>(ci->widget())) t = l->text().left(20); }
+								fprintf(stderr, "DOCKWIDTH      col %d %s '%s' min %d\n", c, ci->widget() ? ci->widget()->metaObject()->className() : "-", qPrintable(t), ci->minimumSize().width());
+							}
+					}
+				}
+			}
+			// every widget of the News Browser page that asks for 120 px or more
+			for (int i = 0; i < tw->count(); ++i)
+			{
+				QScrollArea* sa = qobject_cast<QScrollArea*>(tw->widget(i));
+				if (!sa || !sa->widget()) continue;
+				const QList<QWidget*> kids = sa->widget()->findChildren<QWidget*>();
+				for (QWidget* k : kids)
+				{
+					const int mw = k->minimumSizeHint().width();
+					if (mw < 90) continue;
+					QString txt;
+					if (auto* b = qobject_cast<QAbstractButton*>(k)) txt = b->text();
+					else if (auto* l = qobject_cast<QLabel*>(k)) txt = l->text().left(30);
+					else if (auto* c = qobject_cast<QComboBox*>(k)) txt = c->currentText().left(30);
+					fprintf(stderr, "DOCKWIDTH   %s '%s' min %d (minimumWidth %d) hint %d\n", k->metaObject()->className(), qPrintable(txt), mw, k->minimumWidth(), k->sizeHint().width());
+				}
+			}
+		});
 	scrActions["toolsNewsPanelSettings"]->setCheckable(false);
 	connect(scrActions["toolsNewsPanelSettings"], &QAction::triggered, this, [this]() {
 		if (m_suneerNewsPanel)
@@ -973,12 +1047,19 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerApplyChain"], &QAction::triggered, paragraphStylesPanelTabs, &ParagraphStylesPanel::applyChainCurrentStyle);
 	connect(scrActions["suneerAutoFitHeight"], &QAction::triggered, this, &ScribusMainWindow::suneerAutoFitHeight);
 	connect(scrActions["itemFitCaptionFrame"], &QAction::triggered, this, &ScribusMainWindow::suneerFitCaptionFrames);
+	connect(scrActions["extrasCleanEmptyLines"], &QAction::triggered, this, [this] { suneerCleanEmptyLines(); });
 	connect(scrActions["itemFillTextWithImage"], &QAction::triggered, this, [this] { SuneerFillTextImage::runForSelection(this); });
 	connect(scrActions["itemCondenseToFit"], &QAction::triggered, this, &ScribusMainWindow::suneerCondenseToFit);
 	connect(scrActions["itemTextEffects"], &QAction::triggered, this, [this] { SuneerTextEffects::runForSelection(this); });
 	connect(scrActions["itemPosterStack"], &QAction::triggered, this, [this] { SuneerPosterStack::runForSelection(this); });
 	connect(scrActions["itemPopOutSubject"], &QAction::triggered, this, [this] { SuneerPopOut::runForSelection(this); });
 	connect(scrActions["extrasCheckDuplicateShortcuts"], &QAction::triggered, this, [this] { ScShortcutRegistry::instance().showDuplicatesDialogNow(this); });
+	connect(scrActions["suneerLayoutModels"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel) m_suneerNewsPanel->openLayoutModels(); });
+	connect(scrActions["suneerAutoLayout"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel) m_suneerNewsPanel->openLayoutGallery(); });
+	connect(scrActions["suneerApplyLayoutModel"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->openLayoutGallery(); });
+	connect(scrActions["suneerPageModules"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->openPageModules(); });
+	connect(scrActions["suneerPageModelGallery"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel) m_suneerNewsPanel->openPageModelGallery(); });
+	connect(scrActions["suneerRemoveEmptySlots"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->removeEmptySlots(true); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
@@ -1773,6 +1854,16 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("tableAdjustFrameToTable", "ItemTable");
 	scrMenuMgr->addMenuItemString("tableAdjustTableToFrame", "ItemTable");
 
+	//Layout menu (Faircode layout models)
+	scrMenuMgr->createMenu("SuneerLayout", tr("&Layout"));
+	scrMenuMgr->addMenuItemString("suneerApplyLayoutModel", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerPageModules", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerPageModelGallery", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerRemoveEmptySlots", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("SEPARATOR", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerAutoLayout", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerLayoutModels", "SuneerLayout");
+
 	//Extra menu
 	scrMenuMgr->createMenu("Extras", ActionManager::defaultMenuNameEntryTranslated("Extras"));
 	scrMenuMgr->addMenuItemString("extrasHyphenateText", "Extras");
@@ -1782,6 +1873,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
 	scrMenuMgr->addMenuItemString("extrasManageImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasEmbedAllImages", "Extras");
+	scrMenuMgr->addMenuItemString("extrasCleanEmptyLines", "Extras");
 	scrMenuMgr->addMenuItemString("suneerRedownloadMissingPhotos", "Extras");
 	scrMenuMgr->addMenuItemString("suneerRemoveUnusedPhotos", "Extras");
 	scrMenuMgr->addMenuItemString("extrasWarnLinkedImages", "Extras");
@@ -1840,6 +1932,8 @@ void ScribusMainWindow::createMenuBar()
 	scrMenuMgr->addMenuItemStringsToMenuBar("Page", scrActions);
 	scrMenuMgr->addMenuStringToMenuBar("ItemTable");
 	scrMenuMgr->addMenuItemStringsToMenuBar("ItemTable", scrActions);
+	scrMenuMgr->addMenuStringToMenuBar("SuneerLayout");
+	scrMenuMgr->addMenuItemStringsToMenuBar("SuneerLayout", scrActions);
 	scrMenuMgr->addMenuStringToMenuBar("Extras");
 	scrMenuMgr->addMenuItemStringsToMenuBar("Extras", scrActions);
 	scrMenuMgr->addMenuStringToMenuBar("View");
@@ -4547,7 +4641,7 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		// Suneer: the photos folder moved with the document: the tool attributes follow.
 		SuneerPhotoStore::relocateAttributes(doc);
 		// Suneer: News Browser photos whose file is missing can be fetched again (the story is on the frame).
-		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel)
+		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel && !suneerUnattendedTest())
 		{
 			const QList<PageItem*> missing = SuneerPhotoStore::missingNewsPhotos(doc);
 			if (!missing.isEmpty())
@@ -4602,6 +4696,10 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		QTimer::singleShot(0, this, [this, loadedFormatID] { suneerMaybeOfferLegacyOverflowFix(loadedFormatID); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST"))
 		QTimer::singleShot(3000, this, [this] { suneerEmbedSelfTest(); });
+	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST"))
+		QTimer::singleShot(3000, this, [this] { suneerCleanSelfTest(); });
+	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE"))
+		QTimer::singleShot(3000, this, [this] { suneerPageModelAnalyzeTest(); });
 	// Carry the lock decision onto the document now that it exists.
 	if (ret && doc)
 	{
@@ -5461,6 +5559,8 @@ bool ScribusMainWindow::slotFileSave()
 		QString fn(doc->documentFileName());
 		QString savedFileName;
 		ret = DoFileSave(fn, &savedFileName);
+		if (ret && m_suneerNewsPanel)
+			m_suneerNewsPanel->noteSaved();       // failed automatic "unused" marks are retried now
 		if (!ret && !savedFileName.isEmpty())
 			ScMessageBox::warning(this, CommonStrings::trWarning, tr("Your document was saved to a temporary file and could not be moved: \n%1").arg( QDir::toNativeSeparators(savedFileName) ));
 		else if (!ret)
@@ -6101,6 +6201,13 @@ void ScribusMainWindow::slotEditCut()
 			PageItem* frame = doc->m_Selection->itemAt(i);
 			if (frame->asTextFrame() && frame->prevInChain() == nullptr)
 				frame->clearContents();
+		}
+		if (m_suneerNewsPanel)
+		{
+			QList<PageItem*> cutItems;
+			for (int i = 0; i < doc->m_Selection->count(); ++i)
+				cutItems << doc->m_Selection->itemAt(i);
+			m_suneerNewsPanel->noteCut(cutItems);   // held until pasted or the clipboard changes
 		}
 		doc->itemSelection_DeleteItem();
 	}
@@ -7005,6 +7112,9 @@ void ScribusMainWindow::doEditPaste(bool forcePlainText, bool pasteInOriginalPos
 	symbolPalette->setDoc(doc);
 	inlinePalette->unsetDoc();
 	inlinePalette->setDoc(doc);
+
+	if (m_suneerNewsPanel)
+		m_suneerNewsPanel->notePasted();       // cut story frames pasted back: nothing to mark
 
 	view->DrawNew();
 	slotDocCh(false);
@@ -11024,6 +11134,407 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 		: tr("Fit Caption Frame: %1 fitted").arg(fitted));
 }
 
+// Extras > Clean Empty Lines & Fit Frames (2026-10-18). Text placed before the
+// cleaning (or typed) can end in empty paragraphs, a trailing paragraph mark,
+// lines of zero-width spaces; Fit Frame Height also left the bottom text
+// distance + 2 pt under the last line. The height is trimmed to the lowest
+// line with every line kept in place: a multi-column frame is not re-balanced
+// (that moved text from beside a wrapped photo to above it). Selected text
+// frames (group children included) are cleaned and fitted whatever they are; with nothing selected,
+// the News Browser / Layout Model frames (news.role) of the current page only,
+// so a masthead or an ad box is never touched. Frames only shrink: one that
+// still overflows keeps its height (growing could cover the next story), a
+// caption is fitted only when its text changed (Fit Caption Frame may have
+// balanced it). One undo step.
+static QString suneerItemAttr(const PageItem* item, const QString& name)
+{
+	const QList<ObjectAttribute> found = item->getObjectAttributes(name);
+	return found.isEmpty() ? QString() : found.first().value;
+}
+
+QString ScribusMainWindow::suneerCleanEmptyLines(bool quiet, int* cleanedOut)
+{
+	if (cleanedOut)
+		*cleanedOut = 0;
+	if (!HaveDoc || !doc)
+		return QString();
+	const bool explicitSel = doc->m_Selection->count() > 0;
+	QList<PageItem*> targets;
+	auto addTarget = [&](PageItem* it, bool any) {
+		if (!it || !it->isTextFrame() || it->asTextFrame()->isTableItem || it->isPathText())
+			return;
+		if (!any && suneerItemAttr(it, QStringLiteral("news.role")).isEmpty())
+			return;
+		if (it->prevInChain())
+			return;                         // a chain: its story once, from the first frame
+		if (!targets.contains(it))
+			targets << it;
+	};
+	const int pageNr = doc->currentPageNumber();
+	if (explicitSel)
+	{
+		for (PageItem* it : doc->m_Selection->items())
+		{
+			if (it && it->isGroup())
+				for (PageItem* c : SuneerGroupEdit::textChildren(it))
+					addTarget(c, true);
+			else
+				addTarget(it, true);
+		}
+	}
+	else
+	{
+		for (PageItem* it : std::as_const(*doc->Items))
+		{
+			if (!it || it->OwnPage != pageNr)
+				continue;
+			if (it->isGroup())
+				for (PageItem* c : SuneerGroupEdit::textChildren(it))
+					addTarget(c, false);
+			else
+				addTarget(it, false);
+		}
+	}
+	if (targets.isEmpty())
+	{
+		const QString none = explicitSel ? tr("Clean empty lines: no text frame in the selection")
+		                                 : tr("Clean empty lines: no News Browser / Layout Model text frame on this page (select the frames to clean others)");
+		if (!quiet)
+			ScMessageBox::information(this, tr("Clean Empty Lines & Fit Frames"), none);
+		setStatusBarInfoText(none);
+		return none;
+	}
+	// the top-level groups whose children change: their bounds follow (both undo directions)
+	QList<PageItem*> groups;
+	for (PageItem* it : std::as_const(targets))
+	{
+		PageItem* top = nullptr;
+		for (PageItem* p = it->Parent; p; p = p->Parent)
+			top = p;
+		if (top && !groups.contains(top))
+			groups << top;
+	}
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = m_undoManager->beginTransaction(Um::Selection, Um::IGroup, tr("Clean empty lines & fit frames"), QString(), Um::IResize);
+	for (PageItem* g : std::as_const(groups))
+		SuneerGroupEdit::markRefit(g, false);
+	int cleaned = 0, textChanged = 0, fitted = 0, stillOver = 0, locked = 0;
+	int linesEnd = 0, linesStart = 0, linesInside = 0, chars = 0;
+	double savedPt = 0.0;
+	for (PageItem* it : std::as_const(targets))
+	{
+		PageItem_TextFrame* tf = it->asTextFrame();
+		if (it->locked())
+		{
+			++locked;
+			continue;
+		}
+		const SuneerTextClean::StoryReport r = SuneerTextClean::cleanStory(it, true);
+		if (r.changed())
+		{
+			++textChanged;
+			linesEnd += r.trailingParas;
+			linesStart += r.leadingParas;
+			linesInside += r.collapsedParas;
+			chars += r.trimmedChars;
+		}
+		bool heightChanged = false;
+		const bool caption = suneerItemAttr(it, QStringLiteral("news.role")) == QLatin1String("caption");
+		if (!it->sizeLocked() && !tf->nextInChain() && tf->itemText.length() > 0 && (!caption || r.changed()))
+		{
+			const double oldH = it->height();
+			bool over = false;
+			const double h = SuneerTextClean::trimHeight(tf, &over);   // every line stays where it is
+			if (over)
+				++stillOver;
+			if (qAbs(h - oldH) > 0.01)
+			{
+				heightChanged = true;
+				++fitted;
+				savedPt += oldH - h;
+			}
+		}
+		else
+		{
+			tf->invalidateLayout();
+			tf->layout();
+		}
+		if (r.changed() || heightChanged)
+			++cleaned;
+	}
+	for (PageItem* g : std::as_const(groups))
+		SuneerGroupEdit::markRefit(g, true);
+	if (tx)
+	{
+		if (cleaned > 0)
+			tx.commit();
+		else
+			tx.cancel();
+	}
+	if (cleaned > 0)
+	{
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		view->DrawNew();
+	}
+	if (cleanedOut)
+		*cleanedOut = cleaned;
+	const QString where = explicitSel ? tr("%n selected text frame(s)", "", targets.size())
+	                                  : tr("%n News Browser / Layout Model text frame(s) on page %1", "", targets.size()).arg(pageNr + 1);
+	QStringList detail;
+	if (textChanged)
+		detail << tr("Text: %1 empty line(s) at the end, %2 at the start, %3 inside (runs of 2+); %4 blank character(s) at paragraph ends")
+		              .arg(linesEnd).arg(linesStart).arg(linesInside).arg(chars);
+	if (fitted)
+		detail << tr("%n frame(s) fitted to the last line (%1 mm less in all)", "", fitted).arg(savedPt * 25.4 / 72.0, 0, 'f', 1);
+	if (stillOver)
+		detail << tr("%n frame(s) still overflow - their height was kept (not grown into the next frame)", "", stillOver);
+	if (locked)
+		detail << tr("%n locked frame(s) left as they are", "", locked);
+	const QString head = tr("Cleaned %n frame(s)", "", cleaned);
+	const QString msg = head + QStringLiteral(" (") + where + QStringLiteral(")") + (detail.isEmpty() ? QString() : QStringLiteral("\n\n") + detail.join(QStringLiteral("\n")));
+	setStatusBarInfoText(head);
+	if (!quiet)
+		ScMessageBox::information(this, tr("Clean Empty Lines & Fit Frames"), msg);
+	return msg;
+}
+
+// Unattended bulk import of old pages (tests/suneer/page_models_import.sh): SUNEER_PAGEMODEL_ANALYZE=<folder or file;file>,
+// report to SUNEER_PAGEMODEL_OUT. The News Browser's import dialog runs it (tools/autolayout/page_models.py in a
+// separate process); every page's suggested group is written, the ticked pages are saved as models.
+void ScribusMainWindow::suneerPageModelAnalyzeTest()
+{
+	if (!m_suneerNewsPanel)
+		return;
+	qputenv("SUNEER_PAGEMODEL_IMPORT", qEnvironmentVariable("SUNEER_PAGEMODEL_ANALYZE").toUtf8());
+	m_suneerNewsPanel->runPageModelImportTest(qEnvironmentVariable("SUNEER_PAGEMODEL_OUT"));
+}
+
+// Unattended test of Clean Empty Lines & Fit Frames (tests/suneer/clean_empty_lines.sh),
+// started after a document load when SUNEER_CLEAN_SELFTEST=<report file> is set.
+// Every page: the News Browser text frames before (blank lines a dry run would remove,
+// height, overflow, text without blanks, soft hyphens, line ends), the command (whole
+// page), the same after; then one undo (text and heights exactly as before) and redo.
+// SUNEER_CLEAN_SAVEAS: save the cleaned document there. SUNEER_CLEAN_SELECT=1: select
+// every text frame of the page first (the "selected frames" path, any frame).
+void ScribusMainWindow::suneerCleanSelfTest()
+{
+	if (!HaveDoc || !doc)
+		return;
+	if (doc->isLoading() || !UndoManager::undoEnabled())
+	{
+		QTimer::singleShot(500, this, [this] { suneerCleanSelfTest(); });
+		return;
+	}
+	const QString outPath = qEnvironmentVariable("SUNEER_CLEAN_SELFTEST");
+	QFile out(outPath);
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+		return;
+	QTextStream ts(&out);
+	int fails = 0;
+	auto check = [&](bool ok, const QString& what) {
+		ts << (ok ? "PASS " : "FAIL ") << what << "\n";
+		if (!ok)
+			++fails;
+	};
+	const bool selectAll = qEnvironmentVariable("SUNEER_CLEAN_SELECT") == QLatin1String("1");
+	struct FrameState
+	{
+		PageItem* item = nullptr;
+		QString name, role;
+		QString text;          //!< exact story text
+		QString solid;         //!< without blank characters (what must stay)
+		int shy = 0;
+		int dryEnd = 0, dryStart = 0, dryInside = 0, dryChars = 0;
+		double h = 0.0;
+		bool over = false;
+		int lines = 0;
+		QList<int> lineEnds;   //!< line ends as a count of non-blank characters before them
+		int cols = 1;
+		bool wrap = false;
+	};
+	auto solidOf = [](const StoryText& st, int upTo, QString* solid) {
+		int n = 0;
+		for (int i = 0; i < upTo && i < st.length(); ++i)
+		{
+			const QChar c = st.text(i);
+			if (!SuneerTextClean::isBlank(c, i > 0 ? st.text(i - 1) : QChar()))
+			{
+				++n;
+				if (solid)
+					*solid += c;
+			}
+		}
+		return n;
+	};
+	auto stateOf = [&](PageItem* it) {
+		FrameState s;
+		s.item = it;
+		s.name = it->itemName();
+		s.role = suneerItemAttr(it, QStringLiteral("news.role"));
+		PageItem_TextFrame* tf = it->asTextFrame();
+		tf->invalidateLayout();
+		tf->layout();
+		const StoryText& st = it->itemText;
+		s.text = st.text(0, st.length());
+		solidOf(st, st.length(), &s.solid);
+		s.shy = s.text.count(QChar(0x00AD));
+		StoryText dry(doc);
+		dry.setDefaultStyle(st.defaultStyle());
+		dry.insert(0, st);
+		const SuneerTextClean::StoryReport r = SuneerTextClean::cleanStoryText(dry);
+		s.dryEnd = r.trailingParas;
+		s.dryStart = r.leadingParas;
+		s.dryInside = r.collapsedParas;
+		s.dryChars = r.trimmedChars;
+		s.h = it->height();
+		s.over = tf->frameOverflows();
+		s.lines = int(tf->textLayout.lines());
+		for (uint i = 0; i < tf->textLayout.lines(); ++i)
+			s.lineEnds << solidOf(st, tf->textLayout.line(i)->lastChar() + 1, nullptr);
+		s.cols = it->m_columns;
+		s.wrap = false;
+		return s;
+	};
+	auto framesOf = [&](int pageNr) {
+		QList<PageItem*> res;
+		for (PageItem* it : std::as_const(*doc->Items))
+		{
+			if (!it || it->OwnPage != pageNr)
+				continue;
+			const QList<PageItem*> list = it->isGroup() ? SuneerGroupEdit::textChildren(it) : QList<PageItem*>{ it };
+			for (PageItem* c : list)
+				if (c->isTextFrame() && !c->asTextFrame()->isTableItem && !c->isPathText() && !c->prevInChain() && !c->nextInChain()
+				    && (selectAll || !suneerItemAttr(c, QStringLiteral("news.role")).isEmpty()))
+					res << c;
+		}
+		return res;
+	};
+	ts << "document " << doc->documentFileName() << "\n";
+	for (int p = 0; p < doc->Pages->count(); ++p)
+	{
+		doc->setCurrentPage(doc->Pages->at(p));
+		const QList<PageItem*> frames = framesOf(p);
+		if (frames.isEmpty())
+			continue;
+		QList<FrameState> before;
+		int dirty = 0, overBefore = 0;
+		for (PageItem* it : frames)
+		{
+			before << stateOf(it);
+			const FrameState& b = before.last();
+			if (b.dryEnd + b.dryStart + b.dryInside + b.dryChars > 0)
+				++dirty;
+			if (b.over)
+				++overBefore;
+		}
+		ts << "== page " << (p + 1) << ": " << frames.size() << " text frames, " << dirty << " with blank lines / characters to remove, "
+		   << overBefore << " overflowing\n";
+		for (const FrameState& b : before)
+			if (b.dryEnd + b.dryStart + b.dryInside + b.dryChars > 0)
+				ts << "  before " << b.role << " \"" << b.name << "\": end " << b.dryEnd << " start " << b.dryStart << " inside " << b.dryInside
+				   << " chars " << b.dryChars << " | h " << QString::number(b.h * 25.4 / 72.0, 'f', 2) << " mm, lines " << b.lines
+				   << ", tail " << SuneerTextClean::describeJunk(b.text.right(12)) << "\n";
+		doc->m_Selection->clear();
+		if (selectAll)
+			for (PageItem* it : frames)
+				doc->m_Selection->addItem(it);
+		int cleaned = 0;
+		const QString msg = suneerCleanEmptyLines(true, &cleaned);
+		ts << "  command: " << QString(msg).replace(QChar('\n'), QStringLiteral(" / ")) << "\n";
+		doc->m_Selection->clear();
+		QList<FrameState> after;
+		for (PageItem* it : frames)
+			after << stateOf(it);
+		int leftDirty = 0, newOver = 0, textLost = 0, shyChanged = 0, grew = 0, lineDiff = 0, lineDiffMulti = 0;
+		double gainedMm = 0.0;
+		for (int i = 0; i < frames.size(); ++i)
+		{
+			const FrameState& b = before[i];
+			const FrameState& a = after[i];
+			if (a.dryEnd + a.dryStart + a.dryInside + a.dryChars > 0)
+			{
+				++leftDirty;
+				ts << "  LEFT \"" << a.name << "\": end " << a.dryEnd << " start " << a.dryStart << " inside " << a.dryInside << " chars " << a.dryChars << "\n";
+			}
+			if (a.over && !b.over)
+			{
+				++newOver;
+				ts << "  NEW OVERFLOW \"" << a.name << "\"\n";
+			}
+			if (a.solid != b.solid)
+			{
+				++textLost;
+				ts << "  TEXT CHANGED \"" << a.name << "\" " << b.solid.length() << " -> " << a.solid.length() << " characters\n";
+			}
+			if (a.shy != b.shy)
+				++shyChanged;
+			if (a.h > b.h + 0.01)
+				++grew;
+			gainedMm += (b.h - a.h) * 25.4 / 72.0;
+			// line ends: identical except the lines a removed empty line made disappear
+			QList<int> be = b.lineEnds, ae = a.lineEnds;
+			while (be.size() > 1 && be.last() == be[be.size() - 2])
+				be.removeLast();
+			while (ae.size() > 1 && ae.last() == ae[ae.size() - 2])
+				ae.removeLast();
+			while (!be.isEmpty() && be.first() == 0)
+				be.removeFirst();
+			while (!ae.isEmpty() && ae.first() == 0)
+				ae.removeFirst();
+			if (be != ae)
+			{
+				++lineDiff;
+				if (b.cols > 1)
+					++lineDiffMulti;
+				ts << "  LINE BREAKS CHANGED \"" << a.name << "\" lines " << b.lines << " -> " << a.lines << (b.cols > 1 ? " (multi-column)" : "") << "\n";
+			}
+			if (qAbs(b.h - a.h) > 0.01 || b.text != a.text)
+				ts << "  after  " << a.role << " \"" << a.name << "\": h " << QString::number(b.h * 25.4 / 72.0, 'f', 2) << " -> "
+				   << QString::number(a.h * 25.4 / 72.0, 'f', 2) << " mm, lines " << b.lines << " -> " << a.lines
+				   << ", chars " << b.text.length() << " -> " << a.text.length() << (a.over ? ", overflow" : "") << "\n";
+		}
+		check(leftDirty == 0, QStringLiteral("page %1: no blank line / blank end left in %2 frames (%3 had some)").arg(p + 1).arg(frames.size()).arg(dirty));
+		check(newOver == 0, QStringLiteral("page %1: no new overflow (%2 overflowing before)").arg(p + 1).arg(overBefore));
+		check(textLost == 0, QStringLiteral("page %1: text complete - every non-blank character kept").arg(p + 1));
+		check(shyChanged == 0, QStringLiteral("page %1: soft hyphens unchanged").arg(p + 1));
+		check(lineDiff == 0, QStringLiteral("page %1: line breaks / hyphenation unchanged in every frame (%2 multi-column frames changed)").arg(p + 1).arg(lineDiffMulti));
+		check(grew == 0, QStringLiteral("page %1: no frame taller (%2 mm less height in all)").arg(p + 1).arg(gainedMm, 0, 'f', 1));
+		if (cleaned > 0)
+		{
+			m_undoManager->undo(1);
+			int diff = 0;
+			for (int i = 0; i < frames.size(); ++i)
+			{
+				const FrameState u = stateOf(frames[i]);
+				if (u.text != before[i].text || qAbs(u.h - before[i].h) > 0.01)
+				{
+					++diff;
+					ts << "  UNDO DIFF \"" << u.name << "\": h " << u.h << " vs " << before[i].h << ", chars " << u.text.length() << " vs " << before[i].text.length() << "\n";
+				}
+			}
+			check(diff == 0, QStringLiteral("page %1: one undo -> text and heights as before (%2 differ)").arg(p + 1).arg(diff));
+			m_undoManager->redo(1);
+			diff = 0;
+			for (int i = 0; i < frames.size(); ++i)
+			{
+				const FrameState r = stateOf(frames[i]);
+				if (r.text != after[i].text || qAbs(r.h - after[i].h) > 0.01)
+					++diff;
+			}
+			check(diff == 0, QStringLiteral("page %1: redo -> cleaned again (%2 differ)").arg(p + 1).arg(diff));
+		}
+	}
+	const QString saveAs = qEnvironmentVariable("SUNEER_CLEAN_SAVEAS");
+	if (!saveAs.isEmpty())
+		check(DoFileSave(saveAs), QStringLiteral("save as %1").arg(saveAs));
+	ts << "RESULT " << (fails == 0 ? "ALL PASSED" : QStringLiteral("%1 FAILED").arg(fails)) << "\n";
+	out.close();
+	doc->setModified(false);
+	QTimer::singleShot(0, qApp, [] { qApp->exit(0); });
+}
+
 void ScribusMainWindow::suneerAutoFitTextToggled(bool enabled)
 {
 	if (!HaveDoc || !doc)
@@ -11487,8 +11998,8 @@ void ScribusMainWindow::suneerMaybeOfferLegacyOverflowFix(int loadedFormatID)
 {
 	if (!HaveDoc || !doc || !view || m_suneerLegacyOverflowAsked)
 		return;
-	if (qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST"))
-		return;                          // the unattended Embed All test: no question
+	if (suneerUnattendedTest())
+		return;                          // the unattended regression tests: no question
 	// Native SLA format ids run newest to oldest (171 = 45 ... 12x = 50), so a
 	// file written by an older Scribus sorts *above* the current id. Past the
 	// native range is a foreign importer, which is not a legacy Scribus file.

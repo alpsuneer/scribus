@@ -2560,6 +2560,98 @@ Code: `ui/suneercontrolbar.cpp` - `onImgEdgeFeather()` (image frame: PIL writes 
   alpha-free but not luminance-only - the Lab L channel route is used for RGB.
 - The toolbar row is full at 1600 px: the live result line goes to the status bar + field tooltips.
 
+## Layout Models, Model Editor, Layout Gallery — Phase 1 (2026-10-16, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+- `suneerlayoutmodel.*`: one JSON per model in `<prefs>/layout-models/<id>.json`, `{"format":"faircode-layout-model","model":{…},"obituary":{…}}`.
+  The id is the file name. `obituary.json` is BOTH the Obituary layout model and SuneerObitModel's file: SuneerObitModel reads/writes only the
+  `"obituary"` part (`load()` calls `SuneerLayoutModels::ensureMigrated()` first). Migration runs once per profile: `layout-spacing.json` →
+  `.migrated-<stamp>`, old `obituary.json` → `.pre-models-<stamp>.bak`; built-ins normal / obituary / pradeshikam-learned.
+- `SuneerSpacing` is now only Keys/Values + `forModel(id)` = `SuneerLayoutModels::byId(id).spacing()`; the old Store / Prefs pane / spacing dialog are gone.
+  News Browser Settings gutter / column gap / wrap / story & photo columns write the Normal model.
+- `suneerlayoutengine.*`: Measurer = a scratch ScribusDoc (styles, colours, fonts copied from the page's doc; house-like Malayalam styles when no
+  doc), items created with `new PageItem_TextFrame` + `Items->append` (not itemAdd: no main-window side effects), wrap obstacles = empty text
+  frames after the story frame in Items. Height = binary search on `frameOverflows()` (+2 pt like autoFitFrameHeight); headline block height =
+  caret top of the first body char. Cache key = story key + Spec::key(). Rendering: `DrawObj` into ScPainter on a QImage (setSampleItem(true)).
+  Trap hit: forgetting to store the rendered QImage gave blank grey modules.
+- Runner: GUI-thread time slices (25 ms) — Scribus text layout is not thread safe. `SUNEER_LAYOUT_DEBUG=1` prints each step; measured
+  max 43 ms, avg 8 ms (144 steps, 34 stories, 3 models).
+- Gallery Keep: Placed frames = non-story frames + pinned (`news.manual`) stay, all stories arranged; Every frame = everything on the page stays,
+  new stories arranged; Only new = placed stories not counted. Apply (Phase 1) only remembers the model per page type (`layoutModel/<key>`).
+- Obituary card = a simulation of obitPlaceNow geometry (masonry, short news fallback into obit slots), not the real engine.
+- Harness: `/home/s1/tmp-lm/run_lm.sh <tag>` (Xvfb :95, fixture_obit.json 34 stories, obit_test.sla); Layout menu 293,10 → Auto Layout 330,34 /
+  Layout Models 330,59; News Browser ▦ 1562,867.
+
+## Layout Models — Phase 2 (2026-10-16, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+- `activeModelId()` = `m_modelOverride` (set while a model is applied) else the dropdown. `spacingModel()`, `storyColumns()`,
+  `storyImageCols()`, `currentPhotoPos()` (panel Photo combo only for Normal), `storyGeometry()` (`SuneerLayout::gridFor`, page margins,
+  `gridFromGuides`), layoutStory max photo height, page-target top, pasteboard gaps, obit model / spacing (`activeObitModelId()`) all read it.
+- `ui/suneer_news_models.cpp::arrangeCore()`: Job to the end (Measurer scale 0 = measure only), one UndoTransaction, placed stories via
+  `relayoutPlacedStory()` → layoutStory, new via placeNews with m_force*, settle pass on real heights, rest → pasteboard.
+- Trap 1: moving placed stories one by one, a story laid out at its new place wrapped around the photos of stories not yet moved
+  (plan 417 pt, real 700 pt). Fix: wrap off on every moving story's photos/captions first; layoutStory sets it back. After fix |diff| ≤ 17 pt, real ≤ plan.
+- Trap 2: StoryText::applyStyle is not undoable; the headline restyle records `APPLY_PARASTYLE` ScOldNewState itself (POS = the PARSEP).
+- Redo of a placement with the server down showed one warning per story (31 dialogs); now collected into one (`m_restoreFailures`).
+- `api.log` lines "layout model <id>: '<story>' plan WxH at … real WxH at …" compare measured and real modules.
+
+## Layout Models — Phase 3: archive variants (2026-10-16, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+- `tools/autolayout/learn_models.py` (installed with analyze.py + slaparse.py to `<share>/autolayout/`): pass 1 analyze.py with the default
+  grid, grid inference by edge closeness (n 5..12, gutter 2..10 mm; a yes/no window picked 6.5 mm, closeness gives the true 8 mm on
+  21-09-2024), pass 2 re-analysis with that grid (monkeypatched `analyze.grid_of`), structure per page, groups by (lead pos, rails, decks>0).
+- Gallery "Generate from archive..." runs it with QProcess (python3), PROGRESS/GRID/MODEL lines on stderr, JSON on stdout; models are
+  written straight into `<prefs>/layout-models/`, same ids replaced on a re-run.
+- Obituary pages are not learnable: analyze.py finds no story modules (obit modules have no headline styles) — the learner says so.
+
+### Obit recognition in analyze.py (2026-10-16)
+- `slaparse.py` read no text from 1.7 files: `<Content Chars="..."/>` keeps the text in the attribute. Fixed (char counts of 1.7 pages were 0).
+- `analyze.find_obits()`: by style (91/92/93, 94-96 no-pic, "Obit Name/Place/Body") or by geometry (18-45 mm wide short text frame
+  right under a photo of the same width, h/w 0.75-1.5, no headline / caption style). Obit frames are removed before story detection.
+  On 52 archive pages: obit pages 34-45 obits, other pages 0-2 (threshold OBIT_PAGE_MIN = 6 in learn_models.py).
+- `learn_obituary()`: obit grid (median module width, column-start gaps), obit columns = columns with >= 35 % of the busiest
+  column's modules (one stray news photo in col 10 per page), news columns the rest; photo size/shape, vertical gap, text gap,
+  styles, alignment, classify thresholds (p95 name chars/words, p90 notice chars); the rest of the obit part (photo processing,
+  background, face fill) is copied from the current obituary.json. On Page-15 Obit/KRN/KRS: 10 cols, gap 3, obits 1-8, news 9-10, 30.3 mm square, top 26.
+
+## Layout Models on any page (2026-10-16, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+- `SuneerLayout::detectModules()` (engine): attributes first (news.story; layout.module / layout.role / layout.kind / layout.fixed=<reason> /
+  layout.rigid), then: locked, Line/PolyLine/thin (<1.5 mm) = rule, inside the top/bottom margin = masthead/folio, chained text, groups
+  (narrow image+text group = obit), obits (style or geometry), captions under photos, bodies (>60 body chars) + head frames above
+  (-4..26 mm, stacked kicker) + side-by-side bodies (rigid) + photos on / right above (overlap > 50 % of the narrower), leftovers fixed.
+  A port of tools/autolayout/analyze.py rules.
+- Rigid modules are measured at their size and moved as blocks; detected stories with head frames: heads fitted at module width above the
+  body, then layoutStory. Loose (unlocked) rules stay but are no obstacles (they blocked whole columns on 21page4) - reported.
+- Trap (again): every moving module - blocks too - gets its wrap switched off before the loop; restored for all items layoutStory did not
+  re-set (`relaid`). Before: obit photos not yet moved made a story 78 pt taller than measured.
+- Page Modules panel (`ui/suneermodulepanel.*`, Qt::Tool, non-modal): overlay through `SuneerModulePanel::paintOverlay` in Canvas paint.
+- Harness: `/home/s1/tmp-lm/open_ref.sh <tag> <sla>` (skips the Legacy prompt, zoom 26 %), `saveas.sh`, `check_sla.py` (news.story or layout.module).
+
+## Layout Gallery cards from scratch copies (2026-10-16, committed 2026-10-28 with the features that need it, NOT verified by the user)
+- `SuneerLayout::makeScratchPage()` pastes the page (writeElem/readElemToLayer per layer) into a hidden ScribusDoc;
+  `SuneerNewsPanel::previewArrange()` swaps `m_doc` to it, sets `m_preview`, and calls `arrangePage()` — the Apply path.
+  While `m_preview`: no undo (UndoBlocker), no network (downloadImage → cache only, fetchMediaIfMissing returns), no processEvents,
+  no status / api.log / markPlaced / pasteboard spill. `fitFrame()` must not go through `m_mw->suneerAutoFitHeight()` (main window's doc).
+- Trap: writeElem/readElem do not carry every StoryText exactly (lost last char, default / trailing style → headline frames
+  measured 64 pt on the page but 114 / 288 pt in the copy, order dependent through the Measurer's reused frames). Fixed by copying
+  each unchained text frame's StoryText from the page after the paste. Master items are not copied (writeElem keys by
+  doc->Items index); collectPage gets them via `scratchMasters()`.
+- Evidence: `SUNEER_LAYOUT_DEBUG=1` prints LAYOUT-SCRATCH / LAYOUT-PLAN preview|apply / LAYOUT-CARD / LAYOUT-APPLY ("page against the card").
+- User's "all cards identical, 9 of 9 fit · 0 pt free" = Keep "Every frame" with no new stories (reproduced). Their
+  `~/.config/Faircode/ScribusNews.conf` was root-owned → QSettings writes fail silently.
+
+## Layout Gallery Apply crash (2026-10-17, committed 2026-10-28 with the features that need it, NOT verified by the user)
+- Root cause (ASAN, heap-use-after-free in GuideManager::setDoc): makeScratchPage() called ScribusDoc::setCurrentPage() after
+  setGUI(false, mainWindow): that hands the doc to guidePalette (and setupPage/markPage). The copy was deleted; GuideManager kept
+  m_doc/currentPage and later storePageValues() wrote into the freed page. Crashes then showed up anywhere (QPropertyAnimation
+  destroyed(), QLabel paint). Trap: a GUI-less scratch ScribusDoc must never get setCurrentPage() while m_ScMW is set (addPage()
+  before setGUI() is fine — Measurer, sampleitem, scpreview do it that way). ~ScratchPage() resets guidePalette if it points at it.
+- Second crash: placeNews() in a scratch copy → m_doc->docHyphenator is null without GUI (createHyphenator) → Hyphenator::slotHyphenate(this=null).
+- Card vs page parity traps: PageItem::checkChanges() returns without a view and suneerCaptionToRefit() needs undo on → caption ink-fit
+  only on the real page (now explicit in layoutStory); fitFrame() via GUI selection let PropertyWidget_Distance write clamped
+  distances (now direct autoFitFrameHeight + hidden box never writes); std::sort in settle; packObituary rigid width; fonts set on text.
+- Regression: tests/suneer/layout_models_apply.sh [--models DIR] page.sla... (SUNEER_LAYOUT_SELFTEST in SuneerNewsPanel::setDocument).
+
 ## Embed All includes the _photos folder (2026-10-17, tested by the user)
 - Cause of "Embed All does not embed everything": suneerEmbedAllImages() → SuneerImageLinks::embedAll() → collect(doc, onlyProblems=true),
   and collect() drops every Linked file inside "<doc>_photos/" (isInStore) — that filter is right for the warn-before-Save/PDF dialog
@@ -2577,3 +2669,119 @@ Code: `ui/suneercontrolbar.cpp` - `onImgEdgeFeather()` (image frame: PIL writes 
 - Trap: Edit photo on an embedded, edited picture with no original on this PC: the frame file is the RESULT; the dialog now starts with
   fresh settings instead of applying the stored crop a second time.
 - Regression: tests/suneer/embed_all_images.sh page.sla (SUNEER_EMBED_SELFTEST / _MODE / _SAVEAS / _PNG, ScribusMainWindow::suneerEmbedSelfTest).
+
+## Layout Model gaps + "Adjust gaps" (2026-10-17, committed 2026-10-28 with the features that need it, NOT verified by the user)
+- New SuneerSpacing key KickerHeadline (kickerHeadlineMm, JSON "kickerHeadlineMm"); it is LAST in the enum - oldSpacing() arrays are
+  KeyCount sized, keep them in step. gapKeys()/gapLabel()/houseDefault() in suneerspacing.cpp; the house file
+  resources/autolayout/autolayout-rules.json is now installed to <share>/autolayout/ (tools/autolayout/CMakeLists.txt).
+- A placed story is ONE text frame: headline->body and kicker->headline are the head paragraphs' space after (style value + gap,
+  applyHeadGaps, undoable ScOldNewState). A space after that is neither the style's nor the remembered gap (layout.gaps) was set by
+  hand and stays.
+- SuneerNewsPanel::m_gapOverride wins over the model in spacingValues() (all placement code uses it) and in storyGeometry's gutter.
+  relayoutPlacedStory sets it from layout.gaps when layout.gapsUser=1 (story gaps only; story-to-story stays the model's), and
+  Job::specFor does the same via StoryIn::userGaps so cards measure what Apply does (24/24 card = page after the change).
+- Adjust gaps preview: undo OFF + GapSnapshot restore - never UndoManager::undo() for a preview. undo(1) from the dialog crashed in
+  UndoWidget::updateUndo (its list lacked the step; undo() always pops the GUI list) and with Item Action Mode on it would undo the
+  selected item's last step instead. OK = snapshot restore, then one transaction recorded with showObject(GLOBAL_UNDO_MODE).
+  Item attributes are made undoable with the generic SimpleState "SUNEER_ATTR" (pageitem.cpp).
+- Self-test traps: a fixed 4 s timer after setDocument fired inside the "Missing photos" question during load (undo still blocked,
+  qApp->exit only left the nested loop). Now: wait until !isLoading && undoEnabled, exit via a 0 ms timer, and
+  suneerUnattendedTest() (scribus.cpp) skips the load-time questions for SUNEER_LAYOUT/EMBED/GAPS_SELFTEST.
+- Regression: tests/suneer/layout_gaps.sh page.sla... (SUNEER_GAPS_SELFTEST, SUNEER_GAPS_SELFTEST_MAX=n stories).
+
+## Empty lines in news text + "Clean Empty Lines & Fit Frames" (2026-10-18, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+`scribus/suneertextclean.{h,cpp}` is the one place: `paragraphs()` / `oneLine()` (API text → clean paragraphs; replaces the
+old `contentToParagraphs` body, `collapseSpaces`, `obitCollapse`), `cleanStory()` (a placed frame, undoable through
+`deleteSelectedTextFromFrame` + `SET_PARASTYLE`), `fitHeight()` (placement / engine) and `trimHeight()` (the command).
+
+Traps:
+- `QString::trimmed()` keeps U+200B; the API ends many stories with `\n​` lines. `isBlank()` is the definition of blank.
+- Every placement path ended the story with a PARSEP (`addPara` always appends one) = one empty line. `cleanStoryText()` after
+  the last paragraph; the last paragraph's style lives on that mark, so it is re-applied with `setStyle()`.
+- `autoFitFrameHeight()` adds `textDistanceMargins.bottom() + 2` on top of a height that already contains the bottom distance.
+  `fitHeight()` instead raises the minimal height in 0.25 pt steps until the line layout equals the one with 2 pt more.
+- The command must not re-balance columns: the first version used `fitHeight`, and a 3-column story beside a wrapped photo
+  moved its text up above the photo (frame 84 → 42 mm, see `change-20261018-1205-…-news-first-version-rebalanced.png`).
+  `trimHeight()` keeps the layout signature (line positions) identical and only cuts the space under the lowest line.
+- A `StoryText` copy shares its data (`operator=`); the self-test's dry run uses `insert(0, st)` into a fresh story.
+- Test: `SUNEER_CLEAN_SELFTEST=<report>` after load (`suneerCleanSelfTest`), script `tests/suneer/clean_empty_lines.sh`.
+
+## Page Models (2026-10-19, committed 2026-10-28 with the features that need it, NOT verified by the user)
+
+- `suneerpagemodel.{h,cpp}`: SuneerPageModel / SuneerPageSlot / SuneerPageGroup, storage `<prefs>/layout-models/pages/<group>/<id>.json` + `.png`,
+  `groups.json` (defaults Page-1..24 + Obituary/Editorial/Sports/Business/Supplement written on first use; `pageCount`), similarity (slot
+  matching), `suggestGroup()` (content ≥ 6 obits → obituary; "page N" in the name; words incl. "spo"; group names; page number in a
+  multi-page file; trailing number), export/import of groups as one JSON, grey-box `thumbnail()`.
+- Trap: a member / local named `slots` does not compile (Qt macro) - `storySlots` / `nSlots`; the JSON key stays `"slots"`.
+- Trap: `ScColor(c, m, y, k)` takes 0..255, not percent.
+- Import = `tools/autolayout/page_models.py` (QProcess, `python3 -I`, one JSON line per page on stdout, `PROGRESS i n` on stderr), built on
+  `slaparse.Page(path, page_index)` / `analyze.analyze(path, page_index)` (page index; `pages_in()`). Ad = on a layer / name containing
+  "Advt", ≥ 400 mm², NOT part of a story / obit module and NOT in the top / bottom margin band (whole pages were made on the Advt layer;
+  masthead / folio live there too). `cut_overlaps()`: slots never overlap - the less important one is cut on the cheaper axis, < 20 mm
+  dropped, photos outside their slot dropped (317 corpus slots, 0 overlaps).
+- Earlier attempt (2026-10-18, untracked, in-process analyzer) was replaced; its hook `ScribusMainWindow::suneerPageModelAnalyzeTest()`
+  (SUNEER_PAGEMODEL_ANALYZE / _OUT) now runs `runPageModelImportTest()`. The first design of 10-19 (auto-assign every story to a slot +
+  "Slot <- story" dialog) was removed the same day on the user's request: overlapping, broken pages.
+- The page's group: `ScPage::suneerGroup()`, attribute `SuneerGroup` on the Page element. The 1.7.3 writer is the **scribus171format**
+  plugin (CamelCase names), not scribus170format - both got the attribute.
+- `ui/suneer_news_pagemodels.cpp` (SuneerNewsPanel): `makePageSkeleton()` = placeholder text frames (attr `pagemodel.slot` = slot JSON incl.
+  photoH) + ad outlines (`pagemodel.ad`) on layer "Page model" (made by `skeletonLayer()`: not printable, **selectable**, and
+  `rebuildLayersList()` + `layerPalette->rebuildList()` - an undo that re-selected an item on a layer the main window's scrLayersActions
+  did not know crashed in updateItemLayerList). `fillSlot()` = m_modelOverride (normal / obituary by the page group), cols = widest module
+  that fits the placeholder width in that grid (an 8-col slot on the 10-col obit grid was 7 pt too wide), m_force* + the house headline
+  rule `headlineStyleFor(cols, lead)`, photo height capped through `SuneerLayoutModels::setEditing(&copy)` with photoMaxHeightMm = the
+  slot photo's height, placeNews on the first printable layer, then module bottom vs slot bottom → text frame `sizeItem` to the slot +
+  "PM Overflow" (red) / "PM Short" (yellow) outline (`pagemodel.flag`, non-printing), placeholder deleted, one transaction.
+  `dropStoryOnItem()` (ScribusView::contentsDropEvent, mime `application/x-suneer-news` = m_newsData index from `SuneerNewsListWidget`),
+  `placeIntoSelectedSlot()` (onPlaceSelected: one placeholder selected + one ticked story), context menu "Place selected story here" /
+  "Remove empty slots", `removeEmptySlots()` (Layout menu, gallery button). `ensureFullStory()` was extracted from onPlaceSelected.
+- Tests: SUNEER_PAGEMODEL_IMPORT_REPORT + SUNEER_PAGEMODEL_IMPORT (dialog unattended, overlap count), SUNEER_PAGEMODEL_SELFTEST +
+  SUNEER_PAGEMODEL=<group>/<id> (_TICK = slots to fill through dropStoryOnItem, _SAVEAS, _UNDO, _HOLD): skeleton twice (replace), fills,
+  every frame inside its slot, Remove Empty Slots, undo back to the start. Harness /home/s1/tmp-pm (`run_pm.sh`, Xvfb :95; `overlay.py
+  <sla> <png>` = the page rendered with the slots drawn over it). Layout menu rows: Page Models... y 84, Remove Empty Slots y 109.
+
+- `SuneerNewsPanel::obitRole()` (suneer_news_obit.cpp): ObitRoleBand when `requestedColumns(news) == SuneerObitModel::kBandCount` (2);
+  ObitRoleObit when the count is < 2 and `obitIsObituary()`; else ObitRoleAreaNews at its count (0 → 1 column), clamped to the obit
+  columns. `placeObituaries()` classifies with the same rule, so a short 2-column story is news (picture as it is, no portrait processing).
+- `obitPlaceNow()`: band news fits only in `newsCols` (stacked at `newsCursor`); other news only in `obitCols`, `span` columns wide, in the
+  highest free slot of neighbouring columns (the old "news columns full → 2-column slot in the obit columns" fallback is gone, and obit
+  columns a model shares with its news columns are dropped from `obitCols`). Parked lists are split: `bandNoRoom` indexes → "2-column news
+  with no room in columns 9-10 … not moved into columns 1-8"; the rest → "No room in columns 1-8 …". `news.columns` is written on the news
+  text frame (placed and parked) whenever the workflow sent a count, so the engine keeps the rule on Re-layout / Apply.
+- Engine (`suneerlayoutengine.cpp` Job::prepare / packObituary): obitKind 1 = obit, 2 = band (`requestedCols == 2`, or a placed non-obit
+  module two grid columns wide with no stored count — pages placed before the rule), 3 = other news (its count or its placed span, obit
+  columns only). packObituary maps the plan's columns to the page grid (`gridFor`) to split band / area column indexes; no cross-area
+  fallback; `PlanOut::notFitBand / bandPlaced / bandFirst…` feed the report in `arrangeCore` (two lists + "Columns 9-10: … left blank").
+- `obitRepackPage()`: a band with no module counts as occupied in the 30 × 30 mm empty-area check and adds the "left blank" line.
+- Traps: (1) the external API omits `noOfColumns` (see the Workflow columns note): the fixture tests inject it, production needs the
+  login path or "Place as". (2) Grouped legacy modules (placed before welding): after `moveGroup` the children's XPosition / YPosition in
+  the saved SLA stay at the OLD place (core `ScribusDoc::moveItem` does not adjust embedded items), yet the page reopens correctly
+  (`pdftotext -bbox`: headlines at the group tops ± 0.1 mm) — measure a grouped module by its group frame, never by the children.
+  (3) `xclip` / `xsel` are not installed: status details are read from screenshots.
+- Harness `/home/s1/tmp-obit/band/`: `run_band.sh <tag> <fixture> <model id> [start.sla]` (Xvfb :99, writes the model into the harness
+  ScribusNews.conf), `place_all.sh <tag> <shotdir>` (Fetch → Select All → Place Selected → Save → Fit to Height → screenshot),
+  `render.sh <tag>` (headless PDF → PNG), `band_cols.py <sla> [bandFirst bandLast]` (every story → grid columns, BAND / AREA / PARKED
+  summary). Fixtures from the CNTRL Page 3 2026-09-30 stories on the office news server (address in CLAUDE.local.md): fx_a (as fetched), fx_b (two with noOfColumns 2),
+  fx_c (84 obits), fx_d (ten with noOfColumns 2); legacy grouped page `../placed_t19.sla`.
+
+- The attach rule (`SuneerWeld::attachCaptions`; hooks in `ScribusDoc::sizeItem`, `PageItem::moveWelded(int)`, the resize gesture,
+  the context menu) is never recorded for undo (stall fix 2026-10-26: an undo action per fit step flooded AT-SPI), so an undo has to
+  derive the caption from the photo again.
+- Trap: `PageItem::restoreResize` calls `sizeItem()` BEFORE `moveItem()`. The sizeItem hook attached the caption under the photo's
+  in-between place (new position, old size) and the photo then moved back without it. Found by `tests/suneer/layout_models_apply.sh`
+  on a page with `news.captionOf` captions (normal / obituary-left: undo NOT RESTORED, caption rows only).
+- Now: while `ScribusDoc::isUndoRedoOngoing()`, `attachCaptions()` only notes the photo. `PageItem::restoreMove / restoreResize /
+  restoreRotate` call `SuneerWeld::noteRestored()` (position / size restored from the frame's own record). `UndoManager::undo / redo`
+  replay ONE step at a time (a jump in the Action History = Undo pressed n times) and call `SuneerWeld::undoStepDone()` after each step;
+  `ScribusDoc::undoRedoDone()` calls it once more for anything left. undoStepDone attaches the noted photos' captions: a caption keeps
+  the position / size its own record restored in that step (layout model Apply, re-layout: exact), otherwise x / y / width come from the
+  photo, and it is fitted only when its width changed (the text is the same).
+- Why per step: a single pass at the end cannot tell a caption record of the SAME step from one of an earlier step - undo(2) of
+  [photo made taller, story moved by its caption] left the caption under the taller photo.
+- Why the caption's attach is still not recorded: undoing a welded frame's ITEM_MOVE goes through `moveBy` → `moveWelded`, which drags
+  the photo and the whole story star along.
+- Tests: `tests/suneer/layout_models_apply.sh /home/s1/tmp-obit/band/b.sla tests/suneer/fixtures/chara1.sla`; `SUNEER_CAPTION_SELFTEST`
+  (the sizeItem mode now ends with a two-step undo(2) / redo(2) check) and `SUNEER_CAPTION_MODE=gesture`; `SUNEER_CAPTION_DEBUG=1`
+  prints "CAPTION undo  : caption … kept (restored pos 1 size 1)". Harness copies: `/home/s1/tmp-cap/capundo-20261027/run_all.sh`.
+

@@ -39,6 +39,8 @@ public:
 
 	/*! \brief Set the doc fo the guidemanager to work on. */
 	void setDoc(ScribusDoc* doc);
+	//! The document the palette works on (a hidden scratch document must never stay here - SuneerLayout::ScratchPage).
+	ScribusDoc* doc() const { return m_doc; }
 
 	/*! \brief Reimplement ScrPaletteBase::setVisible() */
 	void setVisible(bool visible) override;

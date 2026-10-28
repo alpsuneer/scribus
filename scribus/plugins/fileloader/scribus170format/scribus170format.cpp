@@ -4317,6 +4317,8 @@ bool Scribus170Format::readPage(ScribusDoc* doc, ScXmlStreamReader& reader)
 	newPage->LeftPg   = attrs.valueAsInt("LEFT", 0);
 	QString mpName    = attrs.valueAsString("MNAM", "Normal");
 	newPage->setMasterPageName(m_Doc->masterPageMode() ? QString() : mpName);
+	if (attrs.hasAttribute("SuneerGroup"))
+		newPage->setSuneerGroup(attrs.valueAsString("SuneerGroup"));
 	if (attrs.hasAttribute("Size"))
 		newPage->setSize(attrs.valueAsString("Size"));
 	if (attrs.hasAttribute("Orientation"))

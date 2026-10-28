@@ -12365,14 +12365,24 @@ void ScribusDoc::itemSelection_DeleteItem(Selection* customSelection, bool force
 	int selectedItemCount = itemSelection->count();
 	if (selectedItemCount == 0)
 		return;
-	// News Browser stories: a plain delete never touches the server; hint once.
+	// News Browser stories: the panel notes the frames about to go and marks a story unused on
+	// the server once none of its frames is left in the document (pref news/markUnusedOnDelete);
+	// with the pref off it only hints once.
 	if (m_ScMW && m_ScMW->m_suneerNewsPanel)
+	{
+		QList<PageItem*> noted;
 		for (int i = 0; i < selectedItemCount; ++i)
-			if (!itemSelection->itemAt(i)->getObjectAttributes(QStringLiteral("news.serverId")).isEmpty())
-			{
-				m_ScMW->m_suneerNewsPanel->deleteKeyHint();
-				break;
-			}
+		{
+			PageItem* it = itemSelection->itemAt(i);
+			if (it && (!it->getObjectAttributes(QStringLiteral("news.serverId")).isEmpty() || it->isGroup()))
+				noted << it;
+		}
+		if (!noted.isEmpty())
+		{
+			m_ScMW->m_suneerNewsPanel->deleteKeyHint();
+			m_ScMW->m_suneerNewsPanel->noteDeleting(noted);
+		}
+	}
 	QList<PageItem*> delItems;
 	QList<PageItem*> textInteractionItems;// text frames possibly interested in removal of selected items
 	PageItem *currItem;
