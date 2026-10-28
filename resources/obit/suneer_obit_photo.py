@@ -8,11 +8,14 @@ Reads one job file (JSON) and writes, for every item, a square JPEG with
      target face luminance, slight unsharp (strength 0-100),
   4. a tight face crop in Haar frontal-face box terms (faceW > 0): the face
      box is faceW (0.60) of the frame width, centred, its top faceTop (0.18)
-     of the frame width below the frame top - hair almost at the top edge,
-     only neck and collar below the chin. (faceW = 0: the older hairline-chin
-     rule with faceH / headTop.) Without a face: centre crop, status
-     "noface"; source too small for 300 ppi: largest crop keeping 300 ppi,
-     status "lowres" (ppi in the message).
+     of the frame width below the frame top, only neck and collar below the
+     chin. With a trusted cut-out the top of the head is never cut: the crop
+     moves up (eyes at most EYE_MAX) or, for tall hair, zooms out to at most
+     FACE_W_MIN, HEADROOM above the hair. (faceW = 0: the older hairline-chin
+     rule with faceH / headTop.) The face is the best-scored candidate of
+     both cascades (face_candidates). Without a face: the upper part of the
+     picture, centred, status "noface"; source too small for 300 ppi: the
+     same crop, status "lowres" (ppi in the message).
   Background removal is checked: when the cut-out still fills the top
   corners of the crop, the next model is tried (model, then the others of
   bgModels); when every model fails the status is "bg". The alpha edge is
@@ -55,8 +58,16 @@ def sha1_file(path):
     return h.hexdigest()
 
 
+# Bumped when the crop rule changes, so cached results made by an older
+# rule are processed again. 2: scored face choice, hair headroom, low-res
+# photos keep the normal face size, no-face crops top-anchored.
+CROP_RULE = 2
+
+
 def params_of(job):
-    return {k: job.get(k) for k in PARAM_KEYS}
+    p = {k: job.get(k) for k in PARAM_KEYS}
+    p["cropRule"] = CROP_RULE
+    return p
 
 
 def cached(item, job, src_sha):
@@ -74,8 +85,28 @@ def cached(item, job, src_sha):
     return meta
 
 
-def detect_face(bgr):
-    """Largest frontal face as (x, y, w, h) in pixels, or None."""
+def _iou(a, b):
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0 else 0.0
+
+
+def face_candidates(bgr):
+    """Every frontal-face box of both cascades with its evidence, best first:
+    [{"box": (x, y, w, h) in source pixels, "cascade", "agree", "eyes",
+    "skin", "below", "score"}].
+
+    The largest box is not always the face: a shirt front or a patterned
+    sari can give a box larger than the real face (KNR_john_389: 432 px on
+    the shirt, 401 px on the face, and the shirt was taken). A real face is
+    found by both cascades, has eyes in its upper part and skin in its
+    middle, and does not sit below another face-sized box (the body is
+    under its head)."""
+    import numpy as np
     import cv2
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
@@ -85,7 +116,7 @@ def detect_face(bgr):
     if min(h, w) < 400:
         scale = 400.0 / min(h, w)
         gray = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
-    best = None
+    cands = []
     for name, neighbours in (("haarcascade_frontalface_default.xml", 5),
                              ("haarcascade_frontalface_alt2.xml", 3)):
         cc = cv2.CascadeClassifier(cv2.data.haarcascades + name)
@@ -94,14 +125,54 @@ def detect_face(bgr):
         faces = cc.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=neighbours,
                                     minSize=(int(min(gray.shape[:2]) / 12),) * 2)
         for (x, y, fw, fh) in faces:
-            if best is None or fw * fh > best[2] * best[3]:
-                best = (x, y, fw, fh)
-        if best is not None:
-            break
-    if best is None:
-        return None
-    x, y, fw, fh = best
-    return (x / scale, y / scale, fw / scale, fh / scale)
+            cands.append({"box": (float(x), float(y), float(fw), float(fh)), "cascade": name[len("haarcascade_frontalface_"):-4]})
+    if not cands:
+        return []
+    eye_ccs = [cv2.CascadeClassifier(cv2.data.haarcascades + n)
+               for n in ("haarcascade_eye_tree_eyeglasses.xml", "haarcascade_eye.xml")]
+    colour = cv2.resize(bgr, (gray.shape[1], gray.shape[0])) if scale != 1.0 else bgr
+    ycc = cv2.cvtColor(colour, cv2.COLOR_BGR2YCrCb)
+    skin_map = (ycc[:, :, 1] >= 133) & (ycc[:, :, 1] <= 173) & (ycc[:, :, 2] >= 77) & (ycc[:, :, 2] <= 127)
+    for c in cands:
+        x, y, fw, fh = [int(v) for v in c["box"]]
+        others = [o for o in cands if o is not c]
+        c["agree"] = any(o["cascade"] != c["cascade"] and _iou(o["box"], c["box"]) > 0.4 for o in others)
+        upper = gray[max(0, y):max(0, y) + int(0.6 * fh), max(0, x):max(0, x) + fw]
+        eyes = 0
+        for ecc in eye_ccs:
+            if ecc.empty() or upper.size == 0:
+                continue
+            found = ecc.detectMultiScale(upper, 1.1, 4, minSize=(max(6, fw // 10),) * 2, maxSize=(max(8, fw // 3),) * 2)
+            eyes = max(eyes, min(2, len(found)))
+        c["eyes"] = eyes
+        mid = skin_map[max(0, y + fh // 5):y + 4 * fh // 5, max(0, x + fw // 5):x + 4 * fw // 5]
+        c["skin"] = float(mid.mean()) if mid.size else 0.0
+        cy = y + fh / 2.0
+        c["below"] = any(_iou(o["box"], c["box"]) < 0.2 and o["box"][2] >= 0.6 * fw
+                         and cy > o["box"][1] + o["box"][3] for o in others)
+        c["score"] = (2.0 if c["agree"] else 0.0) + 1.5 * c["eyes"] + 2.0 * c["skin"] - (3.0 if c["below"] else 0.0)
+    cands.sort(key=lambda c: (-c["score"], -c["box"][2] * c["box"][3]))
+    # The same face from both cascades: the "default" box goes first. The
+    # crop rule (faceW 0.60, faceTop 0.18) was measured on that cascade's
+    # boxes; alt2 boxes are ~10 % smaller and would make the face larger.
+    if cands[0]["cascade"] != "default":
+        twin = next((o for o in cands if o["cascade"] == "default" and _iou(o["box"], cands[0]["box"]) > 0.4), None)
+        if twin is not None:
+            cands.remove(twin)
+            cands.insert(0, twin)
+    for c in cands:
+        c["box"] = tuple(v / scale for v in c["box"])
+        c["skin"] = round(c["skin"], 2)
+        c["score"] = round(c["score"], 2)
+    return cands
+
+
+def detect_face(bgr):
+    """The most face-like frontal-face box as (x, y, w, h) in pixels, or None
+    (see face_candidates). The Edit photo dialog's face guide (--face) uses
+    this same function, so both start from the same face."""
+    cands = face_candidates(bgr)
+    return cands[0]["box"] if cands else None
 
 
 def tone_match(rgb, face, strength):
@@ -189,8 +260,35 @@ def clean_edge(alpha):
     return np.clip(a, 0, 255).astype(np.uint8)
 
 
-def crop_box(face, alpha, W, H, job, size, out_h, min_px):
-    """The crop in source pixels: (left, top, w, h), status, info."""
+HEADROOM = 0.03     # free space above the hair, in frame heights
+EYE_MAX = 0.44      # eyes no lower than this (from the frame top) when the crop moves up for the hair
+EYE_IN_BOX = 0.40   # eye line in a Haar frontal-face box, from its top (measured 38-43 % on the 2026-10 obit page)
+FACE_W_MIN = 0.52   # tall hair zooms out at most to this face width / frame width (faces of one size on the page)
+
+
+def head_top_row(alpha, face):
+    """First row of the person (alpha > 128) above the face box, over the
+    middle of the face, or None when it cannot be told: no cut-out, or the
+    head already touches the top of the source picture."""
+    import numpy as np
+    H, W = alpha.shape[:2]
+    fx, fy, fw, fh = face
+    x0, x1 = max(0, int(fx + 0.2 * fw)), min(W, int(fx + 0.8 * fw))
+    y0, y1 = max(0, int(fy - 1.2 * fh)), max(0, min(H, int(fy + 0.2 * fh)))
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        return None
+    rows = np.where((alpha[y0:y1, x0:x1] > 128).sum(axis=1) > max(3, int(0.05 * fw)))[0]
+    if rows.size == 0:
+        return None
+    head = y0 + int(rows[0])
+    return float(head) if head > 1 else None
+
+
+def crop_box(face, alpha, W, H, job, size, out_h, min_px, head_alpha=None):
+    """The crop in source pixels: (left, top, w, h), status, info.
+    \a head_alpha: the person cut-out, given only when the background
+    removal is trusted; with it the crop moves up (or, for very tall hair,
+    out) so the top of the head is never cut."""
     import numpy as np
     face_w = float(job.get("faceW", 0.0))            # Haar box width / frame width
     face_top = float(job.get("faceTop", 0.18))       # Haar box top below the frame top, in frame widths
@@ -215,23 +313,39 @@ def crop_box(face, alpha, W, H, job, size, out_h, min_px):
             frame_w_src = frame_h_src * size / float(out_h)
             top = top_of_head - head_top * frame_h_src
         left = cx - frame_w_src / 2.0
+        if face_w > 0 and head_alpha is not None:
+            head = head_top_row(head_alpha, face)
+            if head is not None and head - top < HEADROOM * frame_h_src:
+                eye = fy + EYE_IN_BOX * fh
+                moved = head - HEADROOM * frame_h_src
+                if (eye - moved) / frame_h_src <= EYE_MAX:
+                    top = moved
+                    info["headroom"] = "moved up"
+                else:
+                    # tall hair: a little smaller, eyes at EYE_MAX, the hair
+                    # inside; never smaller than FACE_W_MIN - past that the
+                    # crop moves up and the eyes sit lower instead
+                    max_h = (fw / FACE_W_MIN) * out_h / float(size)
+                    frame_h_src = min((eye - head) / (EYE_MAX - HEADROOM), max_h)
+                    frame_w_src = frame_h_src * size / float(out_h)
+                    top = min(eye - EYE_MAX * frame_h_src, head - HEADROOM * frame_h_src)
+                    left = cx - frame_w_src / 2.0
+                    info["headroom"] = "zoomed out"
         info["wantedPx"] = int(round(frame_w_src))
         if min_px > 0 and frame_w_src < min_px:
-            # Too small for 300 ppi: the largest crop that keeps 300 ppi,
-            # face still centred and at the same relative top; flagged.
-            scale = min_px / frame_w_src
-            frame_w_src, frame_h_src = min_px, frame_h_src * scale
-            left = cx - frame_w_src / 2.0
-            top = fy - (face_top if face_w > 0 else 0.18) * frame_w_src
+            # Too small for 300 ppi: the same head-and-shoulders crop as every
+            # other photo (one face size on the page), only flagged. (It used
+            # to widen the crop to keep 300 ppi, which made the face smaller.)
             status = "lowres"
         info["faceWidthPct"] = int(round(100.0 * fw / frame_w_src))
         info["faceTopPct"] = int(round(100.0 * (fy - top) / frame_w_src))
+        info["eyePct"] = int(round(100.0 * (fy + EYE_IN_BOX * fh - top) / frame_h_src))
         info["faceCentrePct"] = int(round(100.0 * (cx - left) / frame_w_src))
     else:
         frame_w_src = float(min(W, H * size / float(out_h)))
         frame_h_src = frame_w_src * out_h / float(size)
         left = (W - frame_w_src) / 2.0
-        top = 0.0 if H > W else (H - frame_h_src) / 2.0   # portraits: keep the head
+        top = 0.0                       # the upper part: that is where a head is
         status = "noface"
     return (left, top, frame_w_src, frame_h_src), status, info
 
@@ -253,7 +367,8 @@ def process(item, job, session, i, n):
     img = ImageOps.exif_transpose(img).convert("RGB")
     rgb = np.asarray(img)
     bgr = rgb[:, :, ::-1].copy()
-    face = detect_face(bgr)
+    cands = face_candidates(bgr)
+    face = cands[0]["box"] if cands else None
 
     W, H = img.size
     # 1. background removal on the whole picture (the crop is padded with the
@@ -334,8 +449,16 @@ def process(item, job, session, i, n):
 
     # 3. the crop in source pixels (same rule as the first_box above)
     W, H = flat.size
-    (left, top, frame_w_src, frame_h_src), status, cinfo = crop_box(face, alpha, W, H, job, size, out_h, min_px)
-    info = {"srcW": W, "srcH": H, "bgModel": bg_model, "bgOpacityPct": int(round(100 * bg_opacity)), "bgOk": bg_ok}
+    # The hair rule needs a trustworthy cut-out; a kept or unused background
+    # (status "bg", "manual") gives the plain face rule, so "check BG" never
+    # changes the crop.
+    trusted = bg_ok and not ask_msg and policy != "manual"
+    (left, top, frame_w_src, frame_h_src), status, cinfo = crop_box(face, alpha, W, H, job, size, out_h, min_px,
+                                                                    head_alpha=alpha if trusted else None)
+    info = {"srcW": W, "srcH": H, "bgModel": bg_model, "bgOpacityPct": int(round(100 * bg_opacity)), "bgOk": bg_ok,
+            "crop": [round(left, 1), round(top, 1), round(frame_w_src, 1), round(frame_h_src, 1)],
+            "faces": [{"box": [round(v, 1) for v in c["box"]], "score": c["score"], "agree": c["agree"],
+                       "eyes": c["eyes"], "skin": c["skin"], "below": c["below"]} for c in cands]}
     info.update(cinfo)
     if not bg_ok and status == "ok":
         status = "bg"          # every model kept the background: check by hand
@@ -420,6 +543,8 @@ def main():
                            "faceWidthPct": info.get("faceWidthPct"), "faceTopPct": info.get("faceTopPct"),
                            "faceCentrePct": info.get("faceCentrePct"), "bgModel": info.get("bgModel"),
                            "bgOpacityPct": info.get("bgOpacityPct"), "bgOk": info.get("bgOk"),
+                           "crop": info.get("crop"), "eyePct": info.get("eyePct"), "headroom": info.get("headroom"),
+                           "faces": info.get("faces"),
                            "seconds": round(time.time() - t0, 2)}, f)
             msg = "%d ppi (%dx%d px)" % (info.get("ppi", 0), info.get("srcW", 0), info.get("srcH", 0))
             if info.get("askMsg"):

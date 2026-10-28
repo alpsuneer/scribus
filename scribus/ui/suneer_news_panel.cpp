@@ -5101,7 +5101,7 @@ void SuneerNewsPanel::onSettings()
 				best = k;
 		obitFillCmb->setCurrentIndex(best);
 	}
-	obitFillCmb->setToolTip(tr("Face crop in Haar frontal-face box terms (measured on the reference strip): the face box is this share of the frame width, centred, its top %1 %% of the frame width below the frame top - hair almost at the top edge, only neck and collar below the chin. Sources smaller than 300 ppi get the largest crop that keeps 300 ppi and an orange flag.").arg(qRound(om.faceTop * 100)));
+	obitFillCmb->setToolTip(tr("Face crop in Haar frontal-face box terms (measured on the reference strip): the face box is this share of the frame width, centred, its top %1 %% of the frame width below the frame top - with a little room above the hair (tall hair: the crop moves up or zooms out a little, the top of the head is never cut), only neck and collar below the chin. Sources smaller than 300 ppi get the same crop and an orange \"low res\" flag.").arg(qRound(om.faceTop * 100)));
 	flo->addRow(tr("Face fill:"), obitFillCmb);
 	QComboBox* obitShapeCmb = new QComboBox(obitTab);
 	obitShapeCmb->addItem(tr("Square (%1 x %1 mm)").arg(om.photoMm), "square");

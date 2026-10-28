@@ -1257,3 +1257,9 @@ scribus
 - പുതിയത്: 📦 → **Unembed / Extract to _photos/edited** — embedded pictures `<sla name>_photos/edited/`-ലേക്ക് എഴുതി frame link ചെയ്യും
   (ഒരേ file ഉണ്ടെങ്കിൽ അത് തന്നെ ഉപയോഗിക്കും). Selected only / All; ഒറ്റ undo.
 - Test: `tests/suneer/embed_all_images.sh page.sla` — embed → save → .sla മാത്രം മറ്റൊരു folder-ലേക്ക് → തുറന്ന് render (pixel താരതമ്യം) → extract.
+### 92. Obituary photo — ശരിയായ മുഖം, മുടി മുറിയില്ല, എല്ലാ photo-യിലും ഒരേ മുഖ വലുപ്പം
+- ഷർട്ടിനെയോ കൈയെയോ മുഖമായി എടുത്ത് താടി/ഷർട്ട് മാത്രം കാണിച്ചിരുന്നത് ശരിയാക്കി: ഏറ്റവും വലിയ box അല്ല, കണ്ണ്, skin,
+  രണ്ട് detector-ഉം സമ്മതിക്കുന്നത് നോക്കി മുഖം തിരഞ്ഞെടുക്കും. Edit photo-യുടെ face guide-ഉം ഇതേ മുഖം.
+- മുടിയുടെ മുകളിൽ ചെറിയ ഇടം; തലയുടെ മുകൾ ഇനി മുറിയില്ല (ആവശ്യമെങ്കിൽ crop മുകളിലേക്ക് / അല്പം ചെറുതായി).
+- Low res photo-കളിലും മറ്റുള്ളവയുടെ അതേ മുഖ വലുപ്പം (orange "low res" flag മാത്രം).
+- മുഖം കിട്ടാത്ത photo: ചിത്രത്തിന്റെ മുകൾ ഭാഗം, flag "no face – check" (screen-ൽ മാത്രം).

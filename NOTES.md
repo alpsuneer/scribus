@@ -1536,6 +1536,14 @@ to test, since a bad matrix could itself explain "no visible difference".
   propagate and the .sla records the old parent. Scribus's own path
   (`itemSelection_SetNamedParagraphStyle`) applies a style whose *parent* is the
   name. Two styles with identical attributes make this invisible in a test.
+- **Obituary photos: the largest Haar box is not the face.** `detect_face()` took the largest box of
+  the first cascade that found anything; a shirt front (KNR_john_389, 432 px vs the face's 401) or a
+  sleeve won, and the crop - correct for that box - showed chin and shirt, and the background check
+  then read the shirt as kept background ("check BG"). `face_candidates()` scores both cascades'
+  boxes (agreement, eyes, skin, not below another box) and prefers the "default" twin, because
+  faceW/faceTop were measured on its boxes. The Edit photo guide goes through the same `--face`, so
+  a detector bug shows in both places. `CROP_RULE` in the sidecar params invalidates cached crops
+  when the rule changes; without it the cache keeps serving the old crop.
 - **`QKeySequenceEdit` records the Enter that confirms it.** The editor keeps
   focus for ~1 s after a key; an Enter inside that window becomes the recorded
   shortcut. The Assign Shortcut dialog moves focus to OK on `editingFinished`

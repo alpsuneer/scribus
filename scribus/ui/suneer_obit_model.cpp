@@ -302,7 +302,7 @@ void paintFlagsIn(QPainter* painter, const Canvas* canvas, ScribusDoc* doc, cons
 			continue;
 		QString text = obitAttr(item, QStringLiteral("obit.checkInfo"));
 		if (text.isEmpty())
-			text = status == QLatin1String("lowres") ? QStringLiteral("low res") : status == QLatin1String("bg") ? QStringLiteral("check BG") : QStringLiteral("no face");
+			text = status == QLatin1String("lowres") ? QStringLiteral("low res") : status == QLatin1String("bg") ? QStringLiteral("check BG") : QStringLiteral("no face \u2013 check");
 		// top-left corner of the frame in widget pixels, then a fixed-size badge
 		QTransform t;
 		t.scale(canvas->scale(), canvas->scale());

@@ -820,7 +820,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				const QString flagText = photoStatus == QLatin1String("lowres")
 					? (info.isEmpty() ? tr("low res") : tr("low res: %1").arg(info))
 					: photoStatus == QLatin1String("bg") ? tr("check BG: %1").arg(info)
-					: (info.contains(QLatin1String("bg?")) ? tr("no face; bg?") : tr("no face"));
+					: (info.contains(QLatin1String("bg?")) ? tr("no face \u2013 check; bg?") : tr("no face \u2013 check"));
 				setAttr(photo, "obit.checkInfo", flagText);
 				if (photoStatus == QLatin1String("lowres"))
 					photoProblems << QStringLiteral("%1: %2").arg(title.left(22), flagText);
@@ -1733,7 +1733,7 @@ void SuneerNewsPanel::onObitReprocess()
 			// flag frame of the module (earlier builds) goes away.
 			const QString flagText = r.status == QLatin1String("lowres") ? tr("low res: %1").arg(r.message)
 			                       : r.status == QLatin1String("bg") ? tr("check BG: %1").arg(r.message)
-			                       : r.status == QLatin1String("noface") ? (r.message.contains(QLatin1String("bg?")) ? tr("no face; bg?") : tr("no face")) : QString();
+			                       : r.status == QLatin1String("noface") ? (r.message.contains(QLatin1String("bg?")) ? tr("no face \u2013 check; bg?") : tr("no face \u2013 check")) : QString();
 			setAttr(f, "obit.checkInfo", flagText);
 			if (f->Parent && f->Parent->isGroup())
 			{
