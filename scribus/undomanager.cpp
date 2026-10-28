@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
  ***************************************************************************/
 
 #include "undomanager.h"
+long long suneerActionCount = 0;   // suneer: undo actions recorded (SUNEER_MOVE_PROFILE)
 
 #include <QDebug>
 #include <QList>
@@ -327,6 +328,7 @@ void UndoManager::clearStack()
 
 void UndoManager::action(UndoObject* target, UndoState* state, QPixmap *targetPixmap)
 {
+	++suneerActionCount;   // suneer: every recorded action, transaction members too (SUNEER_MOVE_PROFILE)
 	QPixmap *oldIcon = nullptr;
 	if (targetPixmap)
 	{

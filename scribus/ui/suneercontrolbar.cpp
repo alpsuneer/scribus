@@ -5119,6 +5119,10 @@ void SuneerControlBar::onDocChangedForCaption()
     m_trackedItemName = curName;
 
     if (!sizeChanged) return;
+    // suneer 2026-10-26: a photo with an attached caption (SuneerWeld::attachCaptions, run by every
+    // resize path) is left alone here - this poll would fight it (own width, own text distances).
+    if (!SuneerWeld::captionsOf(m_doc, item, true).isEmpty())
+        return;
 
     // Caption frame find
     QString captName = QString("caption_%1").arg(item->itemName());

@@ -316,6 +316,7 @@ for which a new license (GPL+exception) is in place.
 #include <QTabWidget>
 #include "undomanager.h"
 #include "suneerweld.h"
+#include "suneerwatchdog.h"
 #include "canvas.h"
 #include "undostate.h"
 #include "units.h"
@@ -4721,6 +4722,8 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		QTimer::singleShot(3000, this, [this] { suneerEmbedSelfTest(); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST"))
 		QTimer::singleShot(3000, this, [this] { suneerCleanSelfTest(); });
+	// suneer: freeze watchdog - main-thread stalls over 1 s go to ~/scribus-crashlogs/stalls.log with a backtrace
+	SuneerWatchdog::start(this);
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST"))
 		QTimer::singleShot(3000, this, [this] { suneerCaptionSelfTest(); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE"))

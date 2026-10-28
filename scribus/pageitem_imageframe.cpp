@@ -74,8 +74,20 @@ PageItem_ImageFrame::~PageItem_ImageFrame()
 	}
 }
 
+// suneer: SUNEER_MOVE_PROFILE=1 - time of this function on stderr (ms, when >= 1)
+#include <QElapsedTimer>
+#include <cstdio>
+namespace {
+struct SuneerProfScopeI
+{
+	const char* what; QElapsedTimer t; bool on; QByteArray extra;
+	SuneerProfScopeI(const char* w, const QByteArray& e = QByteArray()) : what(w), extra(e) { static const bool env = qEnvironmentVariableIsSet("SUNEER_MOVE_PROFILE"); on = env; if (on) t.start(); }
+	~SuneerProfScopeI() { if (on) { const qint64 ms = t.elapsed(); if (ms >= 1) fprintf(stderr, "MOVE-PROFILE %s %lld ms %s\n", what, (long long) ms, extra.constData()); } }
+};
+}
 void PageItem_ImageFrame::DrawObj_Item(ScPainter *p, const QRectF& /*e*/)
 {
+	SuneerProfScopeI suneerProf("imageDraw", itemName().toUtf8());
 	if (m_Doc->RePos)
 		return;
 	if (m_Doc->layerOutline(m_layerID))

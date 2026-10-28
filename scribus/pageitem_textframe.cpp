@@ -1414,8 +1414,20 @@ static bool suneerLayoutDebug()
 	return on;
 }
 
+// suneer: SUNEER_MOVE_PROFILE=1 - time of this function on stderr (ms, when >= 1)
+#include <QElapsedTimer>
+#include <cstdio>
+namespace {
+struct SuneerProfScopeT
+{
+	const char* what; QElapsedTimer t; bool on; QByteArray extra;
+	SuneerProfScopeT(const char* w, const QByteArray& e = QByteArray()) : what(w), extra(e) { static const bool env = qEnvironmentVariableIsSet("SUNEER_MOVE_PROFILE"); on = env; if (on) t.start(); }
+	~SuneerProfScopeT() { if (on) { const qint64 ms = t.elapsed(); if (ms >= 1) fprintf(stderr, "MOVE-PROFILE %s %lld ms %s\n", what, (long long) ms, extra.constData()); } }
+};
+}
 void PageItem_TextFrame::layout()
 {
+	SuneerProfScopeT suneerProf("textLayout", (itemName() + QStringLiteral(" chars=%1 cols=%2 flowUnder=%3 hyph=%4").arg(itemText.length()).arg(m_columns).arg(m_Doc ? m_Doc->Items->count() : 0).arg((int) itemText.defaultStyle().hyphenationMode())).toUtf8());
 //	qDebug() << "==Layout==" << itemName() ;
 
 // 	printBacktrace(24);
@@ -6836,25 +6848,33 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 	const double oldH = m_height;
 	const double oldBottomDist = m_textDistanceMargins.bottom();
 
+	// suneer 2026-10-26: the search below sets the height ~16 times. Every setHeight() used to run
+	// checkChanges() (an undo action each, the Action History list growing, the accessibility bridge
+	// on DBus for each row) and updateClip() with its weld pass (which re-attached and re-fitted the
+	// caption from inside the fit): seconds per mouse release on the desk's machine (stalls.log
+	// 20:51-20:54). The search now records nothing and touches no weld; one final height is recorded.
+	// (setUndoEnabled is a counter: one false here, one true below - whatever the outer state)
+	UndoManager::instance()->setUndoEnabled(false);
+	auto trialHeight = [this](double h) {
+		m_height = h;
+		updateClip(false);
+		invalid = true;
+		layout();
+	};
+
 	// 1. Lay the whole story out with room to spare, so every line exists
 	//    and the last one is not the one being clipped.
 	double low = 1.0, high = 20000.0;
 	while (low < high)
 	{
 		double mid = (low + high) / 2.0;
-		setHeight(mid);
-		updateClip();
-		invalid = true;
-		layout();
+		trialHeight(mid);
 		if (frameOverflows())
 			low = mid + 0.5;
 		else
 			high = mid;
 	}
-	setHeight(high + m_textDistanceMargins.top() + 20.0);
-	updateClip();
-	invalid = true;
-	layout();
+	trialHeight(high + m_textDistanceMargins.top() + 20.0);
 
 	// 2. Measure the ink.
 	SuneerInkMetrics m = suneerInkMetrics();
@@ -6862,10 +6882,8 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 	{
 		// Nothing inked (empty, or only a placeholder space): there is no
 		// text to balance, so the frame is left exactly as it was.
-		setHeight(oldH);
-		updateClip();
-		invalid = true;
-		layout();
+		trialHeight(oldH);
+		UndoManager::instance()->setUndoEnabled(true);
 		if (undoTransaction)
 			undoTransaction.cancel();
 		return false;
@@ -6885,19 +6903,25 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 
 	// through the setter when recorded: Undo gives the caption its bottom distance back (it stayed 0)
 	m_textDistanceMargins.setBottom(0.0);
-	setHeight(newH);
-	updateClip();
-	invalid = true;
-	layout();
+	trialHeight(newH);
 	int guard = 0;
 	while (frameOverflows() && guard++ < 20)
 	{
 		newH += 0.25;
-		setHeight(newH);
-		updateClip();
-		invalid = true;
-		layout();
+		trialHeight(newH);
 	}
+	// the one recorded change: back to the old geometry, then the setters with undo on again
+	m_height = oldH;
+	m_textDistanceMargins.setBottom(oldBottomDist);
+	UndoManager::instance()->setUndoEnabled(true);
+	if (withUndo)
+		setTextToFrameDistBottom(0.0);
+	else
+		m_textDistanceMargins.setBottom(0.0);
+	setHeight(newH);
+	updateClip(false);
+	invalid = true;
+	layout();
 
 	if (!qEnvironmentVariableIsEmpty("SUNEER_CAPTION_DEBUG"))
 	{

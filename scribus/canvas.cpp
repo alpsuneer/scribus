@@ -847,8 +847,20 @@ void Canvas::fillBuffer(QPaintDevice* buffer, QPoint bufferOrigin, QRect clipRec
 */
 static const bool suneerDragDebug = qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG");
 
+// suneer: SUNEER_MOVE_PROFILE=1 - time of this function on stderr (ms, when >= 1)
+#include <QElapsedTimer>
+#include <cstdio>
+namespace {
+struct SuneerProfScopeC
+{
+	const char* what; QElapsedTimer t; bool on; QByteArray extra;
+	SuneerProfScopeC(const char* w, const QByteArray& e = QByteArray()) : what(w), extra(e) { static const bool env = qEnvironmentVariableIsSet("SUNEER_MOVE_PROFILE"); on = env; if (on) t.start(); }
+	~SuneerProfScopeC() { if (on) { const qint64 ms = t.elapsed(); if (ms >= 1) fprintf(stderr, "MOVE-PROFILE %s %lld ms %s\n", what, (long long) ms, extra.constData()); } }
+};
+}
 void Canvas::paintEvent ( QPaintEvent * p )
 {
+	SuneerProfScopeC suneerProf("paintEvent");
 //	qDebug()<<"Canvas::paintEvent"<<p->rect()<<m_viewMode.forceRedraw<<m_viewMode.operItemSelecting;
 // 	printBacktrace(62);
 	if (m_doc->isLoading() || !m_doc->DoDrawing)

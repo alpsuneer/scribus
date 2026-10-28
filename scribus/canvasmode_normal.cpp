@@ -309,8 +309,18 @@ void CanvasMode_Normal::mouseDoubleClickEvent(QMouseEvent *m)
 
 static const bool suneerDragDebugN = qEnvironmentVariableIsSet("SUNEER_DRAG_DEBUG");
 
+// suneer: SUNEER_MOVE_PROFILE=1 prints the time every mouse-move / release handler takes (ms) on stderr
+static bool suneerMoveProfile() { static const bool on = qEnvironmentVariableIsSet("SUNEER_MOVE_PROFILE"); return on; }
+struct SuneerScopeTimer
+{
+	const char* what; QElapsedTimer t; bool on;
+	explicit SuneerScopeTimer(const char* w) : what(w), on(suneerMoveProfile()) { if (on) t.start(); }
+	~SuneerScopeTimer() { if (on) { const qint64 ms = t.elapsed(); if (ms >= 1) fprintf(stderr, "MOVE-PROFILE %s %lld ms\n", what, (long long) ms); } }
+};
+
 void CanvasMode_Normal::mouseMoveEvent(QMouseEvent *m)
 {
+	SuneerScopeTimer suneerTimer("mouseMove");
 // 	qDebug()<<"CanvasMode_Normal::mouseMoveEvent";
 	struct DbgScope {
 		QElapsedTimer t; bool on; Canvas* c;
@@ -996,6 +1006,7 @@ void CanvasMode_Normal::mousePressEvent(QMouseEvent *m)
 
 void CanvasMode_Normal::mouseReleaseEvent(QMouseEvent *m)
 {
+	SuneerScopeTimer suneerTimer("mouseRelease");
 //	qDebug("CanvasMode_Normal::mouseReleaseEvent");
 #ifdef GESTURE_FRAME_PREVIEW
 	clearPixmapCache();

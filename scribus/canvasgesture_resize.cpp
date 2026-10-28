@@ -20,6 +20,8 @@
 
 #include "canvasgesture_resize.h"
 #include "suneerweld.h"
+#include <QElapsedTimer>
+#include <cstdio>
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -203,8 +205,12 @@ void ResizeGesture::drawControls(QPainter* p)
 
 
 
+extern long long suneerActionCount;
 void ResizeGesture::mouseReleaseEvent(QMouseEvent *m)
 {
+	// suneer: SUNEER_MOVE_PROFILE=1 - time of the release and the undo actions it recorded
+	struct ReleaseProfile { QElapsedTimer t; long long a0; bool on; ReleaseProfile() { on = qEnvironmentVariableIsSet("SUNEER_MOVE_PROFILE"); if (on) { t.start(); a0 = suneerActionCount; } }
+		~ReleaseProfile() { if (on) fprintf(stderr, "MOVE-PROFILE resizeRelease %lld ms undoActions=%lld\n", (long long) t.elapsed(), suneerActionCount - a0); } } releaseProfile;
 	adjustBounds(m);
 	if (m_doc->m_Selection->count() != 0)
 	{
