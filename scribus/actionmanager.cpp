@@ -955,6 +955,8 @@ void ActionManager::initToolsMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerRemoveUnusedPhotos";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name="suneerCleanOrphanCaptions";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="suneerFocusFontCombo";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name="itemImageScaleUp";
@@ -1229,6 +1231,7 @@ void ActionManager::initExtrasMenuActions()
 	connect( (*scrActions)["extrasEmbedAllImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerEmbedAllImages()) );
 	connect( (*scrActions)["suneerRedownloadMissingPhotos"], SIGNAL(triggered()), mainWindow, SLOT(suneerRedownloadMissingPhotos()) );
 	connect( (*scrActions)["suneerRemoveUnusedPhotos"], SIGNAL(triggered()), mainWindow, SLOT(suneerRemoveUnusedPhotos()) );
+	connect( (*scrActions)["suneerCleanOrphanCaptions"], SIGNAL(triggered()), mainWindow, SLOT(suneerCleanOrphanCaptions()) );
 	connect( (*scrActions)["extrasWarnLinkedImages"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleWarnLinkedImages()) );
 	connect( (*scrActions)["extrasManageImages"], SIGNAL(triggered()), mainWindow, SLOT(StatusPic()) );
 	connect( (*scrActions)["extrasGenerateTableOfContents"], SIGNAL(triggered()), mainWindow, SLOT(generateTableOfContents()) );
@@ -1554,7 +1557,8 @@ void ActionManager::connectNewDocActions(ScribusDoc *currDoc)
 	connect( (*scrActions)["itemUpdateImage"], SIGNAL(triggered()), currDoc, SLOT(updatePic()) );
 	connect( (*scrActions)["extrasHyphenateText"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_DoHyphenate()) );
 	connect( (*scrActions)["extrasDeHyphenateText"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_DoDeHyphenate()) );
-	connect( (*scrActions)["itemDelete"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_DeleteItem()) );
+	// suneer: through the main window - deleting a photo without its caption asks about the caption
+	connect( (*scrActions)["itemDelete"], SIGNAL(triggered()), mainWindow, SLOT(suneerDeleteSelectedItems()) );
 	connect( (*scrActions)["tableInsertRows"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_InsertTableRows()));
 	connect( (*scrActions)["tableInsertColumns"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_InsertTableColumns()));
 	connect( (*scrActions)["tableDeleteRows"], SIGNAL(triggered()), currDoc, SLOT(itemSelection_DeleteTableRows()));
@@ -2039,6 +2043,7 @@ void ActionManager::languageChange()
 	(*scrActions)["suneerResizeImageToFrame"]->setTexts( tr("Resize Image File to Frame Resolution..."));
 	(*scrActions)["suneerRedownloadMissingPhotos"]->setTexts( tr("Re-download Missing Photos from Workflow"));
 	(*scrActions)["suneerRemoveUnusedPhotos"]->setTexts( tr("Remove Unused Photos..."));
+	(*scrActions)["suneerCleanOrphanCaptions"]->setTexts( tr("Clean Orphan Captions..."));
 	(*scrActions)["suneerScaleUp"]->setTexts( tr("Scale Up / Font Size Up"));
 	(*scrActions)["suneerScaleDown"]->setTexts( tr("Scale Down / Font Size Down"));
 	(*scrActions)["itemImageScaleUp"]->setTexts( tr("Enlarge Image Frame Size"));
@@ -2866,6 +2871,7 @@ void ActionManager::createDefaultMenus()
 		<< "extrasCleanEmptyLines"
 		<< "suneerRedownloadMissingPhotos"
 		<< "suneerRemoveUnusedPhotos"
+		<< "suneerCleanOrphanCaptions"
 		<< "extrasWarnLinkedImages"
 		<< "extrasCheckDuplicateShortcuts"
 		<< "SRDuplicateNewsCheck"

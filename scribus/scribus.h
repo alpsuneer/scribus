@@ -412,6 +412,8 @@ public slots:
 	void suneerExtractImages();
 	//! SUNEER_EMBED_SELFTEST: unattended Embed All / Extract test, see scribus.cpp
 	void suneerEmbedSelfTest();
+	//! SUNEER_CAPTION_SELFTEST=<report>: resize every captioned photo of the loaded document, check the caption, undo, redo
+	void suneerCaptionSelfTest();
 	//! Extras > Clean Empty Lines & Fit Frames: the selected text frames, or the News Browser /
 	//! Layout Model frames of the current page. One undo step. Returns the summary ("Cleaned 23 frames ...").
 	QString suneerCleanEmptyLines(bool quiet = false, int* cleanedOut = nullptr);
@@ -421,6 +423,14 @@ public slots:
 	void suneerPageModelAnalyzeTest();
 	void suneerRedownloadMissingPhotos();
 	void suneerRemoveUnusedPhotos();
+	//! Edit > Delete, the Delete key: a photo deleted without its caption asks what happens to the caption
+	void suneerDeleteSelectedItems();
+	//! \a answer -1: ask; 0: the captions go with their photos; 1: they stay (their link waits for an Undo). False: cancelled
+	bool suneerDeleteAskingCaptions(int answer = -1);
+	//! Extras > Clean Orphan Captions: the caption frames whose photo was deleted, one undo step
+	void suneerCleanOrphanCaptions();
+	//! the worker: \a ask false deletes without asking (the caption self-test); returns how many were deleted
+	int suneerRemoveOrphanCaptions(bool ask);
 	//! View > Image Frames > Show Linked Image Badges
 	void suneerToggleImageLinkBadges();
 	//! Extras > Warn About Linked Images in This Document

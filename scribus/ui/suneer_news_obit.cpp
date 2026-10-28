@@ -26,6 +26,7 @@
 #include "suneerphotostore.h"
 #include "suneerspacing.h"
 #include "suneertextclean.h"
+#include "suneerweld.h"
 #include "suneerlayoutengine.h"
 #include "suneerlayoutmodel.h"
 #include "ui/suneerlayoutmodels.h"
@@ -707,17 +708,9 @@ void SuneerNewsPanel::obitPlaceNow()
 			if (it)
 				it->setXYPos(it->xPos() + dx, it->yPos() + dy);
 		parkY += u.height() + 2.0 * moduleGap;
-		PageItem* group = nullptr;
-		if (items.size() > 1)
-		{
-			Selection sel(this, false);
-			for (PageItem* it : items)
-				sel.addItem(it);
-			group = m_doc->itemSelection_GroupObjects(false, false, &sel);
-		}
+		// welded (star around the text frame), not grouped: every frame stays directly editable
+		SuneerWeld::weldStory(m_doc, items);
 		QList<PageItem*> tagged = items;
-		if (group)
-			tagged << group;
 		tagStoryItems(tagged, title, pos, 1, cols, newsServerId(n));
 		for (PageItem* it : tagged)
 		{
@@ -785,6 +778,7 @@ void SuneerNewsPanel::obitPlaceNow()
 					// never embedded: the file lives in <doc>_photos/ and is linked relatively
 					setAttr(photo, "news.role", "photo");
 					setAttr(photo, "news.index", "0");
+					SuneerWeld::ensurePhotoUid(photo);   // every placed photo has its stable id (news.photoUid)
 					setAttr(photo, "obit.photoStatus", photoStatus);
 					if (model.bgPolicy == QLatin1String("manual"))
 						setAttr(photo, SuneerPhotoEdit::AttrBgMode, "manual");   // placed unremoved; mask by hand in Edit photo
@@ -898,18 +892,9 @@ void SuneerNewsPanel::obitPlaceNow()
 				if (photoStatus == QLatin1String("lowres"))
 					photoProblems << QStringLiteral("%1: %2").arg(title.left(22), flagText);
 			}
-			// Group photo + text (+ flag) and tag everything with the story.
-			PageItem* group = nullptr;
-			if (items.size() > 1)
-			{
-				Selection sel(this, false);
-				for (PageItem* it : items)
-					sel.addItem(it);
-				group = m_doc->itemSelection_GroupObjects(false, false, &sel);
-			}
+			// Weld photo + text (+ flag) into one module and tag everything with the story.
+			SuneerWeld::weldStory(m_doc, items);
 			QList<PageItem*> tagged = items;
-			if (group)
-				tagged << group;
 			tagStoryItems(tagged, title, photo ? QStringLiteral("top") : QStringLiteral("none"), 1, 1, sid);
 			for (PageItem* it : tagged)
 			{
@@ -1070,6 +1055,7 @@ void SuneerNewsPanel::obitPlaceNow()
 					}
 					setAttr(photo, "news.role", "photo");
 					setAttr(photo, "news.index", "0");
+					SuneerWeld::ensurePhotoUid(photo);   // the stable id its caption is linked by
 					setAttr(photo, SuneerPhotoStore::AttrFileUrl, hasMedia ? mediaList(n)[0].toObject()["media"].toObject()["fileUrl"].toString() : QString());
 					setWrap(photo, true);
 					photoBlockH = ph;
@@ -1082,6 +1068,9 @@ void SuneerNewsPanel::obitPlaceNow()
 							items << caption;
 							caption->setItemName(QStringLiteral("caption_%1").arg(text->itemName()));
 							setAttr(caption, "news.role", "caption");
+							photo->AutoName = false;   // the name is saved in the file
+							SuneerWeld::linkCaption(photo, caption);   // attached caption: follows this photo's geometry, linked by the photo's uid
+							setAttr(caption, "news.captionGap", QString::number(sp.pt(SuneerSpacing::CaptionGap), 'f', 3));
 							setAttr(caption, "news.index", "0");
 							addPara(caption, capText, captionStyle);
 							trimTrailingParSep(caption);
@@ -1209,17 +1198,8 @@ void SuneerNewsPanel::obitPlaceNow()
 			obstacles << QRectF(nx, cy, w, hFinal);
 			// settle groups: the band (-1); a one-column news with the obits of its column; a wider one on its own
 			placedModules << PlacedModule{inBand ? -1 : (span == 1 ? areaCol : -100 - areaCol), cy, hFinal, text, photo, caption, title};
-			PageItem* group = nullptr;
-			if (items.size() > 1)
-			{
-				Selection sel(this, false);
-				for (PageItem* it : items)
-					sel.addItem(it);
-				group = m_doc->itemSelection_GroupObjects(false, false, &sel);
-			}
+			SuneerWeld::weldStory(m_doc, items, text);
 			QList<PageItem*> tagged = items;
-			if (group)
-				tagged << group;
 			tagStoryItems(tagged, title, photo ? QStringLiteral("right") : QStringLiteral("none"), 1, span, sid);
 			if (requestedColumns(n) > 0)
 				setAttr(text, "news.columns", QString::number(requestedColumns(n)));   // the desk's count: Re-layout keeps the band rule

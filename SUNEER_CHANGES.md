@@ -1390,6 +1390,42 @@ scribus
 - ശ്രദ്ധിക്കുക: `/external/edition-pages/:id/news` API reply-യിൽ noOfColumns ഇല്ല (backend-ൽ ഒരു വരി fix വേണം); login വഴി
   (`/news/layout`) ഉണ്ട്. അതില്ലാത്തപ്പോൾ "Place as ▸ 2 columns" ഉപയോഗിക്കുക.
 
+### 87. Attached caption — Undo / Redo-ലും caption photo-യുടെ താഴെ തന്നെ
+- Photo-യുടെ caption (News Browser place ചെയ്തത്) photo-യുടെ താഴെ, അതേ വീതിയിൽ, caption gap വിട്ട് — photo resize, Undo, Redo
+  എല്ലാത്തിലും.
+- Layout Gallery Apply / Re-layout (Normal, news left) → Edit > Undo: captions ഇപ്പോൾ Apply-ക്ക് മുമ്പുള്ള സ്ഥലത്ത് കൃത്യമായി
+  (മുമ്പ് ചില captions photo-യിൽ നിന്ന് മാറി താഴെ നിന്നിരുന്നു).
+- Action History-യിൽ പല steps ഒന്നിച്ച് undo / redo ചെയ്താലും ഫലം ഓരോ step-ഉം ഒറ്റയ്ക്ക് Undo അമർത്തിയതുപോലെ തന്നെ.
+
+### 88. Attached caption — save ചെയ്ത് വീണ്ടും തുറന്നാലും caption അതിന്റെ photo-യെ വിടില്ല
+- ഓരോ photo-യ്ക്കും സ്ഥിരമായ ഒരു id (`news.photoUid`) — place ചെയ്യുമ്പോൾ തന്നെ. Caption-ൽ അതേ id (`news.captionOf`). Photo-യുടെ
+  പേര് (Image130 പോലുള്ളവ) ഇനി link അല്ല — file തുറക്കുമ്പോൾ Scribus പേരുകൾ വീണ്ടും ഉണ്ടാക്കും, മുകളിലെ frames delete ചെയ്താൽ
+  മറ്റൊരു photo-യ്ക്ക് ആ പേര് കിട്ടും (അപ്പോൾ resize ചെയ്ത photo-യ്ക്ക് പകരം വേറെ story-യുടെ caption നീങ്ങിയിരുന്നു).
+- പഴയ files: തുറക്കുമ്പോൾ story + photo index നോക്കി ശരിയായ caption കണ്ടെത്തി id കൊടുക്കും; അടുത്ത save-ൽ file-ൽ എഴുതും.
+- Copy/Paste, Duplicate, Page copy, Import Page: copy ചെയ്ത photo-യ്ക്ക് പുതിയ id, അതിന്റെ caption-ഉം copy-യുടെ കൂടെ. Caption മാത്രം
+  copy ചെയ്താൽ അത് photo-യിൽ attach ആകില്ല. Cut + Paste-ൽ link അതേപടി.
+- പഴയ version-ൽ copy ചെയ്ത് ഒരേ id വന്ന photos: തുറക്കുമ്പോൾ weld / സ്ഥാനം നോക്കി വേർതിരിക്കും.
+- "Keep caption attached" off / on, welds — save + reopen കഴിഞ്ഞും അതേപടി.
+
+### 89. Attached caption — Undo / Redo-നു ശേഷം caption-ന്റെ ഉയരവും ശരി
+- Photo resize ചെയ്ത് Undo ചെയ്താൽ caption അതിന്റെ സ്ഥാനത്ത്, ശരിയായ ഉയരത്തിൽ (മുമ്പ് ചിലപ്പോൾ resize-ന്റെ സമയത്തെ ഉയരം തന്നെ
+  നിന്നിരുന്നു — ഉദാ: രണ്ട് steps undo ചെയ്തപ്പോൾ 3 mm കൂടുതൽ).
+- Photo വളരെ ചെറുതാക്കി (caption-ന് കൂടുതൽ വരികൾ വേണ്ടപ്പോൾ) caption ഇനി മുഴുവൻ text കാണിക്കുന്ന ഉയരത്തിലേക്ക് വളരും; മറ്റൊരു
+  story-യുടെ frame-ന്റെ wrap caption-ന്റെ വരികൾ ദൂരേക്ക് തള്ളുമ്പോൾ മാത്രം (runaway) സ്വന്തം text-ന്റെ ഉയരം + overflow mark.
+- Story മുഴുവൻ നീക്കുമ്പോൾ caption fit ചെയ്യില്ല (മുമ്പത്തെ പോലെ); അത് മറ്റൊരു frame-ന്റെ മുകളിൽ വന്നാൽ അടുത്ത resize-ൽ fit ആകും.
+
+### 90. Manual photo + caption (Insert Image, embed) — reopen-നു ശേഷവും caption കൂടെ; weld point ശരിയാക്കൽ; photo delete-ൽ ചോദ്യം
+- News Browser വഴി അല്ലാതെ വെച്ച photo-കളും (Insert Image, embed ചെയ്തവ) അവയുടെ `caption_<photo>` frame-ഉം uid വഴി link ആകും. പഴയ files
+  തുറക്കുമ്പോൾ: പേര്, അല്ലെങ്കിൽ photo-യുമായുള്ള weld, അല്ലെങ്കിൽ caption photo-യുടെ തൊട്ടുതാഴെ (അതേ x, അതേ വീതി ±1.5 mm) — ഇവയിൽ ഒന്ന്.
+- Weld point-കൾ: photo-യും caption-ഉം ചേരുന്ന അരികിൽ (photo-യുടെ താഴെ ഇടത്, caption-ന്റെ മുകളിൽ ഇടത്). Frame-ന് പുറത്തുള്ള weld points
+  file തുറക്കുമ്പോൾ ശരിയാക്കും.
+- Photo delete ചെയ്യുമ്പോൾ (Edit > Delete, Del key) അതിന്റെ caption select ചെയ്തിട്ടില്ലെങ്കിൽ ചോദിക്കും: "Delete Caption Too" / "Keep
+  Caption" / Cancel. Keep: caption അവിടെ തന്നെ; Undo ചെയ്താൽ photo-യും link-ഉം തിരികെ.
+- **Extras > Clean Orphan Captions…**: photo ഇല്ലാത്ത caption frames കാണിച്ച് delete ചെയ്യും (ഒറ്റ Undo-ൽ തിരികെ). File തുറക്കുമ്പോൾ
+  അങ്ങനെയുള്ളവ ഉണ്ടെങ്കിൽ status bar-ൽ പറയും.
+- പഴയ file-ലെ caption photo-യിൽ നിന്ന് എത്ര അകലത്തിലാണോ (ഉദാ: 1 mm, 0.2 mm) ആ gap തന്നെ ഇനി അതിന്റെ caption gap — ആദ്യ resize-ൽ
+  caption ചാടില്ല. Undo-നു ശേഷം caption ഉയരം വീണ്ടും fit ചെയ്യുന്നത് caption നീങ്ങുമ്പോൾ / വീതി മാറുമ്പോൾ മാത്രം.
+
 ### 92. Obituary photo — ശരിയായ മുഖം, മുടി മുറിയില്ല, എല്ലാ photo-യിലും ഒരേ മുഖ വലുപ്പം
 - ഷർട്ടിനെയോ കൈയെയോ മുഖമായി എടുത്ത് താടി/ഷർട്ട് മാത്രം കാണിച്ചിരുന്നത് ശരിയാക്കി: ഏറ്റവും വലിയ box അല്ല, കണ്ണ്, skin,
   രണ്ട് detector-ഉം സമ്മതിക്കുന്നത് നോക്കി മുഖം തിരഞ്ഞെടുക്കും. Edit photo-യുടെ face guide-ഉം ഇതേ മുഖം.

@@ -19,6 +19,7 @@
 #include <cmath>
 
 #include "canvasgesture_resize.h"
+#include "suneerweld.h"
 
 #include <QMouseEvent>
 #include <QPainter>
@@ -246,6 +247,10 @@ void ResizeGesture::mouseReleaseEvent(QMouseEvent *m)
 		{
 			for (int i = 0; i < m_doc->m_Selection->count(); ++i)
 				m_doc->m_Selection->itemAt(i)->checkChanges();
+			// suneer: release - the caption under the FINAL photo geometry, height fitted (inside m_transaction: one undo step)
+			for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+				if (m_doc->m_Selection->itemAt(i)->isImageFrame())
+					SuneerWeld::attachCaptions(m_doc, m_doc->m_Selection->itemAt(i), true);
 			m_doc->invalidateRegion(m_mousePressBounds.united(m_bounds));
 			m_doc->regionsChanged()->update(m_mousePressBounds.united(m_bounds));
 			m_doc->changed();
@@ -431,6 +436,10 @@ void ResizeGesture::doResize(bool scaleContent)
 		if (currItem->imageFlippedV())
 			currItem->moveBy(0, -currItem->height());*/
 		currItem->updateClip();
+		// suneer: the attached caption follows on every drag step (no height fit while dragging:
+		// the release fits it). The gesture sets the size directly, never through sizeItem().
+		if (currItem->isImageFrame())
+			SuneerWeld::attachCaptions(m_doc, currItem, false);
 		if (currItem->isArc())
 		{
 			PageItem_Arc* item = currItem->asArc();

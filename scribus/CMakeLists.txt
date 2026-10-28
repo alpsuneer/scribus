@@ -245,6 +245,7 @@ if(HAVE_OSG)
 		suneerlayoutengine.cpp
 		suneerpagemodel.cpp
 		suneertextclean.cpp
+		suneerweld.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp
@@ -370,6 +371,7 @@ else()
 		suneerlayoutengine.cpp
 		suneerpagemodel.cpp
 		suneertextclean.cpp
+		suneerweld.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp

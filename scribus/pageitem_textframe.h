@@ -199,7 +199,8 @@ public:
 		double lastFontDescent { 0.0 };
 	};
 	SuneerInkMetrics suneerInkMetrics() const;
-	bool suneerFitCaptionHeight(bool withUndo = true);
+	//! fit the height to the text; \a ignoreTextWraps: the height the text needs on its own (no other frame's wrap)
+	bool suneerFitCaptionHeight(bool withUndo = true, bool ignoreTextWraps = false);
 
 	/**
 	 * @brief Fit the story inside this frame by adjusting typography alone.

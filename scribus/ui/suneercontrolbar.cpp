@@ -1,4 +1,5 @@
 #include "suneercontrolbar.h"
+#include "suneerweld.h"
 #include "scribusstructs.h"
 #include "ui/widgets/floatingwindow.h"
 #include "ui/colorpicker/colorpicker.h"
@@ -4238,17 +4239,23 @@ void SuneerControlBar::onPadAllChanged(double delta)
 
 			// ✅ Caption frame-ലും same gap apply ചെയ്യൂ
 			if (item->isImageFrame()) {
-				QString captName = QString("caption_%1").arg(item->itemName());
-				for (PageItem* pi : m_doc->DocItems) {
-					if (pi->itemName() == captName && pi->isTextFrame()) {
-						pi->setWrapOffsets(
-							qMax(0.0, pi->wrapOffsetTop()    + step),
-							qMax(0.0, pi->wrapOffsetBottom() + step),
-							qMax(0.0, pi->wrapOffsetLeft()   + step),
-							qMax(0.0, pi->wrapOffsetRight()  + step));
-						pi->update();
-						break;
-					}
+				// its caption by the photo's uid (SuneerWeld), else by the name caption_<photo>
+				QList<PageItem*> caps = SuneerWeld::captionsOf(m_doc, item, true);
+				if (caps.isEmpty()) {
+					QString captName = QString("caption_%1").arg(item->itemName());
+					for (PageItem* pi : m_doc->DocItems)
+						if (pi->itemName() == captName && pi->isTextFrame()) {
+							caps << pi;
+							break;
+						}
+				}
+				for (PageItem* pi : caps) {
+					pi->setWrapOffsets(
+						qMax(0.0, pi->wrapOffsetTop()    + step),
+						qMax(0.0, pi->wrapOffsetBottom() + step),
+						qMax(0.0, pi->wrapOffsetLeft()   + step),
+						qMax(0.0, pi->wrapOffsetRight()  + step));
+					pi->update();
 				}
 			}
 		}
@@ -4434,15 +4441,22 @@ void SuneerControlBar::onGapSideSet(bool text, int side, double mm)
 			// all sides of a picture: its caption frame follows, as with the toolbar +/-
 			if (!text && side < 0 && item->isImageFrame())
 			{
-				const QString captName = QString("caption_%1").arg(item->itemName());
-				for (PageItem* pi : m_doc->DocItems)
+				// its caption by the photo's uid (SuneerWeld), else by the name caption_<photo>
+				QList<PageItem*> caps = SuneerWeld::captionsOf(m_doc, item, true);
+				if (caps.isEmpty())
 				{
-					if (pi->itemName() == captName && pi->isTextFrame())
-					{
-						pi->setWrapOffsets(v, v, v, v);
-						pi->update();
-						break;
-					}
+					const QString captName = QString("caption_%1").arg(item->itemName());
+					for (PageItem* pi : m_doc->DocItems)
+						if (pi->itemName() == captName && pi->isTextFrame())
+						{
+							caps << pi;
+							break;
+						}
+				}
+				for (PageItem* pi : caps)
+				{
+					pi->setWrapOffsets(v, v, v, v);
+					pi->update();
 				}
 			}
 		}
@@ -5133,13 +5147,15 @@ void SuneerControlBar::onDocChangedForCaption()
 void SuneerControlBar::updateCaptionFrame(PageItem* imgFrame)
 {
     if (!imgFrame || !m_doc) return;
-    // Find caption frame by name convention
-    QString captName = QString("caption_%1").arg(imgFrame->itemName());
-    PageItem* captFrame = nullptr;
-    for (PageItem* item : m_doc->DocItems) {
-        if (item->itemName() == captName && item->isTextFrame()) {
-            captFrame = item;
-            break;
+    // Find the caption frame: by the photo's uid (SuneerWeld), else by the name caption_<photo>
+    PageItem* captFrame = SuneerWeld::captionsOf(m_doc, imgFrame, true).value(0, nullptr);
+    if (!captFrame) {
+        QString captName = QString("caption_%1").arg(imgFrame->itemName());
+        for (PageItem* item : m_doc->DocItems) {
+            if (item->itemName() == captName && item->isTextFrame()) {
+                captFrame = item;
+                break;
+            }
         }
     }
     if (!captFrame) return;
@@ -5310,9 +5326,13 @@ void SuneerControlBar::imgWidthFor(PageItem* item, double val)
 	item->setImageXYScale(scaleX, scaleY);
 	item->setImageXYOffset(0, 0);
 	item->update();
-	// Update caption frame size + position (same invalidation rules)
-	QString captName = QString("caption_%1").arg(item->itemName());
+	// Update caption frame size + position (same invalidation rules). A photo with an attached caption
+	// (SuneerWeld, linked by uid) is done: sizeItem() above put the caption under it - and the name
+	// caption_<photo> can belong to another photo's caption after a reload.
+	QString captName = SuneerWeld::captionsOf(m_doc, item, true).isEmpty() ? QString("caption_%1").arg(item->itemName()) : QString();
 	for (PageItem* pi : m_doc->DocItems) {
+		if (captName.isEmpty())
+			break;
 		if (pi->itemName() == captName) {
 			bool oldPiSizing = pi->Sizing;
 			pi->Sizing = false;
@@ -5392,9 +5412,11 @@ void SuneerControlBar::imgHeightFor(PageItem* item, double val)
 	item->setImageXYScale(scaleX, scaleY);
 	item->setImageXYOffset(0, 0);
 	item->update();
-	// Update caption frame (same invalidation rules)
-	QString captName2 = QString("caption_%1").arg(item->itemName());
+	// Update caption frame (same invalidation rules) - not for an attached caption (see imgWidthFor)
+	QString captName2 = SuneerWeld::captionsOf(m_doc, item, true).isEmpty() ? QString("caption_%1").arg(item->itemName()) : QString();
 	for (PageItem* pi : m_doc->DocItems) {
+		if (captName2.isEmpty())
+			break;
 		if (pi->itemName() == captName2) {
 			bool oldPiSizing = pi->Sizing;
 			pi->Sizing = false;

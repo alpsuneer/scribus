@@ -25,6 +25,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QDebug>
 #include <QList>
+#include <QScopedValueRollback>
 #include <QTransform>
 #include <functional>
 #include <limits>
@@ -232,6 +233,10 @@ static QRegion suneerInsetShapeRegion(const PageItem_TextFrame* frame, const dou
 	return e.region;
 }
 
+// suneer 2026-10-27: set while suneerFitCaptionHeight(..., ignoreTextWraps = true) measures the height a caption's
+// text needs on its own - no other frame's wrap takes part in the layout
+static bool s_suneerIgnoreTextWraps = false;
+
 QRegion PageItem_TextFrame::calcAvailableRegion()
 {
 	// Recursion guard — span + wrap infinite loop prevention
@@ -246,6 +251,8 @@ QRegion PageItem_TextFrame::calcAvailableRegion()
 	if (suneerNeedsInsetShape(this, textDist))
 		result = suneerInsetShapeRegion(this, textDist);
 	if (isEmbedded && !isGroupChild())
+		return result;
+	if (s_suneerIgnoreTextWraps)
 		return result;
 
 	bool invertible(false);
@@ -6813,10 +6820,14 @@ PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() cons
 	return m;
 }
 
-bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo)
+bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWraps)
 {
 	if (m_nextBox != nullptr || m_backBox != nullptr)
 		return false;
+	// the text alone: the frames above this one do not push its lines (calcAvailableRegion), until the end of the fit
+	QScopedValueRollback<bool> ownTextOnly(s_suneerIgnoreTextWraps, s_suneerIgnoreTextWraps || ignoreTextWraps);
+	QElapsedTimer fitTime;
+	fitTime.start();
 
 	UndoTransaction undoTransaction;
 	if (withUndo && UndoManager::undoEnabled())
@@ -6899,7 +6910,8 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo)
 			.arg(f.firstFontAscent * PT2MM, 0, 'f', 2).arg(f.lastFontDescent * PT2MM, 0, 'f', 2)
 			.arg(f.firstInkTop * PT2MM, 0, 'f', 2).arg((m_height - f.lastInkBottom) * PT2MM, 0, 'f', 2)
 			.arg(f.firstBaseline * PT2MM, 0, 'f', 2).arg(f.lastBaseline * PT2MM, 0, 'f', 2)
-			.arg(clampedByFont).arg(frameOverflows());
+			.arg(clampedByFont).arg(frameOverflows()) + (ignoreTextWraps ? QStringLiteral(" | own text only (no wraps)") : QString())
+			+ QStringLiteral(" | %1 ms").arg(fitTime.elapsed());
 	}
 
 	// Already fitted: say nothing. No undo step, no "document modified", no

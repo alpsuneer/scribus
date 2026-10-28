@@ -2767,6 +2767,8 @@ Traps:
   summary). Fixtures from the CNTRL Page 3 2026-09-30 stories on the office news server (address in CLAUDE.local.md): fx_a (as fetched), fx_b (two with noOfColumns 2),
   fx_c (84 obits), fx_d (ten with noOfColumns 2); legacy grouped page `../placed_t19.sla`.
 
+## Attached captions and undo / redo (2026-10-27, committed 2026-10-28, verified by the user)
+
 - The attach rule (`SuneerWeld::attachCaptions`; hooks in `ScribusDoc::sizeItem`, `PageItem::moveWelded(int)`, the resize gesture,
   the context menu) is never recorded for undo (stall fix 2026-10-26: an undo action per fit step flooded AT-SPI), so an undo has to
   derive the caption from the photo again.
@@ -2787,3 +2789,87 @@ Traps:
   (the sizeItem mode now ends with a two-step undo(2) / redo(2) check) and `SUNEER_CAPTION_MODE=gesture`; `SUNEER_CAPTION_DEBUG=1`
   prints "CAPTION undo  : caption … kept (restored pos 1 size 1)". Harness copies: `/home/s1/tmp-cap/capundo-20261027/run_all.sh`.
 
+## Attached captions keep their photo after save / reopen: the uid link (2026-10-27, committed 2026-10-28, verified by the user)
+
+- The link used to be the photo's NAME (`news.captionOf = Image130`, `caption_<photo>`, then story + index). Names are no link:
+  the 1.7.x loaders set `AutoName = true` when the saved name equals the one they would make anyway (scribus171format ~6935,
+  scribus170format ~5840), so the next save drops it, and from then on the name is made again from the item's place in the list
+  on every load. Delete three frames above a story, save, reopen: Image133 became Image130, and `captionOf = Image130` (a rule
+  that wins before story + index) attached the OTHER story's caption - resizing photo B moved story A's caption, B's own stayed.
+  Reproduced with the 12:40 binary on a GUI-placed page (`/home/s1/tmp-cap/reopen-20261027/gui/old_del.sla`).
+- Now: every placed photo carries `news.photoUid` (UUID, `SuneerWeld::ensurePhotoUid`), its caption `news.captionOf = <uid>`
+  (`SuneerWeld::linkCaption`; placeNews, the obituary model, the image-import and Paragraph Styles caption tools). A photo with a
+  uid has ONLY the captions carrying it (`captionsOf`); a photo without one keeps the old rules but never takes a caption carrying
+  a uid.
+- Load (`ScribusMainWindow::loadDoc`, next to `SuneerPhotoStore::relocateAttributes`) and page import (`loadPage`):
+  `SuneerWeld::relinkDocument` - photos sharing a uid (an older version's copy) are told apart: the caption goes with the photo of
+  its weld cluster / group, else the one it sits under; the first photo keeps the uid; a second caption of one photo is detached.
+  Old links become uids: a News caption by story + index (NOT by its name), another caption by name when welded / under it. No undo,
+  not marked modified (saved with the next save). `SUNEER_CAPTION_DEBUG=1` prints "CAPTION relink: …".
+- Copies: every paste, Duplicate, multiple duplicate, page copy comes through `ScriXmlDoc::readElemToLayer` → new items →
+  `SuneerWeld::renewCopiedLinks`: a copied photo whose uid the document has gets a new uid, its copied caption follows; a caption
+  copied alone is detached when its photo still has its own caption (cut + paste keeps the link).
+- Old name-based caption code that fought this: `suneerCaptionToRefit` (pageitem.cpp, the width-change refit in `checkChanges`) no
+  longer handles an image frame's caption - it recorded the caption's resize INSIDE the photo's undo step after the attach had already
+  widened it, so undo put back a wrong width (old binary: 2 FAIL on a fresh page, 3 on page-2 Right); the control bar's image W / H
+  fields skip the caption_<photo> move when the photo has an attached caption.
+- Self-test: `SUNEER_CAPTION_SELFTEST` starts with a link audit (each photo vs the caption of the same story + index, independent of the
+  link), takes its pairs from it (the old test only saw photos whose link worked - it said ALL PASS on the broken file),
+  `SUNEER_CAPTION_COPYTEST=1` (duplicateItem / slotEditCopy / slotEditCut / slotEditPaste), `SUNEER_CAPTION_TOGGLE=<n>:on|off`,
+  `SUNEER_CAPTION_MAXPAIRS`. Harness: `/home/s1/tmp-cap/reopen-20261027/` (`reopen_check.py`, `dup_check.py`, `delete_first.py`,
+  `gui/start.sh`, `st2.sh`, `rc.sh`, `dc.sh`, `final/final.sh`).
+- Still name-based (not changed): the control bar wrap +/- on a photo's caption, the caption text read on image import, the Sizing
+  branch of `ScribusDoc::sizeItem`. The loader's AutoName trap itself is upstream behaviour and was not changed.
+- Known, not changed: after undo a caption is refitted only when its width changed - where another frame's wrap pushes its text, the
+  fitted height depends on the place, so undo(2) of [taller photo, story moved] can leave the caption 3 mm taller (page-2 Right, old
+  binary too). An old placement without `news.captionGap` takes the model's gap on its first resize (page-2 Right: 0.2 mm -> 0).
+
+## Attached caption height after undo / redo (2026-10-27, committed 2026-10-28, verified by the user)
+
+- Every attach fits the caption where it sits, and the fitted height depends on the place: a frame above it with a text wrap
+  (another story's photo, page-2 Right) cuts its lines. Undo / redo re-attached the caption but fitted it only when its width
+  changed, so undo(2) of [photo taller, story moved] left it 14.94 mm instead of 11.94.
+- Now `attachNow(afterUndo)` fits the caption again after every replayed step - also when it already sits in place - unless its
+  own record restored its size in that step (`noteRestored(..., size)`: layout model Apply, re-layout - exact sizes).
+- The runaway guard was path-dependent ("> 3x the height before + 20 pt"): narrowing a caption 3x kept its old height (overflow),
+  and the undo of the next step fitted it from another old height - 6 single-step undo FAILs on page-2 Right, same numbers in the
+  old binary. Now: `suneerFitCaptionHeight(withUndo, ignoreTextWraps)` (pageitem_textframe.h; a file-static flag makes
+  `calcAvailableRegion` skip the other frames' wraps) gives the height the text needs on its own; a fit above 20 pt that exceeds
+  3x that + 20 pt is the runaway (a wrap pushes the lines far down) and the caption gets its own text height with the overflow
+  mark. Same text, width and place -> same height, whatever came before.
+- Self-test: the single undo / redo checks now compare the caption's HEIGHT too (they did not before - the height bug was
+  invisible there); "after undo" is captured before the redo.
+- Remaining by design: a plain move does not refit (the story moves as one); a caption a move left over another frame's wrap
+  overflows until the next resize, and the undo of that resize fits it (page-2 Right: 5.94 -> 11.94 mm, the only FAIL left).
+- `SUNEER_CAPTION_DEBUG=1`: "[CAPTIONFIT] ... | N ms" per fit, "CAPTION fit : ... its text alone ..." for captions over 20 pt.
+  Fits measured on page-2 Right: median 9 ms, max 18 ms. The watchdog "stalls" of the self-test are its own batch (sizeItem mode
+  runs dozens of resize / undo / redo without the event loop) - their stacks are inside `suneerCaptionSelfTest`.
+
+## Captions of photos without News attributes, weld points, deleting a photo (2026-10-27, committed 2026-10-28, verified by the user)
+
+- page-2 Left (user file): an embedded photo + `caption_Image105` from the image import of an older version - no news.* attributes,
+  no AutoName on the photo (reloaded as Image102), so neither the name nor story + index linked them. `relinkDocument` now links any
+  other caption frame (caption_<photo>, news.captionOf) by the name when welded / grouped / under, else by its weld to the photo when
+  it sits under it, else by where it sits (`sitsUnder`: same x and width +-1.5 mm, top -1.5..+6 mm below the photo) - then the uid pair.
+  Only caption frames take part (an ordinary text frame under a photo is never linked).
+- Weld points: `PageItem::addWelded` puts both at the midpoint of the two centres (in each frame's own coordinates); the attach moved
+  captions with setXYPos and left them (5336.7 pt outside a caption 847 pt wide). `SuneerWeld::fixCaptionWeldPoints`: photo (0, height),
+  caption (0, 0) - the note frame convention - after every attach and when the image import / Paragraph Styles welds a new caption;
+  `relinkDocument` repairs every weld point outside its frame (+-1 pt): a linked pair gets the edge, any other weld the midpoint clamped
+  into the frame. In this fork weld points only drive `moveWelded(int)` for note frames and News caption pairs (attach), so the repair
+  changes no geometry - only the weld markers / Edit Weld Point.
+- Delete: `itemDelete` (Edit > Delete, context menu) is connected to `ScribusMainWindow::suneerDeleteSelectedItems` and the canvas
+  Delete key calls it: a photo whose caption is not selected asks Delete Caption Too / Keep Caption / Cancel (batch: keep). Keep leaves
+  `news.captionOf` pointing at the deleted photo, so an Undo brings the linked pair back (attributes have no undo). Cut, scripts and
+  the layout engine call `itemSelection_DeleteItem` directly and never ask.
+- Extras > Clean Orphan Captions: `SuneerWeld::orphanCaptions` (top-level caption frames no photo's `captionsOf(.., true)` returns),
+  listed, deleted as one undo step. The load puts "N caption frame(s) belong to no photo" in the status bar.
+- Control bar wrap +/- and the caption text read after Insert Image find the caption by uid first, the name second.
+- Self-test: the link audit also pairs photos without News attributes by where the caption sits at the start, and checks the pairs'
+  weld points; `SUNEER_CAPTION_DELETETEST=delete|keep`, `SUNEER_CAPTION_ORPHANTEST=1`. reopen_check.py pairs them the same way.
+- Found by `layout_models_apply.sh` on chara1 (obituary-left Apply -> Undo, 1 differ): chara1 has 6 image-import captions that the
+  geometry rule now links; one sits 1 mm (2.835 pt) under its photo with a height that is not a fit. The Apply never attached it (it moved
+  with its photo by the weld), the undo did: house gap 0 + a refit. Now (a) a caption linked the old way keeps the gap it has as
+  `news.captionGap` (also the 0.2 mm of an older News placement - no jump to the model gap), (b) after an undo / redo a caption is
+  refitted only when this attach moves or widens it; one that already sits in place untouched keeps its height. The two-step undo(2)
+  case is still refitted (the attach moves the caption back there).

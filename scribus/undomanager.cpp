@@ -37,6 +37,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpaths.h"
 #include "scraction.h"
 #include "scribuscore.h"
+#include "suneerweld.h"
 #include "undogui.h"
 #include "undostack.h"
 #include "undotransaction.h"
@@ -392,7 +393,15 @@ void UndoManager::undo(int steps)
 
 	emit undoRedoBegin();
 	setUndoEnabled(false);
-	m_stacks[m_currentDoc].undo(steps, m_currentUndoObjectId);
+	// suneer: one step at a time (a jump in the Action History = Undo pressed n times): after each step
+	// the attached captions of the photos it restored go back under them (SuneerWeld::undoStepDone)
+	UndoStack& stack = m_stacks[m_currentDoc];
+	const int objectId = m_currentUndoObjectId;
+	for (int i = 0; i < steps && stack.undoItems() > 0; ++i)
+	{
+		stack.undo(1, objectId);
+		SuneerWeld::undoStepDone();
+	}
 	setUndoEnabled(true);
 	emit undoSignal(steps);
 	emit undoRedoDone();
@@ -406,7 +415,14 @@ void UndoManager::redo(int steps)
 
 	emit undoRedoBegin();
 	setUndoEnabled(false);
-	m_stacks[m_currentDoc].redo(steps, m_currentUndoObjectId);
+	// suneer: one step at a time, see undo()
+	UndoStack& stack = m_stacks[m_currentDoc];
+	const int objectId = m_currentUndoObjectId;
+	for (int i = 0; i < steps && stack.redoItems() > 0; ++i)
+	{
+		stack.redo(1, objectId);
+		SuneerWeld::undoStepDone();
+	}
 	setUndoEnabled(true);
 	emit redoSignal(steps);
 	emit undoRedoDone();

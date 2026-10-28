@@ -20,6 +20,7 @@ for which a new license (GPL+exception) is in place.
 #include <QCursor>
 #include <QDir>
 #include <QFile>
+#include <QSet>
 #include <QTextStream>
 #include <QXmlStreamReader>
 #include <QDebug>
@@ -38,6 +39,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpage.h"
 #include "scpaths.h"
 #include "scribusdoc.h"
+#include "suneerweld.h"
 #include "selection.h"
 #include "units.h"
 
@@ -157,7 +159,20 @@ bool ScriXmlDoc::readElemToLayer(const QString& fileNameOrData, ScribusDoc *doc,
 	if (fmt)
 	{
 		fmt->setupTargets(doc, nullptr, doc->scMW(), nullptr, &(PrefsManager::instance().appPrefs.fontPrefs.AvailFonts));
+		// suneer: every paste, duplicate and page copy comes through here - a copied photo + caption is a new pair
+		// (a new news.photoUid), a copy of a caption alone is not attached to the photo (SuneerWeld::renewCopiedLinks)
+		const QList<PageItem*> itemsBefore = *doc->Items;
+		const QSet<PageItem*> before(itemsBefore.begin(), itemsBefore.end());
 		fmt->loadElements(elementData, fileDir, toLayer, xPos, yPos, loc);
+		QList<PageItem*> added;
+		for (PageItem* it : std::as_const(*doc->Items))
+			if (!before.contains(it))
+				added << it;
+		if (!added.isEmpty())
+		{
+			SuneerWeld::renewCopiedLinks(doc, added);
+			SuneerWeld::relinkDocument(doc);
+		}
 		return true;
 	}
 	return false;

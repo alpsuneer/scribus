@@ -38,6 +38,7 @@
 #include "scribusview.h"
 #include "selection.h"
 #include "suneerimagelinks.h"
+#include "suneerweld.h"
 
 CanvasMode_ImageImport::CanvasMode_ImageImport(ScribusView *view) : CanvasMode(view), m_ScMW(view->m_ScMW)
 {
@@ -258,6 +259,7 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 			0, CommonStrings::None, CommonStrings::None);
 		if (captFrame) {
 			captFrame->setItemName(captName);
+			SuneerWeld::linkCaption(currItem, captFrame);   // follows the picture by its uid (news.photoUid), not by a name a reload can change
 			captFrame->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
 
 			// ✅ Text distance: 1.5mm top + bottom
@@ -270,8 +272,9 @@ void CanvasMode_ImageImport::setImage(PageItem *currItem)
 			captFrame->setFillColor(CommonStrings::None);
 
 			m_doc->DocItems.append(captFrame);
-			// Weld caption to image frame
+			// Weld caption to image frame - the weld points on the edge they share (SuneerWeld)
 			currItem->weldTo(captFrame);
+			SuneerWeld::fixCaptionWeldPoints(currItem, captFrame);
 		}
 	}
 	// Update caption frame with delay (after image fit)

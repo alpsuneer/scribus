@@ -92,6 +92,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusXml.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneerweld.h"
 #include "scribusview.h"
 #include "selection.h"
 #include "suneergroupedit.h"
@@ -1898,6 +1899,10 @@ void ScribusDoc::undoRedoBegin()
 void ScribusDoc::undoRedoDone()
 {
 	--m_undoRedoOngoing;
+	// suneer: attached captions noted during the replay and not yet attached (UndoManager attaches them
+	// after every step; this catches anything left)
+	if (m_undoRedoOngoing == 0)
+		SuneerWeld::undoStepDone();
 	m_Selection->delaySignalsOff();
 	m_docUpdater->endUpdate();
 	changedPagePreview();
@@ -15709,6 +15714,13 @@ bool ScribusDoc::sizeItem(double newW, double newH, PageItem *pi, bool fromMP, b
 			currItem->moveImageInFrame(dX,dY);*/
 		currItem->updateClip();
 	}
+	// suneer: the attached caption follows the photo: under it, as wide, a caption gap below, height
+	// fitted - after updateClip() (whose weld pass would otherwise put it back at gap 0). Same
+	// transaction as the resize, so one undo step. Undo / redo replay sizeItem() before they move the
+	// photo back: there attachCaptions() only notes the photo, and the caption is attached when the
+	// step is complete (SuneerWeld::undoStepDone).
+	if (currItem->isImageFrame() && !isLoading() && appMode != modeEditClip)
+		SuneerWeld::attachCaptions(this, currItem, true);
 	//	currItem->updateGradientVectors();
 	if (!m_loading)
 	{

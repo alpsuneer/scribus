@@ -61,6 +61,7 @@
 #include "ui/stylemanager.h"
 #include "ui/scshortcutregistry.h"
 #include "styles/charstyle.h"
+#include "suneerweld.h"
 #include <functional>
 #include <QRegularExpression>
 #include <QMenu>
@@ -3728,6 +3729,7 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
                 0, CommonStrings::None, CommonStrings::None);
             if (captFrame) {
                 captFrame->setItemName(captName);
+                SuneerWeld::linkCaption(imgFrame, captFrame);   // follows the picture by its uid, not by a name a reload can change
                 captFrame->setTextFlowMode(PageItem::TextFlowUsesBoundingBox);
                 // Text distance 1.5mm
                 captFrame->setTextToFrameDist(0.0, 0.0, 4.2519, 4.2519);
@@ -3741,8 +3743,9 @@ void ParagraphStylesPanel::applyDesignStyle(const QStringList& styles, const QSt
                     captFrame->itemText.applyStyle(0, capStyle);
                 }
                 m_doc->DocItems.append(captFrame);
-                // ✅ Weld caption to image (move together)
+                // ✅ Weld caption to image (move together) - the weld points on the edge they share (SuneerWeld)
                 imgFrame->weldTo(captFrame);
+                SuneerWeld::fixCaptionWeldPoints(imgFrame, captFrame);
                 // Caption update via signal (exif load after image set)
                 // updateCaptionFrame called when image is loaded via Ctrl+I
             }

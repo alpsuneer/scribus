@@ -44,6 +44,7 @@ for which a new license (GPL+exception) is in place.
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QEventLoop>
 #include <QFileDialog>
@@ -314,6 +315,8 @@ for which a new license (GPL+exception) is in place.
 #include <QScrollArea>
 #include <QTabWidget>
 #include "undomanager.h"
+#include "suneerweld.h"
+#include "canvas.h"
 #include "undostate.h"
 #include "units.h"
 #include "usertaskstructs.h"
@@ -1876,6 +1879,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("extrasCleanEmptyLines", "Extras");
 	scrMenuMgr->addMenuItemString("suneerRedownloadMissingPhotos", "Extras");
 	scrMenuMgr->addMenuItemString("suneerRemoveUnusedPhotos", "Extras");
+	scrMenuMgr->addMenuItemString("suneerCleanOrphanCaptions", "Extras");
 	scrMenuMgr->addMenuItemString("extrasWarnLinkedImages", "Extras");
 	scrMenuMgr->addMenuItemString("extrasCheckDuplicateShortcuts", "Extras");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "Extras");
@@ -4072,12 +4076,17 @@ bool ScribusMainWindow::loadPage(const QString& fileName, int Nr, bool Mpa, cons
 		doc->RecalcPictures(&ScCore->InputProfiles, &ScCore->InputProfilesCMYK);
 	}
 	int docItemsCount = doc->Items->count();
+	QList<PageItem*> imported;
 	for (int i = oldItemsCount; i < docItemsCount; ++i)
 	{
 		PageItem *ite = doc->Items->at(i);
+		imported << ite;
 		if ((ite->isTextFrame()) && (ite->isBookmark))
 			AddBookMark(ite);
 	}
+	// suneer: an imported photo + caption whose uid this document has already is a new pair; old links become uids
+	SuneerWeld::renewCopiedLinks(doc, imported);
+	SuneerWeld::relinkDocument(doc);
 	propertiesPalette->updateColorList();
 	contentPalette->updateColorList();
 	emit UpdateRequest(reqArrowStylesUpdate | reqLineStylesUpdate | reqStyleComboDocUpdate | reqInlinePalUpdate);
@@ -4640,6 +4649,20 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		connect(mdiArea, SIGNAL(subWindowActivated(QMdiSubWindow*)), this, SLOT(newActWin(QMdiSubWindow*)));
 		// Suneer: the photos folder moved with the document: the tool attributes follow.
 		SuneerPhotoStore::relocateAttributes(doc);
+		// Suneer: the attached captions from their photos' uids; an older file's name / story links become uids
+		// (saved with the next save - the document is not marked modified)
+		{
+			QElapsedTimer relinkTime;
+			relinkTime.start();
+			QString linkReport;
+			const int relinked = SuneerWeld::relinkDocument(doc, &linkReport);
+			if (qEnvironmentVariableIsSet("SUNEER_CAPTION_DEBUG"))
+				fprintf(stderr, "CAPTION relink: %s (%d changed, %lld ms) - %s\n", qPrintable(linkReport), relinked, static_cast<long long>(relinkTime.elapsed()),
+				        qPrintable(QFileInfo(filename).fileName()));
+			const int orphans = SuneerWeld::orphanCaptions(doc).size();
+			if (orphans > 0)
+				m_mainWindowStatusLabel->setText(tr("%n caption frame(s) belong to no photo - Extras > Clean Orphan Captions", "", orphans));
+		}
 		// Suneer: News Browser photos whose file is missing can be fetched again (the story is on the frame).
 		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel && !suneerUnattendedTest())
 		{
@@ -4698,6 +4721,8 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		QTimer::singleShot(3000, this, [this] { suneerEmbedSelfTest(); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST"))
 		QTimer::singleShot(3000, this, [this] { suneerCleanSelfTest(); });
+	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST"))
+		QTimer::singleShot(3000, this, [this] { suneerCaptionSelfTest(); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE"))
 		QTimer::singleShot(3000, this, [this] { suneerPageModelAnalyzeTest(); });
 	// Carry the lock decision onto the document now that it exists.
@@ -5209,6 +5234,99 @@ void ScribusMainWindow::suneerRedownloadMissingPhotos()
 }
 
 // Extras > Remove Unused Photos: files in "<doc>_photos/" no frame refers to.
+void ScribusMainWindow::suneerDeleteSelectedItems()
+{
+	if (HaveDoc && doc)
+		suneerDeleteAskingCaptions(-1);
+}
+
+bool ScribusMainWindow::suneerDeleteAskingCaptions(int answer)
+{
+	if (!HaveDoc || !doc)
+		return false;
+	// a photo deleted without its caption: the caption goes with it, or stays as a free frame - its link still names
+	// the photo, so an Undo of the delete gives the pair back (and Extras > Clean Orphan Captions finds it)
+	const QList<PageItem*> left = SuneerWeld::captionsLeftBehind(doc, doc->m_Selection->items());
+	if (!left.isEmpty())
+	{
+		if (answer < 0)
+		{
+			QStringList names;
+			for (PageItem* c : left.mid(0, 6))
+				names << c->itemName();
+			if (left.size() > 6)
+				names << QStringLiteral("...");
+			ScMessageBox box(QMessageBox::Question, tr("Delete Photo"),
+			                 tr("%n caption(s) of the photo(s) being deleted are not selected: %1\n\nDelete the caption(s) too?", "", left.size()).arg(names.join(QStringLiteral(", "))),
+			                 QMessageBox::NoButton, this);
+			QPushButton* deleteButton = box.addButton(tr("Delete Caption Too"), QMessageBox::YesRole);
+			QPushButton* keepButton = box.addButton(tr("Keep Caption"), QMessageBox::NoRole);
+			box.addButton(CommonStrings::tr_Cancel, QMessageBox::RejectRole);
+			box.setDefaultButton(deleteButton);
+			box.setDefaultBatchButton(keepButton);   // without a GUI nothing more is deleted than was selected
+			box.exec();
+			if (box.clickedButton() == deleteButton)
+				answer = 0;
+			else if (box.clickedButton() == keepButton)
+				answer = 1;
+			else
+				return false;
+		}
+		if (answer == 0)
+			for (PageItem* c : left)
+				doc->m_Selection->addItem(c);
+	}
+	doc->itemSelection_DeleteItem();
+	return true;
+}
+
+void ScribusMainWindow::suneerCleanOrphanCaptions()
+{
+	suneerRemoveOrphanCaptions(true);
+}
+
+int ScribusMainWindow::suneerRemoveOrphanCaptions(bool ask)
+{
+	if (!HaveDoc || !doc)
+		return 0;
+	const QList<PageItem*> orphans = SuneerWeld::orphanCaptions(doc);
+	if (orphans.isEmpty())
+	{
+		if (ask)
+			ScMessageBox::information(this, tr("Clean Orphan Captions"), tr("Every caption frame of this document belongs to a photo."));
+		return 0;
+	}
+	if (ask)
+	{
+		QStringList lines;
+		for (PageItem* c : orphans)
+		{
+			QString text = c->itemText.plainText().simplified();
+			if (text.size() > 40)
+				text = text.left(40) + QStringLiteral("...");
+			lines << QStringLiteral("%1 (%2): %3").arg(c->itemName(), c->OwnPage >= 0 ? tr("page %1").arg(c->OwnPage + 1) : tr("pasteboard"),
+			                                          text.isEmpty() ? tr("empty") : text);
+		}
+		if (ScMessageBox::question(this, tr("Clean Orphan Captions"),
+		                           tr("%n caption frame(s) belong to no photo any more (the photo was deleted):\n\n%1\n\nDelete them? One Undo brings them back.", "", orphans.size())
+		                               .arg(lines.join(QStringLiteral("\n"))),
+		                           QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes, QMessageBox::No) != QMessageBox::Yes)
+			return 0;
+	}
+	view->deselectItems(true);
+	UndoTransaction transaction;
+	if (UndoManager::undoEnabled())
+		transaction = m_undoManager->beginTransaction(doc->currentPage()->getUName(), Um::IDelete, tr("Clean orphan captions"), QString(), Um::IDelete);
+	for (PageItem* c : orphans)
+		doc->m_Selection->addItem(c);
+	doc->itemSelection_DeleteItem();
+	if (transaction)
+		transaction.commit();
+	view->DrawNew();
+	m_mainWindowStatusLabel->setText(tr("%n orphan caption frame(s) deleted", "", orphans.size()));
+	return orphans.size();
+}
+
 void ScribusMainWindow::suneerRemoveUnusedPhotos()
 {
 	if (!HaveDoc || !doc)
@@ -15377,4 +15495,558 @@ void ScribusMainWindow::changePreviewQuality(int index)
 		return;
 	doc->allItems_ChangePreviewResolution(index);
 	doc->view()->DrawNew();
+}
+// suneer: SUNEER_CAPTION_SELFTEST=<report file>. Unattended: every photo of the loaded document that
+// has an attached caption is resized through ScribusDoc::sizeItem() (the path of the handles, the
+// W/H boxes, Adjust Frame to Image, the image toolbar and Edit photo) to five sizes; after each the
+// caption must sit at the photo's x, as wide as the photo, its gap below the photo unchanged. Then ONE
+// undo must bring photo and caption back together, one redo apply both again. Writes PASS/FAIL lines,
+// saves <doc>_after.sla and quits: exit 0 when all passed, 4 otherwise.
+void ScribusMainWindow::suneerCaptionSelfTest()
+{
+	QFile out(qEnvironmentVariable("SUNEER_CAPTION_SELFTEST"));
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text) || !HaveDoc || !doc)
+	{
+		qApp->exit(3);
+		return;
+	}
+	QTextStream ts(&out);
+	const double kMm = 72.0 / 25.4;
+	int fails = 0, pairs = 0;
+	struct G { double x, y, w, h; };
+	auto g = [](const PageItem* it) { return G { it->xPos(), it->yPos(), it->width(), it->height() }; };
+	// the gap the caption is attached with (news.captionGap, written at placement), else the one it starts with -
+	// a file an older version saved with a caption under the wrong photo starts with any gap
+	auto gapOf = [](const PageItem* cap, double startGap) {
+		bool ok = false;
+		const double v = SuneerWeld::attr(cap, QStringLiteral("news.captionGap")).toDouble(&ok);
+		return ok ? v : startGap;
+	};
+	auto rel = [&](const PageItem* p, const PageItem* c) {
+		return QStringLiteral("dx=%1 dw=%2 gap=%3 capH=%4").arg((c->xPos() - p->xPos()) / kMm, 0, 'f', 2).arg((c->width() - p->width()) / kMm, 0, 'f', 2)
+		        .arg((c->yPos() - p->yPos() - p->height()) / kMm, 0, 'f', 2).arg(c->height() / kMm, 0, 'f', 2);
+	};
+	// Link audit (2026-10-27, captions lost after save + reopen): every News Browser photo against the caption that
+	// was placed with it - the caption of the same news.story + news.index, found here WITHOUT the link the code
+	// uses - and what SuneerWeld::captionsOf() returns. The checks below take their pairs from here, so a lost or
+	// wrong link is a FAIL (before, the test only saw the photos whose link still worked).
+	QList<PageItem*> photos, groupPhotos;   // top-level photos; photos in obituary groups
+	QHash<PageItem*, PageItem*> capOf;     // photo -> the caption placed with it
+	{
+		QList<PageItem*> all;
+		std::function<void(const QList<PageItem*>&)> collect = [&](const QList<PageItem*>& from) {
+			for (PageItem* it : from)
+				if (it)
+				{
+					all << it;
+					if (it->isGroup())
+						collect(it->groupItemList);
+				}
+		};
+		collect(doc->DocItems);
+		auto A = [](const PageItem* it, const char* n) { return SuneerWeld::attr(it, QString::fromLatin1(n)); };
+		QSet<QString> uidsSeen;
+		int withCaption = 0;
+		for (PageItem* p : std::as_const(all))
+		{
+			if (!p->isImageFrame() || A(p, "news.role") != QLatin1String("photo") || A(p, "news.story").isEmpty())
+				continue;
+			QList<PageItem*> mine;
+			for (PageItem* c : std::as_const(all))
+				if (c->isTextFrame() && A(c, "news.role") == QLatin1String("caption") && A(c, "news.story") == A(p, "news.story") && A(c, "news.index") == A(p, "news.index"))
+					mine << c;
+			if (mine.isEmpty())
+				continue;   // a photo without a caption
+			++withCaption;
+			const QList<PageItem*> got = SuneerWeld::captionsOf(doc, p, true);
+			const QString uid = SuneerWeld::photoUid(p);
+			const bool dup = !uid.isEmpty() && uidsSeen.contains(uid);
+			uidsSeen.insert(uid);
+			const bool ok = mine.size() == 1 && got.size() == 1 && got.first() == mine.first() && !uid.isEmpty() && !dup && A(mine.first(), "news.captionOf") == uid;
+			if (!ok)
+				++fails;
+			const QList<PageItem*> cl = SuneerWeld::cluster(p);
+			ts << (ok ? "PASS " : "FAIL ") << "link: photo " << p->itemName() << " uid " << (uid.isEmpty() ? QStringLiteral("(none)") : uid) << (dup ? " DUPLICATE" : "")
+			   << " -> caption " << mine.first()->itemName().left(28) << (mine.size() > 1 ? QStringLiteral(" (+%1 more of this story/index)").arg(mine.size() - 1) : QString())
+			   << " captionOf=" << A(mine.first(), "news.captionOf") << " | captionsOf()=" << (got.isEmpty() ? QStringLiteral("none") : got.first()->itemName().left(28))
+			   << (got.size() > 1 ? QStringLiteral(" +%1").arg(got.size() - 1) : QString()) << " | welded " << (cl.contains(mine.first()) ? "yes" : "no") << " (story cluster " << cl.size() << ")"
+			   << " | keep attached " << (SuneerWeld::captionAttached(p) ? "on" : "off") << (p->isGroupChild() ? " | group member" : "") << "\n";
+			if (mine.size() == 1)
+			{
+				capOf.insert(p, mine.first());
+				(p->isGroupChild() ? groupPhotos : photos) << p;
+			}
+		}
+		// photos without News attributes (Insert Image, an embedded file): the truth is where the caption sits at the start -
+		// a caption frame (caption_<photo>, or linked) right under the photo, as wide (1.5 mm either way, 6 mm below at most)
+		int manual = 0;
+		for (PageItem* p : std::as_const(all))
+		{
+			if (!p->isImageFrame() || A(p, "news.role") == QLatin1String("photo"))
+				continue;
+			QList<PageItem*> mine;
+			for (PageItem* c : std::as_const(all))
+			{
+				if (!c->isTextFrame() || c->Parent != p->Parent || !A(c, "news.story").isEmpty()
+				    || !(c->itemName().startsWith(QLatin1String("caption_")) || !A(c, "news.captionOf").isEmpty()))
+					continue;
+				const double gap = c->yPos() - p->yPos() - p->height();
+				if (qAbs(c->xPos() - p->xPos()) <= 1.5 * kMm && qAbs(c->width() - p->width()) <= 1.5 * kMm && gap >= -1.5 * kMm && gap <= 6.0 * kMm)
+					mine << c;
+			}
+			if (mine.size() != 1)
+				continue;
+			++manual;
+			const QList<PageItem*> got = SuneerWeld::captionsOf(doc, p, true);
+			const QString uid = SuneerWeld::photoUid(p);
+			const bool ok = got.size() == 1 && got.first() == mine.first() && !uid.isEmpty() && A(mine.first(), "news.captionOf") == uid;
+			if (!ok)
+				++fails;
+			ts << (ok ? "PASS " : "FAIL ") << "link (photo without News attributes): photo " << p->itemName() << " uid " << (uid.isEmpty() ? QStringLiteral("(none)") : uid)
+			   << " -> caption " << mine.first()->itemName() << " captionOf=" << A(mine.first(), "news.captionOf")
+			   << " | captionsOf()=" << (got.isEmpty() ? QStringLiteral("none") : got.first()->itemName()) << "\n";
+			capOf.insert(p, mine.first());
+			(p->isGroupChild() ? groupPhotos : photos) << p;
+		}
+		// the weld points of every pair: inside their frames (an older version left one 5336 pt outside its caption)
+		for (auto it = capOf.constBegin(); it != capOf.constEnd(); ++it)
+		{
+			PageItem* p = it.key();
+			PageItem* c = it.value();
+			for (int k = 0; k < 2; ++k)
+			{
+				PageItem* a = k == 0 ? p : c;
+				PageItem* b = k == 0 ? c : p;
+				for (const PageItem::WeldingInfo& w : a->weldList)
+					if (w.weldItem == b)
+					{
+						const bool inside = w.weldPoint.x() >= -1.0 && w.weldPoint.x() <= a->width() + 1.0 && w.weldPoint.y() >= -1.0 && w.weldPoint.y() <= a->height() + 1.0;
+						if (!inside)
+							++fails;
+						ts << (inside ? "PASS " : "FAIL ") << "weld point of " << a->itemName() << " to " << b->itemName() << ": " << QString::number(w.weldPoint.x(), 'f', 2) << ","
+						   << QString::number(w.weldPoint.y(), 'f', 2) << " pt in a frame of " << QString::number(a->width(), 'f', 2) << "x" << QString::number(a->height(), 'f', 2) << " pt\n";
+					}
+			}
+		}
+		ts << "== link audit: " << withCaption << " News photo(s) with a caption, " << manual << " other photo(s) with a caption under them, " << capOf.size() << " pair(s)\n";
+	}
+	// SUNEER_CAPTION_MODE=gesture: the real canvas resize gesture (CanvasMode_Normal -> ResizeGesture) driven
+	// with QMouseEvents at the frame handles: press, six moves, release - every one of the 8 handles, then
+	// Shift (proportional) and Alt (scale content) on the corner; one undo / one redo after each; then the
+	// story moved by dragging its text frame. SUNEER_CAPTION_SHOTS=<dir> saves canvas grabs before / after.
+	if (qEnvironmentVariable("SUNEER_CAPTION_MODE") == QLatin1String("gesture") && !photos.isEmpty() && view && view->m_canvas)
+	{
+		Canvas* cv = view->m_canvas;
+		const QString shots = qEnvironmentVariable("SUNEER_CAPTION_SHOTS");
+		PageItem* photo = photos.first();
+		for (PageItem* p : std::as_const(photos))
+			if (SuneerWeld::captionAttached(p))
+			{
+				photo = p;
+				break;
+			}
+		PageItem* cap = capOf.value(photo);
+		const G p0 = g(photo), c0 = g(cap);
+		const double gap0 = gapOf(cap, c0.y - p0.y - p0.h);
+		view->setCanvasCenterPos(p0.x + p0.w / 2, p0.y + p0.h / 2 + 150);
+		QApplication::processEvents();
+		auto mouse = [&](QEvent::Type t, QPointF docPt, Qt::KeyboardModifiers mods) {
+			const QPointF local = cv->canvasToLocalF(docPt);
+			const QPointF global = cv->mapToGlobal(local.toPoint());
+			QMouseEvent ev(t, local, local, global, Qt::LeftButton, t == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton, mods);
+			// through the canvas widget: QAbstractScrollArea hands it to ScribusView::mouse*Event, which sets the
+			// pressed flag and passes it to the canvas mode / gesture - exactly the path of a real mouse
+			QApplication::sendEvent(cv, &ev);
+			QApplication::processEvents();
+		};
+		auto dragFrom = [&](QPointF from, QPointF delta, Qt::KeyboardModifiers mods) {
+			mouse(QEvent::MouseButtonPress, from, mods);
+			for (int i = 1; i <= 6; ++i)
+				mouse(QEvent::MouseMove, from + delta * (i / 6.0), mods);
+			mouse(QEvent::MouseButtonRelease, from + delta, mods);
+		};
+		auto select = [&]() { doc->m_Selection->clear(); doc->m_Selection->addItem(photo); view->requestMode(modeNormal); QApplication::processEvents(); };
+		auto grab = [&](const QString& name) {
+			if (shots.isEmpty()) return;
+			QApplication::processEvents();
+			const QRectF around(p0.x - 15 * kMm, p0.y - 15 * kMm, p0.w + 60 * kMm, p0.h + 70 * kMm);   // the photo, its caption and the text under it
+			cv->grab(cv->canvasToLocal(around)).save(shots + "/" + name + ".png");
+		};
+		auto checkPair = [&](const QString& what, double gapExpect) {
+			const bool ok = qAbs(cap->xPos() - photo->xPos()) < 0.05 && qAbs(cap->width() - photo->width()) < 0.05
+			                && qAbs((cap->yPos() - photo->yPos() - photo->height()) - gapExpect) < 0.05;
+			if (!ok) ++fails;
+			ts << (ok ? "PASS " : "FAIL ") << what << ": photo " << QString::number(photo->width() / kMm, 'f', 2) << "x" << QString::number(photo->height() / kMm, 'f', 2)
+			   << " mm at " << QString::number(photo->xPos() / kMm, 'f', 2) << "," << QString::number(photo->yPos() / kMm, 'f', 2) << "; caption " << rel(photo, cap) << "\n";
+		};
+		ts << "== GESTURE test on photo " << photo->itemName() << " (" << QString::number(p0.w / kMm, 'f', 2) << "x" << QString::number(p0.h / kMm, 'f', 2) << " mm), caption " << cap->itemName() << " " << rel(photo, cap) << "\n";
+		struct H { const char* name; double hx, hy, dx, dy; };   // handle as fraction of the frame; delta in mm
+		const H handles[] = { { "BR corner", 1, 1, 12, 10 }, { "TL corner", 0, 0, -12, -10 }, { "TR corner", 1, 0, 12, -10 }, { "BL corner", 0, 1, -12, 10 },
+		                      { "T edge", 0.5, 0, 0, -10 }, { "B edge", 0.5, 1, 0, 10 }, { "L edge", 0, 0.5, -12, 0 }, { "R edge", 1, 0.5, 12, 0 } };
+		for (int i = 0; i < 8; ++i)
+		{
+			const H& h = handles[i];
+			select();
+			const G pb = g(photo), cb = g(cap);
+			if (i == 0) grab(QStringLiteral("gesture-before"));
+			dragFrom(QPointF(pb.x + h.hx * pb.w, pb.y + h.hy * pb.h), QPointF(h.dx * kMm, h.dy * kMm), Qt::NoModifier);
+			const bool resized = qAbs(photo->width() - pb.w) > 1 || qAbs(photo->height() - pb.h) > 1;
+			ts << (resized ? "" : "FAIL (gesture did not resize) ");
+			if (!resized) ++fails;
+			checkPair(QString("drag %1").arg(h.name), gap0);
+			if (i == 0) grab(QStringLiteral("gesture-after-BR"));
+			const G pa = g(photo), ca = g(cap);
+			m_undoManager->undo(1);
+			QApplication::processEvents();
+			// the caption's height too: it is fitted where it sits, and the fit depends on the place
+			const bool undoOk = qAbs(photo->width() - pb.w) < 0.05 && qAbs(photo->height() - pb.h) < 0.05 && qAbs(photo->xPos() - pb.x) < 0.05 && qAbs(photo->yPos() - pb.y) < 0.05
+			                    && qAbs(cap->width() - cb.w) < 0.05 && qAbs(cap->yPos() - cb.y) < 0.05 && qAbs(cap->xPos() - cb.x) < 0.05 && qAbs(cap->height() - cb.h) < 0.05;
+			const G pu = g(photo), cu = g(cap);   // after the undo (printed below, after the redo)
+			if (i == 0) grab(QStringLiteral("gesture-undo"));
+			m_undoManager->redo(1);
+			QApplication::processEvents();
+			const bool redoOk = qAbs(photo->width() - pa.w) < 0.05 && qAbs(photo->height() - pa.h) < 0.05 && qAbs(cap->width() - ca.w) < 0.05 && qAbs(cap->yPos() - ca.y) < 0.05
+			                    && qAbs(cap->height() - ca.h) < 0.05;
+			if (!undoOk || !redoOk) ++fails;
+			ts << (undoOk ? "PASS " : "FAIL ") << "   one undo restores photo + caption; " << (redoOk ? "PASS" : "FAIL") << " one redo re-applies both\n";
+			if (!undoOk)
+				ts << "      before: photo " << pb.x / kMm << "," << pb.y / kMm << " " << pb.w / kMm << "x" << pb.h / kMm << " cap " << cb.x / kMm << "," << cb.y / kMm << " " << cb.w / kMm << "x" << cb.h / kMm
+				   << " | after undo: photo " << pu.x / kMm << "," << pu.y / kMm << " " << pu.w / kMm << "x" << pu.h / kMm << " cap " << cu.x / kMm << "," << cu.y / kMm << " " << cu.w / kMm << "x" << cu.h / kMm << "\n";
+			if (!redoOk)
+				ts << "      after redo: cap " << cap->xPos() / kMm << "," << cap->yPos() / kMm << " " << cap->width() / kMm << "x" << cap->height() / kMm << " (expected " << ca.w / kMm << "x" << ca.h / kMm << ")\n";
+			m_undoManager->undo(1);
+			QApplication::processEvents();
+		}
+		for (int k = 0; k < 2; ++k)
+		{
+			select();
+			const G pb = g(photo);
+			dragFrom(QPointF(pb.x + pb.w, pb.y + pb.h), QPointF(12 * kMm, 10 * kMm), k == 0 ? Qt::ShiftModifier : Qt::AltModifier);
+			checkPair(k == 0 ? QStringLiteral("Shift-drag BR corner") : QStringLiteral("Alt-drag BR corner"), gap0);
+			m_undoManager->undo(1);
+			QApplication::processEvents();
+		}
+		// move the whole story by dragging its text frame
+		PageItem* text = nullptr;
+		for (PageItem* it : SuneerWeld::cluster(photo))
+			if (it && it->isTextFrame() && SuneerWeld::attr(it, QStringLiteral("news.role")) == QLatin1String("text"))
+				text = it;
+		if (text)
+		{
+			doc->m_Selection->clear(); doc->m_Selection->addItem(text); view->requestMode(modeNormal); QApplication::processEvents();
+			const G tb = g(text), pb = g(photo), cb = g(cap);
+			// the canvas move gesture needs the real button state (QGuiApplication::mouseButtons), which a
+			// synthetic event cannot set: moved through the document like the gesture's release does
+			doc->moveItem(20 * kMm, 15 * kMm, text);
+			QApplication::processEvents();
+			const G ta = g(text), pa = g(photo), ca = g(cap);
+			const bool moved = qAbs(ta.x - tb.x) > 5;
+			const bool rel1 = qAbs((pa.x - ta.x) - (pb.x - tb.x)) < 0.05 && qAbs((pa.y - ta.y) - (pb.y - tb.y)) < 0.05 && qAbs((ca.x - pa.x) - (cb.x - pb.x)) < 0.05 && qAbs((ca.y - pa.y) - (cb.y - pb.y)) < 0.05;
+			if (!moved || !rel1) ++fails;
+			ts << (moved && rel1 ? "PASS " : "FAIL ") << "move story by its text frame: text moved " << QString::number((ta.x - tb.x) / kMm, 'f', 1) << "," << QString::number((ta.y - tb.y) / kMm, 'f', 1)
+			   << " mm; photo-text offset kept=" << (rel1 ? "yes" : "no") << "; caption " << rel(photo, cap) << "\n";
+			grab(QStringLiteral("gesture-moved"));
+		}
+		ts << "RESULT " << (fails == 0 ? "ALL PASS" : QString::number(fails) + " FAIL") << " (gesture mode)\n";
+		out.close();
+		const QString saveAs2 = qEnvironmentVariable("SUNEER_CAPTION_SAVEAS");
+		if (!saveAs2.isEmpty())
+			doc->save(saveAs2, nullptr);
+		qApp->exit(fails == 0 ? 0 : 4);
+		return;
+	}
+	const QList<PageItem*> topPhotos = photos;
+	photos << groupPhotos;   // obituary modules are groups
+	const int maxPairs = qEnvironmentVariableIsSet("SUNEER_CAPTION_MAXPAIRS") ? qEnvironmentVariableIntValue("SUNEER_CAPTION_MAXPAIRS") : 4;
+	for (PageItem* photo : photos)
+	{
+		if (pairs >= maxPairs)
+			break;
+		PageItem* cap = capOf.value(photo);
+		++pairs;
+		if (!SuneerWeld::captionAttached(photo))
+		{
+			// "Keep caption attached" off: the caption stays where it is
+			const G pb = g(photo), cb = g(cap);
+			doc->sizeItem(pb.w * 1.3, pb.h * 1.2, photo, true, true, false);
+			const bool stays = qAbs(cap->xPos() - cb.x) < 0.05 && qAbs(cap->yPos() - cb.y) < 0.05 && qAbs(cap->width() - cb.w) < 0.05 && qAbs(cap->height() - cb.h) < 0.05;
+			if (!stays)
+				++fails;
+			ts << "== photo " << photo->itemName() << " -> " << cap->itemName() << " (keep caption attached OFF)\n"
+			   << (stays ? "PASS " : "FAIL ") << "photo resized to " << QString::number(photo->width() / kMm, 'f', 1) << "x" << QString::number(photo->height() / kMm, 'f', 1)
+			   << " mm, the caption stays: " << rel(photo, cap) << "\n";
+			m_undoManager->undo(1);
+			continue;
+		}
+		const G p0 = g(photo), c0 = g(cap);
+		const double gap0 = gapOf(cap, c0.y - p0.y - p0.h);
+		ts << "== photo " << photo->itemName() << " -> " << cap->itemName() << " start " << QString::number(p0.w / kMm, 'f', 1) << "x" << QString::number(p0.h / kMm, 'f', 1) << " mm " << rel(photo, cap) << "\n";
+		auto check = [&](const QString& what) {
+			const bool ok = qAbs(cap->xPos() - photo->xPos()) < 0.05 && qAbs(cap->width() - photo->width()) < 0.05
+			                && qAbs((cap->yPos() - photo->yPos() - photo->height()) - gap0) < 0.05;
+			if (!ok) ++fails;
+			ts << (ok ? "PASS " : "FAIL ") << what << ": photo " << QString::number(photo->width() / kMm, 'f', 1) << "x" << QString::number(photo->height() / kMm, 'f', 1) << " mm, caption " << rel(photo, cap) << "\n";
+		};
+		const QList<QPair<QString, QSizeF>> sizes {
+			{ "larger (corner)", QSizeF(p0.w * 1.6, p0.h * 1.3) }, { "smaller (corner)", QSizeF(p0.w * 0.5, p0.h * 0.7) },
+			{ "taller (bottom edge)", QSizeF(p0.w, p0.h * 1.8) }, { "wider (right edge)", QSizeF(p0.w * 1.25, p0.h) }, { "back to start", QSizeF(p0.w, p0.h) } };
+		for (const auto& sz : sizes)
+		{
+			const G pb = g(photo), cb = g(cap);
+			doc->sizeItem(sz.second.width(), sz.second.height(), photo, true, true, false);
+			check(sz.first);
+			// one undo: photo AND caption back; one redo: both again
+			const G pa = g(photo), ca = g(cap);
+			m_undoManager->undo(1);
+			const bool undoOk = qAbs(photo->width() - pb.w) < 0.05 && qAbs(photo->height() - pb.h) < 0.05 && qAbs(cap->width() - cb.w) < 0.05 && qAbs(cap->yPos() - cb.y) < 0.05
+			                    && qAbs(cap->height() - cb.h) < 0.05;
+			const G pu = g(photo), cu = g(cap);   // after the undo (printed below, after the redo)
+			m_undoManager->redo(1);
+			const bool redoOk = qAbs(photo->width() - pa.w) < 0.05 && qAbs(photo->height() - pa.h) < 0.05 && qAbs(cap->width() - ca.w) < 0.05 && qAbs(cap->yPos() - ca.y) < 0.05
+			                    && qAbs(cap->height() - ca.h) < 0.05;
+			if (!undoOk || !redoOk) ++fails;
+			ts << (undoOk ? "PASS " : "FAIL ") << "   one undo restores photo + caption; " << (redoOk ? "PASS" : "FAIL") << " one redo re-applies both\n";
+			if (!undoOk)
+				ts << "      before: photo " << pb.x / kMm << "," << pb.y / kMm << " " << pb.w / kMm << "x" << pb.h / kMm << " cap " << cb.x / kMm << "," << cb.y / kMm << " " << cb.w / kMm << "x" << cb.h / kMm
+				   << " | after undo: photo " << pu.x / kMm << "," << pu.y / kMm << " " << pu.w / kMm << "x" << pu.h / kMm
+				   << " cap " << cu.x / kMm << "," << cu.y / kMm << " " << cu.w / kMm << "x" << cu.h / kMm << "\n";
+			if (!redoOk)
+				ts << "      after redo: cap " << cap->xPos() / kMm << "," << cap->yPos() / kMm << " " << cap->width() / kMm << "x" << cap->height() / kMm << " (expected " << ca.w / kMm << "x" << ca.h / kMm << ")\n";
+		}
+		// moving the photo: the weld takes the caption along
+		doc->moveItem(10 * kMm, 7 * kMm, photo);
+		check("move +10,+7 mm");
+		doc->moveItem(-10 * kMm, -7 * kMm, photo);
+	}
+	// Two steps undone and redone in ONE call (a jump in the Action History): the photo made taller (its
+	// caption's attach is never recorded), then the story moved by its caption (the caption's own move
+	// record). undo(2) must bring photo and caption back to the start and redo(2) to the end: the caption is
+	// attached after each replayed step (SuneerWeld::undoStepDone), not once at the end.
+	PageItem* stepPhoto = nullptr;
+	for (PageItem* it : std::as_const(topPhotos))
+		if (SuneerWeld::captionAttached(it))
+		{
+			stepPhoto = it;
+			break;
+		}
+	if (stepPhoto)
+	{
+		PageItem* photo = stepPhoto;
+		PageItem* cap = capOf.value(photo);
+		auto same = [](const PageItem* it, const G& a) {
+			return qAbs(it->xPos() - a.x) < 0.05 && qAbs(it->yPos() - a.y) < 0.05 && qAbs(it->width() - a.w) < 0.05 && qAbs(it->height() - a.h) < 0.05;
+		};
+		auto at = [&](const G& a) {
+			return QStringLiteral("%1,%2 %3x%4").arg(a.x / kMm, 0, 'f', 2).arg(a.y / kMm, 0, 'f', 2).arg(a.w / kMm, 0, 'f', 2).arg(a.h / kMm, 0, 'f', 2);
+		};
+		const G p0 = g(photo), c0 = g(cap);
+		doc->sizeItem(p0.w, p0.h * 1.5, photo, true, true, false);
+		doc->moveItem(6 * kMm, 4 * kMm, cap);
+		QApplication::processEvents();
+		const G p2 = g(photo), c2 = g(cap);
+		ts << "== two steps in one undo / redo, photo " << photo->itemName() << ": 1.5x taller, then the story moved +6,+4 mm by its caption; caption " << rel(photo, cap) << "\n";
+		m_undoManager->undo(2);
+		QApplication::processEvents();
+		const bool undoOk = same(photo, p0) && same(cap, c0);
+		ts << (undoOk ? "PASS " : "FAIL ") << "undo(2): photo " << at(g(photo)) << " (start " << at(p0) << "), caption " << at(g(cap)) << " (start " << at(c0) << ") mm\n";
+		m_undoManager->redo(2);
+		QApplication::processEvents();
+		const bool redoOk = same(photo, p2) && same(cap, c2);
+		ts << (redoOk ? "PASS " : "FAIL ") << "redo(2): photo " << at(g(photo)) << " (end " << at(p2) << "), caption " << at(g(cap)) << " (end " << at(c2) << ") mm\n";
+		if (!undoOk || !redoOk)
+			++fails;
+	}
+	// SUNEER_CAPTION_COPYTEST=1: copies come through ScriXmlDoc::readElemToLayer (SuneerWeld::renewCopiedLinks). Edit >
+	// Duplicate of a whole story: the copy gets its own photo uid and its caption follows the copy; Copy + Paste of the
+	// caption alone: not attached; cut + paste of the copy: the pair keeps its uid. The pastes are not undone (a
+	// programmatic paste must not be undone in this harness) - run it without SUNEER_CAPTION_SAVEAS.
+	if (qEnvironmentVariableIsSet("SUNEER_CAPTION_COPYTEST") && stepPhoto)
+	{
+		PageItem* photo = stepPhoto;
+		PageItem* cap = capOf.value(photo);
+		auto A = [](const PageItem* it, const char* n) { return SuneerWeld::attr(it, QString::fromLatin1(n)); };
+		auto newItems = [&](int from) {
+			QList<PageItem*> l;
+			for (int i = from; i < doc->Items->count(); ++i)
+				l << doc->Items->at(i);
+			return l;
+		};
+		auto pairIn = [&](const QList<PageItem*>& items, PageItem*& p2, PageItem*& c2) {
+			p2 = c2 = nullptr;
+			for (PageItem* it : items)
+			{
+				if (it->isImageFrame() && A(it, "news.story") == A(photo, "news.story") && A(it, "news.index") == A(photo, "news.index"))
+					p2 = it;
+				if (it->isTextFrame() && A(it, "news.role") == QLatin1String("caption") && A(it, "news.story") == A(cap, "news.story") && A(it, "news.index") == A(cap, "news.index"))
+					c2 = it;
+			}
+		};
+		auto follows = [](const PageItem* p, const PageItem* c, double gap) {
+			return qAbs(c->xPos() - p->xPos()) < 0.05 && qAbs(c->width() - p->width()) < 0.05 && qAbs((c->yPos() - p->yPos() - p->height()) - gap) < 0.05;
+		};
+		auto sameG = [](const PageItem* it, const G& a) {
+			return qAbs(it->xPos() - a.x) < 0.05 && qAbs(it->yPos() - a.y) < 0.05 && qAbs(it->width() - a.w) < 0.05 && qAbs(it->height() - a.h) < 0.05;
+		};
+		auto check = [&](bool ok, const QString& what) {
+			if (!ok)
+				++fails;
+			ts << (ok ? "PASS " : "FAIL ") << what << "\n";
+		};
+		const double gap = cap->yPos() - photo->yPos() - photo->height();
+		const QString uid0 = SuneerWeld::photoUid(photo);
+		ts << "== copies of story " << A(photo, "news.story").left(30) << " (photo " << photo->itemName() << ", uid " << uid0 << ")\n";
+		auto selectOnly = [&](const QList<PageItem*>& items) {
+			view->deselectItems(true);
+			for (PageItem* it : items)
+				doc->m_Selection->addItem(it);
+		};
+		// 1. Edit > Duplicate of the whole story (its weld cluster) - duplicateItem(), the menu entry's slot
+		selectOnly(SuneerWeld::cluster(photo));
+		const int n0 = doc->Items->count();
+		duplicateItem();
+		PageItem* p2 = nullptr;
+		PageItem* c2 = nullptr;
+		pairIn(newItems(n0), p2, c2);
+		if (!p2 || !c2)
+			check(false, QStringLiteral("duplicate: no photo + caption among the %1 copied items").arg(doc->Items->count() - n0));
+		else
+		{
+			const QString uid2 = SuneerWeld::photoUid(p2);
+			ts << "     duplicate: photo " << p2->itemName() << " uid " << uid2 << ", caption " << c2->itemName().left(28) << " captionOf=" << A(c2, "news.captionOf") << "\n";
+			check(!uid2.isEmpty() && uid2 != uid0 && A(c2, "news.captionOf") == uid2 && A(cap, "news.captionOf") == uid0, "duplicate: the copy has its own uid, its caption carries it, the original keeps its own");
+			const QList<PageItem*> g2 = SuneerWeld::captionsOf(doc, p2);
+			const QList<PageItem*> g0 = SuneerWeld::captionsOf(doc, photo);
+			check(g2.size() == 1 && g2.first() == c2 && g0.size() == 1 && g0.first() == cap, "duplicate: captionsOf(copy) = the copied caption, captionsOf(original) = the original caption");
+			check(SuneerWeld::cluster(p2).contains(c2) == SuneerWeld::cluster(photo).contains(cap), "duplicate: the copy is welded like the original");
+			const G cOrig = g(cap);
+			doc->sizeItem(p2->width() * 1.3, p2->height() * 1.25, p2, true, true, false);
+			check(follows(p2, c2, gap) && sameG(cap, cOrig), "duplicate: resizing the copy moves only the copy's caption (" + rel(p2, c2) + ")");
+			const G cCopy = g(c2);
+			doc->sizeItem(photo->width() * 1.2, photo->height() * 1.2, photo, true, true, false);
+			check(follows(photo, cap, gap) && sameG(c2, cCopy), "duplicate: resizing the original moves only the original caption (" + rel(photo, cap) + ")");
+		}
+		// 2. Edit > Copy + Edit > Paste of the caption alone (slotEditCopy / slotEditPaste, the clipboard)
+		{
+			selectOnly({ cap });
+			slotEditCopy();
+			const int n1 = doc->Items->count();
+			slotEditPaste();
+			const QList<PageItem*> pasted = newItems(n1);
+			PageItem* c3 = pasted.isEmpty() ? nullptr : pasted.first();
+			ts << "     caption alone pasted: " << (c3 ? c3->itemName().left(28) : QStringLiteral("nothing")) << " captionOf=" << (c3 ? A(c3, "news.captionOf") : QString()) << "\n";
+			const QList<PageItem*> g0 = SuneerWeld::captionsOf(doc, photo);
+			check(c3 && A(c3, "news.captionOf").isEmpty() && g0.size() == 1 && g0.first() == cap, "caption copy: not attached, the photo keeps its own caption");
+			if (c3)
+			{
+				const G c3g = g(c3);
+				doc->sizeItem(photo->width() * 0.9, photo->height() * 0.9, photo, true, true, false);
+				check(follows(photo, cap, gap) && sameG(c3, c3g), "caption copy: resizing the photo leaves the copy alone");
+			}
+		}
+		// 3. Edit > Cut + Edit > Paste of the duplicate: no other photo has its uid, so the pasted pair keeps it
+		if (p2 && c2)
+		{
+			const QString uid2 = SuneerWeld::photoUid(p2);
+			selectOnly(SuneerWeld::cluster(p2));
+			slotEditCut();
+			const int n2 = doc->Items->count();
+			slotEditPaste();
+			PageItem* p4 = nullptr;
+			PageItem* c4 = nullptr;
+			pairIn(newItems(n2), p4, c4);
+			const bool ok = p4 && c4 && SuneerWeld::photoUid(p4) == uid2 && A(c4, "news.captionOf") == uid2 && SuneerWeld::captionsOf(doc, p4).value(0) == c4;
+			check(ok, QStringLiteral("cut + paste: the pasted pair keeps uid %1 and stays linked").arg(uid2));
+			if (p4 && c4)
+			{
+				doc->sizeItem(p4->width() * 1.1, p4->height() * 1.1, p4, true, true, false);
+				check(follows(p4, c4, gap) && SuneerWeld::captionsOf(doc, photo).value(0) == cap, "cut + paste: resizing the pasted photo moves its caption (" + rel(p4, c4) + "), the original keeps its own");
+			}
+		}
+		view->deselectItems(true);
+	}
+	// SUNEER_CAPTION_DELETETEST=delete|keep: the photo of the first pair deleted the Edit > Delete way (its caption not
+	// selected) with that answer to the question, then one undo: the pair comes back, still linked
+	const QString delTest = qEnvironmentVariable("SUNEER_CAPTION_DELETETEST");
+	if (!delTest.isEmpty() && stepPhoto)
+	{
+		PageItem* photo = stepPhoto;
+		PageItem* cap = capOf.value(photo);
+		const G pb = g(photo), cb = g(cap);
+		const bool del = delTest == QLatin1String("delete");
+		view->deselectItems(true);
+		doc->m_Selection->addItem(photo);
+		const bool done = suneerDeleteAskingCaptions(del ? 0 : 1);
+		const bool photoGone = !doc->DocItems.contains(photo);
+		const bool capGone = !doc->DocItems.contains(cap);
+		const bool orphan = SuneerWeld::orphanCaptions(doc).contains(cap);
+		const bool okDel = done && photoGone && (del ? capGone : (!capGone && orphan));
+		if (!okDel)
+			++fails;
+		ts << "== delete the photo " << photo->itemName() << " alone, answer \"" << (del ? "Delete Caption Too" : "Keep Caption") << "\"\n"
+		   << (okDel ? "PASS " : "FAIL ") << "photo deleted: " << (photoGone ? "yes" : "no") << ", caption " << cap->itemName() << " deleted: " << (capGone ? "yes" : "no")
+		   << (del ? QString() : QStringLiteral(", listed as orphan: %1").arg(orphan ? "yes" : "no")) << "\n";
+		m_undoManager->undo(1);
+		QApplication::processEvents();
+		const bool back = doc->DocItems.contains(photo) && doc->DocItems.contains(cap);
+		const QList<PageItem*> got = back ? SuneerWeld::captionsOf(doc, photo, true) : QList<PageItem*>();
+		const bool linked = got.size() == 1 && got.first() == cap;
+		auto same = [](const PageItem* it, const G& a) {
+			return qAbs(it->xPos() - a.x) < 0.05 && qAbs(it->yPos() - a.y) < 0.05 && qAbs(it->width() - a.w) < 0.05 && qAbs(it->height() - a.h) < 0.05;
+		};
+		const bool okUndo = back && linked && same(photo, pb) && same(cap, cb);
+		if (!okUndo)
+			++fails;
+		ts << (okUndo ? "PASS " : "FAIL ") << "one undo: photo and caption back " << (back ? "yes" : "no") << ", linked " << (linked ? "yes" : "no") << ", where they were "
+		   << (back && same(photo, pb) && same(cap, cb) ? "yes" : "no") << "\n";
+	}
+	// SUNEER_CAPTION_ORPHANTEST=1: Extras > Clean Orphan Captions (without its question), then one undo brings them back
+	if (qEnvironmentVariableIsSet("SUNEER_CAPTION_ORPHANTEST"))
+	{
+		const QList<PageItem*> orphans = SuneerWeld::orphanCaptions(doc);
+		QStringList names;
+		for (PageItem* c : orphans)
+			names << c->itemName();
+		ts << "== orphan captions: " << orphans.size() << (names.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(names.join(QStringLiteral(", ")))) << "\n";
+		const int removed = suneerRemoveOrphanCaptions(false);
+		const int left = SuneerWeld::orphanCaptions(doc).size();
+		bool gone = true;
+		for (PageItem* c : orphans)
+			gone = gone && !doc->DocItems.contains(c);
+		const bool okClean = removed == orphans.size() && left == 0 && gone;
+		if (!okClean)
+			++fails;
+		ts << (okClean ? "PASS " : "FAIL ") << "Clean Orphan Captions deleted " << removed << ", " << left << " left\n";
+		if (removed > 0)
+		{
+			m_undoManager->undo(1);
+			QApplication::processEvents();
+			bool back = true;
+			for (PageItem* c : orphans)
+				back = back && doc->DocItems.contains(c);
+			if (!back)
+				++fails;
+			ts << (back ? "PASS " : "FAIL ") << "one undo brings the " << orphans.size() << " orphan caption(s) back\n";
+		}
+	}
+	// SUNEER_CAPTION_TOGGLE=<n>:<on|off>: "Keep caption attached" of the n-th top-level pair set the way the context menu
+	// does it (setCaptionAttached, attach when on) before the save - the next run checks that it survived save + reopen
+	const QString toggle = qEnvironmentVariable("SUNEER_CAPTION_TOGGLE");
+	if (!toggle.isEmpty())
+	{
+		const int k = toggle.section(QLatin1Char(':'), 0, 0).toInt();
+		const bool on = toggle.section(QLatin1Char(':'), 1, 1) == QLatin1String("on");
+		if (k >= 0 && k < topPhotos.size())
+		{
+			SuneerWeld::setCaptionAttached(topPhotos[k], on);
+			if (on)
+				SuneerWeld::attachCaptions(doc, topPhotos[k], true);
+			ts << "== keep caption attached set " << (on ? "ON" : "OFF") << " for photo " << topPhotos[k]->itemName() << " (saved with the document)\n";
+		}
+	}
+	ts << "RESULT " << (fails == 0 ? "ALL PASS" : QString::number(fails) + " FAIL") << " (" << pairs << " photo+caption pairs)\n";
+	out.close();
+	const QString saveAs = qEnvironmentVariable("SUNEER_CAPTION_SAVEAS");
+	if (!saveAs.isEmpty())
+		doc->save(saveAs, nullptr);
+	qApp->exit(fails == 0 ? 0 : 4);
 }

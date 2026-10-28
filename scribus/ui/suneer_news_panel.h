@@ -329,6 +329,12 @@ public:
 	void rearrangeStory(PageItem* item, const QString& pos, int imgCols);
 	//! Selects every item of the story \a item belongs to.
 	void selectWholeStory(PageItem* item);
+	//! welded stories (see suneerweld.h): weld / unweld the story of \a item, convert old story groups
+	int  weldStoryItems(const QList<PageItem*>& items);
+	void weldStoryOf(PageItem* item);
+	void unweldStoryOf(PageItem* item);
+	int  convertStoryGroupsToWeld(bool wholePage);
+	static QString groupStoryId(const PageItem* group);
 	//! Right-click "Adjust gaps...": the gaps of the placed story \a item belongs to (or of every
 	//! story on the page), live on the page, one undo step. See suneer_news_gaps.cpp.
 	void adjustGaps(PageItem* item);

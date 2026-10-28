@@ -22,6 +22,7 @@ for which a new license (GPL+exception) is in place.
  ***************************************************************************/
 
 #include "pageitem.h"
+#include "suneerweld.h"
 
 #include <utility>
 
@@ -4913,18 +4914,12 @@ static PageItem_TextFrame* suneerCaptionToRefit(PageItem* item)
 	PageItem* caption = nullptr;
 	if (item->isTextFrame() && item->itemName().startsWith(QLatin1String("caption_")))
 		caption = item;
-	else if (item->isImageFrame())
-	{
-		const QString captName = QString("caption_%1").arg(item->itemName());
-		for (PageItem* pi : std::as_const(doc->DocItems))
-		{
-			if (pi->isTextFrame() && pi->itemName() == captName)
-			{
-				caption = pi;
-				break;
-			}
-		}
-	}
+	// suneer 2026-10-27: an image frame's caption is not refitted here any more. The attached-caption code
+	// (SuneerWeld::attachCaptions, after every resize of the photo) gives it the photo's width and fits it;
+	// doing it here as well recorded a resize of the caption inside the photo's undo step - taken after the
+	// attach had already widened it, so undo put back a width that did not belong to the photo's old size -
+	// and caption_<photo> can be another photo's caption after a reload (the photo name is not kept).
+	// A caption with "Keep caption attached" off stays as it is.
 	PageItem_TextFrame* tf = caption ? caption->asTextFrame() : nullptr;
 	if (!tf || tf->itemText.length() == 0)
 		return nullptr;                 // empty captions stay unchanged
@@ -5001,7 +4996,18 @@ void PageItem::checkChanges(bool force)
 				suneerCaption->checkChanges();
 				suneerCaption->updateClip();
 			}
-			suneerCaption->suneerFitCaptionHeight(true);
+			{
+				// a caption pushed down by another frame's wrap would fit to a runaway height:
+				// keep the old height then (the usual overflow mark shows, nothing else moves)
+				const double oldCapH = suneerCaption->height();
+				suneerCaption->suneerFitCaptionHeight(true);
+				if (suneerCaption->height() > oldCapH * 3.0 + 20.0)
+				{
+					suneerCaption->setHeight(oldCapH);
+					suneerCaption->updateClip(false);
+					suneerCaption->invalidateLayout();
+				}
+			}
 			if (fitTransaction)
 				fitTransaction.commit();
 			s_suneerCaptionFitRunning = false;
@@ -7755,6 +7761,8 @@ void PageItem::restoreMove(SimpleState *state, bool isUndo)
 		mx = -mx;
 		my = -my;
 	}
+	// suneer: an attached caption keeps the place its own record restores (SuneerWeld::undoStepDone)
+	SuneerWeld::noteRestored(this, mx != 0.0 || my != 0.0, false);
 	m_Doc->moveItem(mx, my, this);
 	oldXpos = m_xPos;
 	oldYpos = m_yPos;
@@ -7777,6 +7785,9 @@ void PageItem::restoreResize(SimpleState *state, bool isUndo)
 	double  my = oy - y;
 	int  stateCode = state->transactionCode;
 	bool redraw = ((stateCode != 1) && (stateCode != 3));
+	// suneer: sizeItem() comes before moveItem() here, so an attached caption is not attached during the
+	// replay; SuneerWeld::undoStepDone() does it when the step is complete, keeping what this record restores
+	SuneerWeld::noteRestored(this, mx != 0.0 || my != 0.0, ow != w || oh != h);
 	if (isUndo)
 	{
 		m_Doc->sizeItem(ow, oh, this, false, true, redraw);
@@ -7813,6 +7824,7 @@ void PageItem::restoreRotate(SimpleState *state, bool isUndo)
 	double   h = state->getDouble("NEW_RHEIGHT");
 	int  stateCode = state->transactionCode;
 	bool redraw = ((stateCode != 1) && (stateCode != 3));
+	SuneerWeld::noteRestored(this, true, true);   // suneer: see restoreResize()
 	if (isUndo)
 	{
 		m_Doc->rotateItem(ort, this);
@@ -12040,6 +12052,21 @@ void PageItem::moveWelded(double dX, double dY, int weld)
 	PageItem *item = wInf.weldItem;
 	if (!item)
 		return;
+	// suneer: this caption-style move + resize (same width, stacked) is right for a picture and its
+	// caption and for note frames. The other frames of a welded story (headline, body, photo ...)
+	// keep their own size and place when one of them is resized.
+	if (!(isNoteFrame() || item->isNoteFrame() || SuneerWeld::isCaptionPair(this, item)))
+		return;
+	// suneer: a photo welded to its caption - the attached-caption rule (same width, under the photo,
+	// the caption gap, height fitted), not the gap-less caption-style move below
+	if (!isNoteFrame() && !item->isNoteFrame())
+	{
+		// only the PHOTO's own geometry change re-attaches its caption; the caption changing its own
+		// height (the fit) must not come back here and re-fit itself (that recursion was the stall)
+		if (isImageFrame() && !SuneerWeld::captionsOf(m_Doc, this).isEmpty())
+			SuneerWeld::attachCaptions(m_Doc, this, true);
+		return;
+	}
 	double relX = item->xPos() - xPos();
 	double relY = item->yPos() - yPos();
 	if (qAbs(relX) <= qAbs(relY))
@@ -12162,6 +12189,8 @@ QList<PageItem*> PageItem::itemsWeldedTo(PageItem* except)
 	{
 		WeldingInfo wInf = weldList.at(i);
 		PageItem *item = wInf.weldItem;
+		if (!item)   // suneer: a weld whose partner did not resolve (e.g. inside a loaded group) is skipped, not dereferenced
+			continue;
 		if (item != except)
 		{
 			pageItemList.append(item);

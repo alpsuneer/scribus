@@ -63,6 +63,7 @@
 #include "suneerphotostore.h"
 #include "suneerspacing.h"
 #include "suneertextclean.h"
+#include "suneerweld.h"
 #include "suneerlayoutmodel.h"
 #include "suneerlayoutengine.h"
 #include <QTime>
@@ -2145,6 +2146,23 @@ void SuneerNewsPanel::noteDeleting(const QList<PageItem*>& items)
 {
 	if (!m_doc || m_removing || m_preview)
 		return;
+	// A deleted frame takes its welds with it; the rest of the story is welded again right after
+	// the deletion (own undo step, so Undo unwinds in order: re-weld, then the deletion).
+	{
+		QSet<QString> touched;
+		for (PageItem* it : items)
+			if (it && !attr(it, "news.story").isEmpty())
+				touched.insert(attr(it, "news.story"));
+		if (!touched.isEmpty())
+		{
+			QPointer<ScribusDoc> doc = m_doc;
+			QTimer::singleShot(0, this, [this, doc, touched]() {
+				if (!doc || doc != m_doc) return;
+				for (const QString& st : touched)
+					weldStoryItems(storyItems(st));
+			});
+		}
+	}
 	QElapsedTimer clock;
 	clock.start();
 	const bool pref = markUnusedOnDeletePref();
@@ -4895,6 +4913,13 @@ void SuneerNewsPanel::layoutStory(StoryFrames& f, double x, double y, int cols, 
 	for (int i = 0; i < f.photos.size(); ++i)
 		if (f.photos[i] && i < f.captions.size() && f.captions[i])
 			f.photos[i]->weldTo(f.captions[i]);
+	// the whole story welded around its text frame (photo - caption welds above stay; no cycle is made)
+	{
+		QList<PageItem*> all { f.text };
+		for (PageItem* p : f.photos) if (p) all << p;
+		for (PageItem* c : f.captions) if (c) all << c;
+		SuneerWeld::weldStory(m_doc, all, f.text);
+	}
 }
 
 // A working copy of the picture no larger than ~300 ppi at the placed width
@@ -5150,6 +5175,7 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			created << imgFrame;
 			setAttr(imgFrame, "news.role", "photo");
 			setAttr(imgFrame, "news.index", QString::number(mi));
+			SuneerWeld::ensurePhotoUid(imgFrame);   // the stable id its caption is linked by (news.photoUid)
 			setAttr(imgFrame, SuneerPhotoStore::AttrFileUrl, fileUrl);
 			if (!originalPath.isEmpty())
 				setAttr(imgFrame, SuneerPhotoStore::AttrOriginal, originalPath);
@@ -5185,6 +5211,11 @@ QList<PageItem*> SuneerNewsPanel::placeNews(const QJsonObject& news, double x, d
 			{
 				captFrame->setItemName(QStringLiteral("caption_%1").arg(imgFrame->itemName()));
 				setAttr(captFrame, "news.role", "caption");
+				imgFrame->AutoName = false;   // the name is saved in the file (setItemName() skips an unchanged name) for the tools that look for caption_<photo>
+				// attached caption: follows this photo's geometry. Linked by the photo's uid, not its name - a name the
+				// file does not keep is made again from the item's place in the list on every load
+				SuneerWeld::linkCaption(imgFrame, captFrame);
+				setAttr(captFrame, "news.captionGap", QString::number(spacingValues().pt(SuneerSpacing::CaptionGap), 'f', 3));
 				setAttr(captFrame, "news.index", QString::number(mi));
 				captFrame->setLineColor(CommonStrings::None);
 				captFrame->setFillColor(CommonStrings::None);
@@ -6485,4 +6516,138 @@ void SuneerNewsPanel::onSettings()
 		return;
 	}
 	onRefresh();
+}
+
+// ── welded stories ──────────────────────────────────────────────────────────
+
+int SuneerNewsPanel::weldStoryItems(const QList<PageItem*>& items)
+{
+	if (!m_doc)
+		return 0;
+	QList<PageItem*> frames;
+	for (PageItem* it : items)
+		if (it && !it->isGroup())
+			frames << it;
+	if (frames.size() < 2)
+		return 0;
+	// already one piece? (every frame reachable from the first)
+	const QList<PageItem*> have = SuneerWeld::cluster(frames.first());
+	bool whole = true;
+	for (PageItem* it : frames)
+		if (!have.contains(it)) { whole = false; break; }
+	if (whole)
+		return 0;
+	const int made = SuneerWeld::weldStory(m_doc, frames);
+	if (made)
+	{
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
+	return made;
+}
+
+void SuneerNewsPanel::weldStoryOf(PageItem* item)
+{
+	if (!m_doc || !isNewsStory(item))
+		return;
+	const int made = weldStoryItems(storyItems(attr(item, "news.story")));
+	setStatus(made ? tr("Story welded (%1 welds)").arg(made) : tr("Story is already welded"));
+}
+
+void SuneerNewsPanel::unweldStoryOf(PageItem* item)
+{
+	if (!m_doc || !isNewsStory(item))
+		return;
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, Um::UnweldItems, QString(), Um::IDelete);
+	const int n = SuneerWeld::unweldStory(storyItems(attr(item, "news.story")));
+	if (tx)
+		tx.commit();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	setStatus(n ? tr("Story unwelded: every frame moves on its own now") : tr("Nothing to unweld"));
+}
+
+// A group that holds a story: tagged itself (obituary modules of earlier builds), or made by hand
+// around tagged frames (Item > Group). Returns the story id, empty for other groups.
+QString SuneerNewsPanel::groupStoryId(const PageItem* group)
+{
+	if (!group || !group->isGroup())
+		return QString();
+	const QString own = attr(group, "news.story");
+	if (!own.isEmpty())
+		return own;
+	for (PageItem* c : const_cast<PageItem*>(group)->getAllChildren())
+		if (c && !attr(c, "news.story").isEmpty())
+			return attr(c, "news.story");
+	return QString();
+}
+
+// Old documents: a story placed as a GROUP (obituary modules of earlier builds) becomes welded
+// frames: ungroup, then weld. Selected groups, or every story group on the current page.
+int SuneerNewsPanel::convertStoryGroupsToWeld(bool wholePage)
+{
+	if (!m_doc)
+		return 0;
+	QList<PageItem*> groups;
+	if (wholePage)
+	{
+		if (!m_doc->currentPage())
+			return 0;
+		const ScPage* page = m_doc->currentPage();
+		const QRectF pageRect(page->xOffset(), page->yOffset(), page->width(), page->height());
+		for (int i = 0; i < m_doc->Items->count(); ++i)
+		{
+			PageItem* it = m_doc->Items->at(i);
+			if (it && it->isGroup() && !groupStoryId(it).isEmpty() && it->getBoundingRect().intersects(pageRect))
+				groups << it;
+		}
+	}
+	else
+		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+		{
+			PageItem* it = m_doc->m_Selection->itemAt(i);
+			if (it && it->isGroup() && !groupStoryId(it).isEmpty())
+				groups << it;
+		}
+	if (groups.isEmpty())
+	{
+		setStatus(wholePage ? tr("No story groups on this page") : tr("Select a story group first"));
+		return 0;
+	}
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Convert story groups to weld"), QString(), Um::IGroup);
+	int done = 0;
+	for (PageItem* g : groups)
+	{
+		const QString story = groupStoryId(g);
+		QList<PageItem*> children = g->getAllChildren();
+		Selection sel(this, false);
+		sel.addItem(g);
+		m_doc->itemSelection_UnGroupObjects(&sel);
+		QList<PageItem*> frames;
+		for (PageItem* c : children)
+			if (c && !c->isGroup() && m_doc->Items->contains(c))
+			{
+				if (attr(c, "news.story").isEmpty())
+					setAttr(c, "news.story", story);
+				frames << c;
+			}
+		// stale welds from the grouped days (partners that no longer resolve) go first, then one clean star
+		SuneerWeld::unweldStory(frames);
+		SuneerWeld::weldStory(m_doc, frames);
+		indexAdd(frames);
+		++done;
+	}
+	if (tx)
+		tx.commit();
+	m_doc->m_Selection->clear();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
+	if (m_mw)
+		m_mw->HaveNewSel();
+	setStatus(tr("%1 story group(s) converted to welded frames").arg(done));
+	return done;
 }

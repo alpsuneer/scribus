@@ -1350,7 +1350,7 @@ void CanvasMode::commonkeyPressEvent_NormalNodeEdit(QKeyEvent *e)
 			case Qt::Key_Backspace:
 			case Qt::Key_Delete:
 					if (buttonModifiers == Qt::NoModifier)
-						m_doc->itemSelection_DeleteItem();
+						m_view->m_ScMW->suneerDeleteSelectedItems();   // suneer: asks about a photo's caption left behind
 					else
 					{
 						if (m_view->m_ScMW->actionManager->compareKeySeqToShortcut(kk, buttonModifiers, "editClearContents"))

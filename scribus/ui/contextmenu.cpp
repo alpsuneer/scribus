@@ -14,6 +14,7 @@
 ***************************************************************************/
 
 #include "contextmenu.h"
+#include "suneerweld.h"
 
 #include <QApplication>
 #include <QFrame>
@@ -400,6 +401,16 @@ void ContextMenu::createMenuItems_Selection()
 			connect(rmAct, &QAction::triggered, panel, [panel]() { panel->removeEmptySlots(true); });
 			addSeparator();
 		}
+		// A group around a story's frames (old document, or Item > Group by hand): offer the conversion
+		if (selectedItemCount == 1 && currItem->isGroup() && !SuneerNewsPanel::isNewsStory(currItem)
+		    && !SuneerNewsPanel::groupStoryId(currItem).isEmpty() && m_ScMW->m_suneerNewsPanel)
+		{
+			SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+			QAction* cvAct = addAction(tr("Convert story group to weld"));
+			cvAct->setToolTip(tr("Ungroup this story and weld its frames: each frame is editable, moving one moves the story"));
+			connect(cvAct, &QAction::triggered, panel, [panel]() { panel->convertStoryGroupsToWeld(false); });
+			addSeparator();
+		}
 		// A story placed by the News Browser: re-arrange its photos in place.
 		if (selectedItemCount == 1 && SuneerNewsPanel::isNewsStory(currItem) && m_ScMW->m_suneerNewsPanel)
 		{
@@ -407,6 +418,38 @@ void ContextMenu::createMenuItems_Selection()
 			PageItem* story = currItem;
 			QAction* selAct = addAction(tr("Select whole story"));
 			connect(selAct, &QAction::triggered, panel, [panel, story]() { panel->selectWholeStory(story); });
+			if (story->isGroup())
+			{
+				QAction* cvAct = addAction(tr("Convert story group to weld"));
+				cvAct->setToolTip(tr("Ungroup this story and weld its frames: each frame is editable, moving one moves the story"));
+				connect(cvAct, &QAction::triggered, panel, [panel]() { panel->convertStoryGroupsToWeld(false); });
+			}
+			else if (story->isWelded())
+			{
+				QAction* uwAct = addAction(tr("Unweld story"));
+				uwAct->setToolTip(tr("Every frame of this story moves on its own afterwards"));
+				connect(uwAct, &QAction::triggered, panel, [panel, story]() { panel->unweldStoryOf(story); });
+			}
+			else
+			{
+				QAction* wAct = addAction(tr("Weld story"));
+				wAct->setToolTip(tr("Weld the frames of this story together again: moving one moves the story"));
+				connect(wAct, &QAction::triggered, panel, [panel, story]() { panel->weldStoryOf(story); });
+			}
+			if (story->isImageFrame() && !SuneerWeld::captionsOf(m_doc, story, true).isEmpty())
+			{
+				QAction* kcAct = addAction(tr("Keep caption attached"));
+				kcAct->setCheckable(true);
+				kcAct->setChecked(SuneerWeld::captionAttached(story));
+				kcAct->setToolTip(tr("On: after every resize of this photo the caption sits under it, as wide as the photo. Off: the caption stays where you put it."));
+				connect(kcAct, &QAction::toggled, panel, [this, story](bool on) {
+					SuneerWeld::setCaptionAttached(story, on);
+					if (on)
+						SuneerWeld::attachCaptions(m_doc, story, true);
+					m_doc->changed();
+					m_doc->regionsChanged()->update(QRectF());
+				});
+			}
 			QAction* rmAct = addAction(tr("Remove story (mark unused)"));
 			connect(rmAct, &QAction::triggered, panel, [panel, story]() { panel->removeStory(story); });
 			QAction* relAct = addAction(tr("Mark as unused on server (keep frames)"));
@@ -912,6 +955,10 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 	{
 		addAction(m_ScMW->scrActions["suneerApplyLayoutModel"]);
 		addAction(m_ScMW->scrActions["suneerPageModules"]);
+		SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+		QAction* cvAct = addAction(tr("Convert story groups to weld (page)"));
+		cvAct->setToolTip(tr("Old documents: every grouped story on this page becomes welded frames"));
+		connect(cvAct, &QAction::triggered, panel, [panel]() { panel->convertStoryGroupsToWeld(true); });
 	}
 	if (addRelayoutMenu())
 		addSeparator();
