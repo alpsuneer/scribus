@@ -2741,6 +2741,8 @@ Traps:
   every frame inside its slot, Remove Empty Slots, undo back to the start. Harness /home/s1/tmp-pm (`run_pm.sh`, Xvfb :95; `overlay.py
   <sla> <png>` = the page rendered with the slots drawn over it). Layout menu rows: Page Models... y 84, Remove Empty Slots y 109.
 
+## Obituary band rule — the news columns only for workflow count 2 (2026-10-26, committed 2026-10-28, verified by the user)
+
 - `SuneerNewsPanel::obitRole()` (suneer_news_obit.cpp): ObitRoleBand when `requestedColumns(news) == SuneerObitModel::kBandCount` (2);
   ObitRoleObit when the count is < 2 and `obitIsObituary()`; else ObitRoleAreaNews at its count (0 → 1 column), clamped to the obit
   columns. `placeObituaries()` classifies with the same rule, so a short 2-column story is news (picture as it is, no portrait processing).

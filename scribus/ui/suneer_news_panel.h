@@ -620,6 +620,14 @@ private:
 	void preselectLayoutModel();
 	//! Obituary vs short news (long body or headline-like title).
 	static bool obitIsObituary(const QJsonObject& news, const SuneerObitModel& model);
+	/*! suneer 2026-10-26: where a story goes on an obituary page. The model's news columns (9-10
+	    "news right", 1-2 "news left") are reserved for the stories whose workflow column count
+	    (News.noOfColumns, or the News Browser's "Place as" override) is SuneerObitModel::kBandCount; every other
+	    story goes to the obit columns and never into the band: an obituary as a single module, any
+	    other news at its count (1 column when the workflow sends none). Nothing spills from one area
+	    into the other - what has no room is parked and listed. \a cols gets the width in grid columns. */
+	enum ObitRole { ObitRoleObit = 0, ObitRoleBand = 1, ObitRoleAreaNews = 2 };
+	static ObitRole obitRole(const QJsonObject& news, const SuneerObitModel& model, int* cols = nullptr);
 	//! Entry point of the Obituary model: pictures first (background), then obitPlaceNow().
 	void placeObituaries(const QList<QJsonObject>& stories);
 	void obitPlaceNow();

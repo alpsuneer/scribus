@@ -1375,6 +1375,21 @@ scribus
 - Tests: `tests/suneer/page_models_import.sh <folder>` (overlap check ഉൾപ്പെടെ); `tests/suneer/page_models_apply.sh --models <pages dir>
   --model <group>/<id> --tick N page.sla fixture.json` (skeleton → N slots fill → remove → undo).
 
+### 86. Obituary page — വലതുവശം (columns 9–10) 2-column news-ന് മാത്രം
+- Workflow-ൽ column count **2** ഉള്ള stories (News.noOfColumns = 2, അല്ലെങ്കിൽ News Browser list-ലെ "Place as ▸ 2 columns") മാത്രം
+  columns 9–10-ൽ ("Obituary – news left" model-ൽ columns 1–2). അങ്ങനെ ഒരു story-യും ഇല്ലെങ്കിൽ ആ columns **blank** — obit modules
+  അവിടെ വരില്ല. Message: "Columns 9-10: no 2-column news (workflow count 2) … left blank".
+- Obituary modules-ഉം മറ്റ് news-ഉം (count ഇല്ലാത്തത് = 1 column; 3+ = ആ count) columns 1–8-ൽ മാത്രം. 1–8 നിറഞ്ഞാൽ 9–10-ലേക്ക്
+  കയറില്ല — pasteboard-ൽ park ചെയ്ത് message-ൽ list: "No room in columns 1-8 … (columns 9-10 are only for 2-column news)".
+- 9–10-ൽ കൊള്ളാത്ത 2-column stories 1–8-ലേക്ക് മാറ്റില്ല; message-ൽ വേറെ list: "2-column news with no room in columns 9-10 …
+  not moved into columns 1-8".
+- എല്ലാ വഴികളിലും ഒരേ rule: Place Selected, Layout Gallery-യിലെ Obituary cards (Apply), Re-layout (news right / news left),
+  Re-pack (blank band empty area ആയി കണക്കാക്കില്ല; "left blank" line).
+- പഴയ pages (count save ചെയ്യാത്തവ): 2 column വീതിയുള്ള news module band story ആയി കണക്കാക്കും — Re-layout-ൽ അവ 9–10-ൽ തന്നെ.
+- Place ചെയ്ത news frame-ൽ `news.columns` attribute (workflow count) save ചെയ്യും; Re-layout / Apply-ൽ rule നിലനിൽക്കും.
+- ശ്രദ്ധിക്കുക: `/external/edition-pages/:id/news` API reply-യിൽ noOfColumns ഇല്ല (backend-ൽ ഒരു വരി fix വേണം); login വഴി
+  (`/news/layout`) ഉണ്ട്. അതില്ലാത്തപ്പോൾ "Place as ▸ 2 columns" ഉപയോഗിക്കുക.
+
 ### 92. Obituary photo — ശരിയായ മുഖം, മുടി മുറിയില്ല, എല്ലാ photo-യിലും ഒരേ മുഖ വലുപ്പം
 - ഷർട്ടിനെയോ കൈയെയോ മുഖമായി എടുത്ത് താടി/ഷർട്ട് മാത്രം കാണിച്ചിരുന്നത് ശരിയാക്കി: ഏറ്റവും വലിയ box അല്ല, കണ്ണ്, skin,
   രണ്ട് detector-ഉം സമ്മതിക്കുന്നത് നോക്കി മുഖം തിരഞ്ഞെടുക്കും. Edit photo-യുടെ face guide-ഉം ഇതേ മുഖം.

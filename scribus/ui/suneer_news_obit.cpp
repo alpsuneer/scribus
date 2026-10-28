@@ -10,9 +10,11 @@
                       background, progress in the status line) ->
    obitPlaceNow()     one undo transaction: obit modules (photo + text frame,
                       grouped, tagged) in a masonry over the obit columns,
-                      short news stacked in the news columns, nothing over
-                      existing items; stops when a module does not fit and
-                      lists the rest; then the usual USED marking.
+                      the 2-column news (workflow count 2, see obitRole)
+                      stacked in the reserved news columns, any other news in
+                      the obit columns; nothing over existing items and nothing
+                      from one area into the other; what does not fit is
+                      parked and listed per area; then the usual USED marking.
 */
 #include "suneer_news_panel.h"
 
@@ -221,6 +223,26 @@ bool SuneerNewsPanel::obitIsObituary(const QJsonObject& news, const SuneerObitMo
 	return body.length() <= model.bodyMaxChars;
 }
 
+SuneerNewsPanel::ObitRole SuneerNewsPanel::obitRole(const QJsonObject& news, const SuneerObitModel& model, int* cols)
+{
+	const int req = requestedColumns(news);       // the workflow's count or the "Place as" override; 0 = none
+	if (req == SuneerObitModel::kBandCount)
+	{
+		if (cols)
+			*cols = qMax(1, model.newsLastCol - model.newsFirstCol + 1);
+		return ObitRoleBand;
+	}
+	if (req < 2 && obitIsObituary(news, model))
+	{
+		if (cols)
+			*cols = 1;
+		return ObitRoleObit;
+	}
+	if (cols)
+		*cols = qBound(1, req, qMax(1, model.obitLastCol - model.obitFirstCol + 1));   // no count / 1: one column
+	return ObitRoleAreaNews;
+}
+
 QString SuneerNewsPanel::obitImageDir() const
 {
 	QString dir = SuneerPhotoStore::editedDir(m_doc, true);
@@ -310,15 +332,19 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 
 	QList<SuneerObitPhotoWorker::Item> items;
 	const QString dir = obitImageDir();
-	int obits = 0, news = 0;
+	int obits = 0, news = 0, bandNews = 0;
 	int downloaded = 0;
 	for (const QJsonObject& n : stories)
 	{
-		const bool isObit = obitIsObituary(n, model);
+		// the same rule as obitPlaceNow(): a 2-column story is news (its picture as it is) even when it is short
+		const ObitRole role = obitRole(n, model);
+		const bool isObit = role == ObitRoleObit;
 		if (isObit)
 			++obits;
 		else
 			++news;
+		if (role == ObitRoleBand)
+			++bandNews;
 		const QString sid = newsServerId(n);
 		const QJsonArray media = mediaList(n);
 		if (media.isEmpty())
@@ -360,7 +386,7 @@ void SuneerNewsPanel::placeObituaries(const QList<QJsonObject>& stories)
 		it.out = dir + '/' + it.id + QStringLiteral(".png");      // lossless: the background tone stays exact
 		items << it;
 	}
-	apiLog(QStringLiteral("obituary model: %1 obits, %2 short news, %3 pictures to process in %4").arg(obits).arg(news).arg(items.size()).arg(dir));
+	apiLog(QStringLiteral("obituary model: %1 obits, %2 short news (%3 with workflow count 2 for columns %4-%5), %6 pictures to process in %7").arg(obits).arg(news).arg(bandNews).arg(model.newsFirstCol).arg(model.newsLastCol).arg(items.size()).arg(dir));
 	if (items.isEmpty())
 	{
 		obitPlaceNow();
@@ -643,15 +669,23 @@ void SuneerNewsPanel::obitPlaceNow()
 		obitCols << c;
 	for (int c = qMax(1, model.newsFirstCol); c <= qMin(gridCols, model.newsLastCol); ++c)
 		newsCols << c;
+	// the band is reserved: obit columns that a model shares with its news columns are not used for obits
+	obitCols.erase(std::remove_if(obitCols.begin(), obitCols.end(), [&](int c) { return newsCols.contains(c); }), obitCols.end());
+	for (int c = 1; obitCols.isEmpty() && c <= gridCols; ++c)
+		if (!newsCols.contains(c))
+			obitCols << c;
 	if (obitCols.isEmpty())
 		obitCols << 1;
+	// the two areas as the messages name them ("1-8" and "9-10" on "news right")
+	const QString areaColsText = QStringLiteral("%1-%2").arg(obitCols.first()).arg(obitCols.last());
+	const QString bandColsText = newsCols.isEmpty() ? tr("(none)") : QStringLiteral("%1-%2").arg(newsCols.first()).arg(newsCols.last());
 	struct PlacedModule { int col; double y; double h; PageItem* text; PageItem* photo; PageItem* extra; QString title; };
 	QList<PlacedModule> placedModules;       // obit modules, for the settle / overlap pass
 	QHash<int, double> cursor;
 	for (int c : obitCols)
 		cursor[c] = top;
 	double newsCursor = top;
-	int noFace = 0, obitsPlaced = 0, obitsWithPhoto = 0, newsPlaced = 0, newsWithPhoto = 0;
+	int noFace = 0, obitsPlaced = 0, obitsWithPhoto = 0, newsPlaced = 0, newsWithPhoto = 0, areaNewsPlaced = 0, bandAsked = 0;
 	QStringList photoProblems;      // "title: reason" for every placed story without its picture (and the low-res ones)
 	int noPicture = 0;              // placed obits that have no picture at all
 	const bool leftAligned = (model.textAlign == QLatin1String("left"));
@@ -662,6 +696,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	const double parkX = pageX + page->width() + 10.0 * kMm;
 	double parkY = pageY;
 	QStringList parkedTitles;
+	QList<int> bandNoRoom;          // indexes into remainingTitles: 2-column news with no room in the band (never moved into the obit columns)
 	auto parkModule = [&](QList<PageItem*> items, const QJsonObject& n, const QString& title, const QString& modelName, const QString& pos, int cols) {
 		QRectF u;
 		for (PageItem* it : items)
@@ -704,7 +739,11 @@ void SuneerNewsPanel::obitPlaceNow()
 		logTextJunk(n);
 		const QString title = obitCollapse(n["title"].toString());
 		QStringList paras = contentToParagraphs(n["content"].toString());
-		const bool isObit = obitIsObituary(n, model);
+		int roleCols = 1;
+		const ObitRole role = obitRole(n, model, &roleCols);
+		const bool isObit = role == ObitRoleObit;
+		if (role == ObitRoleBand)
+			++bandAsked;
 		if ((++storyIdx % 4) == 0)
 			statusProgress(tr("Placing"), storyIdx, stories.size());
 
@@ -885,18 +924,25 @@ void SuneerNewsPanel::obitPlaceNow()
 		}
 		else
 		{
-			// Short news in the news columns: one frame spanning them, text columns inside.
-			if (newsCols.isEmpty())
+			// News. A 2-column story (workflow count 2) goes to the reserved band only: one frame
+			// spanning it, the model's text columns inside. Any other news goes to the obit columns
+			// only, at its count (1 column when the workflow sends none). Built at the top of its
+			// area and moved to its slot once it is measured.
+			const bool inBand = role == ObitRoleBand;
+			const int span = inBand ? newsCols.size() : qBound(1, roleCols, obitCols.size());
+			if (inBand && newsCols.isEmpty())
 			{
 				remaining << n;
 				remainingTitles << title;
+				bandNoRoom << remainingTitles.size() - 1;
 				continue;
 			}
-			const double x = colX(newsCols.first());
-			const double w = colW * newsCols.size() + gap * (newsCols.size() - 1);
+			const double x = inBand ? colX(newsCols.first()) : colX(obitCols.first());
+			const double w = colW * span + gap * (span - 1);
+			const double buildY = inBand ? newsCursor : top;
 			const QString place = obitPlaceLine(n, paras);
 			QList<PageItem*> items;
-			PageItem* text = makeTextFrame(x, newsCursor, w, 60.0 * kMm);
+			PageItem* text = makeTextFrame(x, buildY, w, 60.0 * kMm);
 			if (!text)
 			{
 				remaining << n;
@@ -904,7 +950,9 @@ void SuneerNewsPanel::obitPlaceNow()
 				continue;
 			}
 			items << text;
-			text->setColumns(model.newsTextColumns);
+			// the model's text columns in the band; one per grid column in the obit columns (Re-layout's
+			// tidy pass lays a news module out again with its text columns as its grid columns)
+			text->setColumns(inBand || span == 2 ? model.newsTextColumns : span);
 			text->setColumnGap(sp.pt(SuneerSpacing::ColumnGap));
 			text->setTextToFrameDist(inset, inset, inset, inset);
 			text->setItemName(title.left(30).isEmpty() ? tr("News story") : title.left(30));
@@ -946,7 +994,7 @@ void SuneerNewsPanel::obitPlaceNow()
 			PageItem* caption = nullptr;
 			double photoBlockH = 0.0;
 			const bool photoAbove = false;
-			const double textTop = newsCursor;
+			const double textTop = buildY;
 			QString newsPhotoPath = m_obitNewsPhoto.value(sid);
 			const bool hasMedia = !mediaList(n).isEmpty();
 			QString placeholder;
@@ -955,7 +1003,7 @@ void SuneerNewsPanel::obitPlaceNow()
 				placeholder = missingImagePlaceholder(m_obitPhotoWhy.value(sid, tr("picture missing")));
 				newsPhotoPath.clear();
 			}
-			const double photoTop = newsCursor + headH + sp.pt(SuneerSpacing::WrapPad);   // the wrap region starts under the headline
+			const double photoTop = buildY + headH + sp.pt(SuneerSpacing::WrapPad);   // the wrap region starts under the headline
 			if (!newsPhotoPath.isEmpty() || !placeholder.isEmpty())
 			{
 				double pw = colW, ph = colW;                        // square when the size is unknown
@@ -1058,37 +1106,41 @@ void SuneerNewsPanel::obitPlaceNow()
 			fitFrame(text);
 			Q_UNUSED(photoAbove);
 			Q_UNUSED(textTop);
-			const double h = qMax(text->height(), (photoTop - newsCursor) + photoBlockH);
-			apiLog(QStringLiteral("obituary model: news '%1': headline block %2 mm, photo at +%3 mm, frame %4 mm").arg(title.left(20)).arg(headH / kMm, 0, 'f', 1).arg((photoTop - newsCursor) / kMm, 0, 'f', 1).arg(text->height() / kMm, 0, 'f', 1));
+			const double h = qMax(text->height(), (photoTop - buildY) + photoBlockH);
+			apiLog(QStringLiteral("obituary model: news '%1' (%5): headline block %2 mm, photo at +%3 mm, frame %4 mm").arg(title.left(20)).arg(headH / kMm, 0, 'f', 1).arg((photoTop - buildY) / kMm, 0, 'f', 1).arg(text->height() / kMm, 0, 'f', 1)
+			       .arg(inBand ? QStringLiteral("2-column, columns %1").arg(bandColsText) : QStringLiteral("%1 column(s) in columns %2").arg(span).arg(areaColsText)));
 			bool fitted = false;
-			double cy = newsCursor;
-			double nx = x;          // final left edge (an alternative slot moves it)
-			int altCol = 0;         // first column of the alternative 2-column slot, 0 = the news columns
-			for (int guard = 0; guard < 50; ++guard)
+			double cy = buildY;
+			double nx = x;          // final left edge (a slot in the obit columns moves it)
+			int areaCol = 0;        // obit columns: the first grid column of the slot (1-based); 0 = the band
+			if (inBand)
 			{
-				if (cy + h > bottom + tol)
-					break;
-				double pushTo = cy;
-				if (!blockedBelow(QRectF(x, cy, w, h), &pushTo))
+				// the reserved band only: a 2-column story never goes into the obit columns
+				for (int guard = 0; guard < 50; ++guard)
 				{
-					fitted = true;
-					break;
+					if (cy + h > bottom + tol)
+						break;
+					double pushTo = cy;
+					if (!blockedBelow(QRectF(x, cy, w, h), &pushTo))
+					{
+						fitted = true;
+						break;
+					}
+					cy = pushTo;
 				}
-				cy = pushTo;
 			}
-			if (!fitted)
+			else
 			{
-				// The news columns are full: the free two-column slot on the
-				// grid in the obit columns that starts highest on the page
-				// (every pair of neighbouring columns is tried, the bottom
-				// area included), so the hole it leaves is the smallest.
+				// the obit columns only, never the band: the free slot of `span` neighbouring columns
+				// that starts highest on the page (the bottom area included), so the hole it leaves is
+				// the smallest
 				double bestY = 0.0;
 				int bestC = 0;
-				for (int ci = 0; ci + 1 < obitCols.size(); ++ci)
+				for (int ci = 0; ci + span - 1 < obitCols.size(); ++ci)
 				{
-					const int c1 = obitCols[ci], c2 = obitCols[ci + 1];
-					if (c2 != c1 + 1)
-						continue;
+					const int c1 = obitCols[ci];
+					if (obitCols[ci + span - 1] != c1 + span - 1)
+						continue;          // not neighbouring grid columns
 					const double ax = colX(c1);
 					double ay = top;
 					for (int guard = 0; guard < 80; ++guard)
@@ -1113,17 +1165,25 @@ void SuneerNewsPanel::obitPlaceNow()
 					fitted = true;
 					nx = colX(bestC);
 					cy = bestY;
-					altCol = bestC;
-					apiLog(QStringLiteral("obituary model: news '%1' goes to columns %2-%3 at %4 mm (news columns full)").arg(title.left(20)).arg(bestC).arg(bestC + 1).arg((bestY - pageY) / kMm, 0, 'f', 1));
+					areaCol = bestC;
+					apiLog(QStringLiteral("obituary model: news '%1' goes to columns %2-%3 at %4 mm (not a 2-column story: obit columns)").arg(title.left(20)).arg(bestC).arg(bestC + span - 1).arg((bestY - pageY) / kMm, 0, 'f', 1));
 				}
 			}
+			auto parkNews = [&](const QString& why) {
+				apiLog(QStringLiteral("obituary model: news '%1' (%2) %3 - parked").arg(title.left(20), inBand ? QStringLiteral("2-column, no room in columns %1, not moved into columns %2").arg(bandColsText, areaColsText)
+				                                                                                                     : QStringLiteral("%1 column(s), no room in columns %2").arg(span).arg(areaColsText), why));
+				if (requestedColumns(n) > 0)
+					setAttr(text, "news.columns", QString::number(requestedColumns(n)));   // the desk's count stays with the parked module
+				parkModule(items, n, title, QStringLiteral("obituary-news"), photo ? QStringLiteral("right") : QStringLiteral("none"), span);
+				if (inBand)
+					bandNoRoom << remainingTitles.size() - 1;
+			};
 			if (!fitted)
 			{
-				apiLog(QStringLiteral("obituary model: news '%1' does not fit (%2 mm high)").arg(title.left(20)).arg(h / kMm, 0, 'f', 1));
-				parkModule(items, n, title, QStringLiteral("obituary-news"), photo ? QStringLiteral("right") : QStringLiteral("none"), newsCols.size());
+				parkNews(QStringLiteral("does not fit (%1 mm high)").arg(h / kMm, 0, 'f', 1));
 				continue;
 			}
-			const double dy = cy - newsCursor;
+			const double dy = cy - buildY;
 			const double dx = nx - x;
 			if (dy != 0.0 || dx != 0.0)
 				for (PageItem* it : items)
@@ -1132,23 +1192,23 @@ void SuneerNewsPanel::obitPlaceNow()
 			text->invalidateLayout();
 			text->layout();
 			fitFrame(text);
-			const double hFinal = qMax(text->height(), (photoTop - newsCursor) + photoBlockH);
+			const double hFinal = qMax(text->height(), (photoTop - buildY) + photoBlockH);
 			if (cy + hFinal > bottom + tol || text->frameOverflows())
 			{
-				apiLog(QStringLiteral("obituary model: news '%1' runs past the bottom margin after layout (%2 mm) - parked").arg(title.left(20)).arg(hFinal / kMm, 0, 'f', 1));
-				parkModule(items, n, title, QStringLiteral("obituary-news"), photo ? QStringLiteral("right") : QStringLiteral("none"), newsCols.size());
+				parkNews(QStringLiteral("runs past the bottom margin after layout (%1 mm)").arg(hFinal / kMm, 0, 'f', 1));
 				continue;
 			}
-			if (altCol)
+			if (areaCol)
 			{
 				const double under = cy + hFinal + moduleGap;
-				cursor[altCol] = qMax(cursor[altCol], under);
-				cursor[altCol + 1] = qMax(cursor[altCol + 1], under);
+				for (int c = areaCol; c < areaCol + span; ++c)
+					cursor[c] = qMax(cursor.value(c, top), under);
 			}
 			else
 				newsCursor = cy + hFinal + moduleGap;
 			obstacles << QRectF(nx, cy, w, hFinal);
-			placedModules << PlacedModule{altCol ? -100 - altCol : -1, cy, hFinal, text, photo, caption, title};
+			// settle groups: the band (-1); a one-column news with the obits of its column; a wider one on its own
+			placedModules << PlacedModule{inBand ? -1 : (span == 1 ? areaCol : -100 - areaCol), cy, hFinal, text, photo, caption, title};
 			PageItem* group = nullptr;
 			if (items.size() > 1)
 			{
@@ -1160,7 +1220,9 @@ void SuneerNewsPanel::obitPlaceNow()
 			QList<PageItem*> tagged = items;
 			if (group)
 				tagged << group;
-			tagStoryItems(tagged, title, photo ? QStringLiteral("right") : QStringLiteral("none"), 1, newsCols.size(), sid);
+			tagStoryItems(tagged, title, photo ? QStringLiteral("right") : QStringLiteral("none"), 1, span, sid);
+			if (requestedColumns(n) > 0)
+				setAttr(text, "news.columns", QString::number(requestedColumns(n)));   // the desk's count: Re-layout keeps the band rule
 			for (PageItem* it : tagged)
 			{
 				setAttr(it, "news.model", "obituary-news");
@@ -1168,7 +1230,10 @@ void SuneerNewsPanel::obitPlaceNow()
 					setAttr(it, "news.refId", newsRefId(n));
 			}
 			placed << n;
-			++newsPlaced;
+			if (inBand)
+				++newsPlaced;
+			else
+				++areaNewsPlaced;
 			if (photo && !newsPhotoPath.isEmpty())
 				++newsWithPhoto;
 			apiLog(QStringLiteral("obituary model: news '%1': media %2, fileUrl %3 -> %4").arg(title.left(24)).arg(mediaList(n).size())
@@ -1250,6 +1315,8 @@ void SuneerNewsPanel::obitPlaceNow()
 					{
 						remaining << placed[p];
 						remainingTitles << placedModules[i].title;
+						if (placedModules[i].col == -1)
+							bandNoRoom << remainingTitles.size() - 1;   // a band module: listed with the 2-column news
 						placed.removeAt(p);
 						break;
 					}
@@ -1297,8 +1364,10 @@ void SuneerNewsPanel::obitPlaceNow()
 		if (mm.hasMatch())
 			notMarked = mm.captured(1).toInt();
 	}
-	QString line = tr("Placed %1: %2 obits (%3 with photo, %4 no photo), %5 news (%6 with photo)")
-		.arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(obitsPlaced - obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto);
+	QString line = tr("Placed %1: %2 obits (%3 with photo, %4 no photo), %5 2-column news in columns %6, %7 other news in columns %8 (%9 news with photo)")
+		.arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(obitsPlaced - obitsWithPhoto).arg(newsPlaced).arg(bandColsText).arg(areaNewsPlaced).arg(areaColsText).arg(newsWithPhoto);
+	if (bandAsked == 0 && !newsCols.isEmpty())
+		line += QStringLiteral("\n") + tr("Columns %1: no 2-column news (workflow count 2) among these stories - left blank").arg(bandColsText);
 	if (!markLine.isEmpty())
 		line += QStringLiteral("\n") + markLine;
 	if (!photoProblems.isEmpty())
@@ -1306,13 +1375,27 @@ void SuneerNewsPanel::obitPlaceNow()
 	QString tip;
 	if (!photoProblems.isEmpty())
 		tip = tr("Placed without their picture:") + QStringLiteral("\n\u2022 ") + photoProblems.join(QStringLiteral("\n\u2022 ")) + QStringLiteral("\n");
-	if (!remaining.isEmpty())
+	// what did not fit, per area: the obit columns never take a 2-column story and the band never takes anything else
+	QStringList areaT, bandT;
+	for (int i = 0; i < remainingTitles.size(); ++i)
+		(bandNoRoom.contains(i) ? bandT : areaT) << remainingTitles[i].left(28);
+	if (!areaT.isEmpty())
 	{
-		QStringList t;
-		for (const QString& s : remainingTitles)
-			t << s.left(28);
-		line += QStringLiteral("\n") + tr("No room on the page, parked on the pasteboard: %n story(ies): ", "", remaining.size()) + t.mid(0, 3).join(QStringLiteral(", ")) + (t.size() > 3 ? QStringLiteral(" ...") : QString());
-		tip += tr("No room on this page - parked on the pasteboard right of the page (grouped, tagged news.parked):") + QStringLiteral("\n\u2022 ") + t.join(QStringLiteral("\n\u2022 "));
+		line += QStringLiteral("\n") + tr("No room in columns %1, parked on the pasteboard (columns %2 are only for 2-column news): %n story(ies): ", "", areaT.size()).arg(areaColsText, bandColsText)
+		        + areaT.mid(0, 3).join(QStringLiteral(", ")) + (areaT.size() > 3 ? QStringLiteral(" ...") : QString());
+		if (!tip.isEmpty() && !tip.endsWith('\n'))
+			tip += QStringLiteral("\n");
+		tip += tr("No room in columns %1 - parked on the pasteboard right of the page (grouped, tagged news.parked); columns %2 stay for 2-column news:").arg(areaColsText, bandColsText)
+		       + QStringLiteral("\n\u2022 ") + areaT.join(QStringLiteral("\n\u2022 "));
+	}
+	if (!bandT.isEmpty())
+	{
+		line += QStringLiteral("\n") + tr("2-column news with no room in columns %1, parked on the pasteboard (not moved into columns %2): %n story(ies): ", "", bandT.size()).arg(bandColsText, areaColsText)
+		        + bandT.join(QStringLiteral(", "));
+		if (!tip.isEmpty() && !tip.endsWith('\n'))
+			tip += QStringLiteral("\n");
+		tip += tr("2-column news with no room in columns %1 - parked on the pasteboard right of the page, not moved into columns %2:").arg(bandColsText, areaColsText)
+		       + QStringLiteral("\n\u2022 ") + bandT.join(QStringLiteral("\n\u2022 "));
 	}
 	if (!repackReport.isEmpty())
 		tip += (tip.isEmpty() ? QString() : QStringLiteral("\n")) + repackReport.join(QStringLiteral("\n"));
@@ -1330,8 +1413,10 @@ void SuneerNewsPanel::obitPlaceNow()
 		shortParts << tr("%n to check", "", noFace);
 	if (noPicture > 0)
 		shortParts << tr("%n no picture", "", noPicture);
-	if (!remaining.isEmpty())
-		shortParts << tr("%n parked", "", remaining.size());
+	if (!areaT.isEmpty())
+		shortParts << tr("%n parked", "", areaT.size());
+	if (!bandT.isEmpty())
+		shortParts << tr("%n 2-column: no room in %1", "", bandT.size()).arg(bandColsText);
 	if (notMarked > 0)
 		shortParts << tr("%n not marked used", "", notMarked);
 	if (overlaps || overflows)
@@ -1342,6 +1427,8 @@ void SuneerNewsPanel::obitPlaceNow()
 	setStatus(shortParts.join(QStringLiteral(" \u00b7 ")), failed);
 	setStatusDetails(line + (tip.isEmpty() ? QString() : QStringLiteral("\n") + tip));
 	apiLog(QStringLiteral("obituary model: placed %1 (%2 obits, %3 with photo; %4 news, %5 with photo), parked %6 (%10), noface %7, photo failures %8: %9").arg(placed.size()).arg(obitsPlaced).arg(obitsWithPhoto).arg(newsPlaced).arg(newsWithPhoto).arg(remaining.size()).arg(noFace).arg(m_obitPhotoFailed).arg(photoProblems.join("; ")).arg(parkedTitles.join("; ")));
+	apiLog(QStringLiteral("obituary model: band columns %1: %2 asked (workflow count 2), %3 placed, %4 no room [%5]; obit columns %6: %7 obits + %8 other news placed, %9 no room")
+	       .arg(bandColsText).arg(bandAsked).arg(newsPlaced).arg(bandT.size()).arg(bandT.join(QStringLiteral("; "))).arg(areaColsText).arg(obitsPlaced).arg(areaNewsPlaced).arg(areaT.size()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1535,6 +1622,25 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 	QList<QRectF> allRects = occupied;
 	for (const Mod& m : mods)
 		allRects << m.r;
+	// suneer 2026-10-26: the reserved news columns with no module in them are blank on purpose (no
+	// 2-column news): one line says so, and they are not listed as an empty area
+	QString bandLine;
+	{
+		const int nf = qMax(1, model.newsFirstCol), nl = qMin(gridCols, model.newsLastCol);
+		if (nf <= nl)
+		{
+			const double bx0 = colX(nf), bx1 = colX(nl) + colW;
+			bool any = false;
+			for (const QRectF& r : gapRects)
+				if (r.right() > bx0 + 1.0 && r.left() < bx1 - 1.0 && r.bottom() > top && r.top() < bottom)
+					any = true;
+			if (!any)
+			{
+				allRects << QRectF(bx0, top, bx1 - bx0, bottom - top);
+				bandLine = tr("Columns %1-%2: no 2-column news - left blank (reserved for workflow count 2)").arg(nf).arg(nl);
+			}
+		}
+	}
 	const double areaMm = 30.0;
 	const int gw = qMax(1, int(usableW / kMm));
 	const int gh = qMax(1, int((bottom - top) / kMm));
@@ -1607,6 +1713,8 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 		report << tr("Gap: ") + g;
 	for (const QString& a : areaLines)
 		report << tr("Empty: ") + a;
+	if (!bandLine.isEmpty())
+		report << bandLine;
 	for (const QString& l : report)
 		apiLog(QStringLiteral("obituary model: ") + l);
 	return report;
