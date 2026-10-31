@@ -72,6 +72,14 @@
 #include "suneerweld.h"
 #include "suneerlayoutmodel.h"
 #include "suneerlayoutengine.h"
+#include "netpathguard.h"
+#include "scribuswin.h"
+#include "third_party/zip/scribus_zip.h"
+#include <QFileDialog>
+#include <QMdiArea>
+#include <QMdiSubWindow>
+#include <QSaveFile>
+#include <QTemporaryFile>
 #include <QTime>
 #include <QDesktopServices>
 #include <QClipboard>
@@ -481,7 +489,19 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_fetchBtn = new SuneerElideButton(im.loadIcon("edit-find-replace"), tr("Fetch News"), w);
 	m_fetchBtn->setStyleSheet("background:#1565C0; color:white; font-weight:bold; padding:4px;");
 	connect(m_fetchBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onFetchNews);
-	vl->addWidget(m_fetchBtn);
+	// Next to it: the page's own .sla from the workflow (template + placed news), opened with the lock.
+	m_openWfBtn = new SuneerElideButton(im.loadIcon("16/document-open.png"), tr("Open page from workflow"), w);
+	m_openWfBtn->setToolTip(tr("Download this page's .sla (Edition / Page / Date) from the workflow, save it in the pages folder "
+	                           "(Settings) as <edition>/<date>/<page>.sla, open it and lock the page for you"));
+	m_openWfBtn->setStyleSheet("padding:4px;");
+	connect(m_openWfBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onOpenPageFromWorkflow);
+	{
+		auto* fetchRow = new QHBoxLayout();
+		fetchRow->setSpacing(4);
+		fetchRow->addWidget(m_fetchBtn, 1);
+		fetchRow->addWidget(m_openWfBtn, 1);
+		vl->addLayout(fetchRow);
+	}
 
 	// Status: a progress bar while something runs, then ONE short line;
 	// everything long goes to the Details dialog (copyable).
@@ -847,6 +867,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	QTimer::singleShot(800, this, &SuneerNewsPanel::startupSession);
 	if (qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
+		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST"))
 	{
 		// After the startup session check; _EARLY: while it still runs (a
@@ -1088,6 +1110,7 @@ void SuneerNewsPanel::loadConfig()
 	m_lastEdition = s.value("defaultEdition").toString();
 	m_lastPage    = s.value("lastPage").toString();
 	m_editionShortNames = s.value("editionShortNames", kDefaultShortNames).toString();
+	m_pagesFolder = s.value("pagesFolder").toString().trimmed();
 }
 
 void SuneerNewsPanel::saveConfig()
@@ -1098,6 +1121,10 @@ void SuneerNewsPanel::saveConfig()
 	s.setValue("defaultEdition", m_lastEdition);
 	s.setValue("lastPage", m_lastPage);
 	s.setValue("editionShortNames", m_editionShortNames);
+	if (m_pagesFolder.isEmpty())
+		s.remove("pagesFolder");
+	else
+		s.setValue("pagesFolder", m_pagesFolder);
 }
 
 QString SuneerNewsPanel::apiUrl(const QString& path) const
@@ -1998,6 +2025,8 @@ void SuneerNewsPanel::onMarkBalanceTicked()
 void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString& status)
 {
 	if (rows.isEmpty())
+		return;
+	if (!confirmWorkflowPage(tr("Mark")))
 		return;
 	// Wording: what the user asked for, not the wire value (today "unused" is
 	// still sent as BALANCED, see unusedStatus()).
@@ -5487,6 +5516,8 @@ void SuneerNewsPanel::onPlaceNews()
 	QListWidgetItem* sel = m_newsList->currentItem();
 	if (!sel || !m_doc)
 		return;
+	if (!isPlacedRow(sel) && !confirmWorkflowPage(tr("Place")))
+		return;
 	int idx = sel->data(Qt::UserRole).toInt();
 	if (idx < 0 || idx >= m_newsData.size())
 		return;
@@ -5579,6 +5610,8 @@ void SuneerNewsPanel::onPlaceSelected()
 		QMessageBox::warning(this, tr("Error"), tr("No document open!"));
 		return;
 	}
+	if (!confirmWorkflowPage(tr("Place")))
+		return;
 	QList<QJsonObject> stories, balance;
 	int usedSkipped = 0;
 	for (int i = 0; i < m_newsList->count(); i++)
@@ -7656,6 +7689,21 @@ void SuneerNewsPanel::onSettings()
 	QLineEdit* shortNamesEdit = new QLineEdit(m_editionShortNames, connTab);
 	shortNamesEdit->setToolTip(tr("Used only when the edition list cannot be loaded from the server"));
 	fl->addRow(tr("Edition short names (fallback):"), shortNamesEdit);
+	// Open page from workflow: <folder>/<edition>/<date>/<page>.sla
+	QLineEdit* pagesEdit = new QLineEdit(m_pagesFolder, connTab);
+	pagesEdit->setPlaceholderText(defaultPagesFolder());
+	pagesEdit->setToolTip(tr("Open page from workflow saves <this folder>/<edition>/<date>/<page>.sla (pictures in <page>_images). Empty = %1").arg(defaultPagesFolder()));
+	QPushButton* pagesBrowse = new QPushButton(tr("Browse..."), connTab);
+	QHBoxLayout* pagesRow = new QHBoxLayout();
+	pagesRow->addWidget(pagesEdit, 1);
+	pagesRow->addWidget(pagesBrowse);
+	fl->addRow(tr("Pages folder:"), pagesRow);
+	connect(pagesBrowse, &QPushButton::clicked, connTab, [this, pagesEdit]() {
+		const QString start = pagesEdit->text().trimmed().isEmpty() ? QDir::homePath() : pagesEdit->text().trimmed();
+		const QString d = QFileDialog::getExistingDirectory(this, tr("Pages folder"), NetPathGuard::reachable(start) ? start : QDir::homePath());
+		if (!d.isEmpty())
+			pagesEdit->setText(d);
+	});
 	QLabel* note = new QLabel(tr("Login is per user (Logout in the panel). The password is never stored; "
 	                             "the session tokens are kept in the system keychain."), connTab);
 	note->setWordWrap(true);
@@ -7884,6 +7932,9 @@ void SuneerNewsPanel::onSettings()
 	m_editionShortNames = shortNamesEdit->text().trimmed();
 	if (m_editionShortNames.isEmpty())
 		m_editionShortNames = kDefaultShortNames;
+	m_pagesFolder = QDir::cleanPath(pagesEdit->text().trimmed());
+	if (m_pagesFolder == QLatin1String("."))
+		m_pagesFolder.clear();
 	{
 		const QString ed = editionCmb->currentText().trimmed();
 		if (!ed.isEmpty())
@@ -8082,4 +8133,705 @@ int SuneerNewsPanel::convertStoryGroupsToWeld(bool wholePage)
 		m_mw->HaveNewSel();
 	setStatus(tr("%1 story group(s) converted to welded frames").arg(done));
 	return done;
+}
+
+// ============================================================================
+// Open page from workflow
+// ============================================================================
+// The page's .sla as the workflow's layout editor exports it ("Download SLA"):
+//   GET /news-layout-settings/page-context?pageId&publishDate  -> the day's template
+//       (slaTemplateId; when the day was never settled, the page's last-used one,
+//       defaultSlaTemplateId - exactly the editor's own rule; templateChosen with no
+//       id = an explicit "no template" for the day)
+//   GET /sla-templates/:id/download?date&pageId  -> application/octet-stream (.sla) or
+//       application/zip (stored) = <page>_<date>.sla + images/<n>_<file> when photos are
+//       placed; the .sla refers to them as PFILE="images/..." (relative to its folder).
+// Both need the web login (Bearer) and layout.view (+ the edition's layoutEditor feature).
+// Fonts are referenced by name only (they must be installed), nothing else is downloaded.
+// Saved as <pages folder>/<edition>/<date>/<page>.sla with its pictures in <page>_images/,
+// the workflow ids written into DOCUMENT (SuneerWf*), then opened with the page lock.
+
+QString SuneerNewsPanel::defaultPagesFolder()
+{
+	return QDir::homePath() + QStringLiteral("/WorkflowPages");
+}
+
+// A page / edition name as a file name: letters (Malayalam too), digits, '-' and '_' stay,
+// everything else (spaces, '/', ':', quotes, '&') becomes '_'. Never empty, never "." / "..".
+QString SuneerNewsPanel::safeFileName(const QString& name)
+{
+	QString out;
+	for (const QChar ch : name.trimmed())
+		out += (ch.isLetterOrNumber() || ch.isMark() || ch == QLatin1Char('-') || ch == QLatin1Char('_')) ? ch : QLatin1Char('_');
+	while (out.contains(QStringLiteral("__")))
+		out.replace(QStringLiteral("__"), QStringLiteral("_"));
+	while (out.startsWith(QLatin1Char('_')))
+		out.remove(0, 1);
+	while (out.endsWith(QLatin1Char('_')))
+		out.chop(1);
+	return out.isEmpty() ? QStringLiteral("page") : out;
+}
+
+QString SuneerNewsPanel::wfErrorText(QNetworkReply* reply, bool timedOut, int timeoutMs) const
+{
+	if (timedOut)
+		return tr("The workflow did not answer within %1 s (%2)").arg(timeoutMs / 1000).arg(QUrl(m_apiHost).host());
+	const int status = httpStatus(reply);
+	const QString msg = serverMessage(reply->peek(reply->bytesAvailable()));
+	switch (status)
+	{
+		case 401:
+			return tr("Login expired or missing (HTTP 401) - log in again in the News Browser");
+		case 403:
+			return tr("Not allowed (HTTP 403): %1").arg(msg.isEmpty() ? tr("your account cannot read layout pages / templates") : msg);
+		case 404:
+			return tr("Not found on the workflow (HTTP 404): %1").arg(msg.isEmpty() ? reply->url().path() : msg);
+		case 400:
+			return tr("The workflow refused it (HTTP 400): %1").arg(msg.isEmpty() ? reply->errorString() : msg);
+		default:
+			break;
+	}
+	if (status >= 500)
+		return tr("Workflow server error (HTTP %1)%2").arg(status).arg(msg.isEmpty() ? QString() : QStringLiteral(": ") + msg);
+	return describeError(reply);
+}
+
+void SuneerNewsPanel::wfGet(const QUrl& url, int timeoutMs, std::function<void(QNetworkReply*)> done, bool retried)
+{
+	QNetworkRequest req = apiRequest(url, true);
+	req.setRawHeader("Accept", "application/json, application/octet-stream, application/zip");
+	req.setTransferTimeout(timeoutMs);   // no data for that long -> aborted (OperationCanceledError)
+	QNetworkReply* reply = m_nam->get(req);
+	auto t = std::make_shared<QElapsedTimer>();
+	t->start();
+	connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 got, qint64 total) {
+		if (total > 0)
+			statusProgress(tr("Downloading (KB)"), int(got / 1024), int(qMax<qint64>(1, total / 1024)));
+	});
+	connect(reply, &QNetworkReply::finished, this, [this, reply, url, timeoutMs, done, retried, t]() {
+		reply->deleteLater();
+		const int status = httpStatus(reply);
+		// path only: the query has ids and a date, never the token (that is a header)
+		apiLog(QStringLiteral("open from workflow: GET %1 -> %2 (%3 ms, %4 bytes)").arg(url.path(),
+		       status > 0 ? QStringLiteral("HTTP %1").arg(status) : reply->errorString()).arg(t->elapsed()).arg(reply->bytesAvailable()));
+		if ((status == 401 || status == 403) && !retried && !m_refreshToken.isEmpty()
+		    && serverMessage(reply->peek(reply->bytesAvailable())).contains(QLatin1String("token"), Qt::CaseInsensitive))
+		{
+			m_quietAuth = true;
+			const bool ok = refreshAccessToken();
+			m_quietAuth = false;
+			if (ok)
+			{
+				wfGet(url, timeoutMs, done, true);
+				return;
+			}
+		}
+		if (done)
+			done(reply);
+	});
+}
+
+bool SuneerNewsPanel::writeWorkflowPage(const QByteArray& body, const QString& slaPath, const QMap<QString, QString>& ids, QString* error, int* images)
+{
+	auto fail = [error](const QString& e) { if (error) *error = e; return false; };
+	if (images)
+		*images = 0;
+	const QFileInfo fi(slaPath);
+	const QString base = fi.completeBaseName();
+	const QString imgDirName = base + QStringLiteral("_images");
+	QByteArray xml;
+	QList<QPair<QString, QByteArray>> pictures;   // name inside <base>_images/, bytes
+	if (body.startsWith("PK\x03\x04"))
+	{
+		QTemporaryFile tmp(QDir::tempPath() + QStringLiteral("/scribus-wfpage-XXXXXX.zip"));
+		if (!tmp.open() || tmp.write(body) != body.size())
+			return fail(tr("could not keep the download for unpacking (%1)").arg(tmp.errorString()));
+		tmp.flush();
+		ScZipHandler zip;
+		if (!zip.open(tmp.fileName()))
+			return fail(tr("the workflow sent a zip that cannot be opened"));
+		for (const QString& name : zip.files())
+		{
+			QByteArray data;
+			if (!zip.read(name, data))
+				return fail(tr("could not read %1 from the zip").arg(name));
+			const QString clean = QDir::cleanPath(name);
+			if (clean.startsWith(QLatin1String("..")) || clean.startsWith(QLatin1Char('/')) || clean.contains(QLatin1String("/../")))
+				return fail(tr("unsafe name in the zip: %1").arg(name));
+			if (clean.endsWith(QLatin1String(".sla"), Qt::CaseInsensitive) && !clean.contains(QLatin1Char('/')))
+				xml = data;
+			else if (clean.startsWith(QLatin1String("images/")) && clean.count(QLatin1Char('/')) == 1 && clean.size() > 7)
+				pictures << qMakePair(clean.mid(7), data);
+			else if (!clean.endsWith(QLatin1Char('/')))
+				apiLog(QStringLiteral("open from workflow: zip entry %1 ignored").arg(name));
+		}
+		zip.close();
+		if (xml.isEmpty())
+			return fail(tr("the zip from the workflow has no .sla in it"));
+	}
+	else
+		xml = body;
+	if (!xml.contains("<SCRIBUSUTF8NEW"))
+		return fail(tr("the workflow did not send a Scribus document (%1 bytes, starts with \"%2\")")
+		            .arg(body.size()).arg(QString::fromUtf8(body.left(40)).simplified()));
+	// The pictures go next to the .sla in <base>_images/ (a folder per page: two pages of one
+	// day would otherwise share images/0_*.jpg), so the references move with them.
+	if (!pictures.isEmpty())
+		xml.replace("PFILE=\"images/", "PFILE=\"" + imgDirName.toUtf8() + "/");
+	// The workflow ids on the document element (1.7: <Document>, 1.6: <DOCUMENT>).
+	int at = xml.indexOf("<Document ");
+	if (at < 0)
+		at = xml.indexOf("<DOCUMENT ");
+	if (at >= 0)
+	{
+		QByteArray attrs;
+		for (const QString& key : ScribusDoc::suneerWorkflowKeys())
+		{
+			const QString v = ids.value(key);
+			if (v.isEmpty())
+				continue;
+			QString esc = v.toHtmlEscaped();   // & < > "
+			esc.replace(QLatin1Char('\''), QStringLiteral("&#39;"));
+			attrs += ' ' + ScribusDoc::suneerWorkflowAttr(key).toUtf8() + "=\"" + esc.toUtf8() + '"';
+		}
+		xml.insert(at + 9, attrs);
+	}
+	if (!QDir().mkpath(fi.absolutePath()))
+		return fail(tr("cannot create the folder %1").arg(fi.absolutePath()));
+	if (!pictures.isEmpty())
+	{
+		const QString imgDir = fi.absolutePath() + QLatin1Char('/') + imgDirName;
+		if (!QDir().mkpath(imgDir))
+			return fail(tr("cannot create the folder %1").arg(imgDir));
+		for (const auto& p : std::as_const(pictures))
+		{
+			QSaveFile f(imgDir + QLatin1Char('/') + p.first);
+			if (!f.open(QIODevice::WriteOnly) || f.write(p.second) != p.second.size() || !f.commit())
+				return fail(tr("cannot write %1 (%2)").arg(f.fileName(), f.errorString()));
+		}
+		if (images)
+			*images = pictures.size();
+	}
+	QSaveFile f(slaPath);
+	if (!f.open(QIODevice::WriteOnly) || f.write(xml) != xml.size() || !f.commit())
+		return fail(tr("cannot write %1 (%2)").arg(slaPath, f.errorString()));
+	return true;
+}
+
+bool SuneerNewsPanel::openWorkflowPage(const QString& path, const QMap<QString, QString>& ids)
+{
+	if (!m_mw)
+		return false;
+	// Already open here ("Open existing"): its window to the front, without loadDoc's
+	// "Document is already opened" message.
+	bool switched = false;
+	for (QMdiSubWindow* sw : m_mw->mdiArea->subWindowList())
+	{
+		auto* win = qobject_cast<ScribusWin*>(sw->widget());
+		if (win && win->doc() && QFileInfo(win->doc()->documentFileName()).canonicalFilePath() == QFileInfo(path).canonicalFilePath())
+		{
+			m_mw->mdiArea->setActiveSubWindow(sw);
+			QCoreApplication::processEvents();
+			switched = true;
+			break;
+		}
+	}
+	if (!switched && !m_mw->loadDoc(path))
+		return false;
+	ScribusDoc* doc = m_mw->doc;
+	if (!doc || QFileInfo(doc->documentFileName()).canonicalFilePath() != QFileInfo(path).canonicalFilePath())
+		return false;
+	// In memory too: an older file ("Open existing") or one read by another loader has none;
+	// they reach the file with the next Save.
+	if (doc->suneerWorkflow() != ids)
+		doc->setSuneerWorkflow(ids);
+	// The page lock goes with this document: closing it releases the page.
+	if (m_heldPageId == ids.value("pageId") && m_heldDate == ids.value("date"))
+	{
+		m_heldDoc = doc;
+		m_heldDocBound = true;
+	}
+	return true;
+}
+
+bool SuneerNewsPanel::confirmWorkflowPage(const QString& action)
+{
+	if (!m_doc || m_fetchPageId.isEmpty())
+		return true;
+	const QMap<QString, QString> wf = m_doc->suneerWorkflow();
+	const QString pid = wf.value("pageId"), date = wf.value("date");
+	if (pid.isEmpty() || (pid == m_fetchPageId && (date.isEmpty() || date == m_fetchDate)))
+		return true;
+	const QString key = QStringLiteral("%1|%2|%3").arg(quintptr(m_doc.data())).arg(m_fetchPageId, m_fetchDate);
+	if (m_wfPageAccepted.contains(key))
+		return true;
+	int listIdx = m_pageCombo->findData(m_fetchPageId);
+	const QString listName = listIdx >= 0 ? pageNameAt(listIdx) : m_fetchPageId;
+	QMessageBox box(QMessageBox::Warning, tr("Another workflow page"),
+	                tr("This document is %1 (%2, %3) in the workflow, but the news list is for %4 (%5).\n\n"
+	                   "%6 for %4 anyway? The workflow then records the stories on %4.")
+	                    .arg(wf.value("pageName", pid), wf.value("edition"), date, listName, m_fetchDate, action),
+	                QMessageBox::NoButton, this);
+	QPushButton* go = box.addButton(tr("%1 anyway").arg(action), QMessageBox::AcceptRole);
+	QPushButton* stop = box.addButton(QMessageBox::Cancel);
+	box.setDefaultButton(stop);
+	if (!m_wfTestAnswer.isEmpty())
+		QTimer::singleShot(300, &box, [&box, go, stop, this]() {
+			m_wfTestLog << QStringLiteral("question: ") + box.text().simplified();
+			(m_wfTestAnswer == QLatin1String("cancel") ? stop : go)->click();
+		});
+	box.exec();
+	if (box.clickedButton() != go)
+	{
+		setStatus(tr("Not done: the document is %1 of %2 in the workflow - fetch that page's news").arg(wf.value("pageName", pid), date), true);
+		return false;
+	}
+	m_wfPageAccepted.insert(key);
+	return true;
+}
+
+void SuneerNewsPanel::onOpenPageFromWorkflow()
+{
+	if (m_wfBusy)
+		return;
+	const int idx = m_pageCombo->currentIndex();
+	const QString pageId = m_pageCombo->currentData().toString();
+	const QString pageName = pageNameAt(idx);
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	const QString edition = m_lastEdition;
+	if (pageId.isEmpty() || edition.isEmpty())
+	{
+		setStatus(tr("Choose the edition and the page first"), true);
+		return;
+	}
+	if (m_accessToken.isEmpty() && !loginDialog())
+	{
+		setStatus(tr("Open page from workflow needs a login"), true);
+		return;
+	}
+	// The page lock first, exactly as Fetch News: another user's page asks (Choose another page stops here).
+	if (m_lockGateKey != currentPageKey())
+	{
+		m_openWfBtn->setEnabled(false);
+		const QString key = currentPageKey();
+		checkAndTakePageLock([this, key]() {
+			m_openWfBtn->setEnabled(true);
+			if (m_lockGateKey == key && currentPageKey() == key)
+				onOpenPageFromWorkflow();
+		});
+		QTimer::singleShot(kLockTimeoutMs + 1000, m_openWfBtn, [this]() { if (!m_wfBusy) m_openWfBtn->setEnabled(true); });
+		return;
+	}
+	// Where it goes; a network folder that does not answer is refused at once (never a hang).
+	const QString root = pagesFolder();
+	if (!NetPathGuard::reachable(root))
+	{
+		setStatus(tr("The pages folder does not answer: %1 (network share off?) - change it in Settings").arg(root), true);
+		return;
+	}
+	const QString dir = root + QLatin1Char('/') + safeFileName(edition) + QLatin1Char('/') + date;
+	QString path = dir + QLatin1Char('/') + safeFileName(pageName) + QStringLiteral(".sla");
+	QMap<QString, QString> ids;
+	ids.insert("pageId", pageId);
+	ids.insert("date", date);
+	ids.insert("pageName", pageName);
+	ids.insert("edition", edition);
+
+	if (QFileInfo::exists(path))
+	{
+		QString answer = m_wfTestAnswer;
+		if (answer.isEmpty())
+		{
+			QMessageBox box(QMessageBox::Question, tr("Page already downloaded"),
+			                tr("%1 of %2 (%3) is already in\n%4\n\nOpen that file, replace it with the workflow's page, or keep both?")
+			                    .arg(pageName, edition, date, QDir::toNativeSeparators(path)),
+			                QMessageBox::NoButton, this);
+			QPushButton* openBtn = box.addButton(tr("Open existing"), QMessageBox::AcceptRole);
+			QPushButton* replBtn = box.addButton(tr("Replace"), QMessageBox::DestructiveRole);
+			QPushButton* keepBtn = box.addButton(tr("Keep both"), QMessageBox::ActionRole);
+			box.addButton(QMessageBox::Cancel);
+			box.setDefaultButton(openBtn);
+			box.exec();
+			answer = box.clickedButton() == openBtn ? QStringLiteral("open") : box.clickedButton() == replBtn ? QStringLiteral("replace")
+			       : box.clickedButton() == keepBtn ? QStringLiteral("keep") : QStringLiteral("cancel");
+		}
+		m_wfTestLog << QStringLiteral("existing file %1: %2").arg(QFileInfo(path).fileName(), answer);
+		if (answer == QLatin1String("cancel"))
+			return;
+		if (answer == QLatin1String("open"))
+		{
+			apiLog(QStringLiteral("open from workflow: %1 %2 %3 - the existing %4 opened").arg(edition, pageName, date, path));
+			if (openWorkflowPage(path, ids))
+				setStatus(tr("Opened the existing %1").arg(QFileInfo(path).fileName()));
+			else
+				setStatus(tr("Could not open %1").arg(path), true);
+			return;
+		}
+		if (answer == QLatin1String("replace"))
+		{
+			// never under an open document's feet
+			for (QMdiSubWindow* sw : m_mw->mdiArea->subWindowList())
+			{
+				auto* win = qobject_cast<ScribusWin*>(sw->widget());
+				if (win && win->doc() && QFileInfo(win->doc()->documentFileName()).canonicalFilePath() == QFileInfo(path).canonicalFilePath())
+				{
+					setStatus(tr("%1 is open in Scribus - close it first, then Replace").arg(QFileInfo(path).fileName()), true);
+					if (!m_wfTestAnswer.isEmpty())
+						m_wfTestLog << QStringLiteral("replace refused: the file is open");
+					return;
+				}
+			}
+		}
+		else
+		{
+			const QString stem = safeFileName(pageName);
+			for (int n = 2; QFileInfo::exists(path) || QFileInfo::exists(dir + QLatin1Char('/') + QFileInfo(path).completeBaseName() + QStringLiteral("_images")); ++n)
+				path = dir + QLatin1Char('/') + stem + QStringLiteral("_%1.sla").arg(n);
+		}
+	}
+
+	m_wfBusy = true;
+	m_openWfBtn->setEnabled(false);
+	auto finish = [this](const QString& msg, bool failed) {
+		m_wfBusy = false;
+		m_openWfBtn->setEnabled(true);
+		statusProgressDone();
+		setStatus(msg, failed);
+		m_wfTestLog << (failed ? QStringLiteral("error: ") : QStringLiteral("status: ")) + msg;
+	};
+	const int timeoutMs = qEnvironmentVariableIsSet("SUNEER_WFOPEN_TIMEOUT_MS") ? qEnvironmentVariableIntValue("SUNEER_WFOPEN_TIMEOUT_MS") : 60000;
+	statusProgress(tr("Asking the workflow for %1").arg(pageName), 0, 0);
+	QUrl cu(apiUrl("/news-layout-settings/page-context"));
+	QUrlQuery cq;
+	cq.addQueryItem("pageId", pageId);
+	cq.addQueryItem("publishDate", date);
+	cu.setQuery(cq);
+	wfGet(cu, qMin(timeoutMs, 15000), [this, finish, ids, pageId, pageName, date, edition, path, timeoutMs](QNetworkReply* reply) mutable {
+		const bool timedOut = reply->error() == QNetworkReply::OperationCanceledError;
+		if (reply->error() != QNetworkReply::NoError || httpStatus(reply) != 200)
+		{
+			finish(tr("Open page from workflow: %1").arg(wfErrorText(reply, timedOut, qMin(timeoutMs, 15000))), true);
+			return;
+		}
+		const QJsonObject ctx = QJsonDocument::fromJson(reply->readAll()).object().value("data").toObject();
+		const bool chosen = ctx.value("templateChosen").toBool();
+		QString tid = ctx.value("slaTemplateId").toString();
+		if (tid.isEmpty() && !chosen)
+			tid = ctx.value("defaultSlaTemplateId").toString();   // the editor's own fallback for an unsettled day
+		if (tid.isEmpty())
+		{
+			const QString why = chosen ? tr("the desk chose \"no template\" for this day")
+			                           : tr("no template was ever chosen for this page");
+			finish(tr("The workflow has no SLA template for %1 (%2) on %3: %4").arg(pageName, edition, date, why), true);
+			if (m_wfTestAnswer.isEmpty())
+				QMessageBox::information(this, tr("No template"), tr("The workflow has no SLA template for %1 (%2) on %3.\n\n%4.\n\nChoose one in the workflow's Layout editor first.")
+				                         .arg(pageName, edition, date, why.left(1).toUpper() + why.mid(1)));
+			return;
+		}
+		ids.insert("templateId", tid);
+		statusProgress(tr("Downloading %1").arg(pageName), 0, 0);
+		QUrl du(apiUrl(QStringLiteral("/sla-templates/%1/download").arg(QString::fromLatin1(QUrl::toPercentEncoding(tid)))));
+		QUrlQuery dq;
+		dq.addQueryItem("date", date);
+		dq.addQueryItem("pageId", pageId);
+		du.setQuery(dq);
+		wfGet(du, timeoutMs, [this, finish, ids, pageName, date, edition, path, timeoutMs](QNetworkReply* r) {
+			const bool to = r->error() == QNetworkReply::OperationCanceledError;
+			if (r->error() != QNetworkReply::NoError || httpStatus(r) != 200)
+			{
+				finish(tr("Open page from workflow: %1").arg(wfErrorText(r, to, timeoutMs)), true);
+				return;
+			}
+			const QByteArray body = r->readAll();
+			QString err;
+			int images = 0;
+			statusProgress(tr("Saving %1").arg(pageName), 0, 0);
+			if (!writeWorkflowPage(body, path, ids, &err, &images))
+			{
+				finish(tr("Open page from workflow: %1").arg(err), true);
+				return;
+			}
+			apiLog(QStringLiteral("open from workflow: %1 %2 %3 saved as %4 (%5 bytes%6)").arg(edition, pageName, date, path).arg(body.size())
+			       .arg(images ? QStringLiteral(", %1 pictures").arg(images) : QString()));
+			statusProgress(tr("Opening %1").arg(pageName), 0, 0);
+			if (!openWorkflowPage(path, ids))
+			{
+				finish(tr("Saved %1, but Scribus could not open it").arg(path), true);
+				return;
+			}
+			finish(tr("Opened %1 (%2, %3) from the workflow%4").arg(pageName, edition, date,
+			       images ? tr(", %n picture(s)", nullptr, images) : QString()), false);
+			setStatusDetails(tr("Saved as %1").arg(QDir::toNativeSeparators(path)));
+		});
+	});
+}
+
+// SUNEER_WFOPEN_SELFTEST=<report prefix>: Open page from workflow end to end against the mock
+// workflow of tests/suneer/news_open_page.sh (fixtures/news_page_lock_mock.py): a plain .sla, an
+// obituary page as a zip with its picture, no template for the day, the page's last-used template,
+// HTTP 500 / 400 / 401, a server that never answers, the existing-file question (keep both / open /
+// replace, replace refused while open), the page lock, the ids in the document, and placing for
+// another page asking first. The script checks the files and the server state afterwards.
+void SuneerNewsPanel::runWorkflowOpenSelfTest(const QString& report)
+{
+	struct Ctx
+	{
+		QStringList lines;
+		int fails = 0;
+		QList<std::function<void(std::function<void()>)>> steps;
+		int step = 0;
+		QString date, root;
+	};
+	auto c = std::make_shared<Ctx>();
+	c->date = qEnvironmentVariable("SUNEER_WFOPEN_DATE", "2026-11-02");
+	c->root = pagesFolder() + QStringLiteral("/KNR/") + c->date + QLatin1Char('/');
+	auto check = [c](const QString& what, bool ok) {
+		c->lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		c->fails += ok ? 0 : 1;
+	};
+	auto note = [c](const QString& l) { c->lines << QStringLiteral("  ") + l; };
+	auto waitFor = [this](std::function<bool()> cond, int ms, std::function<void(bool)> done) {
+		auto* t = new QTimer(this);
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		t->setInterval(50);
+		connect(t, &QTimer::timeout, this, [t, el, cond, ms, done]() {
+			const bool ok = cond();
+			if (!ok && el->elapsed() < ms)
+				return;
+			t->stop();
+			t->deleteLater();
+			done(ok);
+		});
+		t->start();
+	};
+	// the server's lock table (mock only)
+	auto lockState = [this](std::function<void(QHash<QString, QString>)> done) {
+		QNetworkRequest req(QUrl(apiUrl(QStringLiteral("/mock/state"))));
+		QNetworkReply* r = m_nam->get(req);
+		connect(r, &QNetworkReply::finished, this, [r, done]() {
+			r->deleteLater();
+			QHash<QString, QString> h;
+			for (const QJsonValue& v : QJsonDocument::fromJson(r->readAll()).object()["data"].toArray())
+			{
+				const QJsonObject o = v.toObject();
+				h[o["pageId"].toString() + QLatin1Char('|') + o["date"].toString()] = o["lockedById"].toString();
+			}
+			done(h);
+		});
+	};
+	// choose a page, wait for its lock check, press the button, wait until it is done
+	auto openPage = [this, c, waitFor](const QString& pageId, std::function<void(bool)> done) {
+		m_wfTestLog.clear();
+		m_pageCombo->setCurrentIndex(m_pageCombo->findData(pageId));
+		waitFor([this]() { return m_lockGateKey == currentPageKey(); }, 8000, [this, waitFor, done](bool) {
+			onOpenPageFromWorkflow();
+			waitFor([this]() { return !m_wfBusy && !m_wfTestLog.isEmpty(); }, 20000, done);
+		});
+	};
+	auto docPath = [this]() { return m_mw && m_mw->doc ? m_mw->doc->documentFileName() : QString(); };
+	auto readFile = [](const QString& p) { QFile f(p); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); };
+	auto run = std::make_shared<std::function<void()>>();
+	*run = [this, c, run, report]() {
+		if (c->step >= c->steps.size())
+		{
+			c->lines << (c->fails ? QStringLiteral("FAILED: %1").arg(c->fails) : QStringLiteral("ALL PASS"));
+			QFile f(report + "-report.txt");
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(c->lines.join('\n').toUtf8() + "\n");
+			f.close();
+			fprintf(stderr, "WFOPEN-SELFTEST done\n");
+			QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+			return;
+		}
+		auto st = c->steps[c->step++];
+		st([run]() { QTimer::singleShot(100, *run); });
+	};
+	m_wfTestAnswer = QStringLiteral("keep");
+
+	// 0. log in as A, KNR, the test date
+	c->steps << [this, c, check, waitFor](std::function<void()> next) {
+		for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+			if (auto* sw = qobject_cast<QStackedWidget*>(w->parentWidget()))
+				sw->setCurrentWidget(w);
+		m_dateEdit->blockSignals(true);
+		m_dateEdit->setDate(QDate::fromString(c->date, "yyyy-MM-dd"));
+		m_dateEdit->blockSignals(false);
+		QNetworkReply* r = startLoginRequest(QStringLiteral("a@test.local"), QStringLiteral("S3cret-right"));
+		connect(r, &QNetworkReply::finished, this, [this, r, check, waitFor, next]() {
+			QString e;
+			const bool ok = finishLogin(r, QStringLiteral("a@test.local"), false, 0, e);
+			r->deleteLater();
+			check(QStringLiteral("login as A"), ok);
+			setLocked(false);
+			onFetchStatic();
+			const int k = m_editionCombo->findData("KNR");
+			if (k >= 0)
+				m_editionCombo->setCurrentIndex(k);
+			waitFor([this]() { return m_pageCombo->count() >= 8; }, 8000, [this, check, next](bool ok) {
+				bool sideBySide = false;
+				for (QHBoxLayout* hl : m_fetchBtn->parentWidget()->findChildren<QHBoxLayout*>())
+					sideBySide |= hl->indexOf(m_fetchBtn) == 0 && hl->indexOf(m_openWfBtn) == 1;
+				check(QStringLiteral("KNR pages listed (%1), button \"%2\" right of Fetch News in one row").arg(m_pageCombo->count()).arg(m_openWfBtn->text()),
+				      ok && sideBySide);
+				next();
+			});
+		});
+	};
+	// 1. Page 1: a plain .sla
+	c->steps << [this, c, check, note, openPage, docPath, readFile, lockState](std::function<void()> next) {
+		openPage("p-knr-1", [this, c, check, note, docPath, readFile, lockState, next](bool) {
+			const QString p = c->root + "Page_1.sla";
+			const QByteArray sla = readFile(p);
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("Page 1 saved as %1 (%2 bytes)").arg(p).arg(sla.size()), sla.contains("<SCRIBUSUTF8NEW"));
+			check(QStringLiteral("Page 1 opened (%1)").arg(docPath()), docPath() == p);
+			check(QStringLiteral("ids in the file: SuneerWfPageId/Date/TemplateId"),
+			      sla.contains("SuneerWfPageId=\"p-knr-1\"") && sla.contains(QStringLiteral("SuneerWfDate=\"%1\"").arg(c->date).toUtf8()) && sla.contains("SuneerWfTemplateId=\"tpl-p1\""));
+			check(QStringLiteral("ids in the open document: %1").arg(m_mw->doc ? QStringList(m_mw->doc->suneerWorkflow().values()).join(',') : QString()),
+			      m_mw->doc && m_mw->doc->suneerWorkflow().value("pageId") == "p-knr-1" && m_mw->doc->suneerWorkflow().value("pageName") == "Page 1");
+			check(QStringLiteral("Malayalam text kept (U+0D38 in the file)"), QString::fromUtf8(sla).contains(QChar(0x0D38)));
+			lockState([this, c, check, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: Page 1 locked by u-A (%1), lock bound to the document (%2)").arg(h.value("p-knr-1|" + c->date)).arg(m_heldDoc == m_mw->doc),
+				      h.value("p-knr-1|" + c->date) == "u-A" && m_heldDoc == m_mw->doc && m_heldDocBound);
+				next();
+			});
+		});
+	};
+	// 2. Page 3 (obituary): a zip with the .sla and its picture
+	c->steps << [this, c, check, note, openPage, docPath, readFile, lockState](std::function<void()> next) {
+		openPage("p-knr-3", [this, c, check, note, docPath, readFile, lockState, next](bool) {
+			const QString p = c->root + "Page_3.sla";
+			const QByteArray sla = readFile(p);
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("obituary zip: Page_3.sla + Page_3_images/0_obit_photo.jpg"), sla.contains("<SCRIBUSUTF8NEW") && QFileInfo::exists(c->root + "Page_3_images/0_obit_photo.jpg"));
+			check(QStringLiteral("picture reference rewritten: PFILE=\"Page_3_images/0_obit_photo.jpg\""), sla.contains("PFILE=\"Page_3_images/0_obit_photo.jpg\"") && !sla.contains("PFILE=\"images/"));
+			bool shown = false;
+			if (m_mw->doc)
+				for (PageItem* it : *m_mw->doc->Items)
+					if (it->isImageFrame() && it->imageIsAvailable)
+						shown = true;
+			check(QStringLiteral("Page 3 opened (%1), the picture loaded").arg(docPath()), docPath() == p && shown);
+			m_mw->grab().save(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST") + "-obit-opened.png");
+			lockState([this, c, check, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: Page 3 locked by u-A; Page 1 now %1 (one held page per Scribus)").arg(h.value("p-knr-1|" + c->date).isEmpty() ? QStringLiteral("released") : h.value("p-knr-1|" + c->date)),
+				      h.value("p-knr-3|" + c->date) == "u-A");
+				next();
+			});
+		});
+	};
+	// 3. Page 4: the desk chose "no template" for the day
+	c->steps << [this, c, check, note, openPage](std::function<void()> next) {
+		openPage("p-knr-4", [this, c, check, note, next](bool) {
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("no template: said clearly, nothing saved"), m_wfTestLog.join(' ').contains("has no SLA template for Page 4") && !QFileInfo::exists(c->root + "Page_4.sla"));
+			next();
+		});
+	};
+	// 4. Page 5: day never settled -> the page's last-used template
+	c->steps << [this, c, check, note, openPage, docPath, readFile](std::function<void()> next) {
+		openPage("p-knr-5", [this, c, check, note, docPath, readFile, next](bool) {
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("Page 5: the page's last-used template (tpl-p5) opened"), docPath() == c->root + "Page_5.sla" && readFile(c->root + "Page_5.sla").contains("SuneerWfTemplateId=\"tpl-p5\""));
+			next();
+		});
+	};
+	// 5-7. HTTP 500, HTTP 400, no answer
+	const QList<QPair<QString, QString>> errs = { { "p-knr-6", "HTTP 500" }, { "p-knr-8", "Template not found!" }, { "p-knr-7", "did not answer within" } };
+	for (const auto& e : errs)
+		c->steps << [this, c, check, note, openPage, e](std::function<void()> next) {
+			openPage(e.first, [this, c, check, note, e, next](bool) {
+				note(m_wfTestLog.join(" | "));
+				check(QStringLiteral("%1: error \"%2\" shown, button usable again").arg(e.first, e.second), m_wfTestLog.join(' ').contains(e.second) && m_openWfBtn->isEnabled());
+				next();
+			});
+		};
+	// 8. a token the server refuses (no refresh possible) -> 401 text
+	c->steps << [this, check, note, waitFor](std::function<void()> next) {
+		const QString keepA = m_accessToken, keepR = m_refreshToken;
+		m_accessToken = QStringLiteral("AT-wrong");
+		m_refreshToken.clear();
+		m_wfTestLog.clear();
+		onOpenPageFromWorkflow();   // Page 7, its lock check already done
+		waitFor([this]() { return !m_wfBusy && !m_wfTestLog.isEmpty(); }, 10000, [this, check, note, keepA, keepR, next](bool) {
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("401: \"log in again\" shown"), m_wfTestLog.join(' ').contains("HTTP 401"));
+			m_accessToken = keepA;
+			m_refreshToken = keepR;
+			next();
+		});
+	};
+	// 9. Page 1 again: Keep both -> Page_1_2.sla; Open existing -> the open Page_1.sla; Replace while open -> refused
+	c->steps << [this, c, check, note, openPage, docPath](std::function<void()> next) {
+		m_wfTestAnswer = QStringLiteral("keep");
+		openPage("p-knr-1", [this, c, check, note, openPage, docPath, next](bool) {
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("Keep both: Page_1_2.sla made and opened, Page_1.sla untouched"), docPath() == c->root + "Page_1_2.sla" && QFileInfo::exists(c->root + "Page_1.sla"));
+			m_wfTestAnswer = QStringLiteral("open");
+			m_lockGateKey.clear();
+			openPage("p-knr-1", [this, c, check, note, openPage, docPath, next](bool) {
+				note(m_wfTestLog.join(" | "));
+				check(QStringLiteral("Open existing: switched to Page_1.sla, no download"), docPath() == c->root + "Page_1.sla" && !m_wfTestLog.join(' ').contains("from the workflow"));
+				m_wfTestAnswer = QStringLiteral("replace");
+				m_lockGateKey.clear();
+				openPage("p-knr-1", [this, check, note, next](bool) {
+					note(m_wfTestLog.join(" | "));
+					check(QStringLiteral("Replace while the file is open: refused"), m_wfTestLog.join(' ').contains("replace refused"));
+					next();
+				});
+			});
+		});
+	};
+	// 10. Page 5 closed, changed on disk, Replace -> the workflow's version again
+	c->steps << [this, c, check, note, openPage, docPath, readFile, waitFor](std::function<void()> next) {
+		const QString p5 = c->root + "Page_5.sla";
+		bool closed = false;
+		for (QMdiSubWindow* sw : m_mw->mdiArea->subWindowList())
+		{
+			auto* win = qobject_cast<ScribusWin*>(sw->widget());
+			if (win && win->doc() && win->doc()->documentFileName() == p5)
+			{
+				m_mw->mdiArea->setActiveSubWindow(sw);
+				QCoreApplication::processEvents();
+				closed = m_mw->slotFileClose();
+			}
+		}
+		{
+			QFile f(p5);
+			if (f.open(QIODevice::Append))
+				f.write("<!-- local change -->\n");
+		}
+		check(QStringLiteral("Page_5.sla closed (%1) and changed locally").arg(closed), closed && readFile(p5).contains("local change"));
+		m_wfTestAnswer = QStringLiteral("replace");
+		openPage("p-knr-5", [this, p5, check, note, docPath, readFile, next](bool) {
+			note(m_wfTestLog.join(" | "));
+			check(QStringLiteral("Replace: Page_5.sla is the workflow's again and open"), docPath() == p5 && !readFile(p5).contains("local change"));
+			next();
+		});
+	};
+	// 11. the document is Page 5; the news list is Page 2 -> Place asks first
+	c->steps << [this, c, check, note](std::function<void()> next) {
+		m_fetchPageId = QStringLiteral("p-knr-2");
+		m_fetchDate = c->date;
+		m_wfTestLog.clear();
+		m_wfTestAnswer = QStringLiteral("cancel");
+		const bool a = confirmWorkflowPage(tr("Place"));
+		note(m_wfTestLog.join(" | "));
+		m_wfTestAnswer = QStringLiteral("go");
+		const bool b = confirmWorkflowPage(tr("Place"));
+		const bool again = confirmWorkflowPage(tr("Place"));
+		m_fetchPageId = QStringLiteral("p-knr-5");
+		const bool same = confirmWorkflowPage(tr("Place"));
+		check(QStringLiteral("other list page: asks (Cancel stops=%1, anyway goes=%2, not asked twice=%3); same page never asks=%4").arg(!a).arg(b).arg(again).arg(same),
+		      !a && b && again && same && m_wfTestLog.join(' ').contains("Page 5"));
+		QWidget* page = m_stack;
+		for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+			if (qobject_cast<QStackedWidget*>(w->parentWidget()))
+				page = w;
+		if (!page->isVisible())
+			page->resize(320, 900);
+		page->grab().save(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST") + "-panel.png");
+		next();
+	};
+	(*run)();
 }

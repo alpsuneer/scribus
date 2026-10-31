@@ -2532,6 +2532,16 @@ namespace {
 void Scribus171Format::readDocAttributes(ScribusDoc* doc, const ScXmlStreamAttributes& attrs) const
 {
 	m_Doc->setSuneerLinkedImagesNoAsk(attrs.valueAsBool("SuneerLinkedImagesNoAsk", false));
+	{
+		QMap<QString, QString> wf;
+		for (const QString& key : ScribusDoc::suneerWorkflowKeys())
+		{
+			const QString attr = ScribusDoc::suneerWorkflowAttr(key);
+			if (attrs.hasAttribute(attr))
+				wf.insert(key, attrs.valueAsString(attr));
+		}
+		m_Doc->setSuneerWorkflow(wf);
+	}
 	//Remove uppercase in 1.8
 	if (attrs.hasAttribute("PAGESIZE"))
 	{

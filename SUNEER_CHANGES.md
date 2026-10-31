@@ -1509,3 +1509,13 @@ scribus
 - Text edit ചെയ്ത് edit mode-ൽ നിന്ന് പുറത്തുവരുമ്പോൾ box വീണ്ടും fit ആകും — ഒരു Undo step.
 - Justify ചെയ്ത text വലത് border-ൽ തൊടില്ല (അളവ്: 2.06 mm).
 
+### 100. News Browser — "Open page from workflow"
+- Fetch News-ന്റെ അടുത്ത് പുതിയ button. തിരഞ്ഞെടുത്ത Edition / Page / Date-ന്റെ .sla workflow-ൽ നിന്ന് download ചെയ്യും
+  (workflow Layout editor-ലെ "Download SLA" തന്നെ: template + വെച്ച news + പടങ്ങൾ).
+- Save ചെയ്യുന്നത്: `<pages folder>/<edition>/<date>/<page>.sla`. പടങ്ങൾ `<page>_images/`-ൽ.
+  Pages folder Settings → Connection-ൽ മാറ്റാം (default `~/WorkflowPages`).
+- File നേരത്തെ ഉണ്ടെങ്കിൽ ചോദിക്കും: Open existing / Replace / Keep both.
+- തുറക്കുമ്പോൾ page lock എടുക്കും ("opened by"). Workflow ids document-ൽ സൂക്ഷിക്കും (SLA-യിൽ `SuneerWf*`).
+  മറ്റൊരു page-ന്റെ news ഈ document-ൽ Place / Mark ചെയ്യുമ്പോൾ ആദ്യം ചോദിക്കും.
+- Template ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയും. Login, server error (401/403/404/500), timeout എന്നിവയുടെ സന്ദേശങ്ങൾ വ്യക്തം.
+

@@ -265,6 +265,32 @@ private:
 	int     m_lockReleasesInFlight {0};
 	QListWidget* m_newsList      {nullptr};
 	QPushButton* m_fetchBtn      {nullptr};
+	// ---- "Open page from workflow": the page's .sla from the workflow ----------------
+	// GET /news-layout-settings/page-context (template of the page + date), then
+	// GET /sla-templates/:id/download?date&pageId (.sla, or a zip with images/), saved to
+	// <pages folder>/<edition>/<date>/<page>.sla, opened, the page lock taken and the ids
+	// kept in the document (ScribusDoc::suneerWorkflow).
+	QPushButton* m_openWfBtn     {nullptr};
+	QString      m_pagesFolder;              // QSettings pagesFolder; empty = defaultPagesFolder()
+	bool         m_wfBusy {false};
+	QSet<QString> m_wfPageAccepted;          // "doc|pageId|date": a different list page was accepted for the document
+	static QString defaultPagesFolder();
+	QString pagesFolder() const { return m_pagesFolder.isEmpty() ? defaultPagesFolder() : m_pagesFolder; }
+	static QString safeFileName(const QString& name);
+	void onOpenPageFromWorkflow();
+	//! One async GET with the login token: progress, inactivity timeout, one token refresh on 401/403.
+	void wfGet(const QUrl& url, int timeoutMs, std::function<void(QNetworkReply*)> done, bool retried = false);
+	QString wfErrorText(QNetworkReply* reply, bool timedOut, int timeoutMs) const;
+	//! Writes the download (.sla or zip) as \a slaPath (+ <base>_images/), the workflow ids in DOCUMENT.
+	bool writeWorkflowPage(const QByteArray& body, const QString& slaPath, const QMap<QString, QString>& ids, QString* error, int* images);
+	//! Opens \a path, keeps \a ids in the document, binds the held page lock to it.
+	bool openWorkflowPage(const QString& path, const QMap<QString, QString>& ids);
+	//! Placing / marking for the list page (m_fetchPageId, m_fetchDate) into a document opened from another
+	//! workflow page asks first. True = go on.
+	bool confirmWorkflowPage(const QString& action);
+	void runWorkflowOpenSelfTest(const QString& report);
+	QStringList m_wfTestLog;
+	QString m_wfTestAnswer;                  // self-test: the existing-file answer (open / replace / keep / cancel)
 	QPushButton* m_placeBtn      {nullptr};
 	QPushButton* m_refreshBtn    {nullptr};
 	QPushButton* m_settingsBtn   {nullptr};

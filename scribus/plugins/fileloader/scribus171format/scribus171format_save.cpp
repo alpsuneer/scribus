@@ -427,6 +427,10 @@ bool Scribus171Format::saveFile(const QString & fileName, const FileFormat & /* 
 	// Written only when set, so documents that never used it stay byte-identical.
 	if (m_Doc->suneerLinkedImagesNoAsk())
 		docu.writeAttribute("SuneerLinkedImagesNoAsk", 1);
+	// The workflow page the document was opened from (News Browser); only when there is one.
+	for (const QString& key : ScribusDoc::suneerWorkflowKeys())
+		if (!m_Doc->suneerWorkflow().value(key).isEmpty())
+			docu.writeAttribute(ScribusDoc::suneerWorkflowAttr(key), m_Doc->suneerWorkflow().value(key));
 	docu.writeAttribute("ShowMargins", static_cast<int>(m_Doc->guidesPrefs().marginsShown));
 	docu.writeAttribute("ShowBaselineGrid", static_cast<int>(m_Doc->guidesPrefs().baselineGridShown));
 	docu.writeAttribute("ShowImages", static_cast<int>(m_Doc->guidesPrefs().showPic));

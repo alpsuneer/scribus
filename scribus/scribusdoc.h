@@ -1405,6 +1405,9 @@ protected:
 	//! "Don't ask again for this document" of the linked-images check before
 	//! Save / PDF / Print. Saved in the .sla (DOCUMENT SuneerLinkedImagesNoAsk).
 	bool m_suneerLinkedImagesNoAsk { false };
+	//! The workflow page this document was opened from (News Browser "Open page from workflow"):
+	//! keys pageId, date, pageName, edition, templateId. Saved in the .sla as DOCUMENT SuneerWf<Key>.
+	QMap<QString, QString> m_suneerWorkflow;
 	QUuid m_uuid;
 
 public: // Public attributes
@@ -2043,6 +2046,11 @@ public:
 	void setOpenedReadOnly(bool ro) { m_openedReadOnly = ro; }
 	bool suneerLinkedImagesNoAsk() const { return m_suneerLinkedImagesNoAsk; }
 	void setSuneerLinkedImagesNoAsk(bool on) { m_suneerLinkedImagesNoAsk = on; }
+	const QMap<QString, QString>& suneerWorkflow() const { return m_suneerWorkflow; }
+	void setSuneerWorkflow(const QMap<QString, QString>& ids) { m_suneerWorkflow = ids; }
+	//! The .sla attribute names of the workflow ids (DOCUMENT SuneerWfPageId, ...).
+	static QStringList suneerWorkflowKeys() { return { QStringLiteral("pageId"), QStringLiteral("date"), QStringLiteral("pageName"), QStringLiteral("edition"), QStringLiteral("templateId") }; }
+	static QString suneerWorkflowAttr(const QString& key) { return QStringLiteral("SuneerWf") + key.left(1).toUpper() + key.mid(1); }
 	void setDocumentFileName(const QString& documentFileName);
 };
 

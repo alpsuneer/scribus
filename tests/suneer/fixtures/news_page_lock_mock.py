@@ -10,7 +10,13 @@ usage: news_page_lock_mock.py <port>
   editions KNR (Page 1..8) and TVM (Page 1..3); A has both, B has KNR.
   test-only: POST /api/v1/mock/hang {"on": true} makes GET /news/layout/pages hang;
              GET /api/v1/mock/state lists the locks.
+  Open page from workflow (tests/suneer/news_open_page.sh), files from $WFOPEN_FIXTURES:
+    GET /news-layout-settings/page-context?pageId&publishDate  (the workflow's getPageLayoutContext)
+    GET /sla-templates/<id>/download?date&pageId  -> page.sla (octet-stream) or obit.zip (zip)
+  KNR Page 1 tpl-p1 (.sla), Page 3 tpl-obit (zip with images/), Page 4 "no template" chosen,
+  Page 5 only the page's last-used tpl-p5, Page 6 -> 500, Page 7 -> never answers, Page 8 -> 400.
 """
+import os
 import json
 import sys
 import threading
@@ -34,6 +40,12 @@ PAGE_EDITION = {p["id"]: ed for ed, ps in PAGES.items() for p in ps}
 STATUS = {}
 LOCK = threading.Lock()
 HANG = {"on": False}
+FIX = os.environ.get("WFOPEN_FIXTURES", "")
+# pageId -> (day's slaTemplateId, templateChosen, page's last-used template)
+CONTEXT = {"p-knr-1": ("tpl-p1", True, "tpl-p1"), "p-knr-3": ("tpl-obit", True, "tpl-obit"),
+           "p-knr-4": (None, True, "tpl-p1"), "p-knr-5": (None, False, "tpl-p5"),
+           "p-knr-6": ("tpl-500", True, None), "p-knr-7": ("tpl-hang", True, None), "p-knr-8": ("tpl-gone", True, None)}
+TEMPLATE_FILE = {"tpl-p1": ("page.sla", False), "tpl-p5": ("page.sla", False), "tpl-obit": ("obit.zip", True)}
 
 
 def now():
@@ -123,6 +135,36 @@ class Handler(BaseHTTPRequestHandler):
             return self.ok(user_json(u))
         if method == "POST" and path == "/users/auth/logout":
             return self.ok({})
+        if method == "GET" and path == "/news-layout-settings/page-context":
+            pid = (q.get("pageId") or [""])[0]
+            if pid not in PAGE_EDITION:
+                return self.bad(400, "Page not found")
+            day, chosen, last = CONTEXT.get(pid, (None, False, None))
+            return self.ok({"pageId": pid, "pageName": next(p["name"] for p in PAGES[PAGE_EDITION[pid]] if p["id"] == pid),
+                            "editionId": PAGE_EDITION[pid], "pageType": "obituary" if pid == "p-knr-3" else None,
+                            "slaTemplateId": day, "defaultSlaTemplateId": last, "sourcePageId": None, "rowCount": 3,
+                            "templateChosen": chosen, "needsTemplateChoice": False})
+        if method == "GET" and path.startswith("/sla-templates/") and path.endswith("/download"):
+            tid = path[len("/sla-templates/"):-len("/download")]
+            if not q.get("date"):
+                return self.bad(400, "date is required")
+            if tid == "tpl-500":
+                return self.bad(500, "Internal server error")
+            if tid == "tpl-hang":
+                time.sleep(30)
+                return self.bad(500, "too late")
+            if tid not in TEMPLATE_FILE:
+                return self.bad(400, "Template not found!")
+            name, is_zip = TEMPLATE_FILE[tid]
+            data = open(os.path.join(FIX, name), "rb").read()
+            page = (q.get("pageId") or ["layout"])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip" if is_zip else "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="%s_%s.%s"' % (page, q["date"][0], "zip" if is_zip else "sla"))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if method == "GET" and path == "/news/layout/pages":
             if HANG["on"]:
                 time.sleep(30)
