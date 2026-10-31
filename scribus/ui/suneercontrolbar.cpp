@@ -1,5 +1,7 @@
 #include "suneercontrolbar.h"
+#include "fontcombo.h"
 #include "suneerweld.h"
+#include "stylecombos.h"
 #include "scribusstructs.h"
 #include "ui/widgets/floatingwindow.h"
 #include "ui/colorpicker/colorpicker.h"
@@ -84,6 +86,7 @@
 #include <QMenu>
 #include <QActionGroup>
 #include <QSettings>
+#include <QResizeEvent>
 #include <QWidgetAction>
 #include <QPushButton>
 #include "colorcombo.h"
@@ -256,6 +259,49 @@ static QFrame* makeSep()
 	return f;
 }
 
+// The Properties > Text font widget, with its family and style boxes handed to the bar's two rows.
+// Everything else (list building, names drawn in their font, style list per family, keeping the
+// style when the family changes, the fontSelected signal) is FontComboH itself - shared, not copied.
+class SuneerFontBoxes : public FontComboH
+{
+public:
+	explicit SuneerFontBoxes(QWidget* parent) : FontComboH(parent, false)
+	{
+		fontFamily->setFixedWidth(120);
+		fontFamily->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		fontStyle->setFixedWidth(96);
+		fontStyle->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		if (fontFamily->completer())
+		{
+			fontFamily->completer()->setCompletionMode(QCompleter::PopupCompletion);
+			fontFamily->completer()->setFilterMode(Qt::MatchContains);
+		}
+		// hints live in the instant full-name popup (FontComboH)
+		hide();
+	}
+	QComboBox* familyBox() const { return fontFamily; }
+	QComboBox* styleBox() const { return fontStyle; }
+	//! Mixed fonts in the selection: both boxes empty, nothing selected.
+	void setMixed(const QStringList& fonts = QStringList())
+	{
+		setMixedFonts(fonts);
+		const bool b1 = fontFamily->blockSignals(true), b2 = fontStyle->blockSignals(true);
+		fontFamily->setCurrentIndex(-1);
+		fontFamily->clearEditText();
+		fontStyle->clear();
+		fontFamily->blockSignals(b1);
+		fontStyle->blockSignals(b2);
+	}
+	//! The family box shows families: the full font name for the preview is family + current style.
+	QString fullNameForFamily(const QString& family) const
+	{
+		const QStringList styles = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.fontMap.value(family);
+		const QString cur = fontStyle->currentText();
+		QString style = styles.contains(cur) ? cur : (styles.contains(QStringLiteral("Regular")) ? QStringLiteral("Regular") : (styles.isEmpty() ? QString() : styles.first()));
+		return style.isEmpty() ? family : family + QStringLiteral(" ") + style;
+	}
+};
+
 SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	: QToolBar("Control Bar", parent), m_scmw(parent)
 {
@@ -303,14 +349,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	auto addR1 = [&](QWidget* w) { row1->addWidget(w); m_textWidgets << w; };
 
 	// Font Selection
-	m_fontCombo = new QComboBox();
-	m_fontCombo->setFixedWidth(120);
-	m_fontCombo->setEditable(true);
-	m_fontCombo->setInsertPolicy(QComboBox::NoInsert);
-	m_fontCombo->completer()->setCompletionMode(QCompleter::PopupCompletion);
-	m_fontCombo->completer()->setFilterMode(Qt::MatchContains);
-	m_fontCombo->setToolTip("Font Family");
-	addR1(m_fontCombo);
+	m_fontBoxes = new SuneerFontBoxes(this);
+	m_fontCombo = m_fontBoxes->familyBox();
+	addR1(m_fontCombo);                 // re-parented into row 1 (the layout takes it)
 
 	// Font Size
 	m_fontSizeSpin = makeSpinBox(0.1, 3000, 2, 0.3, " pt");
@@ -328,6 +369,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_styleSelect->setAdvancedButtonsVisible(false);   // Underline/Strike/Sub/Super: "advanced", see setShowAdvanced()
 	// Detach the Shadow button so it can be placed after the +/- outline-width controls.
 	QToolButton* shadowBtn = m_styleSelect->detachShadowButton();
+	m_shadowBtn = shadowBtn;
 	addR1(m_styleSelect);
 	m_textWidgets << m_styleSelect;
 
@@ -384,6 +426,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		leadL->addWidget(stepW, 0, Qt::AlignVCenter);
 
 		addR1(leadW);   // add to row1 after StyleSelect; shows/hides with the text widgets
+		m_outlineLeadW = leadW;
 	}
 
 	// Shadow button, moved to appear immediately after the +/- outline-width controls
@@ -652,11 +695,8 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	auto addR2 = [&](QWidget* w) { row2->addWidget(w); m_textWidgets << w; };
 
 	// Font Style
-	m_styleCombo = new QComboBox();
-	m_styleCombo->setFixedWidth(96);
-	m_styleCombo->setToolTip("Font Style");
-	m_styleCombo->addItems({"Regular", "Bold", "Italic", "Bold Italic"});
-	addR2(m_styleCombo);
+	m_styleCombo = m_fontBoxes->styleBox();
+	addR2(m_styleCombo);                // the shared widget's style box, in row 2
 
 
 	// Line Spacing
@@ -754,6 +794,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			if (m_scmw && m_scmw->scrActions["itemCondenseToFit"])
 				m_scmw->scrActions["itemCondenseToFit"]->trigger();
 		});
+		m_condenseBtn = condenseBtn;
 		row2->addWidget(condenseBtn);
 		m_textWidgets << condenseBtn;
 	}
@@ -766,6 +807,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			if (m_scmw && m_scmw->scrActions["itemFillTextWithImage"])
 				m_scmw->scrActions["itemFillTextWithImage"]->trigger();
 		});
+		m_fillImageBtn = fillImageBtn;
 		row2->addWidget(fillImageBtn);
 		m_textWidgets << fillImageBtn;
 	}
@@ -778,6 +820,7 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			if (m_scmw && m_scmw->scrActions["itemPosterStack"])
 				m_scmw->scrActions["itemPosterStack"]->trigger();
 		});
+		m_posterBtn = posterBtn;
 		row2->addWidget(posterBtn);
 		m_textWidgets << posterBtn;
 	}
@@ -1451,12 +1494,12 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	iconSetChange();
 
 	// ── Connections ───────────────────────────────────────────────
-	connect(m_fontCombo->lineEdit(), &QLineEdit::returnPressed, this, [this]() { onFontChanged(QFont()); });
-	connect(m_fontCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int) {
-		// Order-independent with the popup's Hide: if the preview is somehow still live,
-		// roll it back first so the committed undo step starts from the original font.
+	// FontComboH commits a family or style choice through fontSelected(full name); a live preview
+	// still running is rolled back first so the undo step starts from the original font.
+	connect(m_fontBoxes, &FontComboH::fontSelected, this, [this](const QString& name) {
 		if (m_fontPreviewActive) { restoreFontPreview(); endFontPreview(); }
-		if (m_fontComboPopupShown) { m_fontComboPopupShown = false; onFontChanged(QFont()); }
+		m_fontComboPopupShown = false;
+		onFontSelected(name);
 	});
 	connect(m_fontCombo, &QComboBox::customContextMenuRequested, this, [this](const QPoint&) { m_fontComboPopupShown = true; });
 	QObject::connect(m_fontCombo->view(), &QAbstractItemView::pressed, this, [this](const QModelIndex&) { m_fontComboPopupShown = true; });
@@ -1482,13 +1525,12 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 			return;
 		// Enter on a highlighted row must reach the activated() commit path above.
 		m_fontComboPopupShown = true;
-		m_fontPreviewPending = m_fontCombo->itemText(idx);
+		m_fontPreviewPending = m_fontBoxes->fullNameForFamily(m_fontCombo->itemText(idx));   // the list holds families
 		// Debounce: each apply is a full relayout + canvas repaint, so a held-down arrow
 		// key must not queue one per font.
 		m_fontPreviewTimer->start();
 	});
 	m_fontCombo->view()->installEventFilter(this);
-	connect(m_styleCombo,       QOverload<int>::of(&QComboBox::currentIndexChanged),   this, &SuneerControlBar::onStyleChanged);
 	connect(m_fontSizeSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged),  this, &SuneerControlBar::onFontSizeChanged);
 	connect(m_trackingSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SuneerControlBar::onTrackingChanged);
 	connect(m_baselineSpin,     QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &SuneerControlBar::onBaselineChanged);
@@ -1878,6 +1920,9 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		connect(m_showAdvancedAction, &QAction::toggled, this, [this](bool on) { setShowAdvanced(on); });
 		setShowAdvanced(prefs ? prefs->getBool("showAdvancedButtons", false) : false);
 	}
+
+	buildTextLayout();
+	updateFromSelection();
 }
 
 void SuneerControlBar::setShowAdvanced(bool on)
@@ -1891,7 +1936,7 @@ void SuneerControlBar::setShowAdvanced(bool on)
 	if (PrefsContext* prefs = PrefsManager::instance().prefsFile ? PrefsManager::instance().prefsFile->getContext("SuneerControlBar") : nullptr)
 		prefs->set("showAdvancedButtons", on);
 	if (m_styleSelect)
-		m_styleSelect->setAdvancedButtonsVisible(on);
+		m_styleSelect->setAdvancedButtonsVisible(true);   // its buttons sit in the » menu now, always shown there
 	// Re-run the contextual pass so the advanced widgets of the current
 	// state appear or disappear right away.
 	updateFromSelection();
@@ -1900,11 +1945,13 @@ void SuneerControlBar::setShowAdvanced(bool on)
 void SuneerControlBar::contextMenuEvent(QContextMenuEvent* ev)
 {
 	QMenu menu(this);
+	for (int g = 0; g < 3; ++g)
+		if (m_groupActs[g]) menu.addAction(m_groupActs[g]);
 	if (m_showAdvancedAction)
-	{
 		menu.addAction(m_showAdvancedAction);
-		menu.addSeparator();
-	}
+	if (m_resetToolbarAction)
+		menu.addAction(m_resetToolbarAction);
+	menu.addSeparator();
 	// The usual toolbar/palette toggles QMainWindow offers on a toolbar. The
 	// toggle actions belong to the main window; only the temporary menu that
 	// carried them is deleted after exec(). (Reparenting that menu into ours
@@ -1922,9 +1969,9 @@ void SuneerControlBar::logToolbarWidth()
 	int mode = m_doc ? m_doc->appMode : -1;
 	QString type = (sel > 0) ? QString::number(m_doc->m_Selection->itemAt(0)->itemType()) : QStringLiteral("-");
 	int win = window() ? window()->width() : 0;
-	qWarning("CONTROLBAR width: toolbar=%d rows=%d row1=%d row2=%d window=%d appMode=%d sel=%d type=%s",
+	qWarning("CONTROLBAR width: toolbar=%d rows=%d row1=%d row2=%d row3=%d window=%d appMode=%d sel=%d type=%s",
 	         sizeHint().width(), m_row1 ? m_row1->parentWidget()->sizeHint().width() : 0,
-	         m_row1 ? m_row1->sizeHint().width() : 0, m_row2 ? m_row2->sizeHint().width() : 0,
+	         m_row1 ? m_row1->sizeHint().width() : 0, m_row2 ? m_row2->sizeHint().width() : 0, m_row3 ? m_row3->sizeHint().width() : 0,
 	         win, mode, sel, qPrintable(type));
 }
 
@@ -2072,14 +2119,8 @@ void SuneerControlBar::setDocument(ScribusDoc* doc)
 		updateFrameSizeVisibility();
 		return;
 	}
-	// Load Scribus fonts into combo
-	m_fontCombo->blockSignals(true);
-	m_fontCombo->clear();
-	QStringList fonts = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.keys();
-	fonts.sort();
-	for (const QString& f : fonts)
-		m_fontCombo->addItem(f);
-	m_fontCombo->blockSignals(false);
+	// the font list exactly as Properties > Text builds it (document fonts included)
+	m_fontBoxes->rebuildList(doc);
 	if (doc) {
 		m_textColorBtn->setDoc(doc);
 		m_bgColorBtn->setDoc(doc);
@@ -2141,6 +2182,10 @@ void SuneerControlBar::showTextWidgets(bool show)
 		if (w)
 			w->setVisible(show && (m_showAdvanced || !m_advancedWidgets.contains(w)));
 	}
+	if (show)
+		applyGroupVisibility();
+	reflowExtras();
+	refreshRowsHeight();
 }
 
 void SuneerControlBar::showLineWidgets(bool show)
@@ -2154,12 +2199,32 @@ void SuneerControlBar::showImageWidgets(bool show)
 	if (show) showLineWidgets(false);
 	for (QWidget* w : m_imageWidgets)
 		w->setVisible(show && (m_showAdvanced || !m_advancedWidgets.contains(w)));
+	refreshRowsHeight();
 }
 
 void SuneerControlBar::showTextWrapWidgets(bool show)
 {
+	// Text frames: the five flow buttons + Wrap sit in row 2's Frame group (before the line width),
+	// side by side, the active one checked. Image frames and the rest keep them in row 1 as before.
+	const bool textState = m_doc && !m_doc->m_Selection->isEmpty() && m_doc->m_Selection->itemAt(0)->isTextFrame()
+	                       && m_textLineWidthSpin && !m_textLineWidthSpin->isHidden();
+	if (show && m_row1 && m_row2 && m_textLineWidthSpin && m_arrangeSep && textState != m_wrapOnRow2)
+	{
+		for (QWidget* w : std::as_const(m_textWrapWidgets)) { m_row1->removeWidget(w); m_row2->removeWidget(w); }
+		if (textState)
+		{
+			int at = m_row2->indexOf(m_textLineWidthSpin);
+			for (QWidget* w : std::as_const(m_textWrapWidgets)) m_row2->insertWidget(at++, w);
+		}
+		else
+		{
+			int at = m_row1->indexOf(m_arrangeSep);
+			for (QWidget* w : std::as_const(m_textWrapWidgets)) m_row1->insertWidget(at++, w);
+		}
+		m_wrapOnRow2 = textState;
+	}
 	for (QWidget* w : m_textWrapWidgets)
-		w->setVisible(show);
+		if (w) w->setVisible(show);
 }
 
 void SuneerControlBar::updateTextWrapControls(PageItem* item)
@@ -2171,6 +2236,16 @@ void SuneerControlBar::updateTextWrapControls(PageItem* item)
 	m_textFlowBBoxBtn->setChecked(    mode == PageItem::TextFlowUsesBoundingBox);
 	m_textFlowContourBtn->setChecked( mode == PageItem::TextFlowUsesContourLine);
 	m_textFlowClipBtn->setChecked(    mode == PageItem::TextFlowUsesImageClipping);
+	// the Wrap dropdown (row 2) shows the same choice
+	const bool actOn[5] = { mode == PageItem::TextFlowDisabled, mode == PageItem::TextFlowUsesFrameShape, mode == PageItem::TextFlowUsesBoundingBox,
+	                        mode == PageItem::TextFlowUsesContourLine, mode == PageItem::TextFlowUsesImageClipping };
+	for (int i = 0; i < 5; ++i)
+		if (m_flowActs[i])
+		{
+			m_flowActs[i]->setChecked(actOn[i]);
+			// a tick in the text as well: with an icon the checked state alone is easy to miss
+			m_flowActs[i]->setText((actOn[i] ? QStringLiteral("\u2713 ") : QStringLiteral("    ")) + m_flowActs[i]->data().toString());
+		}
 	// Sync the popup radios too
 	m_wrapNoneRadio->setChecked(    mode == PageItem::TextFlowDisabled);
 	m_wrapShapeRadio->setChecked(   mode == PageItem::TextFlowUsesFrameShape);
@@ -2249,24 +2324,66 @@ void SuneerControlBar::updateFromSelection()
 		const CharStyle& cs = textItem->currentCharStyle();
 		const ParagraphStyle& ps = textItem->currentStyle();
 
-		// Font family — from effective char style (same as Text Properties)
+		// Font family + style - from the effective char style, shown by the shared widget (same as Properties > Text)
 		QString fontName = cs.font().scName();
 		if (fontName.isEmpty())
 			fontName = ps.charStyle().font().scName();
-		m_fontCombo->setCurrentText(fontName);
+		m_fontBoxes->setCurrentFont(fontName);
+		// Mixed fonts: a whole frame (or several) with more than one font, or in edit mode a text
+		// selection spanning two fonts, shows EMPTY boxes rather than the first run's name. Cursor
+		// only (no selection) keeps the typing font, as Properties > Text does.
+		{
+			QSet<QString> fonts;
+			const bool editing = (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable);
+			int from = 0, to = textItem->itemText.length();
+			bool scan = true;
+			if (editing)
+			{
+				if (textItem->itemText.hasSelection())
+				{
+					from = textItem->itemText.startOfSelection();
+					to = textItem->itemText.endOfSelection();
+				}
+				else
+					scan = false;
+			}
+			if (scan)
+			{
+				QList<PageItem*> all;
+				for (int k = 0; k < sel()->count(); ++k)
+					if (sel()->itemAt(k)->isTextFrame())
+						all << sel()->itemAt(k);
+				if (all.isEmpty())
+					all << textItem;
+				for (PageItem* fr : all)
+				{
+					const int f0 = (fr == textItem) ? from : 0, f1 = (fr == textItem) ? to : fr->itemText.length();
+					if (f1 <= f0)
+						fonts.insert(fr->itemText.defaultStyle().charStyle().font().scName());
+					for (int i = f0; i < f1; ++i)
+						fonts.insert(fr->itemText.charStyle(i).font().scName());
+				}
+				if (fonts.count() > 1)
+					m_fontBoxes->setMixed(fonts.values());
+				if (qEnvironmentVariableIsSet("SUNEER_FONTBOX_DEBUG"))
+					fprintf(stderr, "FONTBOX mode=%d editing=%d hasSel=%d from=%d to=%d fonts=%d [%s]\n", (int) m_doc->appMode, editing ? 1 : 0, textItem->itemText.hasSelection() ? 1 : 0, from, to, fonts.count(), qPrintable(QStringList(fonts.values()).join(',')));
+			}
+			else if (qEnvironmentVariableIsSet("SUNEER_FONTBOX_DEBUG"))
+				fprintf(stderr, "FONTBOX mode=%d editing, no selection: typing font %s\n", (int) m_doc->appMode, qPrintable(fontName));
+		}
 
 		// Font size
 		m_fontSizeSpin->setValue(cs.fontSize() / 10.0);
 
-		// Font style
-		QString style = "Regular";
-		if (fontName.contains("Bold Italic", Qt::CaseInsensitive)) style = "Bold Italic";
-		else if (fontName.contains("Bold", Qt::CaseInsensitive)) style = "Bold";
-		else if (fontName.contains("Italic", Qt::CaseInsensitive)) style = "Italic";
-		m_styleCombo->setCurrentText(style);
-
 		// Character formatting via StyleSelect
 		m_styleSelect->setStyle(cs.effects());
+		if (m_boldBtn && m_italicBtn)
+		{
+			const QString fn = cs.font().scName();
+			QSignalBlocker b1(m_boldBtn), b2(m_italicBtn);
+			m_boldBtn->setChecked(fn.contains(QLatin1String("Bold"), Qt::CaseInsensitive) || fn.contains(QLatin1String("Heavy"), Qt::CaseInsensitive) || fn.contains(QLatin1String("Black"), Qt::CaseInsensitive));
+			m_italicBtn->setChecked(fn.contains(QLatin1String("Italic"), Qt::CaseInsensitive) || fn.contains(QLatin1String("Oblique"), Qt::CaseInsensitive));
+		}
 		// Outline stroke width popup + stroke/shadow colour
 		if (m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->LWidth)
 		{
@@ -2355,6 +2472,8 @@ void SuneerControlBar::updateFromSelection()
 		// Paragraph spacing (pt, matches Properties Palette Distances)
 		m_gapBeforeSpin->setValue(ps.gapBefore());
 		m_gapAfterSpin->setValue(ps.gapAfter());
+		if (m_dropCapBtn) { QSignalBlocker b(m_dropCapBtn); m_dropCapBtn->setChecked(ps.hasDropCap()); }
+		updateTextWrapControls(item);
 
 		// Advanced typography
 		m_trackingSpin->setValue(cs.tracking() / 10.0);
@@ -2745,7 +2864,7 @@ void SuneerControlBar::showGroupMixedValues()
 				fonts.insert(it->itemText.defaultStyle().charStyle().font().scName());
 				sizes.insert(it->itemText.defaultStyle().charStyle().fontSize());
 			}
-			for (int i = 0; i < len && (fonts.count() < 2 || sizes.count() < 2); ++i)
+			for (int i = 0; i < len; ++i)
 			{
 				const CharStyle& cs = it->itemText.charStyle(i);
 				fonts.insert(cs.font().scName());
@@ -2753,11 +2872,7 @@ void SuneerControlBar::showGroupMixedValues()
 			}
 		}
 		if (fonts.count() > 1)
-		{
-			m_fontCombo->setCurrentIndex(-1);
-			m_fontCombo->clearEditText();
-			m_styleCombo->setCurrentIndex(-1);
-		}
+			m_fontBoxes->setMixed(fonts.values());   // mixed fonts: both boxes empty, never a wrong name
 		if (sizes.count() > 1)
 			setSpinMixed(m_fontSizeSpin);
 		if (differs([](const PageItem* it) { return it->currentStyle().lineSpacing(); }))
@@ -2872,6 +2987,7 @@ void SuneerControlBar::snapshotFontPreview()
 			continue;
 		FontPreviewFrame snap;
 		snap.item = item;
+		snap.defaultFont = item->itemText.defaultStyle().charStyle().font().scName();
 		int runStart = start;
 		QString runFont = item->itemText.charStyle(start).font().scName();
 		for (int pos = start + 1; pos <= end; ++pos)
@@ -2927,12 +3043,23 @@ void SuneerControlBar::restoreFontPreview()
 			cs.setFont(availFonts[run.fontName]);
 			item->itemText.applyCharStyle(run.start, len, cs);
 		}
+		// A select-mode apply also rewrites the story's default style font; put that back as well,
+		// otherwise Properties > Text keeps showing the previewed font after the list is cancelled.
+		if (!snap.defaultFont.isEmpty() && availFonts.contains(snap.defaultFont))
+		{
+			ParagraphStyle ds(item->itemText.defaultStyle());
+			ds.charStyle().setFont(availFonts[snap.defaultFont]);
+			item->itemText.setDefaultStyle(ds);
+		}
 		item->invalid = true;
 		item->invalidateLayout();
 	}
 	UndoManager::instance()->setUndoEnabled(true);
 	m_doc->regionsChanged()->update(QRectF());
 	m_fontPreviewApplied.clear();
+	// refresh bar + Properties from the restored story
+	if (m_scmw && !m_fontPreviewFrames.isEmpty() && m_fontPreviewFrames.first().item)
+		m_scmw->setTBvals(m_fontPreviewFrames.first().item);
 }
 
 void SuneerControlBar::endFontPreview()
@@ -3091,11 +3218,31 @@ void SuneerControlBar::announceWholeFrameChange(const QString& what)
 		m_scmw->statusBar()->showMessage(tr("%1 changed for the whole frame (no text selected in edit mode)").arg(what), 6000);
 }
 
-void SuneerControlBar::onFontChanged(const QFont& font)
+static QString suneerStyledFontName(QString base, const QString& style);
+
+void SuneerControlBar::onFontSelected(const QString& fontName)
 {
 	SuneerGroupUndo groupUndo(this);
-	if (m_updating || !m_doc) return;
-	QString fontName = m_fontCombo->currentText();
+	if (m_updating || !m_doc || fontName.isEmpty()) return;
+	if (!PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.contains(fontName)) return;
+	// A group of frames with different families and only the STYLE changed: every frame keeps its
+	// own family and takes the chosen style (where that face exists).
+	if (m_groupActive && m_fontCombo->currentText().isEmpty())
+	{
+		const QString style = m_styleCombo->currentText();
+		for (PageItem* frame : sel()->items())
+		{
+			const QString styled = suneerStyledFontName(frame->currentCharStyle().font().scName(), style);
+			if (styled.isEmpty())
+				continue;
+			Selection one(this, false);
+			one.addItem(frame);
+			m_doc->itemSelection_SetFont(styled, &one);
+		}
+		m_doc->changed();
+		announceWholeFrameChange(tr("Font"));
+		return;
+	}
 	if (!sel()->isEmpty()) {
 		PageItem* item = sel()->itemAt(0);
 		// suneer: table-wide Font — only handle the "whole table selected as an object"
@@ -3142,6 +3289,11 @@ void SuneerControlBar::onFontChanged(const QFont& font)
 	// returns only on Enter or Esc, via returnFocusToCanvas().
 }
 
+void SuneerControlBar::onFontChanged(const QFont&)
+{
+	onFontSelected(m_fontBoxes ? m_fontBoxes->currentFont() : m_fontCombo->currentText());
+}
+
 // "Family Regular" + Bold is "Family Bold", not "Family Regular Bold": the
 // face name replaces Regular. Returns an empty name when the family has no
 // such face, so the caller leaves that text alone instead of naming a font
@@ -3167,63 +3319,6 @@ static QString suneerStyledFontName(QString base, const QString& style)
 	return QString();
 }
 
-void SuneerControlBar::onStyleChanged(int)
-{
-	SuneerGroupUndo groupUndo(this);
-	if (m_updating || !m_doc || sel()->isEmpty()) return;
-	if (m_groupActive)
-	{
-		// Each frame keeps its own family and only gains the style.
-		const QString style = m_styleCombo->currentText();
-		for (PageItem* frame : sel()->items())
-		{
-			const QString styled = suneerStyledFontName(frame->currentCharStyle().font().scName(), style);
-			if (styled.isEmpty())
-				continue;   // this family has no such face
-			Selection one(this, false);
-			one.addItem(frame);
-			m_doc->itemSelection_SetFont(styled, &one);
-		}
-		m_doc->changed();
-		return;
-	}
-	PageItem* item = sel()->itemAt(0);
-
-	// The family to restyle has to come from a cell, not from the table. A
-	// PageItem_Table has its own empty story, so currentCharStyle() there returns
-	// the default face and "Bold" would be applied on top of the wrong family --
-	// usually naming a face that does not exist, which itemSelection_SetFont then
-	// discards. Prefer the selection's first cell, then the active one.
-	PageItem* styleSrc = item;
-	if (item->isTable())
-	{
-		PageItem_Table* tbl = item->asTable();
-		PageItem_TextFrame* srcFrame = nullptr;
-		if (tbl->hasSelection() && !tbl->selectedCells().isEmpty())
-			srcFrame = tbl->selectedCells().values().first().textFrame();
-		if (!srcFrame)
-			srcFrame = tbl->activeCell().textFrame();
-		if (!srcFrame && tbl->rows() > 0 && tbl->columns() > 0)
-			srcFrame = tbl->cellAt(0, 0).textFrame();
-		if (srcFrame)
-			styleSrc = srcFrame;
-	}
-
-	QString base = styleSrc->currentCharStyle().font().scName();
-	base = base.replace(" Bold Italic","").replace(" Bold","").replace(" Italic","").trimmed();
-	QString style = m_styleCombo->currentText();
-	if (style != "Regular") base += " " + style;
-	const QString newFont = base.trimmed();
-
-	if (m_doc->appMode != modeEditTable && item->isTable())
-	{
-		if (suneerApplyToWholeTable(m_doc, item->asTable(),
-		        [this, newFont](Selection& sel) { m_doc->itemSelection_SetFont(newFont, &sel); }))
-			return;
-	}
-	m_doc->itemSelection_SetFont(newFont, tsel());
-	m_doc->changed();
-}
 
 void SuneerControlBar::onFontSizeChanged(double val)
 {
@@ -6243,4 +6338,435 @@ void SuneerControlBar::onTextFrameBox()
 		borderTransaction.commit();
 	doc->regionsChanged()->update(QRect());
 	doc->changed();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// suneer 2026-10-25: redesigned text rows.
+//
+// Row 1 - CHARACTER: family + style side by side | Size | Line + mode | ↔ | AV | colour | B I U x² |
+//         character style | »
+// Row 2 - PARAGRAPH: paragraph style | alignment | ⇤ ↥ ↧ | drop cap || FRAME: columns, gap | wrap
+//         dropdown | line width + style, line colour, fill | »
+// Every widget of the old bar is kept (same object, same slots); only its seat changes. The rarely
+// used ones sit in the two » menus, where they keep working and showing their state. New here: B / I
+// (switch the font face), the character and paragraph style combos, drop cap, and the Wrap dropdown
+// (the five text-flow icons stay in the bar for image frames and become menu entries here).
+// ═══════════════════════════════════════════════════════════════════════════
+
+static QLabel* suneerGroupLabel(const QString& text)
+{
+	QLabel* l = new QLabel(text);
+	l->setStyleSheet("QLabel { color: #8c8c8c; font-size: 8pt; font-weight: 600; }");
+	l->setContentsMargins(3, 0, 2, 0);
+	l->setToolTip(text);
+	return l;
+}
+
+static QLabel* suneerFieldLabel(const QString& text, const QString& tip)
+{
+	QLabel* l = new QLabel(text);
+	l->setStyleSheet("QLabel { color: #6a6a6a; font-size: 8pt; }");
+	l->setContentsMargins(3, 0, 1, 0);
+	l->setToolTip(tip);
+	return l;
+}
+
+static bool suneerIsSeparator(QWidget* w)
+{
+	QFrame* f = qobject_cast<QFrame*>(w);
+	return f && qstrcmp(w->metaObject()->className(), "QFrame") == 0 && f->frameShape() == QFrame::VLine;
+}
+
+static void suneerSetIcon(QToolButton* b, const QString& name, const QString& fallbackText = QString())
+{
+	if (!b) return;
+	QIcon ic = IconManager::instance().loadIcon(name);
+	if (ic.isNull())
+	{
+		if (!fallbackText.isEmpty()) b->setText(fallbackText);
+		return;
+	}
+	b->setIcon(ic);
+	b->setIconSize(QSize(20, 20));
+	b->setText(QString());
+	b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+}
+
+QToolButton* SuneerControlBar::makeOverflowButton(const QString& tip, QWidget* content)
+{
+	QToolButton* b = new QToolButton();
+	b->setText(QStringLiteral("»"));
+	b->setToolTip(tip);
+	b->setFixedSize(22, 22);
+	b->setPopupMode(QToolButton::InstantPopup);
+	b->setStyleSheet("QToolButton { font-weight: bold; font-size: 13px; } QToolButton::menu-indicator { image: none; }");
+	QMenu* menu = new QMenu(b);
+	QWidgetAction* wa = new QWidgetAction(menu);
+	wa->setDefaultWidget(content);
+	menu->addAction(wa);
+	b->setMenu(menu);
+	return b;
+}
+
+// one "Label: widgets…" line inside a » menu
+static QHBoxLayout* suneerMenuLine(QVBoxLayout* v, const QString& title)
+{
+	QHBoxLayout* h = new QHBoxLayout();
+	h->setContentsMargins(0, 0, 0, 0);
+	h->setSpacing(3);
+	QLabel* l = new QLabel(title);
+	l->setStyleSheet("QLabel { color: #6a6a6a; font-size: 8pt; }");
+	l->setMinimumWidth(78);
+	h->addWidget(l);
+	v->addLayout(h);
+	return h;
+}
+
+void SuneerControlBar::buildTextLayout()
+{
+	if (!m_row1 || !m_row2)
+		return;
+	IconManager& im = IconManager::instance();
+
+	// ── 1. take every text widget out of the rows; old separators go away ──
+	QList<QWidget*> keep;
+	for (QWidget* w : std::as_const(m_textWidgets))
+	{
+		if (!w) continue;
+		if (suneerIsSeparator(w))
+		{
+			m_row1->removeWidget(w); m_row2->removeWidget(w);
+			w->hide(); w->deleteLater();
+			continue;
+		}
+		m_row1->removeWidget(w); m_row2->removeWidget(w);
+		if (!keep.contains(w)) keep << w;
+	}
+	m_textWidgets = keep;
+	auto reg = [this](QWidget* w) { if (w && !m_textWidgets.contains(w)) m_textWidgets << w; return w; };
+
+	// the » menus hold the "advanced" ones permanently, so they leave the advanced set
+	for (QWidget* w : { static_cast<QWidget*>(m_trackingIconLbl), static_cast<QWidget*>(m_trackingSpin),
+	                    static_cast<QWidget*>(m_baselineIconLbl), static_cast<QWidget*>(m_baselineSpin),
+	                    static_cast<QWidget*>(m_scaleVIconLbl), static_cast<QWidget*>(m_scaleVSpin) })
+		m_advancedWidgets.remove(w);
+	if (m_styleSelect)
+		m_styleSelect->setAdvancedButtonsVisible(true);
+
+	// ── 2. new controls ──
+	QToolButton* underlineBtn = m_styleSelect ? m_styleSelect->detachUnderlineButton() : nullptr;
+	QToolButton* superBtn = m_styleSelect ? m_styleSelect->detachSuperscriptButton() : nullptr;
+
+	m_boldBtn = makeButton(QStringLiteral("B"), tr("Bold: switch to the Bold face of this family (Ctrl+B in Properties is not affected)"), true);
+	m_boldBtn->setStyleSheet("QToolButton { font-weight: bold; font-size: 12px; }");
+	connect(m_boldBtn, &QToolButton::clicked, this, [this](bool) { applyFaceToggle(); });
+	m_italicBtn = makeButton(QStringLiteral("I"), tr("Italic: switch to the Italic / Oblique face of this family"), true);
+	m_italicBtn->setStyleSheet("QToolButton { font-style: italic; font-size: 12px; font-family: serif; }");
+	connect(m_italicBtn, &QToolButton::clicked, this, [this](bool) { applyFaceToggle(); });
+
+	m_dropCapBtn = makeButton(QStringLiteral("Dc"), tr("Drop cap: the first letter of the paragraph spans the first lines (2 lines, or the number set in Properties > Paragraph Effects)"), true);
+	suneerSetIcon(m_dropCapBtn, "paragraph-effects-style", "Dc");
+	connect(m_dropCapBtn, &QToolButton::clicked, this, &SuneerControlBar::onDropCapToggled);
+
+	// ── 3. icons instead of text-like buttons (tooltips stay) ──
+	suneerSetIcon(m_textFeatherBtn, "fether");
+	if (m_textFeatherBtn && m_textFeatherBtn->icon().isNull())
+	{
+		QIcon fi(QStringLiteral("/usr/local/share/scribus/icons/1_7_0/fether.png"));
+		if (!fi.isNull()) { m_textFeatherBtn->setIcon(fi); m_textFeatherBtn->setIconSize(QSize(20, 20)); m_textFeatherBtn->setText(QString()); }
+	}
+	suneerSetIcon(m_textBoxBtn, "border-outside");
+	suneerSetIcon(m_shadingBtn, "text-background-color");
+	suneerSetIcon(m_condenseBtn, "character-scale-width-min");
+	suneerSetIcon(m_textPadResetBtn, "path-contour-reset");
+	if (m_internalPadChk)
+	{
+		QIcon ii = im.loadIcon("border-inside");
+		if (!ii.isNull()) { m_internalPadChk->setIcon(ii); m_internalPadChk->setIconSize(QSize(18, 18)); m_internalPadChk->setText(QString()); }
+	}
+	if (m_scaleHIconLbl) m_scaleHIconLbl->setToolTip(tr("Horizontal scale (%)"));
+	if (m_trackingIconLbl) m_trackingIconLbl->setToolTip(tr("Tracking / character spacing"));
+	if (m_firstLineIndentIconLbl) m_firstLineIndentIconLbl->setToolTip(tr("First line indent (mm)"));
+	if (m_gapBeforeIconLbl) m_gapBeforeIconLbl->setToolTip(tr("Space above paragraph (pt)"));
+	if (m_gapAfterIconLbl) m_gapAfterIconLbl->setToolTip(tr("Space below paragraph (pt)"));
+	if (m_baselineIconLbl) m_baselineIconLbl->setToolTip(tr("Baseline offset (%)"));
+	if (m_scaleVIconLbl) m_scaleVIconLbl->setToolTip(tr("Vertical scale (%)"));
+	if (m_columnsIconLbl) m_columnsIconLbl->setToolTip(tr("Columns"));
+	if (m_fontCombo) m_fontCombo->setFixedWidth(150);
+	if (m_styleCombo) m_styleCombo->setFixedWidth(88);
+	if (m_columnGapCombo) m_columnGapCombo->setFixedWidth(50);
+	if (m_columnsSpin) m_columnsSpin->setFixedWidth(40);
+	if (m_firstLineIndentSpin) m_firstLineIndentSpin->setFixedWidth(62);
+	if (m_gapBeforeSpin) m_gapBeforeSpin->setFixedWidth(56);
+	if (m_gapAfterSpin) m_gapAfterSpin->setFixedWidth(56);
+	if (m_textLineWidthSpin) m_textLineWidthSpin->setFixedWidth(66);
+	if (m_textLineStyleCombo) m_textLineStyleCombo->setFixedWidth(58);
+
+	// ── 4. row 3: the former » tools, all visible ──
+	// Row 1 would reach ~1700 px and row 2 ~1460 px with them, so they get a third row of their own:
+	// extra character tools on the left, extra frame tools on the right. Nothing is hidden anywhere.
+	QVBoxLayout* vlay = qobject_cast<QVBoxLayout*>(m_row1->parent());
+	if (!m_row3 && vlay)
+	{
+		m_row3 = new QHBoxLayout();
+		m_row3->setSpacing(1);
+		m_row3->setContentsMargins(0, 0, 0, 0);
+		m_row3->addStretch();
+		vlay->insertLayout(vlay->indexOf(m_row2) + 1, m_row3);
+	}
+	// ── 5. seat everything ──
+	m_groupCharacter.clear(); m_groupParagraph.clear(); m_groupFrame.clear();
+	int i1 = m_groupEditWidget ? m_row1->indexOf(m_groupEditWidget) + 1 : 0;
+	auto r1 = [&](QWidget* w, QList<QWidget*>* group = nullptr) { if (!w) return; m_row1->insertWidget(i1++, w); reg(w); if (group) *group << w; };
+	auto sep1 = [&](QList<QWidget*>* group) { r1(makeSep(), group); };
+	r1(m_fontCombo, &m_groupCharacter); r1(m_styleCombo, &m_groupCharacter);
+	sep1(&m_groupCharacter);
+	r1(suneerFieldLabel(tr("Size"), tr("Font size (pt)")), &m_groupCharacter); r1(m_fontSizeSpin, &m_groupCharacter);
+	r1(suneerFieldLabel(tr("Line"), tr("Line spacing (pt) and mode")), &m_groupCharacter); r1(m_lineSpSpin, &m_groupCharacter); r1(m_lineSpModeCombo, &m_groupCharacter);
+	sep1(&m_groupCharacter);
+	r1(m_scaleHIconLbl, &m_groupCharacter); r1(m_scaleHSpin, &m_groupCharacter);
+	r1(m_trackingIconLbl, &m_groupCharacter); r1(m_trackingSpin, &m_groupCharacter);
+	sep1(&m_groupCharacter);
+	r1(m_textColorBtn, &m_groupCharacter);
+	r1(m_boldBtn, &m_groupCharacter); r1(m_italicBtn, &m_groupCharacter); r1(underlineBtn, &m_groupCharacter); r1(superBtn, &m_groupCharacter);
+	m_charRowEnd = superBtn;
+
+	int i2 = 0;
+	auto r2 = [&](QWidget* w, QList<QWidget*>* group = nullptr) { if (!w) return; m_row2->insertWidget(i2++, w); reg(w); if (group) *group << w; };
+	auto sep2 = [&](QList<QWidget*>* group) { r2(makeSep(), group); };
+	r2(m_alignSelect, &m_groupParagraph);
+	sep2(&m_groupParagraph);
+	r2(m_firstLineIndentIconLbl, &m_groupParagraph); r2(m_firstLineIndentSpin, &m_groupParagraph);
+	r2(m_gapBeforeIconLbl, &m_groupParagraph); r2(m_gapBeforeSpin, &m_groupParagraph);
+	r2(m_gapAfterIconLbl, &m_groupParagraph); r2(m_gapAfterSpin, &m_groupParagraph);
+	r2(m_dropCapBtn, &m_groupParagraph);
+	sep2(&m_groupParagraph);
+	r2(m_columnsIconLbl, &m_groupFrame); r2(m_columnsSpin, &m_groupFrame); r2(m_columnGapCombo, &m_groupFrame); r2(m_columnGapSpin, &m_groupFrame);
+	sep2(&m_groupFrame);
+	// text-flow buttons (m_textWrapWidgets) are seated here by showTextWrapWidgets() in the text state
+	r2(m_textLineWidthSpin, &m_groupFrame); r2(m_textLineStyleCombo, &m_groupFrame); r2(m_fillColorBtn, &m_groupFrame);
+
+	// extras: at the END of row 1 (character) / row 2 (frame) when the width allows, else on row 3 —
+	// decided by reflowExtras() on every resize and state change. Separators belong to the lists.
+	m_extraChar.clear(); m_extraFrame.clear();
+	auto xc = [&](QWidget* w) { if (!w) return; reg(w); m_groupCharacter << w; m_extraChar << w; };
+	auto xf = [&](QWidget* w) { if (!w) return; reg(w); m_groupFrame << w; m_extraFrame << w; };
+	xc(makeSep());
+	xc(suneerFieldLabel(tr("Effects"), tr("Underline word, strike out, subscript, outline (+ width, colour), shadow")));
+	xc(m_styleSelect); xc(m_outlineLeadW); xc(m_shadowBtn);
+	xc(makeSep());
+	xc(suneerFieldLabel(tr("Bg"), tr("Text background colour"))); xc(m_bgColorBtn);
+	xc(makeSep());
+	xc(m_baselineIconLbl); xc(m_baselineSpin); xc(m_scaleVIconLbl); xc(m_scaleVSpin);
+	xf(makeSep());
+	xf(suneerFieldLabel(tr("Fit"), tr("Condense to fit, fill text with image, poster stack")));
+	xf(m_condenseBtn); xf(m_fillImageBtn); xf(m_posterBtn);
+	xf(makeSep());
+	xf(m_textFeatherBtn); xf(m_textBoxBtn); xf(m_shadingBtn);
+	xf(makeSep());
+	xf(suneerFieldLabel(tr("Line"), tr("Frame line colour"))); xf(m_txtLineColorBtn);
+	xf(makeSep());
+	xf(suneerFieldLabel(tr("Gap"), tr("Frame gap (padding): internal/external, all sides + / -, reset, each side")));
+	xf(m_internalPadChk); xf(m_textPadAllPlusBtn); xf(m_textPadAllMinusBtn); xf(m_textPadResetBtn); xf(m_textGapSidesBtn);
+	m_extrasOnRow3[0] = m_extrasOnRow3[1] = true;   // start on row 3; reflowExtras() lifts them into the rows if they fit
+	for (QWidget* w : std::as_const(m_extraChar)) m_row3->insertWidget(m_row3->count() - 1, w);
+	for (QWidget* w : std::as_const(m_extraFrame)) m_row3->insertWidget(m_row3->count() - 1, w);
+
+	// ── 6. one height for every box and button ──
+	for (QWidget* w : std::as_const(m_textWidgets))
+	{
+		if (!w) continue;
+		if (qobject_cast<QAbstractSpinBox*>(w) || qobject_cast<QComboBox*>(w))
+			w->setFixedHeight(22);
+		else if (QToolButton* b = qobject_cast<QToolButton*>(w))
+		{
+			if (b != m_outlineIncBtn && b != m_outlineDecBtn) b->setFixedHeight(22);
+			if (!b->icon().isNull()) b->setIconSize(QSize(20, 20));
+		}
+	}
+
+	// ── 7. groups the operator switched off (right-click menu), and the reset entry ──
+	PrefsContext* prefs = PrefsManager::instance().prefsFile ? PrefsManager::instance().prefsFile->getContext("SuneerControlBar") : nullptr;
+	const char* keys[3] = { "showGroupCharacter", "showGroupParagraph", "showGroupFrame" };
+	const QString names[3] = { tr("Character group"), tr("Paragraph group"), tr("Frame group") };
+	for (int g = 0; g < 3; ++g)
+	{
+		m_groupShown[g] = prefs ? prefs->getBool(keys[g], true) : true;
+		m_groupActs[g] = new QAction(names[g], this);
+		m_groupActs[g]->setCheckable(true);
+		m_groupActs[g]->setChecked(m_groupShown[g]);
+		connect(m_groupActs[g], &QAction::toggled, this, [this, g](bool on) { setGroupShown(g, on); });
+	}
+	m_resetToolbarAction = new QAction(tr("Reset toolbar"), this);
+	m_resetToolbarAction->setToolTip(tr("Show every group again, hide the advanced image buttons, dock the bar at the top"));
+	connect(m_resetToolbarAction, &QAction::triggered, this, &SuneerControlBar::resetToolbar);
+}
+
+// Extras at the end of row 1 / row 2 when the toolbar is wide enough (1920: always), else on row 3.
+void SuneerControlBar::reflowExtras()
+{
+	if (!m_row1 || !m_row2 || !m_row3 || m_extraChar.isEmpty() || m_reflowing)
+		return;
+	m_reflowing = true;
+	const int avail = (width() > 100 ? width() : (window() ? window()->width() : 1366)) - 12;
+	auto rowWidth = [](QHBoxLayout* row) { row->invalidate(); row->activate(); return row->sizeHint().width(); };
+	auto widthOf = [](const QList<QWidget*>& ws) { int w = 0; for (QWidget* x : ws) if (x && !x->isHidden()) w += x->sizeHint().width() + 1; return w; };
+	auto place = [this](const QList<QWidget*>& ws, bool toRow3, QHBoxLayout* row, QWidget* after, bool& state) {
+		if (state == toRow3) return;
+		for (QWidget* w : ws) { m_row1->removeWidget(w); m_row2->removeWidget(w); m_row3->removeWidget(w); }
+		if (toRow3)
+			for (QWidget* w : ws) m_row3->insertWidget(m_row3->count() - 1, w);
+		else
+		{
+			int at = after ? row->indexOf(after) + 1 : 0;
+			for (QWidget* w : ws) row->insertWidget(at++, w);
+		}
+		state = toRow3;
+	};
+	// width of the row without its extras + the extras themselves
+	const int base1 = rowWidth(m_row1) - (m_extrasOnRow3[0] ? 0 : widthOf(m_extraChar));
+	const int base2 = rowWidth(m_row2) - (m_extrasOnRow3[1] ? 0 : widthOf(m_extraFrame));
+	const bool char3 = base1 + widthOf(m_extraChar) > avail;
+	const bool frame3 = base2 + widthOf(m_extraFrame) > avail;
+	place(m_extraChar, char3, m_row1, m_charRowEnd, m_extrasOnRow3[0]);
+	place(m_extraFrame, frame3, m_row2, m_fillColorBtn, m_extrasOnRow3[1]);
+	// the "Character + / Frame +" titles only make sense on the separate row
+	if (m_extraCharTitle) m_extraCharTitle->setVisible(char3 && m_extraCharTitle->parentWidget() && !m_styleSelect->isHidden());
+	if (m_extraFrameTitle) m_extraFrameTitle->setVisible(frame3 && m_extraFrameTitle->parentWidget() && !m_textFeatherBtn->isHidden());
+	if (qEnvironmentVariableIsSet("SUNEER_CONTROLBAR_DEBUG"))
+		qWarning("CONTROLBAR reflow: avail=%d base1=%d+%d base2=%d+%d -> char on row%d, frame on row%d", avail, base1, widthOf(m_extraChar), base2, widthOf(m_extraFrame), char3 ? 3 : 1, frame3 ? 3 : 2);
+	m_reflowing = false;
+}
+
+void SuneerControlBar::resizeEvent(QResizeEvent* ev)
+{
+	QToolBar::resizeEvent(ev);
+	if (ev->oldSize().width() != ev->size().width())
+	{
+		reflowExtras();
+		refreshRowsHeight();
+	}
+}
+
+// The rows live in one container widget inside the QToolBar; the toolbar sized it once at start-up
+// for two rows, so after the third row is built (and whenever a state shows/hides a row) the
+// container tells the toolbar its real height.
+void SuneerControlBar::refreshRowsHeight()
+{
+	QWidget* c = m_row1 ? m_row1->parentWidget() : nullptr;
+	if (!c || !c->layout())
+		return;
+	c->layout()->invalidate();
+	c->layout()->activate();
+	const int h = c->layout()->sizeHint().height();
+	if (qEnvironmentVariableIsSet("SUNEER_CONTROLBAR_DEBUG"))
+		qWarning("CONTROLBAR height: hint=%d min=%d max=%d row3hint=%d row3first=%s", h, c->minimumHeight(), c->maximumHeight(), m_row3 ? m_row3->sizeHint().height() : -1,
+		         (m_row3 && m_row3->count() > 1 && m_row3->itemAt(0)->widget()) ? (m_row3->itemAt(0)->widget()->isHidden() ? "hidden" : "shown") : "none");
+	if (c->minimumHeight() != h)
+	{
+		c->setMinimumHeight(h);
+		c->setMaximumHeight(h);
+		c->updateGeometry();
+		// the QToolBar and the main window's toolbar area cache their size hints
+		if (layout()) { layout()->invalidate(); layout()->activate(); }
+		m_rowsHeight = h + 6;
+		setMinimumHeight(m_rowsHeight);
+		updateGeometry();
+		if (parentWidget() && parentWidget()->layout()) { parentWidget()->layout()->invalidate(); parentWidget()->layout()->activate(); }
+	}
+}
+
+void SuneerControlBar::applyGroupVisibility()
+{
+	const QList<QWidget*>* groups[3] = { &m_groupCharacter, &m_groupParagraph, &m_groupFrame };
+	for (int g = 0; g < 3; ++g)
+		if (!m_groupShown[g])
+			for (QWidget* w : *groups[g])
+				if (w) w->setVisible(false);
+}
+
+void SuneerControlBar::setGroupShown(int g, bool on)
+{
+	if (g < 0 || g > 2) return;
+	m_groupShown[g] = on;
+	if (m_groupActs[g] && m_groupActs[g]->isChecked() != on) { QSignalBlocker b(m_groupActs[g]); m_groupActs[g]->setChecked(on); }
+	const char* keys[3] = { "showGroupCharacter", "showGroupParagraph", "showGroupFrame" };
+	if (PrefsContext* prefs = PrefsManager::instance().prefsFile ? PrefsManager::instance().prefsFile->getContext("SuneerControlBar") : nullptr)
+		prefs->set(keys[g], on);
+	updateFromSelection();
+}
+
+void SuneerControlBar::resetToolbar()
+{
+	for (int g = 0; g < 3; ++g) setGroupShown(g, true);
+	setShowAdvanced(false);
+	setOrientation(Qt::Horizontal);
+	if (m_scmw)
+	{
+		m_scmw->addToolBar(Qt::TopToolBarArea, this);
+	}
+	show();
+	updateFromSelection();
+}
+
+// B / I: pick the face of the current family that matches the two buttons
+void SuneerControlBar::applyFaceToggle()
+{
+	if (m_updating || !m_doc || !m_fontCombo || !m_boldBtn || !m_italicBtn) return;
+	const QString family = m_fontCombo->currentText();
+	if (family.isEmpty()) return;   // mixed selection: nothing to base the face on
+	const bool wantBold = m_boldBtn->isChecked(), wantItalic = m_italicBtn->isChecked();
+	const QStringList styles = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.fontMap.value(family);
+	auto isBold = [](const QString& s) { return s.contains(QLatin1String("Bold"), Qt::CaseInsensitive) || s.contains(QLatin1String("Heavy"), Qt::CaseInsensitive) || s.contains(QLatin1String("Black"), Qt::CaseInsensitive); };
+	auto isItalic = [](const QString& s) { return s.contains(QLatin1String("Italic"), Qt::CaseInsensitive) || s.contains(QLatin1String("Oblique"), Qt::CaseInsensitive); };
+	QString pick;
+	for (const QString& s : styles)
+		if (isBold(s) == wantBold && isItalic(s) == wantItalic) { pick = s; break; }
+	if (pick.isEmpty())
+	{
+		// no such face: put the buttons back to what the text has
+		const QString cur = m_styleCombo ? m_styleCombo->currentText() : QString();
+		QSignalBlocker b1(m_boldBtn), b2(m_italicBtn);
+		m_boldBtn->setChecked(isBold(cur)); m_italicBtn->setChecked(isItalic(cur));
+		if (m_scmw) m_scmw->setStatusBarInfoText(tr("%1 has no %2 face").arg(family, wantBold && wantItalic ? tr("Bold Italic") : wantBold ? tr("Bold") : wantItalic ? tr("Italic") : tr("Regular")));
+		return;
+	}
+	const QString full = family + QStringLiteral(" ") + pick;
+	if (!PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.contains(full)) return;
+	if (m_fontBoxes) m_fontBoxes->setCurrentFont(full);
+	onFontSelected(full);
+}
+
+void SuneerControlBar::onDropCapToggled(bool on)
+{
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	ParagraphStyle ns;
+	ns.setHasDropCap(on);
+	if (on)
+	{
+		int lines = 2;
+		if (PageItem* it = sel()->itemAt(0)) lines = qMax(2, it->currentStyle().dropCapLines());
+		ns.setDropCapLines(lines);
+		ns.setHasBullet(false);
+		ns.setHasNum(false);
+	}
+	m_doc->itemSelection_ApplyParagraphStyle(ns, tsel());
+	m_doc->changed();
+}
+
+void SuneerControlBar::onCharStyleSelected(const QString& name)
+{
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	m_doc->itemSelection_SetNamedCharStyle(name, tsel());
+	m_doc->changed();
+}
+
+void SuneerControlBar::onParaStyleSelected(const QString& name)
+{
+	SuneerGroupUndo groupUndo(this);
+	if (m_updating || !m_doc || sel()->isEmpty()) return;
+	m_doc->itemSelection_SetNamedParagraphStyle(name, tsel());
+	m_doc->changed();
 }

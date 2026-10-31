@@ -2251,6 +2251,10 @@ void ScribusMainWindow::setTBvals(PageItem *currItem)
 	emit TextStyle(doc->currentStyle);
 	// to go: (av)
 	contentPalette->update(doc->currentStyle);
+	// suneer: the toolbar's font boxes follow the same refresh as Properties > Text, so a keyboard
+	// text selection (Shift+Home ...) or a change made in the dock shows in the bar at once.
+	if (m_suneerControlBar)
+		m_suneerControlBar->updateFromSelection();
 	if (paragraphStylesPanelTabs)
 		paragraphStylesPanelTabs->syncCurrentStyle();
 	//check if mark in cursor place and enable editMark action

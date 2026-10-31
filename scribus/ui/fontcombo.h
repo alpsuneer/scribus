@@ -37,6 +37,7 @@ class QFont;
 class QGridLayout;
 class QPixmap;
 class QLabel;
+class QTimer;
 class PrefsManager;
 class ScFace;
 class ScribusDoc;
@@ -77,6 +78,15 @@ public:
 	QString currentFont() const;
 	void rebuildList(ScribusDoc *currentDoc, bool forAnnotation = false, bool forSubstitute = false);
 
+	/*! suneer: the boxes are narrow and long font names are cut off, so the full name is shown in an
+	 *  instant frameless popup (no tooltip delay, never takes focus): on hover over either box, while
+	 *  stepping with Up/Down/wheel in a focused box (hides 1.5 s after the last step or on focus out),
+	 *  and for the item under the mouse / arrow keys in an open list. The list itself is widened to the
+	 *  longest name. A mixed selection shows "Mixed: A, B" instead of a name. */
+	void setMixedFonts(const QStringList& fonts);
+	QStringList mixedFonts() const { return m_mixedFonts; }
+	bool eventFilter(QObject* obj, QEvent* ev) override;
+
 	void setGuestWidget( QWidget * widget);
 	QWidget* guestWidget();
 
@@ -92,6 +102,20 @@ signals:
 protected slots:
 	void familySelected(int id);
 	void styleSelected(int id);
+	void familyHighlighted(int id);
+	void styleHighlighted(int id);
+
+protected:
+	// suneer: instant full-name popup
+	class FontNamePopup* m_namePopup { nullptr };
+	QTimer* m_popupHideTimer { nullptr };
+	QStringList m_mixedFonts;
+	bool m_popupKeyDriven { false };
+	QString popupTextFor(const QString& fullName) const;
+	void showNamePopup(QWidget* anchor, const QString& fullName, bool keyDriven, const QPoint* globalPos = nullptr);
+	void hideNamePopup();
+	void fitListWidth(QComboBox* box);
+	QString fullNameForFamilyRow(int row) const;
 
 protected:
 	QComboBox* fontFamily { nullptr };
@@ -110,6 +134,23 @@ protected:
 	QPixmap substFont;
 
 	void changeEvent(QEvent *e) override;
+};
+
+/*! suneer: frameless, focus-free popup with the full font name, a short Malayalam/Latin sample drawn
+ *  in that font, and the box's hint line. */
+class SCRIBUS_API FontNamePopup : public QWidget
+{
+	Q_OBJECT
+public:
+	explicit FontNamePopup(QWidget* parent);
+	void setContent(const QString& title, const QString& fullName, const QString& hint);
+	void placeAt(const QPoint& globalTopLeft);
+	//! beside the anchor: right of it, else left of it, else below - never over the anchor or the box under it
+	void placeBeside(const QRect& anchorGlobal);
+private:
+	QLabel* m_title { nullptr };
+	QLabel* m_sample { nullptr };
+	QLabel* m_hint { nullptr };
 };
 
 // based on Qfontcombobox class from Qt project

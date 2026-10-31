@@ -374,6 +374,20 @@ QToolButton* StyleSelect::detachShadowButton()
 	return shadowButton;
 }
 
+QToolButton* StyleSelect::detachUnderlineButton()
+{
+	if (ssLayout && underlineButton)
+		ssLayout->removeWidget(underlineButton);
+	return underlineButton;
+}
+
+QToolButton* StyleSelect::detachSuperscriptButton()
+{
+	if (ssLayout && superscriptButton)
+		ssLayout->removeWidget(superscriptButton);
+	return superscriptButton;
+}
+
 void StyleSelect::addOutlineLeadingWidget(QWidget* w)
 {
 	if (!w || !ssLayout || !outlineButton)

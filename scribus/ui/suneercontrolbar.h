@@ -77,17 +77,14 @@ protected:
 		updateGeometry();
 		repaint();
 	}
-	void resizeEvent(QResizeEvent* e) override {
-		QToolBar::resizeEvent(e);
-		updateGeometry();
-	}
+	// height follows the rows container (2 rows = 56; a third row when the width forces it)
 	QSize sizeHint() const override {
 		QSize s = QToolBar::sizeHint();
-		s.setHeight(56);
+		s.setHeight(qMax(56, m_rowsHeight));
 		return s;
 	}
 	QSize minimumSizeHint() const override {
-		return QSize(100, 56);
+		return QSize(100, qMax(56, m_rowsHeight));
 	}
 public slots:
 	void updateFromSelection();
@@ -104,7 +101,6 @@ private slots:
 	void onFontSizeChanged(double val);
 	void onAlignChanged(int align);
 	// Row 2
-	void onStyleChanged(int idx);
 	void onLineSpacingChanged(double val);
 	void onLineSpModeChanged(int mode);
 	// Image
@@ -237,21 +233,63 @@ private:
 	/// True when \a w is a control-bar focus-chain widget or a child of one.
 	bool isInFocusChain(QWidget* w) const;
 
+	// ── suneer 2026-10-25 redesigned text rows (see buildTextLayout) ──
+	void buildTextLayout();
+	QToolButton* makeOverflowButton(const QString& tip, QWidget* content);
+	void applyGroupVisibility();
+	void refreshRowsHeight();
+	void reflowExtras();
+	void resizeEvent(QResizeEvent* ev) override;
+	QList<QWidget*> m_extraChar, m_extraFrame;   // former » tools, end of row 1 / row 2 or row 3
+	QLabel* m_extraCharTitle {nullptr};
+	QLabel* m_extraFrameTitle {nullptr};
+	bool m_extrasOnRow3[2] {true, true};
+	bool m_reflowing {false};
+	QWidget* m_charRowEnd {nullptr};   // last fixed row-1 character widget; extras seat after it
+	bool m_wrapOnRow2 {false};
+	int m_rowsHeight {56};
+	void setGroupShown(int g, bool on);
+	void resetToolbar();
+	void applyFaceToggle();
+	void onDropCapToggled(bool on);
+	void onCharStyleSelected(const QString& name);
+	void onParaStyleSelected(const QString& name);
+	QToolButton*  m_boldBtn {nullptr};
+	QToolButton*  m_italicBtn {nullptr};
+	QToolButton*  m_dropCapBtn {nullptr};
+	QAction*      m_flowActs[5] {nullptr, nullptr, nullptr, nullptr, nullptr};
+	QHBoxLayout*  m_row3 {nullptr};   // extra character / frame tools (former » menus)
+	QWidget*      m_outlineLeadW {nullptr};
+	QToolButton*  m_shadowBtn {nullptr};
+	QToolButton*  m_condenseBtn {nullptr};
+	QToolButton*  m_fillImageBtn {nullptr};
+	QToolButton*  m_posterBtn {nullptr};
+	QList<QWidget*> m_groupCharacter, m_groupParagraph, m_groupFrame;
+	bool          m_groupShown[3] {true, true, true};
+	QAction*      m_groupActs[3] {nullptr, nullptr, nullptr};
+	QAction*      m_resetToolbarAction {nullptr};
+
 	ScribusMainWindow* m_scmw {nullptr};
 	QPointer<ScribusDoc> m_doc;
 	bool m_updating {false};
 	bool m_iconsSet {false};
 
 	// ── ROW 1 ─────────────────────────────────
+	// The font boxes are the SAME widget as Properties > Text (FontComboH: family list with the
+	// names drawn in their own font, style list of the chosen family, style kept across a family
+	// change). SuneerFontBoxes lends its two inner combos to the bar's rows; m_fontCombo is the
+	// family box and m_styleCombo the style box of that one widget.
+	class SuneerFontBoxes* m_fontBoxes    {nullptr};
 	QComboBox*      m_fontCombo           {nullptr};
 	bool            m_fontComboPopupShown  {false};
+	void onFontSelected(const QString& fontName);
 
 	// ── Live font preview (arrow-key / hover navigation in the font dropdown) ──
 	// Preview applies fonts with undo suppressed, so the original per-run fonts are kept
 	// here and restored when the popup closes. A selection can span several fonts, hence
 	// runs rather than one style: restoring a single style would flatten the others.
 	struct FontPreviewRun   { int start; int length; QString fontName; };
-	struct FontPreviewFrame { QPointer<PageItem> item; QList<FontPreviewRun> runs; };
+	struct FontPreviewFrame { QPointer<PageItem> item; QList<FontPreviewRun> runs; QString defaultFont; };   // defaultFont: the story default style's font, restored too
 	QList<FontPreviewFrame> m_fontPreviewFrames;
 	bool     m_fontPreviewActive  {false};
 	QTimer*  m_fontPreviewTimer   {nullptr};
@@ -432,8 +470,6 @@ public:
 	// (textToFrameDist*); unchecked (default) → external wrap boundary (wrapOffset*)
 	QCheckBox*      m_internalPadChk       {nullptr};
 
-	// Unused — kept for compat
-	QComboBox*      m_paraStyleCombo      {nullptr};
 
 	// ── Line ─────────────────────────────────────────────────────
 	ColorButton*    m_fillColorBtn         {nullptr};

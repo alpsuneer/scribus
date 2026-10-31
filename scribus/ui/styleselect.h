@@ -128,6 +128,9 @@ public:
 	void removeGroupSpacers();
 	// Remove the Shadow button from this widget's layout and return it (to reposition elsewhere)
 	QToolButton* detachShadowButton();
+	//! suneer: hand the underline / superscript buttons to the caller's layout (they stay wired to this widget)
+	QToolButton* detachUnderlineButton();
+	QToolButton* detachSuperscriptButton();
 	// Suneer: show or hide Underline / Underline words / Strike out / Subscript / Superscript
 	// (the control bar keeps them off the toolbar unless "advanced buttons" is on)
 	void setAdvancedButtonsVisible(bool on);

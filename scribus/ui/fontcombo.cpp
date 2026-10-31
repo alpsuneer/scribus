@@ -32,6 +32,15 @@ for which a new license (GPL+exception) is in place.
 #include <QPixmapCache>
 #include <QStringList>
 #include <QToolTip>
+#include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QMouseEvent>
+#include <QScreen>
+#include <QScrollBar>
+#include <QTimer>
+#include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include "fontcombo.h"
 #include "iconmanager.h"
@@ -146,6 +155,23 @@ FontComboH::FontComboH(QWidget* parent, bool labels) :
 	connect(fontFamily, SIGNAL(activated(int)), this, SLOT(familySelected(int)));
 	connect(fontStyle, SIGNAL(activated(int)), this, SLOT(styleSelected(int)));
 	connect(ScQApp, SIGNAL(iconSetChanged()), this, SLOT(iconSetChange()));
+
+	// suneer: instant full-name popup (see fontcombo.h)
+	m_namePopup = new FontNamePopup(this);
+	m_popupHideTimer = new QTimer(this);
+	m_popupHideTimer->setSingleShot(true);
+	m_popupHideTimer->setInterval(1500);
+	connect(m_popupHideTimer, &QTimer::timeout, this, &FontComboH::hideNamePopup);
+	for (QWidget* w : { static_cast<QWidget*>(fontFamily), static_cast<QWidget*>(fontFamily->lineEdit()), static_cast<QWidget*>(fontStyle) })
+		if (w) w->installEventFilter(this);
+	for (QComboBox* box : { fontFamily, fontStyle })
+	{
+		box->view()->installEventFilter(this);
+		box->view()->viewport()->installEventFilter(this);
+		box->view()->viewport()->setMouseTracking(true);
+	}
+	connect(fontFamily, QOverload<int>::of(&QComboBox::highlighted), this, &FontComboH::familyHighlighted);
+	connect(fontStyle, QOverload<int>::of(&QComboBox::highlighted), this, &FontComboH::styleHighlighted);
 	//connect(ScQApp, SIGNAL(labelVisibilityChanged(bool)), this, SLOT(toggleLabelVisibility(bool)));
 
 }
@@ -162,8 +188,9 @@ void FontComboH::languageChange()
 {
 	fontFaceLabel->setText( tr("Family"));
 	fontStyleLabel->setText( tr("Style"));
-	fontFamily->setToolTip( tr("Font Family of Selected Text or Text Frame"));
-	fontStyle->setToolTip( tr("Font Style of Selected Text or Text Frame"));
+	// suneer: the instant full-name popup carries these hints; a second, delayed tooltip would overlap it
+	fontFamily->setToolTip(QString());
+	fontStyle->setToolTip(QString());
 }
 
 void FontComboH::iconSetChange()
@@ -203,6 +230,7 @@ void FontComboH::familySelected(int id)
 	}
 	slist.sort();
 	fontStyle->addItems(slist);
+	fitListWidth(fontStyle);
 	if (slist.contains(curr))
 		setCurrentComboItem(fontStyle, curr);
 	else if (slist.contains("Regular"))
@@ -254,6 +282,8 @@ void FontComboH::setCurrentFont(const QString& f)
 	}
 	else
 		fontStyle->addItems(slist);
+	fitListWidth(fontStyle);
+	m_mixedFonts.clear();
 	setCurrentComboItem(fontStyle, style);
 	fontFamily->blockSignals(familySigBlocked);
 	fontStyle->blockSignals(styleSigBlocked);
@@ -346,8 +376,253 @@ void FontComboH::rebuildList(ScribusDoc *currentDoc, bool forAnnotation, bool fo
 	}
 	else
 		fontStyle->addItems(slist);
+	fitListWidth(fontStyle);
+	m_mixedFonts.clear();
 	fontFamily->blockSignals(familySigBlocked);
 	fontStyle->blockSignals(styleSigBlocked);
+	fitListWidth(fontFamily);
+}
+
+// ─── suneer: instant full-name popup ───────────────────────────────────────────
+
+FontNamePopup::FontNamePopup(QWidget* parent)
+	: QWidget(parent, Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus)
+{
+	setAttribute(Qt::WA_ShowWithoutActivating);
+	setAttribute(Qt::WA_TransparentForMouseEvents);
+	setFocusPolicy(Qt::NoFocus);
+	setAutoFillBackground(true);
+	QPalette pal = palette();
+	pal.setColor(QPalette::Window, pal.color(QPalette::ToolTipBase));
+	pal.setColor(QPalette::WindowText, pal.color(QPalette::ToolTipText));
+	setPalette(pal);
+	setStyleSheet("FontNamePopup { border: 1px solid palette(mid); }");
+	QVBoxLayout* lay = new QVBoxLayout(this);
+	lay->setContentsMargins(8, 5, 8, 5);
+	lay->setSpacing(2);
+	m_title = new QLabel(this);
+	QFont tf = m_title->font();
+	tf.setBold(true);
+	m_title->setFont(tf);
+	m_sample = new QLabel(this);
+	m_hint = new QLabel(this);
+	QFont hf = m_hint->font();
+	hf.setPointSizeF(hf.pointSizeF() * 0.85);
+	m_hint->setFont(hf);
+	m_hint->setEnabled(false);
+	lay->addWidget(m_title);
+	lay->addWidget(m_sample);
+	lay->addWidget(m_hint);
+}
+
+void FontNamePopup::setContent(const QString& title, const QString& fullName, const QString& hint)
+{
+	m_title->setText(title);
+	const SCFonts& avail = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts;
+	if (!fullName.isEmpty() && avail.contains(fullName))
+	{
+		const ScFace& face = avail[fullName];
+		QFont f = QFontDatabase::font(face.family(), face.style(), QFontInfo(font()).pointSize() + 3);
+		m_sample->setFont(f);
+		m_sample->setText(QString::fromUtf8("\xe0\xb4\xae\xe0\xb4\xb2\xe0\xb4\xaf\xe0\xb4\xbe\xe0\xb4\xb3\xe0\xb4\x82 Abc 123"));
+		m_sample->show();
+	}
+	else
+		m_sample->hide();
+	m_hint->setText(hint);
+	m_hint->setVisible(!hint.isEmpty());
+	adjustSize();
+}
+
+void FontNamePopup::placeAt(const QPoint& globalTopLeft)
+{
+	adjustSize();
+	QPoint p = globalTopLeft;
+	QScreen* scr = QGuiApplication::screenAt(p);
+	if (!scr) scr = QGuiApplication::primaryScreen();
+	if (scr)
+	{
+		const QRect a = scr->availableGeometry();
+		if (p.x() + width() > a.right()) p.setX(a.right() - width());
+		if (p.y() + height() > a.bottom()) p.setY(p.y() - height() - 30);
+		if (p.x() < a.left()) p.setX(a.left());
+		if (p.y() < a.top()) p.setY(a.top());
+	}
+	move(p);
+}
+
+void FontNamePopup::placeBeside(const QRect& anchorGlobal)
+{
+	adjustSize();
+	QScreen* scr = QGuiApplication::screenAt(anchorGlobal.center());
+	if (!scr) scr = QGuiApplication::primaryScreen();
+	const QRect a = scr ? scr->availableGeometry() : QRect(0, 0, 100000, 100000);
+	QPoint p(anchorGlobal.right() + 6, anchorGlobal.top() - 2);
+	if (p.x() + width() > a.right())
+		p.setX(anchorGlobal.left() - width() - 6);
+	if (p.x() < a.left())
+		p = QPoint(anchorGlobal.left(), anchorGlobal.bottom() + 4);
+	if (p.y() + height() > a.bottom()) p.setY(a.bottom() - height());
+	if (p.y() < a.top()) p.setY(a.top());
+	move(p);
+}
+
+void FontComboH::setMixedFonts(const QStringList& fonts)
+{
+	m_mixedFonts = fonts;
+}
+
+QString FontComboH::popupTextFor(const QString& fullName) const
+{
+	if (!m_mixedFonts.isEmpty())
+		return tr("Mixed: %1").arg(m_mixedFonts.join(", "));
+	return fullName;
+}
+
+QString FontComboH::fullNameForFamilyRow(int row) const
+{
+	if (row < 0 || row >= fontFamily->count())
+		return QString();
+	const QString family = fontFamily->itemText(row);
+	const QStringList styles = prefsManager.appPrefs.fontPrefs.AvailFonts.fontMap.value(family);
+	const QString cur = fontStyle->currentText();
+	QString style = styles.contains(cur) ? cur : (styles.contains("Regular") ? "Regular" : (styles.isEmpty() ? QString() : styles.first()));
+	return style.isEmpty() ? family : family + " " + style;
+}
+
+void FontComboH::showNamePopup(QWidget* anchor, const QString& fullName, bool keyDriven, const QPoint* globalPos)
+{
+	if (!m_namePopup || !anchor)
+		return;
+	const QString text = popupTextFor(fullName);
+	if (qEnvironmentVariableIsSet("SUNEER_FONTBOX_DEBUG"))
+		fprintf(stderr, "FONTPOPUP show anchor=%s text='%s' keyDriven=%d visibleParent=%d\n", qPrintable(anchor->objectName()), qPrintable(text), keyDriven ? 1 : 0, isVisible() ? 1 : 0);
+	if (text.trimmed().isEmpty())
+	{
+		hideNamePopup();
+		return;
+	}
+	const bool styleBox = (anchor == fontStyle);
+	const QString hint = styleBox ? tr("Font style of selected text or frame") : tr("Font family of selected text or frame");
+	m_namePopup->setContent(text, m_mixedFonts.isEmpty() ? fullName : QString(), hint);
+	if (globalPos)
+		m_namePopup->placeAt(*globalPos);
+	else
+		m_namePopup->placeBeside(QRect(anchor->mapToGlobal(QPoint(0, 0)), anchor->size()));
+	if (!m_namePopup->isVisible())
+		m_namePopup->show();
+	m_popupKeyDriven = keyDriven;
+	if (keyDriven)
+		m_popupHideTimer->start();
+	else
+		m_popupHideTimer->stop();
+}
+
+void FontComboH::hideNamePopup()
+{
+	m_popupHideTimer->stop();
+	m_popupKeyDriven = false;
+	if (m_namePopup)
+		m_namePopup->hide();
+}
+
+void FontComboH::fitListWidth(QComboBox* box)
+{
+	// the list is as wide as its longest name (the delegate draws family names 1.5x), never narrower
+	// than the box and never wider than two thirds of the screen
+	if (!box || !box->view())
+		return;
+	QFont f = box->font();
+	if (box == fontFamily)
+		f.setPointSize(QFontInfo(f).pointSize() * 3 / 2);
+	const QFontMetrics fm(f);
+	int w = 0;
+	for (int i = 0; i < box->count(); ++i)
+		w = qMax(w, fm.horizontalAdvance(box->itemText(i)));
+	w += (box == fontFamily ? 48 : 24) + box->view()->verticalScrollBar()->sizeHint().width();
+	if (QScreen* scr = QGuiApplication::primaryScreen())
+		w = qMin(w, scr->availableGeometry().width() * 2 / 3);
+	box->view()->setMinimumWidth(qMax(w, box->width()));
+}
+
+void FontComboH::familyHighlighted(int id)
+{
+	if (id < 0) return;
+	QAbstractItemView* v = fontFamily->view();
+	const QRect r = v->visualRect(v->model()->index(id, 0));
+	QPoint p = v->viewport()->mapToGlobal(QPoint(v->viewport()->width() + 4, r.top()));
+	showNamePopup(fontFamily, fullNameForFamilyRow(id), false, &p);
+}
+
+void FontComboH::styleHighlighted(int id)
+{
+	if (id < 0) return;
+	QAbstractItemView* v = fontStyle->view();
+	const QRect r = v->visualRect(v->model()->index(id, 0));
+	QPoint p = v->viewport()->mapToGlobal(QPoint(v->viewport()->width() + 4, r.top()));
+	showNamePopup(fontStyle, fontFamily->currentText() + " " + fontStyle->itemText(id), false, &p);
+}
+
+bool FontComboH::eventFilter(QObject* obj, QEvent* ev)
+{
+	if (!m_namePopup)
+		return QWidget::eventFilter(obj, ev);
+	const bool onFamily = (obj == fontFamily || (fontFamily->lineEdit() && obj == fontFamily->lineEdit()));
+	const bool onStyle = (obj == fontStyle);
+	if (onFamily || onStyle)
+	{
+		QComboBox* box = onFamily ? fontFamily : fontStyle;
+		switch (ev->type())
+		{
+		case QEvent::Enter:
+			if (qEnvironmentVariableIsSet("SUNEER_FONTBOX_DEBUG"))
+				fprintf(stderr, "FONTPOPUP enter box=%s keyDriven=%d\n", onFamily ? "family" : "style", m_popupKeyDriven ? 1 : 0);
+			if (!m_popupKeyDriven)
+				showNamePopup(box, currentFont(), false);
+			break;
+		case QEvent::Leave:
+			if (!m_popupKeyDriven)
+				hideNamePopup();
+			break;
+		case QEvent::FocusOut:
+		case QEvent::Hide:
+			hideNamePopup();
+			break;
+		case QEvent::KeyPress:
+		{
+			const int k = static_cast<QKeyEvent*>(ev)->key();
+			if (k == Qt::Key_Up || k == Qt::Key_Down || k == Qt::Key_PageUp || k == Qt::Key_PageDown)
+				QTimer::singleShot(0, this, [this, box]() { if (box->view()->isVisible()) return; showNamePopup(box, currentFont(), true); });
+			else if (k == Qt::Key_Escape)
+				hideNamePopup();
+			break;
+		}
+		case QEvent::Wheel:
+			QTimer::singleShot(0, this, [this, box]() { showNamePopup(box, currentFont(), true); });
+			break;
+		default:
+			break;
+		}
+		return QWidget::eventFilter(obj, ev);
+	}
+	// open lists: the item under the mouse; hide with the list
+	for (QComboBox* box : { fontFamily, fontStyle })
+	{
+		QAbstractItemView* v = box->view();
+		if (obj == v && ev->type() == QEvent::Hide)
+			hideNamePopup();
+		else if (obj == v->viewport() && ev->type() == QEvent::MouseMove)
+		{
+			const QModelIndex idx = v->indexAt(static_cast<QMouseEvent*>(ev)->pos());
+			if (idx.isValid())
+			{
+				if (box == fontFamily) familyHighlighted(idx.row()); else styleHighlighted(idx.row());
+			}
+		}
+		else if (obj == v->viewport() && ev->type() == QEvent::Leave)
+			hideNamePopup();
+	}
+	return QWidget::eventFilter(obj, ev);
 }
 
 void FontComboH::setGuestWidget(QWidget *widget)
