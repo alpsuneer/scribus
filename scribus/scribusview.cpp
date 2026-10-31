@@ -630,7 +630,7 @@ void ScribusView::contentsDropEvent(QDropEvent *e)
 				hit = item;
 		}
 		if (hit && m_ScMW && m_ScMW->m_suneerNewsPanel)
-			m_ScMW->m_suneerNewsPanel->dropStoryOnItem(hit, newsIndex);
+			m_ScMW->m_suneerNewsPanel->handleStoryDrop(hit, newsIndex);   // duplicate check, then the slot
 		else if (m_ScMW)
 			m_ScMW->setStatusBarInfoText(tr("Drop the story on a page model slot (a grey placeholder frame)"));
 		return;

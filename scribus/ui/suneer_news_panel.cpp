@@ -256,6 +256,10 @@ public:
 		const QString colBadge = index.data(Qt::UserRole + 6).toString();
 		const int badgeW = colBadge.isEmpty() ? 0 : QFontMetrics(tagFont(opt.font)).horizontalAdvance(colBadge) + 10;
 		strip += badgeW ? badgeW + 4 : 0;
+		// "DUP": the story (or its photo) repeats another one (UserRole + 8: why, for the tooltip)
+		const bool dup = !index.data(Qt::UserRole + 8).toString().isEmpty();
+		const int dupW = dup ? QFontMetrics(tagFont(opt.font)).horizontalAdvance(QStringLiteral("DUP")) + 10 : 0;
+		strip += dupW ? dupW + 4 : 0;
 		// Title area: the row minus the tag strip. Elide the title to it.
 		QStyleOptionViewItem textOpt(opt);
 		textOpt.rect.setRight(opt.rect.right() - strip);
@@ -297,6 +301,18 @@ public:
 			p->drawRoundedRect(badge, 3, 3);
 			p->setPen(Qt::white);
 			p->drawText(badge, Qt::AlignCenter, colBadge);
+		}
+		if (dupW > 0)
+		{
+			const int tagW = QFontMetrics(tagFont(opt.font)).horizontalAdvance(tag);
+			const int bh = QFontMetrics(tagFont(opt.font)).height() + 2;
+			const int right = opt.rect.right() - 6 - tagW - 4 - (badgeW ? badgeW + 4 : 0);
+			QRect badge(right - dupW, opt.rect.top() + (opt.rect.height() - metaH - bh) / 2, dupW, bh);
+			p->setPen(Qt::NoPen);
+			p->setBrush(dark ? QColor("#AB47BC") : QColor("#7B1FA2"));
+			p->drawRoundedRect(badge, 3, 3);
+			p->setPen(Qt::white);
+			p->drawText(badge, Qt::AlignCenter, QStringLiteral("DUP"));
 		}
 		if (metaH > 0)
 		{
@@ -564,6 +580,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_filterCombo->addItem(tr("Show: USD"), "USED");
 	m_filterCombo->addItem(tr("Show: UNUSD"), "UNUSED");
 	m_filterCombo->addItem(tr("Show: BAL"), "BALANCED");
+	m_filterCombo->addItem(tr("Show: no DUP"), "NODUP");   // the repeats (DUP badge) hidden
 	m_filterCombo->setToolTip(tr("Which stories the list shows (local filter, no new fetch). Select All, Place and Mark act on the visible rows only."));
 	{
 		QSettings cfg("Faircode", "ScribusNews");
@@ -855,6 +872,14 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		processObitPhotos(m_doc && m_doc->m_Selection->count() > 0);
 	});
 	vl->addWidget(m_obitWfBtn);
+	{
+		auto* dupBtn = new SuneerElideButton(tr("Check duplicates on page"), w);
+		dupBtn->setObjectName("checkDuplicatesBtn");
+		dupBtn->setToolTip(tr("Every story / photo of the document that repeats another one (the same story placed twice, a near copy of the text, the same photo even resized or cropped a little), with a score; click a pair to go there. Runs in the background."));
+		dupBtn->setStyleSheet("padding:4px;");
+		connect(dupBtn, &QPushButton::clicked, this, &SuneerNewsPanel::checkDuplicatesOnPage);
+		vl->addWidget(dupBtn);
+	}
 	vl->addLayout(btnRow);
 	// Re-layout: the stories already on the current page, arranged by another layout model (one undo step)
 	QHBoxLayout* layoutRow = new QHBoxLayout();
@@ -899,6 +924,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_DUP_SELFTEST"))
+		QTimer::singleShot(5000, this, [this]() { runDupSelfTest(qEnvironmentVariable("SUNEER_DUP_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_OBITWF_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runObitWfSelfTest(qEnvironmentVariable("SUNEER_OBITWF_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_TAKEOVER_SELFTEST"))
@@ -5387,6 +5414,8 @@ void SuneerNewsPanel::showNewsList()
 	else
 		applyListFilter(true);     // "N stories - X USD, Y UNUSD, Z BAL (showing: f)" or "No f stories (N total) - change Show:"
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());
+	m_dupScanDone = false;
+	startDuplicateScan();      // DUP badges, in the background
 }
 
 // The theme's picture-frame icon; two or more photos get the count drawn
@@ -5743,7 +5772,13 @@ void SuneerNewsPanel::onPlaceNews()
 	int idx = sel->data(Qt::UserRole).toInt();
 	if (idx < 0 || idx >= m_newsData.size())
 		return;
-	const QJsonObject news = m_newsData[idx].toObject();
+	QJsonObject news = m_newsData[idx].toObject();
+	if (!isPlacedRow(sel))
+	{
+		QList<QJsonObject> one { news };
+		if (!confirmDuplicatesBeforePlacing(one))
+			return;
+	}
 	if (isPlacedRow(sel))
 	{
 		// Placed (server says USED): if it is in this document, jump to it.
@@ -5882,6 +5917,9 @@ void SuneerNewsPanel::onPlaceSelected()
 			n = QJsonObject();
 	stories.erase(std::remove_if(stories.begin(), stories.end(), [](const QJsonObject& n) { return n.isEmpty(); }), stories.end());
 	if (stories.isEmpty())
+		return;
+	// already on the page (the same story, a near copy, or the same photo)? asked per story
+	if (!confirmDuplicatesBeforePlacing(stories))
 		return;
 	// a page model placeholder selected on the page: the one ticked story goes into it
 	if (placeIntoSelectedSlot(stories))
@@ -6321,6 +6359,9 @@ void SuneerNewsPanel::refreshPlacedMarks()
 			row->setForeground(pending ? QBrush(QColor(180, 90, 0)) : QBrush());
 			row->setToolTip((pending ? tr("Placed here but NOT marked on the server yet - press Check to retry.") : tr("FREE - not used yet (server status).")) + "\n" + tip);
 		}
+		const QString dup = row->data(Qt::UserRole + 8).toString();
+		if (!dup.isEmpty())
+			row->setToolTip(tr("DUP - possibly a duplicate:") + QLatin1Char('\n') + dup + QStringLiteral("\n\n") + row->toolTip());
 	}
 	applyListFilter();
 }
@@ -6343,7 +6384,7 @@ void SuneerNewsPanel::applyListFilter(bool setStatusLine)
 		QListWidgetItem* row = m_newsList->item(i);
 		const QString st = row->data(Qt::UserRole + 4).toString();
 		if (st == "USED") ++used; else if (st == "BALANCED") ++bal; else ++unused;
-		const bool hide = (f != "ALL") && (st != f);
+		const bool hide = f == QLatin1String("NODUP") ? row->data(Qt::UserRole + 9).toBool() : (f != "ALL") && (st != f);
 		if (row->isHidden() != hide)
 		{
 			row->setHidden(hide);
@@ -6352,7 +6393,7 @@ void SuneerNewsPanel::applyListFilter(bool setStatusLine)
 		}
 		if (!hide) ++shown;
 	}
-	const QString showing = f == "ALL" ? tr("all") : f == "USED" ? QStringLiteral("USD") : f == "BALANCED" ? QStringLiteral("BAL") : QStringLiteral("UNUSD");
+	const QString showing = f == "ALL" ? tr("all") : f == "USED" ? QStringLiteral("USD") : f == "BALANCED" ? QStringLiteral("BAL") : f == "NODUP" ? tr("no DUP") : QStringLiteral("UNUSD");
 	// The status line describes the WHOLE page; it is rewritten only when
 	// the filter changes or a fetch just finished, so other messages
 	// (marks, placing) are not wiped by a routine refresh.
@@ -7974,6 +8015,18 @@ void SuneerNewsPanel::onSettings()
 	imgColsSpin->setRange(1, 8);
 	imgColsSpin->setValue(s.value("layout/photoColumns", 3).toInt());
 	fl2->addRow(tr("Photo columns:"), imgColsSpin);
+	QSpinBox* dupSpin = new QSpinBox(layoutTab);
+	dupSpin->setRange(50, 100);
+	dupSpin->setSuffix(QStringLiteral(" %"));
+	dupSpin->setValue(s.value("dup/threshold", 85).toInt());
+	dupSpin->setToolTip(tr("Two stories are duplicates when this much of their text is the same (DUP badge, the warning on placing, Check duplicates on page)"));
+	fl2->addRow(tr("Duplicate news at:"), dupSpin);
+	QSpinBox* dupBitsSpin = new QSpinBox(layoutTab);
+	dupBitsSpin->setRange(0, 20);
+	dupBitsSpin->setSuffix(tr(" bits"));
+	dupBitsSpin->setValue(s.value("dup/photoBits", 6).toInt());
+	dupBitsSpin->setToolTip(tr("Two photos are the same when their perceptual hashes differ in at most this many of 64 bits. 6: resized / recompressed / cropped up to ~10 %; more finds more but obituary headshots of different people can be 8 bits apart."));
+	fl2->addRow(tr("Same photo within:"), dupBitsSpin);
 	QComboBox* posCmb = new QComboBox(layoutTab);
 	for (const QString& key : placePhotoPositionKeys())
 		posCmb->addItem(photoPositionLabel(key), key);
@@ -8170,6 +8223,8 @@ void SuneerNewsPanel::onSettings()
 	if (dlg.exec() != QDialog::Accepted)
 		return;
 	s.setValue("obit/autoProcessWorkflow", obitAutoWfChk->isChecked());
+	s.setValue("dup/threshold", dupSpin->value());
+	s.setValue("dup/photoBits", dupBitsSpin->value());
 
 	QString host = hostEdit->text().trimmed();
 	while (host.endsWith('/'))

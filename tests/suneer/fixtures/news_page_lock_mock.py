@@ -63,6 +63,18 @@ CONTEXT["p-knr-2"] = ("tpl-sync", True, "tpl-sync")
 TEMPLATE_FILE = {"tpl-p1": ("page.sla", False), "tpl-p5": ("page.sla", False), "tpl-obit": ("obit.zip", True),
                  "tpl-sync": ("sync.sla", False)}
 BODY = "ജില്ലയിൽ ഇന്നലെ നടന്ന പരിപാടിയിൽ നിരവധി പേർ പങ്കെടുത്തു. വിശദമായ റിപ്പോർട്ട് താഴെ."
+# every story its own body: identical bodies are duplicates for the News Browser's DUP check (and its
+# warning on placing) - real stories never share their whole text
+BODIES = {
+    "n-1": "നഗരത്തിൽ രാവിലെ മുതൽ പെയ്ത മഴയിൽ പല റോഡുകളും വെള്ളത്തിനടിയിലായി. ഗതാഗതം തടസ്സപ്പെട്ടു.",
+    "n-2": "ഏറെക്കാലത്തെ കാത്തിരിപ്പിനൊടുവിൽ പുഴയ്ക്ക് കുറുകെയുള്ള പാലം നാട്ടുകാർക്കായി തുറന്നുകൊടുത്തു.",
+    "n-3": "മെട്രോയുടെ അടുത്ത ഘട്ടത്തിന്റെ നിർമാണം തുടങ്ങിയതോടെ യാത്രക്കാർക്ക് പുതിയ പ്രതീക്ഷ.",
+    "n-4": "പുസ്തകോത്സവത്തിൽ നൂറിലധികം പ്രസാധകർ പങ്കെടുക്കുന്നു. പത്ത് ദിവസം നീളും.",
+    "n-5": "കലോത്സവത്തിന്റെ അവസാന ദിനം നൃത്തയിനങ്ങളിൽ കടുത്ത മത്സരം. സമാപന സമ്മേളനം വൈകിട്ട്.",
+    "n-6": "സംഭരണ കേന്ദ്രങ്ങളിൽ നെല്ല് കെട്ടിക്കിടക്കുന്നു. കർഷകർക്ക് പണം കിട്ടാൻ വൈകുന്നതായി പരാതി.",
+    "n-7": "വിമാനത്താവളത്തിലെ പുതിയ ടെർമിനൽ അടുത്ത മാസം പ്രവർത്തനം തുടങ്ങുമെന്ന് അധികൃതർ.",
+    "n-8": "മറ്റൊരു പേജിൽ ഉപയോഗിച്ച വാർത്തയുടെ ഉള്ളടക്കം ഇവിടെ പരീക്ഷണത്തിനായി മാത്രം.",
+}
 # news id -> title, news_pages {pageId: dtpStatus} (no date: news_pages has none)
 NEWS = {
     "n-1": ("തിരുവനന്തപുരത്ത് കനത്ത മഴ", {"p-knr-2": "UNUSED"}),
@@ -90,7 +102,7 @@ def page_name(pid):
 
 def news_json(nid, page_id=None):
     title, pages = NEWS[nid]
-    n = {"id": nid, "refId": "R" + nid, "title": title, "content": "<p>%s</p>" % BODY, "kicker": None, "byline": None,
+    n = {"id": nid, "refId": "R" + nid, "title": title, "content": "<p>%s</p>" % BODIES.get(nid, BODY), "kicker": None, "byline": None,
          "createdAt": "2026-11-01T08:00:00.000Z", "status": "PUBLISHED", "newsMedia": [],
          "newsPages": [{"pageId": p, "page": {"id": p, "name": page_name(p)}, "dtpStatus": st} for p, st in pages.items()]}
     if page_id:

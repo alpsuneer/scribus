@@ -1592,3 +1592,14 @@ scribus
 - Fix: load സമയത്ത് ഉണ്ടാക്കിയ undo step Ctrl+Z-ൽ crash ആക്കിയിരുന്നു (Undo widget); restore ഇപ്പോൾ load കഴിഞ്ഞ്,
   Undo widget ശൂന്യമായ list-ൽ crash ആകില്ല.
 
+### 107. ഒരേ വാർത്ത / ഒരേ ഫോട്ടോ രണ്ടുതവണ — കണ്ടെത്തൽ
+- News Browser list-ൽ **DUP** badge: list-ലെ മറ്റൊരു വാർത്തയുടെയോ page-ൽ ഉള്ളതിന്റെയോ ആവർത്തനം (text ≥ 85 %, Malayalam
+  normalise: spaces, punctuation, ZWJ/ZWNJ, soft hyphen), ഒരേ ഫോട്ടോ (resize / recompress / ~10 % crop ചെയ്താലും), workflow
+  പ്രകാരം മറ്റൊരു page-ൽ used. Tooltip: "Same as: <headline> (92 %)". "Show: no DUP" ആവർത്തനങ്ങൾ മറയ്ക്കും.
+- Obituary: ഒരേ പേര് മാത്രം പോരാ; പ്രായം വ്യത്യസ്തമെങ്കിൽ രണ്ട് ആളുകൾ.
+- Place ചെയ്യുമ്പോൾ: "This story / photo is already on the page (module X)" [Place anyway] [Skip] [Show].
+- News Browser-ൽ നിന്ന് page model slot-ലേക്ക് drag and drop ചെയ്യുമ്പോഴും ഇതേ മുന്നറിയിപ്പ്.
+- "Check duplicates on page" (News Browser button, page right-click): എല്ലാ ജോഡികളും, click → അവിടേക്ക്.
+- Photo hash (pHash) `<sla>_photos/hashes.json`-ൽ cache; BG removed / edit ചെയ്ത ഫോട്ടോ original-ന്റെ hash.
+- Settings → Layout: "Duplicate news at" (85 %), "Same photo within" (6 bits). Background-ൽ (154 stories ~0.5 s).
+- Test: `tests/suneer/news_duplicates.sh <obituary page.sla> <dir>`.

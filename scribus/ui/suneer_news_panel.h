@@ -34,6 +34,8 @@ class QCheckBox;
 class QComboBox;
 class QDateEdit;
 class QDialog;
+struct SuneerDupItem;
+struct SuneerDupPair;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
@@ -112,6 +114,9 @@ public:
 	QString fillSlot(PageItem* placeholder, QJsonObject news);
 	//! Canvas drop of News Browser row \a newsIndex (m_newsData) on \a item: fills the slot when \a item is a placeholder.
 	bool dropStoryOnItem(PageItem* item, int newsIndex);
+	//! A News Browser row dropped on a page model slot (ScribusView): the duplicate check first
+	//! ([Place anyway] [Skip] [Show]), then dropStoryOnItem - right after the drop event, not inside it.
+	void handleStoryDrop(PageItem* slot, int newsIndex);
 	//! Right-click on a placeholder: the one ticked story into it (Place Selected with the placeholder selected).
 	void placeTickedStoryInto(PageItem* placeholder);
 	//! Layout > Remove Empty Slots: every placeholder / ad outline left on the current page. Returns how many.
@@ -267,6 +272,22 @@ private:
 	QStringList m_obitWfTestLog;
 	QString m_obitWfLastReport;
 	void runObitWfSelfTest(const QString& report);
+	// ---- duplicate news / photos (suneer_news_dup.cpp) ----
+	static void dupCollectDocument(ScribusDoc* doc, QList<SuneerDupItem>& items, QList<QList<PageItem*>>& frames);
+	static SuneerDupItem dupListItem(const QJsonObject& n, int index, std::function<QString(const QString&)> photoOf);
+	//! After Fetch News: the list against itself and the document, in the background -> DUP badges.
+	void startDuplicateScan();
+	void applyDuplicateBadges(const QList<SuneerDupItem>& items, int listCount, const QList<SuneerDupPair>& pairs, qint64 ms);
+	//! Before placing: [Place anyway] [Skip] [Show] for a story / photo already on the page; skipped ones leave \a stories.
+	bool confirmDuplicatesBeforePlacing(QList<QJsonObject>& stories);
+	int m_dupGen {0};
+	bool m_dupScanDone {false};
+	QString m_dupLog;
+	QStringList m_dupPagePairs;                 // the last "Check duplicates on page" (self-test)
+	QPointer<QDialog> m_dupDialog;
+	QString m_dupTestAnswer;                    // self-test: "place" / "skip" / "show"
+	QStringList m_dupTestLog;
+	void runDupSelfTest(const QString& report);
 	QString pageNameAt(int index) const;
 	QString currentPageKey() const;             // "pageId|date" of the Page box and date
 	static QString formatLockSince(const QDateTime& since);
@@ -563,6 +584,8 @@ public:
 	//! "Process obituary photos": the page's obituary photos not processed yet (or the selected ones) through the
 	//! obituary pipeline (background, face crop, Obit BG colour, tone) in the background; one undo step.
 	void processObitPhotos(bool selectionOnly);
+	//! "Check duplicates on page": every duplicate pair of the document (stories, photos, a story placed twice), click to jump.
+	void checkDuplicatesOnPage();
 	//! An obituary photo frame "Process obituary photos" takes (\a why: why not - edited by hand, already processed, ...).
 	bool obitPhotoNeedsProcessing(PageItem* item, QString* why = nullptr) const;
 	static bool markUnusedOnDeletePref();
