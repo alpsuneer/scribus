@@ -18,9 +18,12 @@ for which a new license (GPL+exception) is in place.
 #include "prefsmanager.h"
 #include "text/specialchars.h"
 #include "pageitem_textframe.h"
+#include "text/boxes.h"
 #include "scpage.h"
+#include "scraction.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "prefsstructs.h"
 #include "scribusview.h"
 #include "selection.h"
 #include "suneerboxfit.h"
@@ -29,12 +32,126 @@ for which a new license (GPL+exception) is in place.
 #include "undomanager.h"
 #include "undostate.h"
 
+// The running app: frames A_<path>_c<N> (1-5 columns) fitted by the REAL commands - the menu action, the
+// toolbar action, Styled Copy of S_src + Styled Paste - with frame borders on; canvas grabs before / after,
+// one cases line per frame (the fit itself writes FIT-TRACE lines to stderr).
+static void runActionsMode(ScribusView* view, ScribusDoc* doc, const QString& prefix)
+{
+	ScribusMainWindow* mw = doc->scMW();
+	auto mm = [](double pt) { return pt * 25.4 / 72.0; };
+	doc->guidesPrefs().framesShown = true;
+	auto grab = [&](const QString& tag) {
+		if (mw->scrActions.contains("viewFitPage"))
+			mw->scrActions["viewFitPage"]->trigger();
+		view->DrawNew();
+		for (int i = 0; i < 10; ++i)
+			QCoreApplication::processEvents();
+		view->viewport()->grab().save(prefix + QStringLiteral("-app-%1.png").arg(tag));
+	};
+	auto select = [&](PageItem* it) {
+		view->requestMode(modeNormal);
+		doc->m_Selection->clear();
+		doc->m_Selection->addItem(it);
+		for (int i = 0; i < 3; ++i)
+			QCoreApplication::processEvents();
+	};
+	auto describe = [&](const QString& path, PageItem* it, double before) {
+		PageItem_TextFrame* tf = it->asTextFrame();
+		tf->invalidateLayout();
+		tf->layout();
+		QStringList cols, bottoms;
+		if (const Box* fb = tf->textLayout.box())
+			for (const Box* column : fb->boxes())
+			{
+				int n = 0;
+				const LineBox* last = nullptr;
+				for (const Box* b : column->boxes())
+					if (const LineBox* l = dynamic_cast<const LineBox*>(b))
+					{
+						++n;
+						last = l;
+					}
+				cols << QString::number(n);
+				bottoms << (last ? QString::number(mm(fb->y() + column->y() + last->y() + last->textRect().bottom()), 'f', 2) : QStringLiteral("-"));
+			}
+		ScPage* page = doc->DocPages.at(qMax(0, it->OwnPage));
+		return QStringLiteral("%1 %2 %3 %4 %5 %6 %7 %8 %9 %10 cols=%11 bottoms=%12 before=%13 gap=%14")
+		       .arg(path, it->itemName()).arg(qMax(0, it->OwnPage) + 1)
+		       .arg(mm(it->xPos() - page->xOffset()), 0, 'f', 3).arg(mm(it->yPos() - page->yOffset()), 0, 'f', 3)
+		       .arg(mm(it->width()), 0, 'f', 3).arg(mm(it->height()), 0, 'f', 3)
+		       .arg(tf->frameOverflows() ? 1 : 0).arg(mm(it->lineWidth()), 0, 'f', 3).arg(mm(tf->textToFrameDistTop()), 0, 'f', 3)
+		       .arg(cols.join('/'), bottoms.join('/')).arg(mm(before), 0, 'f', 2).arg(mm(it->columnGap()), 0, 'f', 2);
+	};
+	QStringList cases;
+	grab(QStringLiteral("before"));
+	PageItem* src = nullptr;
+	for (PageItem* it : *doc->Items)
+		if (it->itemName() == QStringLiteral("S_src"))
+			src = it;
+	for (const QString& path : { QStringLiteral("menu"), QStringLiteral("toolbar"), QStringLiteral("paste") })
+	{
+		for (PageItem* it : *doc->Items)
+		{
+			if (!it->isTextFrame() || !it->itemName().startsWith(QStringLiteral("A_%1_").arg(path)))
+				continue;
+			const double before = it->height();
+			if (path == QLatin1String("menu"))
+			{
+				select(it);
+				mw->scrActions["itemAdjustFrameHeightToText"]->trigger();
+			}
+			else if (path == QLatin1String("toolbar"))
+			{
+				select(it);
+				mw->scrActions["suneerAutoFitHeight"]->trigger();
+			}
+			else if (src)
+			{
+				// Styled Copy wants edit mode with a text selection
+				select(src);
+				view->requestMode(modeEdit);
+				src->itemText.selectAll();
+				src->asTextFrame()->HasSel = true;
+				mw->scrActions["editStyledCopy"]->trigger();
+				src->itemText.deselectAll();
+				src->asTextFrame()->HasSel = false;
+				view->requestMode(modeNormal);
+				select(it);
+				mw->scrActions["editStyledPaste"]->trigger();
+			}
+			for (int i = 0; i < 5; ++i)
+				QCoreApplication::processEvents();
+			cases << describe(path, it, before);
+		}
+		grab(QStringLiteral("after-%1").arg(path));
+	}
+	QFile f(prefix + QStringLiteral("-cases.txt"));
+	if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+		f.write(cases.join('\n').toUtf8() + "\n");
+	f.close();
+	QFile fc(prefix + QStringLiteral("-checks.txt"));
+	if (fc.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+		fc.write("PASS actions mode: the real menu / toolbar / Styled Paste commands ran (see FIT-TRACE lines)\n");
+	fc.close();
+	const QString saveAs = qEnvironmentVariable("SUNEER_FITGAP_SAVEAS");
+	if (!saveAs.isEmpty())
+		doc->save(saveAs);
+	doc->setModified(false);
+	fprintf(stderr, "FITGAP-SELFTEST done %lld cases (actions mode)\n", (long long) cases.size());
+	QTimer::singleShot(300, mw, [mw]() { mw->close(); });
+}
+
 void SuneerFitGap::runSelfTestIfAsked(ScribusView* view, ScribusDoc* doc)
 {
 	const QString prefix = qEnvironmentVariable("SUNEER_FITGAP_SELFTEST");
 	if (prefix.isEmpty() || !doc || !view)
 		return;
 	ScribusMainWindow* mw = doc->scMW();
+	if (qEnvironmentVariable("SUNEER_FITGAP_MODE") == QLatin1String("actions"))
+	{
+		runActionsMode(view, doc, prefix);
+		return;
+	}
 	const QStringList paths { "menu", "toolbar", "placement", "caption", "box" };
 	QStringList cases;
 	auto mm = [](double pt) { return pt * 25.4 / 72.0; };
@@ -81,12 +198,57 @@ void SuneerFitGap::runSelfTestIfAsked(ScribusView* view, ScribusDoc* doc)
 			}
 			tf->invalidateLayout();
 			tf->layout();
-			cases << QStringLiteral("%1 %2 %3 %4 %5 %6 %7 %8 %9 %10")
+			const uint warmLines = tf->textLayout.lines();
+			const bool warmOver = tf->frameOverflows();
+			tf->itemText.invalidateAll();
+			tf->invalidateLayout(true);
+			tf->layout();
+			if (tf->textLayout.lines() != warmLines || tf->frameOverflows() != warmOver)
+				cases << QStringLiteral("# COLD-RELAYOUT %1: warm %2 lines overflow %3 -> cold %4 lines overflow %5").arg(it->itemName()).arg(warmLines).arg(warmOver).arg(tf->textLayout.lines()).arg(tf->frameOverflows());
+			// lines per column (by line x), for the balance check
+			QStringList colCounts;
+			if (const Box* frameBox = tf->textLayout.box())
+				for (const Box* column : frameBox->boxes())
+				{
+					int n = 0;
+					for (const Box* b : column->boxes())
+						n += dynamic_cast<const LineBox*>(b) ? 1 : 0;
+					colCounts << QString::number(n);
+				}
+			cases << QStringLiteral("%1 %2 %3 %4 %5 %6 %7 %8 %9 %10 cols=%11")
 			         .arg(path, it->itemName()).arg(pg + 1)
 			         .arg(mm(it->xPos() - page->xOffset()), 0, 'f', 3).arg(mm(it->yPos() - page->yOffset()), 0, 'f', 3)
 			         .arg(mm(it->width()), 0, 'f', 3).arg(mm(it->height()), 0, 'f', 3)
 			         .arg(tf->frameOverflows() ? 1 : 0).arg(mm(it->lineWidth()), 0, 'f', 3)
-			         .arg(mm(tf->textToFrameDistTop()), 0, 'f', 3);
+			         .arg(mm(tf->textToFrameDistTop()), 0, 'f', 3).arg(colCounts.join('/'));
+		}
+		// a linked chain "L_*_1" -> "L_*_2": the last frame is fitted, the first stays
+		for (PageItem* it : *doc->Items)
+		{
+			if (!it->isTextFrame() || it->OwnPage != pg || !it->itemName().startsWith(QStringLiteral("L_")) || it->nextInChain() || !it->prevInChain())
+				continue;
+			PageItem_TextFrame* tf = it->asTextFrame();
+			const double firstH = it->prevInChain()->height();
+			if (path == QLatin1String("box"))
+				continue;                                  // Frame Border fits single frames only
+			if (path == QLatin1String("placement"))
+				SuneerTextClean::fitHeight(tf, 1.0, 20000.0);
+			else
+			{
+				doc->m_Selection->clear();
+				doc->m_Selection->addItem(it);
+				if (path == QLatin1String("toolbar")) mw->suneerAutoFitHeight(); else if (path == QLatin1String("caption")) mw->suneerFitCaptionFrames();
+				else { Selection one(doc, false); one.addItem(it); doc->itemSelection_AdjustFrameHeightToText(&one); }
+				doc->m_Selection->clear();
+			}
+			tf->invalidateLayout();
+			tf->layout();
+			cases << QStringLiteral("%1 %2 %3 %4 %5 %6 %7 %8 %9 %10 cols=chain first=%11 lines=%12")
+			         .arg(path, it->itemName()).arg(pg + 1)
+			         .arg(mm(it->xPos() - page->xOffset()), 0, 'f', 3).arg(mm(it->yPos() - page->yOffset()), 0, 'f', 3)
+			         .arg(mm(it->width()), 0, 'f', 3).arg(mm(it->height()), 0, 'f', 3)
+			         .arg(tf->frameOverflows() ? 1 : 0).arg(mm(it->lineWidth()), 0, 'f', 3)
+			         .arg(mm(tf->textToFrameDistTop()), 0, 'f', 3).arg(qAbs(it->prevInChain()->height() - firstH) < 0.01 ? "unchanged" : "CHANGED").arg(tf->textLayout.lines());
 		}
 	}
 	// Paste: Malayalam text that ends in two empty paragraphs, pasted at the end of an empty frame in

@@ -8033,6 +8033,10 @@ void SuneerNewsPanel::onSettings()
 	dupBitsSpin->setValue(s.value("dup/photoBits", 6).toInt());
 	dupBitsSpin->setToolTip(tr("Two photos are the same when their perceptual hashes differ in at most this many of 64 bits. 6: resized / recompressed / cropped up to ~10 %; more finds more but obituary headshots of different people can be 8 bits apart."));
 	fl2->addRow(tr("Same photo within:"), dupBitsSpin);
+	QCheckBox* balanceChk = new QCheckBox(tr("Balance columns when fitting a frame to its text"), layoutTab);
+	balanceChk->setChecked(s.value("fit/balanceColumns", true).toBool());
+	balanceChk->setToolTip(tr("Fit (toolbar, Adjust Frame Height to Text, placement, Frame Border): a frame with several columns gets the height at which the text just fills all columns evenly. Off: the columns fill one after another and the frame follows the first column."));
+	fl2->addRow(QString(), balanceChk);
 	QComboBox* posCmb = new QComboBox(layoutTab);
 	for (const QString& key : placePhotoPositionKeys())
 		posCmb->addItem(photoPositionLabel(key), key);
@@ -8231,6 +8235,7 @@ void SuneerNewsPanel::onSettings()
 	s.setValue("obit/autoProcessWorkflow", obitAutoWfChk->isChecked());
 	s.setValue("dup/threshold", dupSpin->value());
 	s.setValue("dup/photoBits", dupBitsSpin->value());
+	s.setValue("fit/balanceColumns", balanceChk->isChecked());
 
 	QString host = hostEdit->text().trimmed();
 	while (host.endsWith('/'))

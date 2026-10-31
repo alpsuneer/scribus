@@ -204,6 +204,7 @@ bool SuneerBoxFit::fitFrame(PageItem_TextFrame* tf, double inset)
 	// The bottom distance starts at the inset and is lowered only as much as the font's descent needs.
 	tf->setTextToFrameDistBottom(inset);
 	PageItem_TextFrame::SuneerFitOptions o;
+	o.via = "Frame Border fit box to text";
 	const bool fitted = tf->suneerFitToInk(o);
 	tf->checkChanges(true);
 	tf->invalidateLayout();

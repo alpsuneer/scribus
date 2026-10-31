@@ -17,6 +17,7 @@ for line in open(W + "/out/t-cases.txt"):
         continue
     path, name, pg = p[0], p[1], int(p[2])
     x, y, w, h, over, lw, dtop = map(float, p[3:10])
+    extra = " ".join(p[10:])
     if pg not in imgs:
         imgs[pg] = Image.open(pages[pg - 1]).convert("L")
     im = imgs[pg]; px = im.load()
@@ -27,6 +28,8 @@ for line in open(W + "/out/t-cases.txt"):
     # with a border the stroke itself is ink: look only well inside it
     pad = int((lw * px_mm) + 3) if lw > 0 else 0
     top = bottom = None
+    if y1 > im.height or x1 > im.width:
+        print("FAIL %-8s %-26s frame outside the page (%.1f x %.1f mm at %.1f,%.1f)" % (path, name, w, h, x, y)); fails += 1; continue
     for yy in range(int(y0) + pad, int(y1) - pad):
         if any(px[xx, yy] < 128 for xx in range(x0 + pad, x1 - pad, 2)):
             if top is None:
@@ -38,9 +41,21 @@ for line in open(W + "/out/t-cases.txt"):
     gb = (y1 - (bottom + 1)) / px_mm
     d = gb - gt
     ok = abs(d) <= TOL and not over
+    # balance: no column shorter than the first by more than 2 lines (the last may be a little shorter)
+    bal = ""
+    if extra.startswith("cols=") and "/" in extra:
+        counts = [int(c) for c in extra[5:].split()[0].split("/")]
+        bal = " lines %s" % "/".join(map(str, counts))
+        # all columns but the last within one line of the fullest; the last may be shorter (the text ran out)
+        if counts and (max(counts) - min(counts[:-1] or counts) > 1 or counts[-1] > counts[0] + 1):
+            bal += " UNBALANCED"; ok = False
+    if "CHANGED" in extra:
+        ok = False
+    if "bottoms=" in extra:
+        bal += " " + extra
     fails += 0 if ok else 1
     rows.append((path, name, gt, gb, d, over))
-    print("%s %-8s %-26s top %5.2f mm  bottom %5.2f mm  bottom-top %+5.2f mm  overflow %d" % ("PASS" if ok else "FAIL", path, name, gt, gb, d, over))
+    print("%s %-9s %-24s top %5.2f mm  bottom %5.2f mm  bottom-top %+5.2f mm  overflow %d%s %s" % ("PASS" if ok else "FAIL", path, name, gt, gb, d, over, bal, extra if "chain" in extra else ""))
 by = {}
 for r in rows:
     by.setdefault(r[0], []).append(r[4])

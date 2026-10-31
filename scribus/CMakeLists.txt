@@ -496,7 +496,9 @@ set(SCRIBUS_RELEASE_VERSION "" CACHE STRING "Release version for the updater and
 # package (tools/local-deb.sh: below that day's release, above every earlier one). A DDMMYY number
 # ("1.7.3-311026-1") compares OLDER than every YYYYMMDD release, in the updater and in dpkg alike, so a PC
 # holding it would be "updated" back to an earlier release. Empty stays allowed (developer build).
-if (SCRIBUS_RELEASE_VERSION AND NOT SCRIBUS_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+-20[2-9][0-9](0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])-(0|[1-9][0-9]*)$")
+# A test package is "<date>-<N>.local<M>", N = that day's latest published release (0 when none): above the
+# release it was built on, below the next one; the updater ignores ".localM" and sees it as that release.
+if (SCRIBUS_RELEASE_VERSION AND NOT SCRIBUS_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+-20[2-9][0-9](0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])-(0|[1-9][0-9]*)(\\.local[1-9][0-9]*)?$")
 	message(FATAL_ERROR "SCRIBUS_RELEASE_VERSION '${SCRIBUS_RELEASE_VERSION}' is not <upstream>-YYYYMMDD-N (e.g. 1.7.3-20261031-1, or -0 for a test package): "
 		"a DDMMYY or other number would rank below the releases already on the office PCs. "
 		"Reconfigure with -DSCRIBUS_RELEASE_VERSION= (empty) or a YYYYMMDD-N number.")

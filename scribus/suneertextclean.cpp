@@ -526,13 +526,14 @@ double fitHeight(PageItem_TextFrame* t, double minH, double maxH, bool* overflow
 		*overflow = false;
 	if (!t)
 		return 0.0;
-	if (t->nextInChain() || t->prevInChain())
-		return t->height();
+	if (t->nextInChain())
+		return t->height();                       // the last frame of a chain is fitted, the others never
 	// suneer 2026-10-31: the one fit (PageItem_TextFrame::suneerFitToInk) - the space under the last
 	// line's ink equals the space above the first line's ink, blank paragraphs at the end dropped.
 	// Placement, Layout Models / Gallery, obituary modules and Re-pack all come here.
 	PageItem_TextFrame::SuneerFitOptions o;
 	o.withUndo = false;
+	o.via = "placement / layout engine (SuneerTextClean::fitHeight)";
 	o.minH = qMax(1.0, minH);
 	o.maxH = qMax(o.minH, maxH);
 	t->suneerFitToInk(o, overflow);

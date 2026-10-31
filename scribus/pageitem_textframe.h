@@ -214,11 +214,25 @@ public:
 		bool trimTrailing { true };       //!< blank paragraphs at the end of the story go first
 		bool requireInk { false };        //!< no visible glyph: leave the frame (captions); else font metrics
 		bool updateWelds { true };        //!< false: the final updateClip() makes no weld pass (captions)
+		//! several columns: the height at which the text just fits all columns (balanced: 10 / 10 / 10 lines);
+		//! false = the columns fill one after another and the frame follows the first (14 / 11 / 5).
+		//! Default from Settings > Layout "Balance columns" (Faircode/ScribusNews fit/balanceColumns, on).
+		bool balanceColumns { balanceColumnsDefault() };
+		const char* via { "?" };          //!< which command: the SUNEER_FIT_TRACE line names it
 		double minH { 1.0 };
 		double maxH { 20000.0 };
 	};
-	//! false: not fitted (linked frame, empty, or no ink with requireInk); \a overflow: still overflowing at maxH
+	//! false: not fitted (a frame with a next frame in its chain, empty, or no ink with requireInk); the LAST
+	//! frame of a chain is fitted so the chain has no overflow. \a overflow: still overflowing at maxH
 	bool suneerFitToInk(const SuneerFitOptions& o, bool* overflow = nullptr);
+	static bool balanceColumnsDefault();
+	//! suneer 2026-10-31: lines per column the layout fills before it moves to the next column (item attribute
+	//! "SuneerColumnLines", set by the balanced fit: ceil(lines / columns), so 36 lines in 5 columns lay out
+	//! 8/7/7/7/7 instead of the greedy 8/8/8/8/4); 0 = greedy. A capped layout that overflows (text edited,
+	//! columns changed) is laid out greedily again, so a stale cap never hides text.
+	int suneerColumnLineCap() const;
+	void suneerSetColumnLineCap(int cap);
+	bool m_suneerNoColumnCap { false };
 
 	/**
 	 * @brief Fit the story inside this frame by adjusting typography alone.

@@ -1635,3 +1635,18 @@ scribus
 - Bottom text distance: ആവശ്യമെങ്കിൽ മാത്രം കുറയ്ക്കും (font descent-ന് വേണ്ടത്ര).
 - തിരുത്തൽ: toolbar Fit bottom distance രണ്ടുതവണ + 2 pt ചേർത്തിരുന്നു; menu Adjust Height ചെറിയ frame-ൽ overflow വിട്ടിരുന്നു.
 - Test: `tests/suneer/fit_gap.sh <dir>` (FITGAP_TEXT=clean: ശൂന്യ paragraph ഇല്ലാതെ).
+
+### 110. Fit to text — പല columns ഉള്ള frame-ഉം linked chain-ഉം
+- Columns > 1: text എല്ലാ columns-ലും കൃത്യം നിറയുന്ന ഏറ്റവും ചെറിയ ഉയരം (10 / 10 / 10 വരികൾ; അവസാന column അല്പം ചെറുതാകാം),
+  താഴെ ഇടം = മുകളിലെ ഇടം (#109 പോലെ). മുമ്പ്: ആദ്യ column-ന്റെ ഉയരം (14 / 11 / 5).
+- Settings → Layout: **"Balance columns when fitting"** (default on). Off = പഴയ പോലെ ആദ്യ column-ന് fit.
+- Linked chain: അവസാന frame fit ചെയ്യും, മുമ്പത്തെ frames മാറില്ല.
+- Keep lines / widows / baseline grid: layout തന്നെ പാലിക്കുന്നു. Overflow ഒരിക്കലും ഇല്ല (0.1 pt ഉയരം + bottom distance-ൽ 0.3 pt margin — reload-ൽ ഒരു വരി നഷ്ടപ്പെട്ടിരുന്നു).
+- എല്ലാ fit വഴികളും (toolbar, Adjust Frame Height, Frame Border, paste, placement, obituary 2-col).
+- **ഓരോ column-നും അതിന്റെ പങ്ക്:** fit `SuneerColumnLines` (item attribute, SLA-ൽ save) വെക്കും = ceil(വരികൾ / columns); layout ആ എണ്ണം
+  കഴിഞ്ഞാൽ അടുത്ത column-ലേക്ക് (36 വരി 5 column: 8/7/7/7/7, greedy 8/8/8/8/4 അല്ല). Cap-ഓടെ overflow വന്നാൽ (text മാറ്റി, columns
+  മാറ്റി) layout സ്വയം greedy ആയി വീണ്ടും — text ഒരിക്കലും മറയില്ല.
+- Running app-ൽ യഥാർത്ഥ commands (menu, toolbar, Styled Paste) കൊണ്ട് test: `FITGAP_TEXT=app tests/suneer/fit_gap.sh <dir>` (FIT-TRACE വരികൾ).
+- Test: `FITGAP_TEXT=columns tests/suneer/fit_gap.sh <dir>`.
+- Laptop test package ഇനി `<date>-<N>.local<M>` (N = അന്നത്തെ release): അന്നത്തെ release-ന് മുകളിൽ — updater `0.local1`-നെ release കൊണ്ട് മാറ്റിയിരുന്നു.
+- Styled Paste (frame select ചെയ്ത് paste): target frame-ന്റെ columns / gap നിലനിൽക്കും (മുമ്പ് source-ന്റേത് വന്നു).

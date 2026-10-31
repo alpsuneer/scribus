@@ -6951,8 +6951,8 @@ void ScribusMainWindow::slotEditStyledPaste()
 			// setWrapOffsets() now records its own state, so no explicit one here.
 
 			// R2: keep the target's top-left AND its drawn WIDTH; take everything else from source.
-			currItem->setColumns(snap.columns);
-			currItem->setColumnGap(snap.columnGap);
+			// suneer 2026-10-31: the target keeps its own columns and gap (a 1-column source made a 5-column
+			// frame single-column); the rest of the source layout is applied as before
 			currItem->setTextToFrameDist(snap.distL, snap.distR, snap.distT, snap.distB);
 			currItem->setTextFlowMode(static_cast<PageItem::TextFlowMode>(snap.textFlowMode));
 			currItem->setWrapOffsets(snap.wrapT, snap.wrapB, snap.wrapL, snap.wrapR);
@@ -11404,6 +11404,7 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 		PageItem_TextFrame::SuneerFitOptions o;
 		o.requireInk = true;
 		o.updateWelds = false;
+		o.via = "Item > Adjust > Fit Caption Frame";
 		if (tf->suneerFitToInk(o))
 			++fitted;
 		else
