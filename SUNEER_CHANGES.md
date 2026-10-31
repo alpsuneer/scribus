@@ -1477,3 +1477,15 @@ scribus
   അടുത്ത placement-ൽ ശരിയായ face crop വരും.
 - Edit photo-യിലെ face guide: അതേ വ്യക്തമായ message.
 
+### 97. News Browser login ഒരിക്കലും കുടുങ്ങില്ല — keyring ഇല്ലെങ്കിലും
+- ചില PC-കളിൽ (chn-dtp26) login keyring ഇല്ല. Login ശരിയായാലും token keyring-ൽ വെക്കുമ്പോൾ മറഞ്ഞ "new keyring"
+  prompt വന്ന് Login dialog എന്നെന്നേക്കുമായി കാത്തിരുന്നു (Cancel-ഉം Login-ഉം ചാരനിറം).
+- ഇപ്പോൾ Scribus keyring ഉപയോഗിക്കുന്നത് default keyring ഉണ്ടെങ്കിലും unlock ആണെങ്കിലും മാത്രം (3 സെക്കൻഡിനുള്ളിൽ
+  ഉത്തരം വേണം). Keyring prompt ഒരിക്കലും Scribus കാരണം വരില്ല.
+- Keyring ഇല്ലെങ്കിൽ: login ഈ Scribus session-ൽ മാത്രം (memory-യിൽ; disk-ൽ ഒന്നുമില്ല). ഒരിക്കൽ message:
+  "Login saved for this session only - keyring not available". Scribus വീണ്ടും തുറക്കുമ്പോൾ വീണ്ടും login.
+- Login: 10 സെക്കൻഡ് പരമാവധി; Cancel എപ്പോഴും പ്രവർത്തിക്കും; വ്യക്തമായ error (server refused, server name not
+  found, no answer within 10 seconds, wrong password …).
+- ഓരോ login step-ഉം സമയത്തോടെ `~/scribus-crashlogs/login.log`-ൽ (password / token ഒരിക്കലും ഇല്ല).
+- install.sh summary-യിൽ user-ന്റെ keyring check, ശരിയാക്കാനുള്ള വഴിയോടെ.
+

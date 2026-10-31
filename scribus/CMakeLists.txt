@@ -449,6 +449,9 @@ target_link_libraries(${EXE_NAME}
 
 if (Qt6Keychain_FOUND)
 	target_link_libraries(${EXE_NAME} PRIVATE Qt6Keychain::Qt6Keychain)
+	if (Qt6DBus_FOUND)
+		target_link_libraries(${EXE_NAME} PRIVATE Qt6::DBus)
+	endif()
 endif()
 
 # Updater: the installer runs as root, so a manifest is only trusted when it

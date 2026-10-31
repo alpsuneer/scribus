@@ -38,7 +38,10 @@
 #include <QDateEdit>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <memory>
+
 #include <QDir>
+#include <QElapsedTimer>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QEventLoop>
@@ -805,6 +808,26 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	// The keychain is touched after main-window construction so a keyring
 	// prompt never lands in the middle of start-up.
 	QTimer::singleShot(800, this, &SuneerNewsPanel::startupSession);
+	if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST"))
+	{
+		// After the startup session check; _EARLY: while it still runs (a
+		// Login clicked during a slow keyring check).
+		if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST_EARLY"))
+			QTimer::singleShot(1500, this, [this]() { runLoginSelfTest(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST")); });
+		else
+		{
+			auto* wait = new QTimer(this);
+			wait->setInterval(200);
+			connect(wait, &QTimer::timeout, this, [this, wait]() {
+				if (!m_startupDone)
+					return;
+				wait->stop();
+				wait->deleteLater();
+				QTimer::singleShot(500, this, [this]() { runLoginSelfTest(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST")); });
+			});
+			wait->start();
+		}
+	}
 
 }
 
@@ -2732,38 +2755,161 @@ QNetworkReply* SuneerNewsPanel::postBlocking(const QNetworkRequest& req, const Q
 // Session: login, refresh, logout, keychain
 // ============================================================================
 
+void SuneerNewsPanel::loginLog(const QString& line)
+{
+	const QString dir = QDir::homePath() + QStringLiteral("/scribus-crashlogs");
+	QDir().mkpath(dir);
+	const QString path = dir + QStringLiteral("/login.log");
+	if (QFileInfo(path).size() > 1024 * 1024)
+	{
+		QFile::remove(path + QStringLiteral(".1"));
+		QFile::rename(path, path + QStringLiteral(".1"));
+	}
+	QFile f(path);
+	if (!f.open(QIODevice::Append | QIODevice::Text))
+		return;
+	QTextStream out(&f);
+	out << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+	    << "  [" << QCoreApplication::applicationPid() << "]  " << line << "\n";
+}
+
+// "suneer@example.com" -> "s***@example.com": enough to tell accounts apart in the log.
+QString SuneerNewsPanel::maskEmail(const QString& email)
+{
+	const int at = email.indexOf(QLatin1Char('@'));
+	if (at <= 0)
+		return email.isEmpty() ? QStringLiteral("(empty)") : email.left(1) + QStringLiteral("***");
+	return email.left(1) + QStringLiteral("***") + email.mid(at);
+}
+
+// The keyring is used only when it is ready (ScUpdateKeyStore::keyringState):
+// a missing default keyring would make the first write pop a hidden "create
+// new keyring" prompt and wait for it (chn-dtp26), a locked one an unlock
+// prompt. Without it the tokens live in memory for this session only.
 void SuneerNewsPanel::ensureSecretsLoaded()
 {
-	if (m_secretsLoaded)
+	// The check runs a local event loop (at most ~3 s when the keyring hangs):
+	// a Login clicked meanwhile goes ahead without it, and its session wins.
+	if (m_secretsLoaded || m_secretsLoading)
 		return;
+	m_secretsLoading = true;
+	const int gen = m_sessionGen;
+	QString access, refresh, device, user, why;
+	int probeMs = 0;
+	const ScUpdateKeyStore::KeyringState st = ScUpdateKeyStore::keyringState(3000, &probeMs);
+	loginLog(QStringLiteral("keyring check: %1 (%2 ms)").arg(ScUpdateKeyStore::keyringStateText(st)).arg(probeMs));
+	bool fromKeyring = false;
+	if (st == ScUpdateKeyStore::KeyringState::Ready)
+	{
+		QElapsedTimer t;
+		t.start();
+		QString err;
+		const bool ok = ScUpdateKeyStore::keyringLoad(kSecretService, kKeyAccess, &access, 3000, &err)
+		             && ScUpdateKeyStore::keyringLoad(kSecretService, kKeyRefresh, &refresh, 3000, &err)
+		             && ScUpdateKeyStore::keyringLoad(kSecretService, kKeyDevice, &device, 3000, &err)
+		             && ScUpdateKeyStore::keyringLoad(kSecretService, kKeyUserName, &user, 3000, &err);
+		loginLog(ok ? QStringLiteral("keyring read: ok, saved session %1 (%2 ms)").arg(refresh.isEmpty() ? "no" : "yes").arg(t.elapsed())
+		            : QStringLiteral("keyring read failed: %1 (%2 ms)").arg(err).arg(t.elapsed()));
+		if (ok)
+			fromKeyring = true;
+		else
+			why = err;
+	}
+	else
+		why = ScUpdateKeyStore::keyringStateText(st);
+	if (!fromKeyring)
+	{
+		// What a build without a keyring left in the prefs file (read only;
+		// it is never written again), the device id from the plain settings.
+		access  = ScUpdateKeyStore::loadLegacySecret(kSecretService, kKeyAccess);
+		refresh = ScUpdateKeyStore::loadLegacySecret(kSecretService, kKeyRefresh);
+		user    = ScUpdateKeyStore::loadLegacySecret(kSecretService, kKeyUserName);
+		device  = ScUpdateKeyStore::loadLegacySecret(kSecretService, kKeyDevice);
+		if (device.isEmpty())
+			device = settingsString(QStringLiteral("deviceId"), QString());
+		loginLog(QStringLiteral("keyring not used (%1): login kept for this session only; older saved session %2")
+		             .arg(why, refresh.isEmpty() ? "none" : "found in the prefs file"));
+	}
+	m_secretsLoading = false;
 	m_secretsLoaded = true;
-	m_accessToken  = ScUpdateKeyStore::loadSecret(kSecretService, kKeyAccess);
-	m_refreshToken = ScUpdateKeyStore::loadSecret(kSecretService, kKeyRefresh);
-	m_deviceId     = ScUpdateKeyStore::loadSecret(kSecretService, kKeyDevice);
-	m_userName     = ScUpdateKeyStore::loadSecret(kSecretService, kKeyUserName);
+	if (!fromKeyring)
+	{
+		m_sessionOnly = true;
+		if (m_keyringWhy.isEmpty())
+			m_keyringWhy = why;
+	}
+	if (gen != m_sessionGen)
+		loginLog(QStringLiteral("keyring check finished after a login / logout in the meantime: that session is kept"));
+	else
+	{
+		m_accessToken = access;
+		m_refreshToken = refresh;
+		m_userName = user;
+	}
+	if (m_deviceId.isEmpty())
+		m_deviceId = device;
 	if (m_deviceId.isEmpty())
 	{
-		// One UUID per machine, generated once and kept with the tokens.
+		// One UUID per machine, generated once and kept with the tokens. It is
+		// not a secret: without a keyring it goes to ScribusNews.conf.
 		m_deviceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-		ScUpdateKeyStore::storeSecret(kSecretService, kKeyDevice, m_deviceId);
+		if (m_sessionOnly || !ScUpdateKeyStore::keyringStore(kSecretService, kKeyDevice, m_deviceId, 3000))
+			QSettings("Faircode", "ScribusNews").setValue("deviceId", m_deviceId);
 	}
 }
 
 void SuneerNewsPanel::saveSession()
 {
-	auto put = [](const QString& key, const QString& value) {
-		if (value.isEmpty())
-			ScUpdateKeyStore::clearSecret(kSecretService, key);
-		else
-			ScUpdateKeyStore::storeSecret(kSecretService, key, value);
-	};
-	put(kKeyAccess, m_accessToken);
-	put(kKeyRefresh, m_refreshToken);
-	put(kKeyUserName, m_userName);
+	if (!m_sessionOnly)
+	{
+		QElapsedTimer t;
+		t.start();
+		QString err;
+		auto put = [&err](const QString& key, const QString& value) {
+			return value.isEmpty() ? ScUpdateKeyStore::keyringClear(kSecretService, key, 4000, &err)
+			                       : ScUpdateKeyStore::keyringStore(kSecretService, key, value, 4000, &err);
+		};
+		const bool ok = put(kKeyAccess, m_accessToken) && put(kKeyRefresh, m_refreshToken) && put(kKeyUserName, m_userName);
+		loginLog(ok ? QStringLiteral("keyring write: ok (%1 ms)").arg(t.elapsed())
+		            : QStringLiteral("keyring write failed: %1 (%2 ms) - this session only from now on").arg(err).arg(t.elapsed()));
+		if (ok)
+			return;
+		m_sessionOnly = true;
+		m_keyringWhy = err;
+	}
+	// Session only: nothing goes to disk, and an older prefs-file copy is
+	// stale from now on (the server rotates the refresh token).
+	ScUpdateKeyStore::clearLegacySecret(kSecretService, kKeyAccess);
+	ScUpdateKeyStore::clearLegacySecret(kSecretService, kKeyRefresh);
+	ScUpdateKeyStore::clearLegacySecret(kSecretService, kKeyUserName);
+	if (!m_accessToken.isEmpty() || !m_refreshToken.isEmpty())
+		showSessionOnlyNotice();
+}
+
+void SuneerNewsPanel::showSessionOnlyNotice()
+{
+	if (m_sessionOnlyNoticeShown)
+		return;
+	m_sessionOnlyNoticeShown = true;
+	m_sessionOnlyNotice = tr("Login saved for this session only - keyring not available (%1).\n"
+	                         "You will be asked to log in again after Scribus restarts.").arg(m_keyringWhy);
+	loginLog(QStringLiteral("notice shown: login saved for this session only"));
+	setStatus(tr("Login saved for this session only - keyring not available"));
+	auto* box = new QMessageBox(QMessageBox::Information, tr("News Browser"), m_sessionOnlyNotice, QMessageBox::Ok, this);
+	box->setAttribute(Qt::WA_DeleteOnClose);
+	box->setModal(false);
+	box->show();
+	if (m_loginSelfTest)
+	{
+		if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST_SHOT"))
+			QTimer::singleShot(200, box, [box]() { box->grab().save(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST_SHOT") + "-notice.png"); });
+		QTimer::singleShot(500, box, &QMessageBox::close);
+	}
 }
 
 void SuneerNewsPanel::clearSession()
 {
+	++m_sessionGen;
 	m_accessToken.clear();
 	m_refreshToken.clear();
 	m_userName.clear();
@@ -2905,9 +3051,18 @@ void SuneerNewsPanel::startupSession()
 		setStatus(tr("Fixture mode: Fetch News reads the file"));
 		return;
 	}
+	const int gen = m_sessionGen;
 	ensureSecretsLoaded();
+	if (gen != m_sessionGen)
+	{
+		// The user logged in while the keyring was checked: nothing to restore.
+		m_startupDone = true;
+		return;
+	}
 	if (m_refreshToken.isEmpty())
 	{
+		m_startupDone = true;
+		loginLog(QStringLiteral("startup: no saved session, panel locked"));
 		m_accessToken.clear();
 		setLocked(true);
 		return;
@@ -2915,8 +3070,15 @@ void SuneerNewsPanel::startupSession()
 	m_quietAuth = true;
 	const bool ok = refreshAccessToken();
 	m_quietAuth = false;
+	if (gen != m_sessionGen)
+	{
+		m_startupDone = true;   // a login while the refresh ran: keep it
+		return;
+	}
 	if (!ok)
 	{
+		m_startupDone = true;
+		loginLog(QStringLiteral("startup: saved session refused or server not reachable, panel locked"));
 		clearSession();
 		setLocked(true);
 		m_lockLabel->setText(tr("Saved session is no longer valid - please log in."));
@@ -2925,6 +3087,7 @@ void SuneerNewsPanel::startupSession()
 	m_quietAuth = true;
 	fetchCurrentUser();
 	m_quietAuth = false;
+	m_startupDone = true;
 	setLocked(false);
 	onFetchStatic();
 }
@@ -2938,8 +3101,19 @@ bool SuneerNewsPanel::refreshAccessToken()
 	req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 	req.setRawHeader("x-device-id", m_deviceId.toUtf8());
 	req.setRawHeader("Cookie", "refreshToken=" + m_refreshToken.toUtf8());
+	QElapsedTimer t;
+	t.start();
+	const int gen = m_sessionGen;
 	QNetworkReply* reply = postBlocking(req, QByteArray("{}"));
 	const int status = httpStatus(reply);
+	loginLog(QStringLiteral("token refresh: %1 after %2 ms")
+	             .arg(status > 0 ? QStringLiteral("HTTP %1").arg(status) : QStringLiteral("network error (%1)").arg(reply->errorString()))
+	             .arg(t.elapsed()));
+	if (gen != m_sessionGen)
+	{
+		loginLog(QStringLiteral("token refresh ignored: a login / logout happened while it ran"));
+		return isLoggedIn();
+	}
 	if (reply->error() != QNetworkReply::NoError || status != 200)
 	{
 		if (status == 401 || status == 403)
@@ -2955,9 +3129,26 @@ bool SuneerNewsPanel::refreshAccessToken()
 	return true;
 }
 
-bool SuneerNewsPanel::doLogin(const QString& email, const QString& password, QString& error)
+namespace {
+// The whole login request; Qt's own transfer timeout is a little longer so
+// the dialog's guard always decides and gives its own message.
+const int kLoginTimeoutMs = 10000;
+}
+
+QNetworkReply* SuneerNewsPanel::startLoginRequest(const QString& email, const QString& password)
 {
 	ensureSecretsLoaded();
+	if (m_deviceId.isEmpty())
+	{
+		// Login while the startup keyring check still runs: the device id
+		// from the plain settings (it is not a secret).
+		m_deviceId = settingsString(QStringLiteral("deviceId"), QString());
+		if (m_deviceId.isEmpty())
+		{
+			m_deviceId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+			QSettings("Faircode", "ScribusNews").setValue("deviceId", m_deviceId);
+		}
+	}
 	QJsonObject body;
 	body["email"]    = email;
 	body["password"] = password;
@@ -2966,15 +3157,70 @@ bool SuneerNewsPanel::doLogin(const QString& email, const QString& password, QSt
 	body.remove("password");
 	QNetworkRequest req = apiRequest(QUrl(apiUrl("/users/auth/login")), false);
 	req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-	QNetworkReply* reply = postBlocking(req, bytes);
+	req.setTransferTimeout(kLoginTimeoutMs + 2000);
+	loginLog(QStringLiteral("login request: POST %1/users/auth/login as %2").arg(QUrl(m_apiHost).authority(), maskEmail(email)));
+	QNetworkReply* reply = m_nam->post(req, bytes);
 	bytes.fill('\0');   // the password is not kept around
-	if (reply->error() != QNetworkReply::NoError || httpStatus(reply) != 200)
+	return reply;
+}
+
+QString SuneerNewsPanel::loginErrorText(QNetworkReply* reply, bool timedOut) const
+{
+	const QString host = QUrl(m_apiHost).authority();
+	if (timedOut)
+		return tr("No answer from the server %1 within %2 seconds.\nCheck the network and the server address (Settings), then try again.")
+		    .arg(host).arg(kLoginTimeoutMs / 1000);
+	const int status = httpStatus(reply);
+	const QString msg = serverMessage(reply->peek(reply->bytesAvailable()));
+	switch (reply->error())
+	{
+		case QNetworkReply::NoError:
+			break;
+		case QNetworkReply::ConnectionRefusedError:
+			return tr("The server %1 refused the connection: the News server is not running at that address.\nCheck the server address (Settings).").arg(host);
+		case QNetworkReply::HostNotFoundError:
+			return tr("Server name %1 not found.\nCheck the server address (Settings).").arg(host);
+		case QNetworkReply::TimeoutError:
+		case QNetworkReply::OperationCanceledError:
+			return tr("No answer from the server %1 within %2 seconds.\nCheck the network and the server address (Settings), then try again.")
+			    .arg(host).arg(kLoginTimeoutMs / 1000);
+		case QNetworkReply::RemoteHostClosedError:
+		case QNetworkReply::NetworkSessionFailedError:
+		case QNetworkReply::UnknownNetworkError:
+		case QNetworkReply::TemporaryNetworkFailureError:
+			return tr("Cannot reach the server %1: %2").arg(host, reply->errorString());
+		default:
+			if (status == 0)
+				return tr("Cannot reach the server %1: %2").arg(host, reply->errorString());
+			break;
+	}
+	if (status == 400 || status == 401 || status == 403)
+		return tr("%1 (HTTP %2)").arg(msg.isEmpty() ? tr("Wrong email or password") : msg).arg(status);
+	if (status == 429)
+		return tr("Too many login attempts - wait a few minutes and try again (HTTP 429)%1").arg(msg.isEmpty() ? QString() : QStringLiteral(": ") + msg);
+	if (status == 404)
+		return tr("The login address was not found on %1 (HTTP 404).\nCheck the server address (Settings).").arg(host);
+	if (status >= 500)
+		return tr("Server error (HTTP %1)%2").arg(status).arg(msg.isEmpty() ? QString() : QStringLiteral(": ") + msg);
+	if (status != 200)
+		return tr("Unexpected answer from the server (HTTP %1)%2").arg(status).arg(msg.isEmpty() ? QString() : QStringLiteral(": ") + msg);
+	return QString();
+}
+
+bool SuneerNewsPanel::finishLogin(QNetworkReply* reply, const QString& email, bool timedOut, qint64 ms, QString& error)
+{
+	const int status = httpStatus(reply);
+	loginLog(QStringLiteral("login reply: %1 after %2 ms")
+	             .arg(timedOut ? QStringLiteral("no answer (timed out)")
+	                           : status > 0 ? QStringLiteral("HTTP %1").arg(status)
+	                                        : QStringLiteral("network error %1 (%2)").arg(int(reply->error())).arg(reply->errorString()))
+	             .arg(ms));
+	if (timedOut || reply->error() != QNetworkReply::NoError || status != 200)
 	{
 		// The server says why: wrong password, disabled account, too many
-		// attempts ... Show that; fall back to the transport error.
-		const QString msg = serverMessage(reply->peek(reply->bytesAvailable()));
-		error = msg.isEmpty() ? describeError(reply)
-		                      : tr("%1 (HTTP %2)").arg(msg).arg(httpStatus(reply));
+		// attempts ... Show that; otherwise the transport problem.
+		error = loginErrorText(reply, timedOut);
+		loginLog(QStringLiteral("login failed: %1").arg(QString(error).replace('\n', ' ')));
 		return false;
 	}
 	captureRefreshCookie(reply);
@@ -2983,21 +3229,29 @@ bool SuneerNewsPanel::doLogin(const QString& email, const QString& password, QSt
 	if (m_accessToken.isEmpty())
 	{
 		error = tr("Login reply carried no access token");
+		loginLog(QStringLiteral("login failed: reply without an access token"));
 		return false;
 	}
 	m_userName.clear();
 	parseUser(data["user"].toObject());
 	if (m_userName.isEmpty())
 		m_userName = email;
+	++m_sessionGen;
+	loginLog(QStringLiteral("login ok: refresh cookie %1").arg(m_refreshToken.isEmpty() ? "missing" : "received"));
 	saveSession();
 	return true;
 }
 
+// The request runs asynchronously while the dialog stays usable: Cancel is
+// always enabled and aborts it, nothing waits longer than kLoginTimeoutMs,
+// and a keyring problem can no longer hold the dialog (saveSession() only
+// uses a ready keyring, with a timeout).
 bool SuneerNewsPanel::loginDialog()
 {
 	if (m_loginDialogOpen)
 		return false;
 	m_loginDialogOpen = true;
+	loginLog(QStringLiteral("login dialog opened, server %1").arg(QUrl(m_apiHost).authority()));
 	QDialog dlg(this);
 	dlg.setWindowTitle(tr("News Browser - Login"));
 	dlg.setMinimumWidth(380);
@@ -3009,43 +3263,145 @@ bool SuneerNewsPanel::loginDialog()
 	QLabel* info = new QLabel(tr("Server: %1").arg(m_apiHost), &dlg);
 	info->setStyleSheet("color:#666; font-size:11px;");
 	QLabel* err = new QLabel(&dlg);
-	err->setStyleSheet("color:#B00020;");
 	err->setWordWrap(true);
 	fl->addRow(info);
 	fl->addRow(tr("Email:"), emailEdit);
 	fl->addRow(tr("Password:"), passEdit);
 	fl->addRow(err);
 	QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-	bb->button(QDialogButtonBox::Ok)->setText(tr("Login"));
-	bb->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
+	QPushButton* loginBtn = bb->button(QDialogButtonBox::Ok);
+	QPushButton* cancelBtn = bb->button(QDialogButtonBox::Cancel);
+	loginBtn->setText(tr("Login"));
+	cancelBtn->setText(tr("Cancel"));
 	fl->addRow(bb);
-	connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+	QPointer<QNetworkReply> pending;
+	bool timedOut = false;
+	bool cancelled = false;
+	QString email;
+	QElapsedTimer clock;
+	QTimer guard;
+	guard.setTimerType(Qt::PreciseTimer);
+	guard.setSingleShot(true);
+	guard.setInterval(kLoginTimeoutMs);
+	auto setBusy = [&](bool busy) {
+		emailEdit->setEnabled(!busy);
+		passEdit->setEnabled(!busy);
+		loginBtn->setEnabled(!busy);
+		cancelBtn->setEnabled(true);   // always: it aborts a running request
+	};
+	auto showError = [&](const QString& text) {
+		err->setStyleSheet("color:#B00020;");
+		err->setText(text);
+		m_loginSelfTestError = text;
+		dlg.adjustSize();   // a two- or three-line message must not be cut off
+	};
+	connect(&guard, &QTimer::timeout, &dlg, [&]() {
+		if (!pending)
+			return;
+		timedOut = true;
+		pending->abort();
+	});
 	// Each click is one deliberate attempt; nothing is retried on its own
 	// (repeated failures lock the account server-side).
 	connect(bb, &QDialogButtonBox::accepted, &dlg, [&]() {
-		const QString email = emailEdit->text().trimmed();
+		if (pending)
+			return;
+		email = emailEdit->text().trimmed();
 		if (email.isEmpty() || passEdit->text().isEmpty())
 		{
-			err->setText(tr("Enter email and password"));
+			showError(tr("Enter email and password"));
 			return;
 		}
-		QString e;
-		bb->setEnabled(false);
-		const bool ok = doLogin(email, passEdit->text(), e);
+		timedOut = false;
+		err->setStyleSheet("color:#666;");
+		err->setText(tr("Connecting to %1 ...").arg(QUrl(m_apiHost).authority()));
+		setBusy(true);
+		clock.start();
+		QNetworkReply* reply = startLoginRequest(email, passEdit->text());
 		passEdit->clear();
-		bb->setEnabled(true);
-		if (ok)
-		{
-			QSettings s("Faircode", "ScribusNews");
-			s.setValue("loginEmail", email);
-			dlg.accept();
-		}
-		else
-			err->setText(e);
+		pending = reply;
+		guard.start();
+		connect(reply, &QNetworkReply::finished, &dlg, [&, reply]() {
+			guard.stop();
+			pending = nullptr;
+			const qint64 ms = clock.elapsed();
+			m_loginSelfTestRequestMs = ms;
+			if (cancelled)
+			{
+				reply->deleteLater();
+				return;
+			}
+			QString e;
+			const bool ok = finishLogin(reply, email, timedOut, ms, e);
+			reply->deleteLater();
+			if (ok)
+			{
+				QSettings s("Faircode", "ScribusNews");
+				s.setValue("loginEmail", email);
+				dlg.accept();
+				return;
+			}
+			setBusy(false);
+			showError(e);
+			passEdit->setFocus();
+			if (m_loginSelfTest && qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST_SHOT"))
+				QTimer::singleShot(100, &dlg, [&]() { dlg.grab().save(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST_SHOT") + "-error.png"); });
+		});
 	});
+	connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+	// Cancel, Esc and the window's close button all end here.
+	connect(&dlg, &QDialog::rejected, &dlg, [&]() {
+		if (pending)
+		{
+			cancelled = true;
+			loginLog(QStringLiteral("login cancelled by the user after %1 ms; request aborted").arg(clock.elapsed()));
+			pending->abort();
+		}
+	});
+	if (m_loginSelfTest)
+	{
+		// The self-test fills the dialog, clicks Login (and Cancel when asked)
+		// and watches the buttons while the request runs.
+		QTimer::singleShot(300, &dlg, [&]() {
+			emailEdit->setText(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST_EMAIL", "test@example.com"));
+			passEdit->setText(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST_PASS", "right"));
+			loginBtn->click();
+			const int cancelMs = qEnvironmentVariableIntValue("SUNEER_LOGIN_SELFTEST_CANCEL_MS");
+			if (cancelMs > 0)
+				QTimer::singleShot(cancelMs, &dlg, [&]() {
+					QElapsedTimer c;
+					c.start();
+					cancelBtn->click();
+					m_loginSelfTestCancelCloseMs = dlg.isVisible() ? -1 : c.elapsed();
+				});
+		});
+		auto* tick = new QTimer(&dlg);
+		tick->setInterval(100);
+		connect(tick, &QTimer::timeout, &dlg, [&]() {
+			if (!pending)
+				return;
+			++m_loginSelfTestTicks;
+			if (m_loginSelfTestTicks == 15 && qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST_SHOT"))
+				dlg.grab().save(qEnvironmentVariable("SUNEER_LOGIN_SELFTEST_SHOT") + "-busy.png");
+			if (loginBtn->isEnabled())
+				m_loginSelfTestLoginEnabledBusy = true;
+			if (!cancelBtn->isEnabled())
+				m_loginSelfTestCancelDisabledBusy = true;
+		});
+		tick->start();
+		QTimer::singleShot(30000, &dlg, &QDialog::reject);   // never hang the test
+	}
 	(emailEdit->text().isEmpty() ? emailEdit : passEdit)->setFocus();
 	const bool ok = (dlg.exec() == QDialog::Accepted);
+	if (pending)
+	{
+		cancelled = true;
+		pending->abort();
+	}
 	m_loginDialogOpen = false;
+	loginLog(ok ? QStringLiteral("login done, logged in as %1").arg(maskEmail(email))
+	            : QStringLiteral("login dialog closed, not logged in"));
 	return ok;
 }
 
@@ -3062,6 +3418,7 @@ void SuneerNewsPanel::onLogin()
 void SuneerNewsPanel::onLogout()
 {
 	ensureSecretsLoaded();
+	loginLog(QStringLiteral("logout"));
 	if (!m_accessToken.isEmpty())
 	{
 		// Best effort: the server revokes the refresh session it finds in the cookie.
@@ -3078,6 +3435,71 @@ void SuneerNewsPanel::onLogout()
 	setLocked(true);
 	m_lockLabel->setText(tr("Logged out."));
 }
+
+// SUNEER_LOGIN_SELFTEST=<report>: one login through the real dialog with
+// SUNEER_LOGIN_SELFTEST_EMAIL / _PASS (and _CANCEL_MS: click Cancel after
+// that many ms), then the report and quit. tests/suneer/news_login.sh runs it
+// against a mock server in each keyring state; secrets are never written to
+// the report, only whether they are present.
+void SuneerNewsPanel::runLoginSelfTest(const QString& report)
+{
+	m_loginSelfTest = true;
+	ensureSecretsLoaded();
+	const ScUpdateKeyStore::KeyringState st = ScUpdateKeyStore::keyringState();
+	QElapsedTimer t;
+	t.start();
+	onLogin();
+	const qint64 dialogMs = t.elapsed();
+	// A login during the startup check: the check finishes afterwards (its
+	// event loop is below this call, so wait from a timer) and must not lock
+	// the panel again.
+	auto* wait = new QTimer(this);
+	wait->setInterval(200);
+	auto waited = std::make_shared<QElapsedTimer>();
+	waited->start();
+	connect(wait, &QTimer::timeout, this, [this, wait, waited, report, st, dialogMs]() {
+		if (!m_startupDone && waited->elapsed() < 15000)
+			return;
+		wait->stop();
+		wait->deleteLater();
+		writeLoginSelfTestReport(report, int(st), dialogMs);
+	});
+	wait->start();
+}
+
+void SuneerNewsPanel::writeLoginSelfTestReport(const QString& report, int keyringState, qint64 dialogMs)
+{
+	const auto st = ScUpdateKeyStore::KeyringState(keyringState);
+	QStringList lines;
+	lines << QStringLiteral("keyring: %1").arg(ScUpdateKeyStore::keyringStateText(st))
+	      << QStringLiteral("sessionOnly: %1").arg(m_sessionOnly ? "yes" : "no")
+	      << QStringLiteral("loggedIn: %1").arg(isLoggedIn() ? "yes" : "no")
+	      << QStringLiteral("user: %1").arg(m_userName)
+	      << QStringLiteral("error: %1").arg(QString(m_loginSelfTestError).replace('\n', ' '))
+	      << QStringLiteral("requestMs: %1").arg(m_loginSelfTestRequestMs)
+	      << QStringLiteral("ticksWhileBusy: %1").arg(m_loginSelfTestTicks)
+	      << QStringLiteral("loginEnabledWhileBusy: %1").arg(m_loginSelfTestLoginEnabledBusy ? "yes" : "no")
+	      << QStringLiteral("cancelDisabledWhileBusy: %1").arg(m_loginSelfTestCancelDisabledBusy ? "yes" : "no")
+	      << QStringLiteral("cancelCloseMs: %1").arg(m_loginSelfTestCancelCloseMs)
+	      << QStringLiteral("dialogMs: %1").arg(dialogMs)
+	      << QStringLiteral("notice: %1").arg(QString(m_sessionOnlyNotice).replace('\n', ' '))
+	      << QStringLiteral("startupDone: %1").arg(m_startupDone ? "yes" : "no")
+	      << QStringLiteral("panelUnlocked: %1").arg(m_stack->currentIndex() == 1 ? "yes" : "no");
+	if (st == ScUpdateKeyStore::KeyringState::Ready)
+	{
+		QString v;
+		const bool read = ScUpdateKeyStore::keyringLoad(kSecretService, kKeyRefresh, &v, 3000);
+		lines << QStringLiteral("keyringHasRefreshToken: %1").arg(!read ? "read failed" : v.isEmpty() ? "no" : "yes");
+	}
+	lines << QStringLiteral("prefsFileHasRefreshToken: %1").arg(ScUpdateKeyStore::loadLegacySecret(kSecretService, kKeyRefresh).isEmpty() ? "no" : "yes");
+	QFile f(report);
+	if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+		f.write(lines.join('\n').toUtf8() + "\n");
+	f.close();
+	fprintf(stderr, "LOGIN-SELFTEST done: %s\n", qPrintable(report));
+	QTimer::singleShot(200, qApp, []() { QApplication::exit(0); });
+}
+
 
 // ============================================================================
 // Editions / pages / news (the /external routes, no login)

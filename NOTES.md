@@ -2955,3 +2955,32 @@ Traps:
   through the cairo matrix — text on a path / flipped frames are not checked.
 - Test: tests/suneer/text_gradient.sh <dir> (fixture fixtures/text_gradient_make.py; SUNEER_TEXTGRAD_SELFTEST).
   The scripter Printer to "File" tiles an A3 page into 9 tiles; each tile re-renders → 9× pattern defs (fine).
+
+## News Browser login never blocks, keyring never prompts (2026-10-29, NOT committed, NOT verified by the user)
+- Cause (chn-dtp26): gnome-keyring runs but has no default ("login") collection. Qt Keychain (libsecret)
+  writes to the "default" alias, so saveSession() after a good login popped a hidden "create new keyring"
+  prompt; ScUpdateKeyStore ran the job in a QEventLoop with no timeout and the dialog had disabled its whole
+  button box → hung for ever. The same happens with a locked default keyring (unlock prompt).
+- ScUpdateKeyStore::keyringState() (scupdatekeystore.cpp, HAVE_KEYRING_PROBE = Linux + Qt6::DBus): NameHasOwner
+  org.freedesktop.secrets → Service.ReadAlias("default") → Collection.Locked, every call with
+  setAutoStartService(false) (never activates a daemon) and one 3 s deadline; result cached per process
+  (a keyring set up later needs a restart). Ready only when the default collection exists and is unlocked.
+  QKeychain::isAvailable() is asked only after the probe (it may hit D-Bus itself). Reentrant call while the
+  probe's event loop runs → NoAnswer, no second probe.
+- keyringStore/Load/Clear: keyring only, never the prefs file, 4 s job timeout. Jobs: autoDelete(false), the
+  result copied in finished(); a job alive at the timeout gets autoDelete(true) and is left to finish.
+  The old store/load/storeSecret/loadSecret (updater API key) go through the same gate.
+- News panel: not Ready → m_sessionOnly: tokens in memory only, old obfuscated ScribusSecrets.conf tokens read
+  once and then removed, deviceId in ScribusNews.conf (not secret). Notice once per session. Chosen over a 0600
+  file: a refresh token on disk is a long-lived login anyone with the disk / backup / NFS home can reuse.
+- Login dialog: async post, guard QTimer (PreciseTimer) 10 s → abort, transfer timeout 12 s; Cancel / Esc /
+  close always enabled and abort; clear messages per error. m_sessionGen: a login during the startup check or
+  refresh is never undone by it (that was a real bug the noanswer test found: the finishing startup check
+  relocked the panel).
+- ~/scribus-crashlogs/login.log (1 MB, one .1): each step with ms; email masked, never password / token.
+- Test: tests/suneer/news_login.sh <dir> [scribus] — one dbus-run-session per keyring state (normal,
+  nocollection, locked, nodaemon via a busconfig without service dirs, notstarted, noanswer = a Gio service
+  that never replies, early login), mock server fixtures/news_login_mock.py (never a real server),
+  SUNEER_LOGIN_SELFTEST(_EMAIL/_PASS/_CANCEL_MS/_EARLY/_SHOT). Trap: xdg-desktop-portal (started by Qt)
+  activates org.freedesktop.secrets itself at start-up — not Scribus, and it prompts nothing.
+- install.sh: keyring_check in the summary (read only, the user's /run/user/UID/bus).

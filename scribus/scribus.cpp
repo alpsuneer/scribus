@@ -381,7 +381,8 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_IMPORT_REPORT") || qEnvironmentVariableIsSet("SUNEER_UNUSED_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_BADGE_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :

@@ -251,17 +251,43 @@ private:
 	bool    m_secretsLoaded {false};
 	bool    m_loginDialogOpen {false};
 	bool    m_quietAuth {false};   // startup: never pop the login dialog
+	// The keyring is not usable (no default keyring, locked, no service, no
+	// answer): the tokens stay in memory for this Scribus session only.
+	bool    m_secretsLoading {false};  // the keyring check / read is running (a login may happen meanwhile)
+	int     m_sessionGen {0};          // +1 on every login / logout: startup work never undoes a newer one
+	bool    m_startupDone {false};
+	bool    m_sessionOnly {false};
+	bool    m_sessionOnlyNoticeShown {false};
+	QString m_keyringWhy;          // why the keyring is not used
+	QString m_sessionOnlyNotice;   // the text shown once (the self-test reads it)
 
 	void ensureSecretsLoaded();
 	void saveSession();
 	void clearSession();
+	void showSessionOnlyNotice();
 	void captureRefreshCookie(QNetworkReply* reply);
 	bool isLoggedIn() const { return !m_accessToken.isEmpty(); }
 	void setLocked(bool locked);
 	bool refreshAccessToken();   // blocking
-	bool loginDialog();          // modal; true when logged in
-	bool doLogin(const QString& email, const QString& password, QString& error);
+	bool loginDialog();          // modal; the request inside is asynchronous; true when logged in
+	QNetworkReply* startLoginRequest(const QString& email, const QString& password);
+	bool finishLogin(QNetworkReply* reply, const QString& email, bool timedOut, qint64 ms, QString& error);
+	QString loginErrorText(QNetworkReply* reply, bool timedOut) const;
 	void startupSession();
+	//! One line to ~/scribus-crashlogs/login.log with a timestamp; never a password or token.
+	static void loginLog(const QString& line);
+	static QString maskEmail(const QString& email);
+
+	//! SUNEER_LOGIN_SELFTEST=<report>: drives the login dialog (tests/suneer/news_login.sh).
+	void runLoginSelfTest(const QString& report);
+	void writeLoginSelfTestReport(const QString& report, int keyringState, qint64 dialogMs);
+	bool    m_loginSelfTest {false};
+	QString m_loginSelfTestError;                     // the dialog's last error text
+	int     m_loginSelfTestTicks {0};                 // event-loop ticks while the request ran
+	bool    m_loginSelfTestLoginEnabledBusy {false};  // Login button enabled at a tick while busy
+	bool    m_loginSelfTestCancelDisabledBusy {false};// Cancel disabled at a tick while busy
+	qint64  m_loginSelfTestRequestMs {-1};            // click -> reply handled
+	qint64  m_loginSelfTestCancelCloseMs {-1};        // Cancel click -> dialog closed
 
 	// ---- allowed editions (from user.editionGroups; memory only) ---------
 	QList<QPair<QString, QString>> m_allowedEditions;   // (edition id, name)
