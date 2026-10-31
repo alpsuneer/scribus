@@ -14,7 +14,9 @@
 ***************************************************************************/
 
 #include "contextmenu.h"
+#include "suneertable.h"
 #include "suneerweld.h"
+#include "contentpalette.h"
 
 #include <QApplication>
 #include <QFrame>
@@ -351,6 +353,68 @@ void ContextMenu::createMenuItems_Selection()
 			addAction(m_ScMW->scrActions["tableAdjustFrameToTable"]);
 		if (m_actionList.contains("tableAdjustTableToFrame"))
 			addAction(m_ScMW->scrActions["tableAdjustTableToFrame"]);
+		// suneer: Text Properties + named styles for the selected cells (edit mode) / every cell
+		if (currItem && currItem->isTable())
+		{
+			addSeparator();
+			QAction* tpAct = addAction(tr("Text Properties\u2026"));
+			tpAct->setToolTip(tr("Text Properties palette (font, size, spacing, colour, alignment...) for the selected cells - every option applies to all of them"));
+			connect(tpAct, &QAction::triggered, m_ScMW, [this]() {
+				ContentPalette* cp = m_ScMW->contentPalette;
+				if (!cp)
+					return;
+				// docked: show + make it the current tab of its dock area; floating: raise + activate its window
+				cp->toggleView(true);
+				cp->setAsCurrentTab();
+				cp->raise();
+				if (cp->isFloating() && cp->window())
+				{
+					cp->window()->show();
+					cp->window()->raise();
+					cp->window()->activateWindow();
+				}
+				cp->suneerShowTextPanel();
+			});
+			if (m_doc->appMode == modeEditTable)
+			{
+				QAction* cellAct = addAction(tr("Cell Properties\u2026"));
+				cellAct->setToolTip(tr("Table panel of the palette: fill and borders of the selected cells"));
+				connect(cellAct, &QAction::triggered, m_ScMW, [this]() {
+					ContentPalette* cp = m_ScMW->contentPalette;
+					if (!cp)
+						return;
+					cp->toggleView(true);
+					cp->setAsCurrentTab();
+					cp->raise();
+					cp->suneerShowTablePanel();
+				});
+			}
+			QMenu* psMenu = addMenu(tr("Paragraph Style"));
+			const StyleSet<ParagraphStyle>& pst = m_doc->paragraphStyles();
+			for (int i = 0; i < pst.count(); ++i)
+			{
+				const QString nm = pst[i].name();
+				QAction* a = psMenu->addAction(nm);
+				connect(a, &QAction::triggered, m_ScMW, [this, nm]() { m_doc->itemSelection_SetNamedParagraphStyle(nm); });
+			}
+			QMenu* csMenu = addMenu(tr("Character Style"));
+			const StyleSet<CharStyle>& cst = m_doc->charStyles();
+			for (int i = 0; i < cst.count(); ++i)
+			{
+				const QString nm = cst[i].name();
+				QAction* a = csMenu->addAction(nm);
+				connect(a, &QAction::triggered, m_ScMW, [this, nm]() { m_doc->itemSelection_SetNamedCharStyle(nm); });
+			}
+			PageItem* tbl = currItem;
+			ScribusDoc* doc = m_doc;
+			QAction* autoAct = addAction(tr("Rows grow with text"));
+			autoAct->setCheckable(true);
+			autoAct->setChecked(SuneerTable::rowsAuto(tbl));
+			autoAct->setToolTip(tr("Checked: a row grows downward while typing. Unchecked: fixed row height, overflow marker"));
+			connect(autoAct, &QAction::toggled, m_ScMW, [tbl, doc](bool on) { SuneerTable::setRowsAuto(tbl, on); doc->changed(); });
+			QAction* fitAct = addAction(tr("Fit rows to text"));
+			connect(fitAct, &QAction::triggered, m_ScMW, [tbl, doc]() { SuneerTable::fitRowsToText(doc, tbl->asTable()); });
+		}
 		if (m_actionList.contains("itemAdjustFrameHeightToText"))
 			addAction(m_ScMW->scrActions["itemAdjustFrameHeightToText"]);
 		m_ScMW->scrActions["suneerAutoFitHeight"]->setEnabled(true);

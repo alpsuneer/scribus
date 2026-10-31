@@ -17,6 +17,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "tableutils.h"
 
+#include <QSettings>
 #include "tablecell.h"
 
 using namespace TableUtils;
@@ -35,6 +36,18 @@ TableCell::TableCell(int row, int column, PageItem_Table *table) : d(new TableCe
 	d->textFrame->OwnPage = table->OwnPage;
 	d->textFrame->OnMasterPage = table->OnMasterPage;
 	d->textFrame->m_layerID = table->m_layerID;
+	// suneer: a new cell writes in the house body style (Faircode/ScribusNews style/bodyStyle, "02 BodyText")
+	// when the document has it, so Malayalam shows in the right font from the first key
+	{
+		QSettings cfg("Faircode", "ScribusNews");
+		const QString body = cfg.value("style/bodyStyle", "02 BodyText").toString().trimmed();
+		if (!body.isEmpty() && d->table->m_Doc && d->table->m_Doc->paragraphStyles().contains(body))
+		{
+			ParagraphStyle ps(d->textFrame->itemText.defaultStyle());
+			ps.setParent(body);
+			d->textFrame->itemText.setDefaultStyle(ps);
+		}
+	}
 
 	setValid(true);
 	setRow(row);

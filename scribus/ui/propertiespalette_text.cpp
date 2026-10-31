@@ -270,7 +270,7 @@ void PropertiesPalette_Text::handleSelectionChanged()
 			setEnabled(true);
 			break;
 		case PageItem::Table:
-			setEnabled(m_doc->appMode == modeEditTable);
+			setEnabled(true);   // suneer: a selected table formats all its cells (greyed before)
 			break;
 		default:
 			setEnabled(false);
@@ -327,7 +327,7 @@ void PropertiesPalette_Text::setCurrentItem(PageItem *item)
 	if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 	{
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 			m_item->currentTextProps(parStyle);
 		updateParagraphStyle(parStyle);
 	}

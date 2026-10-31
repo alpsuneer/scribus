@@ -1426,6 +1426,14 @@ scribus
 - പഴയ file-ലെ caption photo-യിൽ നിന്ന് എത്ര അകലത്തിലാണോ (ഉദാ: 1 mm, 0.2 mm) ആ gap തന്നെ ഇനി അതിന്റെ caption gap — ആദ്യ resize-ൽ
   caption ചാടില്ല. Undo-നു ശേഷം caption ഉയരം വീണ്ടും fit ചെയ്യുന്നത് caption നീങ്ങുമ്പോൾ / വീതി മാറുമ്പോൾ മാത്രം.
 
+### 91. Design Style shortcut — save ചെയ്ത key പ്രവർത്തിക്കും, dialog വീണ്ടും തുറന്നാലും കാണും
+- Style Settings > Design Style-ൽ കൊടുക്കുന്ന Shortcut ഇനി ശരിക്കും പ്രവർത്തിക്കും: frame select ചെയ്ത് key അമർത്തിയാൽ ആ Design
+  Style icon click ചെയ്തതുപോലെ തന്നെ (text edit mode-ൽ select ചെയ്ത text-ന് മാത്രം), ഒറ്റ Undo. Save ചെയ്ത ഉടൻ — restart വേണ്ട.
+- Dialog വീണ്ടും തുറക്കുമ്പോൾ save ചെയ്ത key field-ൽ കാണും (മുമ്പ് field കാലിയായിരുന്നു, അടുത്ത Save key മായ്ച്ചുകളഞ്ഞിരുന്നു). "Clear" button.
+- Key വേറെ എവിടെയെങ്കിലും ഉപയോഗത്തിലുണ്ടെങ്കിൽ (paragraph style, Column config, menu, മറ്റൊരു Design Style) field-നു താഴെ ചുവപ്പിൽ
+  പറയും; Save-ൽ ചോദിക്കും: Replace / Choose another key / Cancel. Replace പഴയ സ്ഥലത്തുനിന്ന് key മാറ്റും.
+- Design Style tab-ൽ ഓരോ icon-നു താഴെ പേരും shortcut-ഉം (`[Ctrl+Alt+3]`).
+
 ### 92. Obituary photo — ശരിയായ മുഖം, മുടി മുറിയില്ല, എല്ലാ photo-യിലും ഒരേ മുഖ വലുപ്പം
 - ഷർട്ടിനെയോ കൈയെയോ മുഖമായി എടുത്ത് താടി/ഷർട്ട് മാത്രം കാണിച്ചിരുന്നത് ശരിയാക്കി: ഏറ്റവും വലിയ box അല്ല, കണ്ണ്, skin,
   രണ്ട് detector-ഉം സമ്മതിക്കുന്നത് നോക്കി മുഖം തിരഞ്ഞെടുക്കും. Edit photo-യുടെ face guide-ഉം ഇതേ മുഖം.

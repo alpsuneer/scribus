@@ -6,6 +6,9 @@ for which a new license (GPL+exception) is in place.
 */
 
 #include "propertywidget_distance.h"
+#include "suneertable.h"
+#include "undotransaction.h"
+#include "undomanager.h"
 
 #include <QSignalBlocker>
 
@@ -116,6 +119,14 @@ void PropertyWidget_Distance::updateStyle(const ParagraphStyle &newCurrent)
 	rightIndentSpin->setValue(newCurrent.rightMargin() * m_unitRatio);
 	gapBeforeSpin->setValue(newCurrent.gapBefore());
 	gapAfterSpin->setValue(newCurrent.gapAfter());
+
+	// suneer: several table cells - a value that differs between the cells shows as "\u2014"
+	const QList<PageItem_TextFrame*> cells = SuneerTable::readFramesWithText(m_doc);
+	SuneerTable::showMixedSpin(firstLineIndentSpin, SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).firstIndent(); }));
+	SuneerTable::showMixedSpin(leftIndentSpin,      SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).leftMargin(); }));
+	SuneerTable::showMixedSpin(rightIndentSpin,     SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).rightMargin(); }));
+	SuneerTable::showMixedSpin(gapBeforeSpin,       SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).gapBefore(); }));
+	SuneerTable::showMixedSpin(gapAfterSpin,        SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).gapAfter(); }));
 }
 
 void PropertyWidget_Distance::setCurrentItem(PageItem *item)
@@ -140,12 +151,12 @@ void PropertyWidget_Distance::setCurrentItem(PageItem *item)
 	if (!m_item) return;
 
 	PageItem_TextFrame *textItem = m_item->asTextFrame();
-	if (m_doc->appMode == modeEditTable)
+	if (m_item->isTable())
 		textItem = m_item->asTable()->activeCell().textFrame();
 	if (!textItem) return;
 
 	ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-	if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+	if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 		m_item->currentTextProps(parStyle);
 
 	//#14427: columns->setMaximum(qMax(qRound(textItem->width() / qMax(textItem->ColGap, 10.0)), 1));
@@ -217,7 +228,7 @@ void PropertyWidget_Distance::configureWidgets()
 	if (m_item && m_doc)
 	{
 		const PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 
 		enabled  = (textItem != nullptr);
@@ -282,7 +293,7 @@ void PropertyWidget_Distance::showColumns(int r, double g)
 	if (m_item)
 	{
 		PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 
 		if (textItem != nullptr)
@@ -314,19 +325,24 @@ void PropertyWidget_Distance::handleColumns()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
-		textItem = m_item->asTable()->activeCell().textFrame();
-
-	if (textItem)
+	// suneer: a table -> every selected cell (or every cell), one undo step
+	QList<PageItem*> targets; QSet<PageItem*> whole;
+	Selection one(this, false); one.addItem(SuneerTable::applyTarget(m_doc, m_item));
+	SuneerTable::expandTargets(m_doc, &one, targets, whole);
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled() && targets.size() > 1)
+		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::Columns, QString(), Um::IBorder);
+	for (PageItem* textItem : targets)
 	{
 		textItem->setColumns(static_cast<int>(columns->value()));
-		showColumns(textItem->m_columns, textItem->m_columnGap);
 		textItem->update();
-		if (m_doc->appMode == modeEditTable)
-			m_item->asTable()->update();
-		m_doc->regionsChanged()->update(QRect());
 	}
+	if (tx) tx.commit();
+	if (!targets.isEmpty())
+		showColumns(targets.first()->m_columns, targets.first()->m_columnGap);
+	if (m_item->isTable())
+		m_item->asTable()->update();
+	m_doc->regionsChanged()->update(QRect());
 }
 
 void PropertyWidget_Distance::handleColumnGap()
@@ -334,25 +350,29 @@ void PropertyWidget_Distance::handleColumnGap()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
-		textItem = m_item->asTable()->activeCell().textFrame();
-	if (!textItem)
-		return;
-
-	if (columnGapCombo->currentIndex() == 0)
-		textItem->setColumnGap(columnGap->value() / m_unitRatio);
-	else
+	QList<PageItem*> targets; QSet<PageItem*> whole;
+	Selection one(this, false); one.addItem(SuneerTable::applyTarget(m_doc, m_item));
+	SuneerTable::expandTargets(m_doc, &one, targets, whole);
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled() && targets.size() > 1)
+		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::Columns, QString(), Um::IBorder);
+	for (PageItem* textItem : targets)
 	{
-		double lineCorr=0.0;
-		if ((textItem->lineColor() != CommonStrings::None) || (!textItem->strokePattern().isEmpty()))
-			lineCorr = textItem->lineWidth();
-		double newWidth = columnGap->value() / m_unitRatio;
-		double newGap = qMax(((textItem->width() - textItem->textToFrameDistLeft() - textItem->textToFrameDistRight() - lineCorr) - (newWidth * textItem->m_columns)) / (textItem->m_columns - 1), 0.0);
-		textItem->setColumnGap(newGap);
+		if (columnGapCombo->currentIndex() == 0)
+			textItem->setColumnGap(columnGap->value() / m_unitRatio);
+		else
+		{
+			double lineCorr=0.0;
+			if ((textItem->lineColor() != CommonStrings::None) || (!textItem->strokePattern().isEmpty()))
+				lineCorr = textItem->lineWidth();
+			double newWidth = columnGap->value() / m_unitRatio;
+			double newGap = qMax(((textItem->width() - textItem->textToFrameDistLeft() - textItem->textToFrameDistRight() - lineCorr) - (newWidth * textItem->m_columns)) / (qMax(1, textItem->m_columns - 1)), 0.0);
+			textItem->setColumnGap(newGap);
+		}
+		textItem->update();
 	}
-	textItem->update();
-	if (m_doc->appMode == modeEditTable)
+	if (tx) tx.commit();
+	if (m_item->isTable())
 		m_item->asTable()->update();
 	m_doc->regionsChanged()->update(QRect());
 }
@@ -363,7 +383,7 @@ void PropertyWidget_Distance::handleGapSwitch()
 		return;
 
 	const PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
+	if (m_item->isTable())
 		textItem = m_item->asTable()->activeCell().textFrame();
 	if (textItem != nullptr)
 		showColumns(textItem->m_columns, textItem->m_columnGap);
@@ -377,19 +397,31 @@ void PropertyWidget_Distance::handleTabs()
 	if (!m_doc || !m_item)
 		return;
 
+	// suneer: a table (the widget may hold the table or its active cell): read the active cell, apply to every selected cell
+	PageItem* target = SuneerTable::applyTarget(m_doc, m_item);
 	PageItem_TextFrame *tItem = m_item->asTextFrame();
+	if (m_item->isTable())
+		tItem = m_item->asTable()->activeCell().textFrame();
 	if (tItem == nullptr)
 		return;
-	const ParagraphStyle& style(m_doc->appMode == modeEdit ? tItem->currentStyle() : tItem->itemText.defaultStyle());
+	const ParagraphStyle& style((m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable) ? tItem->currentStyle() : tItem->itemText.defaultStyle());
 	TabManager *dia = new TabManager(this, m_doc->unitIndex(), style.tabValues(), tItem->columnWidth());
 	if (dia->exec())
 	{
-		if (m_doc->appMode != modeEdit)
+		if (target->isTable())
+		{
+			ParagraphStyle newStyle;
+			newStyle.setTabValues(dia->tabList());
+			Selection tempSelection(this, false);
+			tempSelection.addItem(target);
+			m_doc->itemSelection_ApplyParagraphStyle(newStyle, &tempSelection);
+		}
+		else if (m_doc->appMode != modeEdit)
 		{
 			ParagraphStyle newStyle(m_item->itemText.defaultStyle());
 			newStyle.setTabValues(dia->tabList());
 			Selection tempSelection(this, false);
-			tempSelection.addItem(m_item);
+			tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 			m_doc->itemSelection_ApplyParagraphStyle(newStyle, &tempSelection);
 		}
 		else
@@ -413,20 +445,26 @@ void PropertyWidget_Distance::handleTextDistances()
 	if (!distanceWidget->isVisibleTo(this))
 		return;
 
-	PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
-		textItem = m_item->asTable()->activeCell().textFrame();
-	if (!textItem) return;
+	QList<PageItem*> targets; QSet<PageItem*> whole;
+	Selection one(this, false); one.addItem(SuneerTable::applyTarget(m_doc, m_item));
+	SuneerTable::expandTargets(m_doc, &one, targets, whole);
+	if (targets.isEmpty()) return;
 
 	double left   = distanceWidget->margins().left();
 	double right  = distanceWidget->margins().right();
 	double top    = distanceWidget->margins().top();
 	double bottom = distanceWidget->margins().bottom();
-	textItem->setTextToFrameDist(left, right, top, bottom);
-	showColumns(textItem->m_columns, textItem->m_columnGap);
-
-	textItem->update();
-	if (m_doc->appMode == modeEditTable)
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled() && targets.size() > 1)
+		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::TextFrameDist, QString(), Um::IBorder);
+	for (PageItem* textItem : targets)
+	{
+		textItem->setTextToFrameDist(left, right, top, bottom);
+		textItem->update();
+	}
+	if (tx) tx.commit();
+	showColumns(targets.first()->m_columns, targets.first()->m_columnGap);
+	if (m_item->isTable())
 		m_item->asTable()->update();
 	m_doc->regionsChanged()->update(QRect());
 }
@@ -435,6 +473,22 @@ void PropertyWidget_Distance::handleIndents()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
+
+	// suneer: a table (cells selected / whole table): only the fields that are not "\u2014", to every target cell, one undo step
+	if (SuneerTable::applyTarget(m_doc, m_item)->isTable())
+	{
+		ParagraphStyle newStyle;
+		if (!SuneerTable::spinIsMixed(firstLineIndentSpin)) newStyle.setFirstIndent(firstLineIndentSpin->value() / m_unitRatio);
+		if (!SuneerTable::spinIsMixed(leftIndentSpin))      newStyle.setLeftMargin(leftIndentSpin->value() / m_unitRatio);
+		if (!SuneerTable::spinIsMixed(rightIndentSpin))     newStyle.setRightMargin(rightIndentSpin->value() / m_unitRatio);
+		if (!SuneerTable::spinIsMixed(gapBeforeSpin))       newStyle.setGapBefore(gapBeforeSpin->value());
+		if (!SuneerTable::spinIsMixed(gapAfterSpin))        newStyle.setGapAfter(gapAfterSpin->value());
+		Selection tempSelection(this, false);
+		tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
+		m_doc->itemSelection_ApplyParagraphStyle(newStyle, &tempSelection);
+		m_item->update();
+		return;
+	}
 
 	const PageItem_TextFrame *tItem = m_item->asTextFrame();
 	if (tItem == nullptr)
@@ -449,7 +503,7 @@ void PropertyWidget_Distance::handleIndents()
 		newStyle.setGapBefore(gapBeforeSpin->value());
 		newStyle.setGapAfter(gapAfterSpin->value());
 		Selection tempSelection(this, false);
-		tempSelection.addItem(m_item);
+		tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 		m_doc->itemSelection_ApplyParagraphStyle(newStyle, &tempSelection);
 	}
 	else

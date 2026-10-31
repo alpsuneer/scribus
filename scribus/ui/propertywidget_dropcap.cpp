@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 
+#include "suneertable.h"
 #include "pageitem.h"
 #include "pageitem_table.h"
 #include "propertywidget_dropcap.h"
@@ -83,7 +84,7 @@ void PropertyWidget_DropCap::setCurrentItem(PageItem *item)
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
 		if (m_doc->appMode == modeEdit)
 			m_item->currentTextProps(parStyle);
-		else if (m_doc->appMode == modeEditTable)
+		else if (m_item->isTable())
 			m_item->asTable()->activeCell().textFrame()->currentTextProps(parStyle);
 		updateStyle(parStyle);
 
@@ -155,7 +156,7 @@ void PropertyWidget_DropCap::configureWidgets(void)
 	if (m_item && m_doc)
 	{
 		PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 		if (textItem || m_item->asPathText())
 			enabled = true;
@@ -196,9 +197,7 @@ void PropertyWidget_DropCap::handleDropCapUse()
 		return;
 	ParagraphStyle newStyle;
 	newStyle.setHasDropCap(dropCapBox->isChecked());
-	PageItem *item = m_item;
-	if (m_doc->appMode == modeEditTable)
-		item = item->asTable()->activeCell().textFrame();
+	PageItem *item = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -215,9 +214,7 @@ void PropertyWidget_DropCap::handleDropCapLines()
 	ParagraphStyle newStyle;
 	newStyle.setDropCapLines(static_cast<int>(dropCapLines->value()));
 	newStyle.setHasDropCap(dropCapBox->isChecked());
-	PageItem *item = m_doc->m_Selection->itemAt(0);
-	if (m_doc->appMode == modeEditTable)
-		item = item->asTable()->activeCell().textFrame();
+	PageItem *item = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -233,9 +230,7 @@ void PropertyWidget_DropCap::handleDropCapOffset()
 	ParagraphStyle newStyle;
 	newStyle.setDropCapOffset(dropCapOffset->value());
 	newStyle.setHasDropCap(dropCapBox->isChecked());
-	PageItem *item = m_item;
-	if (m_doc->appMode == modeEditTable)
-		item = item->asTable()->activeCell().textFrame();
+	PageItem *item = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -253,9 +248,7 @@ void PropertyWidget_DropCap::handleDropCapCharStyle()
 	if (!name.isEmpty())
 		newStyle.setDcCharStyleName(name);
 	newStyle.setHasDropCap(dropCapBox->isChecked());
-	PageItem *item = m_item;
-	if (m_doc->appMode == modeEditTable)
-		item = item->asTable()->activeCell().textFrame();
+	PageItem *item = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		Selection tempSelection(this, false);

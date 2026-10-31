@@ -472,6 +472,17 @@ void FontComboH::setMixedFonts(const QStringList& fonts)
 	m_mixedFonts = fonts;
 }
 
+void FontComboH::showMixed(const QStringList& fonts)
+{
+	setMixedFonts(fonts);
+	const bool b1 = fontFamily->blockSignals(true), b2 = fontStyle->blockSignals(true);
+	fontFamily->setCurrentIndex(-1);
+	fontFamily->clearEditText();
+	fontStyle->clear();
+	fontFamily->blockSignals(b1);
+	fontStyle->blockSignals(b2);
+}
+
 QString FontComboH::popupTextFor(const QString& fullName) const
 {
 	if (!m_mixedFonts.isEmpty())

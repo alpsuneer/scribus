@@ -6,6 +6,9 @@ for which a new license (GPL+exception) is in place.
 */
 
 #include "propertywidget_alignment.h"
+#include "suneertable.h"
+#include "undotransaction.h"
+#include "undomanager.h"
 
 #include <QSignalBlocker>
 
@@ -45,6 +48,14 @@ void PropertyWidget_Alignment::updateStyle(const ParagraphStyle &newCurrent)
 	m_haveItem = tmp;
 
 	showOpticalMargins(newCurrent.opticalMargins(), newCurrent.opticalMarginSetId());
+	// suneer: cells with different alignments -> no button pressed
+	{
+		const QList<PageItem_TextFrame*> frames = SuneerTable::readFrames(m_doc);
+		QList<PageItem_TextFrame*> withText;
+		for (PageItem_TextFrame* f : frames) if (f && f->itemText.length() > 0) withText << f;
+		if (withText.size() > 1 && SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return (int) f->itemText.paragraphStyle(0).alignment(); }))
+			textAlignment->setStyle(-1, newCurrent.direction());
+	}
 }
 
 void PropertyWidget_Alignment::setMainWindow(ScribusMainWindow* mw)
@@ -120,13 +131,13 @@ void PropertyWidget_Alignment::setCurrentItem(PageItem *item)
 	if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 	{
 		PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 		if (textItem)
 			textVerticalAlignment->setStyle(textItem->verticalAlignment());
 
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 			m_item->currentTextProps(parStyle);
 
 		updateStyle(parStyle);
@@ -169,7 +180,7 @@ void PropertyWidget_Alignment::configureWidgets()
 	if (m_item && m_doc)
 	{
 		PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 
 		enabled  = (textItem != nullptr);
@@ -223,7 +234,7 @@ void PropertyWidget_Alignment::handleSelectionChanged()
 			setEnabled(true);
 			break;
 		case PageItem::Table:
-			setEnabled(m_doc->appMode == modeEditTable);
+			setEnabled(true);   // suneer: a selected table formats all its cells
 			break;
 		default:
 			setEnabled(false);
@@ -288,7 +299,7 @@ void PropertyWidget_Alignment::handleAlignment(int a)
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetAlignment(a, &tempSelection);
 
 }
@@ -297,17 +308,22 @@ void PropertyWidget_Alignment::handleVAlignment(int a)
 {
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
-		textItem = m_item->asTable()->activeCell().textFrame();
-	if (textItem != nullptr)
+	// suneer: a table -> every selected cell (or every cell), one undo step
+	QList<PageItem*> targets; QSet<PageItem*> whole;
+	Selection one(this, false); one.addItem(SuneerTable::applyTarget(m_doc, m_item));
+	SuneerTable::expandTargets(m_doc, &one, targets, whole);
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled() && targets.size() > 1)
+		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::AlignText, QString(), Um::IFont);
+	for (PageItem* textItem : targets)
 	{
 		textItem->setVerticalAlignment(a);
 		textItem->update();
-		if (m_doc->appMode == modeEditTable)
-			m_item->asTable()->update();
-		m_doc->regionsChanged()->update(QRect());
 	}
+	if (tx) tx.commit();
+	if (m_item->isTable())
+		m_item->asTable()->update();
+	m_doc->regionsChanged()->update(QRect());
 }
 
 void PropertyWidget_Alignment::handleDirection(int d)
@@ -315,7 +331,7 @@ void PropertyWidget_Alignment::handleDirection(int d)
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetDirection(d, &tempSelection);
 	// If current text alignment is left or right, change it to match direction
 	if (d == ParagraphStyle::RTL && textAlignment->selectedId() == ParagraphStyle::LeftAligned)
@@ -335,23 +351,28 @@ void PropertyWidget_Alignment::handleFirstLinePolicy(int radioFlop)
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *textItem = m_item;
-	if (m_doc->appMode == modeEditTable)
-		textItem = m_item->asTable()->activeCell().textFrame();
-	if (textItem == nullptr)
+	QList<PageItem*> targets; QSet<PageItem*> whole;
+	Selection one(this, false); one.addItem(SuneerTable::applyTarget(m_doc, m_item));
+	SuneerTable::expandTargets(m_doc, &one, targets, whole);
+	if (targets.isEmpty())
 		return;
-
-	if (radioFlop == FlopWidget::RealHeightID)
-		textItem->setFirstLineOffset(FLOPRealGlyphHeight);
-	else if (radioFlop == FlopWidget::FontAscentID)
-		textItem->setFirstLineOffset(FLOPFontAscent);
-	else if (radioFlop == FlopWidget::LineSpacingID)
-		textItem->setFirstLineOffset(FLOPLineSpacing);
-	else if (radioFlop == FlopWidget::BaselineGridID)
-		textItem->setFirstLineOffset(FLOPBaselineGrid);
-	textItem->update();
-
-	if (m_doc->appMode == modeEditTable)
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled() && targets.size() > 1)
+		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::FirstLineOffset, QString(), Um::IBorder);
+	for (PageItem* textItem : targets)
+	{
+		if (radioFlop == FlopWidget::RealHeightID)
+			textItem->setFirstLineOffset(FLOPRealGlyphHeight);
+		else if (radioFlop == FlopWidget::FontAscentID)
+			textItem->setFirstLineOffset(FLOPFontAscent);
+		else if (radioFlop == FlopWidget::LineSpacingID)
+			textItem->setFirstLineOffset(FLOPLineSpacing);
+		else if (radioFlop == FlopWidget::BaselineGridID)
+			textItem->setFirstLineOffset(FLOPBaselineGrid);
+		textItem->update();
+	}
+	if (tx) tx.commit();
+	if (m_item->isTable())
 		m_item->asTable()->update();
 
 	m_doc->regionsChanged()->update(QRect());
@@ -362,9 +383,7 @@ void PropertyWidget_Alignment::handleOpticalMargins()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *item = m_item;
-	if (m_doc->appMode == modeEditTable)
-		item = m_item->asTable()->activeCell().textFrame();
+	PageItem *item = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		Selection tempSelection(this, false);

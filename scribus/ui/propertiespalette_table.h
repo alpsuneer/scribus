@@ -37,6 +37,8 @@ public:
 
 	/// Update the list of colors.
 	void updateColorList();
+	/// The border (width / colour / style lines) the panel currently applies to the selected sides.
+	const TableBorder& currentBorder() const { return m_currentBorder; }
 
 public slots:
 	/// Set the main window to @a mainWindow.
@@ -65,9 +67,13 @@ public slots:
 	/// Updates the fill controls.
 	void updateFillControls();
 	void updateStyleControls();
+	/// suneer: row height mode (auto / fixed) and Fit rows to text
+	void updateRowControls();
 
 private slots:
 	void setTableStyle(const QString& name);
+	void on_rowHeightMode_activated(int index);
+	void on_fitRowsButton_clicked();
 	void setCellStyle(const QString& name);
 	/// Handles selection changes in the side selector.
 	void on_sideSelector_selectionChanged();

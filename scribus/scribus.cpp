@@ -316,9 +316,12 @@ for which a new license (GPL+exception) is in place.
 #include <QScrollArea>
 #include <QTabWidget>
 #include "undomanager.h"
+#include "suneertable.h"
 #include "suneerweld.h"
 #include "suneerwatchdog.h"
 #include "canvas.h"
+#include <functional>
+#include "tablecell.h"
 #include "undostate.h"
 #include "units.h"
 #include "usertaskstructs.h"
@@ -4792,6 +4795,8 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		QTimer::singleShot(3000, this, [this] { suneerEmbedSelfTest(); });
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST"))
 		QTimer::singleShot(3000, this, [this] { suneerCleanSelfTest(); });
+	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST"))
+		QTimer::singleShot(3000, this, [this] { suneerTableTextSelfTest(); });
 	// suneer: freeze watchdog - main-thread stalls over 1 s go to ~/scribus-crashlogs/stalls.log with a backtrace
 	SuneerWatchdog::start(this);
 	if (ret && HaveDoc && doc && qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST"))
@@ -5184,6 +5189,64 @@ void ScribusMainWindow::slotFileRevert()
 // True while slotFileSave() is running, so the Save As it falls through to
 // for an unnamed document does not show the linked-images dialog a second time.
 static bool s_suneerLinkCheckDone = false;
+
+// Image preflight: the frames that would print empty. A picture that failed to load, or a
+// picture whose placed rectangle (offset x scale) misses the frame's visible area entirely -
+// the mistakes a proof print only shows on paper. Listed with page and position; the user
+// decides whether to go on.
+bool ScribusMainWindow::suneerImagePreflight(const QString& action)
+{
+	if (!HaveDoc || !doc)
+		return true;
+	if (!ScCore->usingGUI() || scriptIsRunning())
+		return true;
+	QStringList problems;
+	const double mm = 72.0 / 25.4;
+	std::function<void(PageItem*)> check = [&](PageItem* it) {
+		if (!it)
+			return;
+		if (it->isGroup())
+		{
+			for (PageItem* c : it->groupItemList)
+				check(c);
+			return;
+		}
+		if (!it->isImageFrame() || it->Pfile.isEmpty() || !it->imageVisible())
+			return;
+		if (it->OwnPage < 0 && it->xPos() > doc->Pages->count() * doc->pageWidth() + 1000)
+			return;
+		QString why;
+		if (!it->imageIsAvailable)
+			why = tr("picture could not be loaded");
+		else if (it->pixm.width() > 0 && it->pixm.height() > 0)
+		{
+			const QRectF frame(0, 0, it->width(), it->height());
+			const QRectF pic(it->imageXOffset() * it->imageXScale(), it->imageYOffset() * it->imageYScale(),
+			                 it->pixm.width() * it->imageXScale(), it->pixm.height() * it->imageYScale());
+			const QRectF seen = pic.intersected(frame);
+			if (seen.isEmpty() || seen.width() < 1.0 || seen.height() < 1.0)
+				why = tr("picture lies outside the frame (offset %1 x %2 mm, scale %3 %) - the frame prints empty")
+				          .arg(it->imageXOffset() * it->imageXScale() / mm, 0, 'f', 1).arg(it->imageYOffset() * it->imageYScale() / mm, 0, 'f', 1).arg(it->imageXScale() * 100, 0, 'f', 0);
+		}
+		if (why.isEmpty())
+			return;
+		const ScPage* pg = (it->OwnPage >= 0 && it->OwnPage < doc->Pages->count()) ? doc->Pages->at(it->OwnPage) : nullptr;
+		const double px = pg ? (it->xPos() - pg->xOffset()) / mm : it->xPos() / mm;
+		const double py = pg ? (it->yPos() - pg->yOffset()) / mm : it->yPos() / mm;
+		problems << tr("page %1, %2 x %3 mm, %4 x %5 mm, '%6': %7").arg(pg ? QString::number(pg->pageNr() + 1) : tr("pasteboard"))
+		                .arg(px, 0, 'f', 0).arg(py, 0, 'f', 0).arg(it->width() / mm, 0, 'f', 0).arg(it->height() / mm, 0, 'f', 0).arg(it->itemName(), why);
+	};
+	for (int i = 0; i < doc->Items->count(); ++i)
+		check(doc->Items->at(i));
+	if (problems.isEmpty())
+		return true;
+	QMessageBox box(QMessageBox::Warning, tr("%1: image frames that would print empty").arg(action),
+	                tr("%n image frame(s) would come out empty or wrong:", "", problems.size()) + "\n\n" + problems.join("\n"), QMessageBox::NoButton, this);
+	QPushButton* go = box.addButton(tr("%1 anyway").arg(action), QMessageBox::AcceptRole);
+	box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+	box.exec();
+	return box.clickedButton() == go;
+}
 
 bool ScribusMainWindow::suneerLinkedImagesCheck(const QString& action)
 {
@@ -6027,6 +6090,8 @@ void ScribusMainWindow::slotFilePrint()
 {
 	if (!suneerLinkedImagesCheck(tr("Print")))
 		return;
+	if (!suneerImagePreflight(tr("Print")))
+		return;
 	if (doc->checkerProfiles()[doc->curCheckProfile()].autoCheck)
 	{
 		if (scanDocument())
@@ -6175,6 +6240,8 @@ void ScribusMainWindow::slotFileProofPrint()
 		return;
 	}
 	if (!suneerLinkedImagesCheck(tr("Proof Print")))
+		return;
+	if (!suneerImagePreflight(tr("Proof Print")))
 		return;
 
 	// F9 opens this: the paper a proof is scaled onto depends on what is
@@ -10220,6 +10287,11 @@ void ScribusMainWindow::SaveAsPDF()
 void ScribusMainWindow::suneerSaveAsPDFChecked()
 {
 	if (!suneerLinkedImagesCheck(tr("PDF export")))
+	{
+		s_pdfDirectPreset.clear();
+		return;
+	}
+	if (!suneerImagePreflight(tr("PDF export")))
 	{
 		s_pdfDirectPreset.clear();
 		return;
@@ -15574,6 +15646,182 @@ void ScribusMainWindow::changePreviewQuality(int index)
 	doc->allItems_ChangePreviewResolution(index);
 	doc->view()->DrawNew();
 }
+
+// suneer: SUNEER_TABLETEXT_SELFTEST=<report file>. Unattended: a 3x3 table is added to the loaded
+// document, every cell gets Malayalam text, then for each of three selection states (all cells
+// selected in edit mode, the text of every cell selected without a cell selection, the table frame
+// selected in normal mode) every text setter the Text Properties palette / text toolbar uses is
+// applied through its document funnel and EVERY character of EVERY cell is checked for the new
+// value; one undo must bring every character back. Writes PASS/FAIL per option, then quits:
+// exit 0 when everything passed, 4 otherwise.
+void ScribusMainWindow::suneerTableTextSelfTest()
+{
+	const QString outPath = qEnvironmentVariable("SUNEER_TABLETEXT_SELFTEST");
+	QFile out(outPath);
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text) || !HaveDoc || !doc)
+	{
+		qApp->exit(3);
+		return;
+	}
+	QTextStream ts(&out);
+	int fails = 0;
+
+	// the table
+	const int idx = doc->itemAdd(PageItem::Table, PageItem::Unspecified, 100, 100, 300, 150, 0, CommonStrings::None, CommonStrings::None);
+	PageItem_Table* table = doc->Items->at(idx)->asTable();
+	table->insertRows(0, 2);
+	table->insertColumns(0, 2);
+	table->adjustTableToFrame();
+	table->adjustFrameToTable();
+	const QStringList words { QStringLiteral("കേരളം"), QStringLiteral("മലയാളം"), QStringLiteral("ദേശാഭിമാനി") };
+	QList<PageItem_TextFrame*> cells;
+	for (int r = 0; r < 3; ++r)
+		for (int c = 0; c < 3; ++c)
+		{
+			PageItem_TextFrame* tf = table->cellAt(r, c).textFrame();
+			tf->itemText.insertChars(0, words.at((r * 3 + c) % 3) + QStringLiteral(" ") + QString::number(r) + QString::number(c));
+			cells << tf;
+		}
+	int totalChars = 0;
+	for (PageItem_TextFrame* tf : cells)
+		totalChars += tf->itemText.length();
+	ts << "table 3x3, cells " << cells.size() << ", characters " << totalChars << "\n";
+
+	// a second font, a colour and two named styles to switch to
+	QString otherFont;
+	const QString curFont = cells.first()->itemText.charStyle(0).font().scName();
+	for (auto it = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.begin(); it != PrefsManager::instance().appPrefs.fontPrefs.AvailFonts.end(); ++it)
+		if (it.value().usable() && !it.value().isReplacement() && it.key() != curFont) { otherFont = it.key(); break; }
+	doc->PageColors.insert(QStringLiteral("SelfTestBlue"), ScColor(255, 255, 0, 0));
+	{
+		StyleSet<CharStyle> cst; CharStyle cs; cs.setName(QStringLiteral("SelfTestChar")); cs.setFontSize(90); cst.create(cs);
+		doc->redefineCharStyles(cst, false);
+		StyleSet<ParagraphStyle> pst; ParagraphStyle ps; ps.setName(QStringLiteral("SelfTestPara")); ps.setGapAfter(13); pst.create(ps);
+		doc->redefineStyles(pst, false);
+	}
+	doc->m_Selection->clear();
+	doc->m_Selection->addItem(table);
+
+	Selection* curSel = nullptr;   // nullptr = the document selection (toolbar path); state D = what a palette widget builds
+	struct Opt { QString name; std::function<void()> apply; std::function<bool(const CharStyle&, const ParagraphStyle&)> ok; };
+	ParagraphStyle indents; indents.setFirstIndent(7); indents.setLeftMargin(8); indents.setRightMargin(9); indents.setGapBefore(4); indents.setGapAfter(5);
+	ParagraphStyle tabs; QList<ParagraphStyle::TabRecord> tl; ParagraphStyle::TabRecord tr; tr.tabPosition = 42; tr.tabType = 0; tl << tr; tabs.setTabValues(tl);
+	ParagraphStyle dropcap; dropcap.setHasDropCap(true); dropcap.setDropCapLines(3);
+	const QList<Opt> opts {
+		{ "font",                [&]{ doc->itemSelection_SetFont(otherFont, curSel); },                  [&](const CharStyle& c, const ParagraphStyle&) { return c.font().scName() == otherFont; } },
+		{ "font size",           [&]{ doc->itemSelection_SetFontSize(160, curSel); },                    [](const CharStyle& c, const ParagraphStyle&) { return c.fontSize() == 160; } },
+		{ "fill colour",         [&]{ doc->itemSelection_SetFillColor("SelfTestBlue", curSel); },        [](const CharStyle& c, const ParagraphStyle&) { return c.fillColor() == "SelfTestBlue"; } },
+		{ "fill shade",          [&]{ doc->itemSelection_SetFillShade(55, curSel); },                    [](const CharStyle& c, const ParagraphStyle&) { return c.fillShade() == 55; } },
+		{ "stroke colour",       [&]{ doc->itemSelection_SetStrokeColor("SelfTestBlue", curSel); },      [](const CharStyle& c, const ParagraphStyle&) { return c.strokeColor() == "SelfTestBlue"; } },
+		{ "stroke shade",        [&]{ doc->itemSelection_SetStrokeShade(45, curSel); },                  [](const CharStyle& c, const ParagraphStyle&) { return c.strokeShade() == 45; } },
+		{ "background colour",   [&]{ doc->itemSelection_SetBackgroundColor("SelfTestBlue", curSel); },  [](const CharStyle& c, const ParagraphStyle&) { return c.backColor() == "SelfTestBlue"; } },
+		{ "background shade",    [&]{ doc->itemSelection_SetBackgroundShade(35, curSel); },              [](const CharStyle& c, const ParagraphStyle&) { return c.backShade() == 35; } },
+		{ "effects (underline)", [&]{ doc->itemSelection_SetEffects(ScStyle_Underline, curSel); },       [](const CharStyle& c, const ParagraphStyle&) { return (c.effects() & ScStyle_Underline) != 0; } },
+		{ "effects (outline+shadow)", [&]{ doc->itemSelection_SetEffects(ScStyle_Outline | ScStyle_Shadowed, curSel); }, [](const CharStyle& c, const ParagraphStyle&) { return (c.effects() & ScStyle_Outline) && (c.effects() & ScStyle_Shadowed); } },
+		{ "scale H",             [&]{ doc->itemSelection_SetScaleH(1200, curSel); },                     [](const CharStyle& c, const ParagraphStyle&) { return c.scaleH() == 1200; } },
+		{ "scale V",             [&]{ doc->itemSelection_SetScaleV(800, curSel); },                      [](const CharStyle& c, const ParagraphStyle&) { return c.scaleV() == 800; } },
+		{ "tracking",            [&]{ doc->itemSelection_SetTracking(50, curSel); },                     [](const CharStyle& c, const ParagraphStyle&) { return c.tracking() == 50; } },
+		{ "baseline offset",     [&]{ doc->itemSelection_SetBaselineOffset(100, curSel); },              [](const CharStyle& c, const ParagraphStyle&) { return c.baselineOffset() == 100; } },
+		{ "language",            [&]{ doc->itemSelection_SetLanguage("de", curSel); },                   [](const CharStyle& c, const ParagraphStyle&) { return c.language() == "de"; } },
+		{ "font features",       [&]{ doc->itemSelection_SetFontFeatures("+smcp", curSel); },            [](const CharStyle& c, const ParagraphStyle&) { return c.fontFeatures() == "+smcp"; } },
+		{ "underline pos/width", [&]{ doc->itemSelection_SetUnderline(10, 20, curSel); },                [](const CharStyle& c, const ParagraphStyle&) { return c.underlineOffset() == 10 && c.underlineWidth() == 20; } },
+		{ "strikethru pos/width",[&]{ doc->itemSelection_SetStrikethru(30, 40, curSel); },               [](const CharStyle& c, const ParagraphStyle&) { return c.strikethruOffset() == 30 && c.strikethruWidth() == 40; } },
+		{ "shadow offsets",      [&]{ doc->itemSelection_SetShadowOffsets(60, 70, curSel); },            [](const CharStyle& c, const ParagraphStyle&) { return c.shadowXOffset() == 60 && c.shadowYOffset() == 70; } },
+		{ "outline width",       [&]{ doc->itemSelection_SetOutlineWidth(25, curSel); },                 [](const CharStyle& c, const ParagraphStyle&) { return c.outlineWidth() == 25; } },
+		{ "named character style", [&]{ doc->itemSelection_SetNamedCharStyle("SelfTestChar", curSel); }, [](const CharStyle& c, const ParagraphStyle&) { return c.parent() == "SelfTestChar"; } },
+		{ "line spacing",        [&]{ doc->itemSelection_SetLineSpacing(33, curSel); },                  [](const CharStyle&, const ParagraphStyle& p) { return p.lineSpacing() == 33; } },
+		{ "line spacing mode",   [&]{ doc->itemSelection_SetLineSpacingMode(1, curSel); },               [](const CharStyle&, const ParagraphStyle& p) { return p.lineSpacingMode() == 1; } },
+		{ "alignment",           [&]{ doc->itemSelection_SetAlignment(1, curSel); },                     [](const CharStyle&, const ParagraphStyle& p) { return p.alignment() == 1; } },
+		{ "direction",           [&]{ doc->itemSelection_SetDirection(1, curSel); },                     [](const CharStyle&, const ParagraphStyle& p) { return p.direction() == 1; } },
+		{ "indents + space before/after", [&]{ doc->itemSelection_ApplyParagraphStyle(indents, curSel); }, [](const CharStyle&, const ParagraphStyle& p) { return p.firstIndent() == 7 && p.leftMargin() == 8 && p.rightMargin() == 9 && p.gapBefore() == 4 && p.gapAfter() == 5; } },
+		{ "tabs",                [&]{ doc->itemSelection_ApplyParagraphStyle(tabs, curSel); },           [](const CharStyle&, const ParagraphStyle& p) { return p.tabValues().size() == 1 && p.tabValues().first().tabPosition == 42; } },
+		{ "drop cap",            [&]{ doc->itemSelection_ApplyParagraphStyle(dropcap, curSel); },        [](const CharStyle&, const ParagraphStyle& p) { return p.hasDropCap() && p.dropCapLines() == 3; } },
+		{ "optical margins",     [&]{ doc->itemSelection_SetOpticalMargins(ParagraphStyle::OM_Default, QString(), curSel); }, [](const CharStyle&, const ParagraphStyle& p) { return p.opticalMargins() == ParagraphStyle::OM_Default; } },
+		{ "hyphenation word min",[&]{ doc->itemSelection_SetHyphenWordMin(5, curSel); },                 [](const CharStyle& c, const ParagraphStyle&) { return c.hyphenWordMin() == 5; } },
+		{ "hyphenation consecutive lines", [&]{ doc->itemSelection_SetHyphenConsecutiveLines(2, curSel); }, [](const CharStyle&, const ParagraphStyle& p) { return p.hyphenConsecutiveLines() == 2; } },
+		{ "named paragraph style", [&]{ doc->itemSelection_SetNamedParagraphStyle("SelfTestPara", curSel); }, [](const CharStyle&, const ParagraphStyle& p) { return p.parent() == "SelfTestPara"; } },
+	};
+
+	auto snapshot = [&]() {
+		QList<QList<QPair<CharStyle, ParagraphStyle>>> snap;
+		for (PageItem_TextFrame* tf : cells)
+		{
+			QList<QPair<CharStyle, ParagraphStyle>> one;
+			for (int i = 0; i < tf->itemText.length(); ++i)
+				one << qMakePair(CharStyle(tf->itemText.charStyle(i)), ParagraphStyle(tf->itemText.paragraphStyle(i)));
+			snap << one;
+		}
+		return snap;
+	};
+	auto countOk = [&](const Opt& o, int& bad) {
+		int good = 0; bad = 0;
+		for (PageItem_TextFrame* tf : cells)
+			for (int i = 0; i < tf->itemText.length(); ++i)
+				(o.ok(tf->itemText.charStyle(i), tf->itemText.paragraphStyle(i)) ? good : bad)++;
+		return good;
+	};
+	auto restored = [&](const QList<QList<QPair<CharStyle, ParagraphStyle>>>& snap) {
+		int bad = 0;
+		for (int k = 0; k < cells.size(); ++k)
+		{
+			PageItem_TextFrame* tf = cells.at(k);
+			if (tf->itemText.length() != snap.at(k).size()) { ++bad; continue; }
+			for (int i = 0; i < tf->itemText.length(); ++i)
+				if (!tf->itemText.charStyle(i).equiv(snap.at(k).at(i).first) || !tf->itemText.paragraphStyle(i).equiv(snap.at(k).at(i).second))
+					++bad;
+		}
+		return bad;
+	};
+
+	auto runState = [&](const QString& title, std::function<void()> select) {
+		ts << "== " << title << "\n";
+		for (const Opt& o : opts)
+		{
+			select();
+			const auto before = snapshot();
+			o.apply();
+			int bad = 0;
+			const int good = countOk(o, bad);
+			m_undoManager->undo(1);
+			const int notBack = restored(before);
+			const bool pass = (bad == 0 && good == totalChars && notBack == 0);
+			if (!pass) ++fails;
+			ts << (pass ? "PASS " : "FAIL ") << o.name << ": " << good << "/" << totalChars << " characters changed";
+			if (bad) ts << ", " << bad << " NOT changed";
+			ts << "; undo: " << (notBack == 0 ? "restored" : QString::number(notBack) + " characters not restored") << "\n";
+		}
+	};
+
+	// state A: table edit mode, every cell selected (Ctrl+A / Edit > Select All / drag)
+	view->requestMode(modeEditTable);
+	runState(QStringLiteral("A: edit mode, all 9 cells selected"), [&] { SuneerTable::selectAllCells(table); });
+	// state B: edit mode, the text of every cell selected but no cell selection (old canvas Ctrl+A)
+	runState(QStringLiteral("B: edit mode, text of every cell selected, no cell selection"), [&] {
+		table->clearSelection();
+		for (PageItem_TextFrame* tf : cells) { tf->itemText.selectAll(); tf->HasSel = true; }
+	});
+	// state D: edit mode, all cells selected, but the setter is given what a Text Properties widget builds
+	// when it holds the ACTIVE CELL frame instead of the table (the palette's item in edit mode) - the
+	// path of the "only one character changed" bug
+	Selection palSel(this, false);
+	curSel = &palSel;
+	runState(QStringLiteral("D: edit mode, all 9 cells selected, palette widget path (active cell frame -> applyTarget)"), [&] {
+		SuneerTable::selectAllCells(table);
+		palSel.clear();
+		palSel.addItem(SuneerTable::applyTarget(doc, table->activeCell().textFrame()));
+	});
+	curSel = nullptr;
+	// state C: normal mode, the table frame selected
+	view->requestMode(modeNormal);
+	runState(QStringLiteral("C: normal mode, table frame selected"), [&] {
+		doc->m_Selection->clear();
+		doc->m_Selection->addItem(table);
+	});
+	ts << "RESULT " << (fails == 0 ? "ALL PASS" : QString::number(fails) + " FAIL") << " (" << opts.size() << " options x 4 states)\n";
+	out.close();
+	qApp->exit(fails == 0 ? 0 : 4);
+}
+
 // suneer: SUNEER_CAPTION_SELFTEST=<report file>. Unattended: every photo of the loaded document that
 // has an attached caption is resized through ScribusDoc::sizeItem() (the path of the handles, the
 // W/H boxes, Adjust Frame to Image, the image toolbar and Edit photo) to five sizes; after each the

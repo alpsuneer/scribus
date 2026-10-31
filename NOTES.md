@@ -1544,6 +1544,13 @@ to test, since a bad matrix could itself explain "no visible difference".
   faceW/faceTop were measured on its boxes. The Edit photo guide goes through the same `--face`, so
   a detector bug shows in both places. `CROP_RULE` in the sidecar params invalidates cached crops
   when the rule changes; without it the cache keeps serving the old crop.
+- **The Design Style dialog wrote back a key it never showed.** `openDesignStyleSettings()` read
+  `savedShortcut` but built the `QKeySequenceEdit` empty, and Save writes every field, so
+  reopen + Save blanked every Design Style key; and nothing ever created a QShortcut for them,
+  so even a key that survived did nothing. Now `rebuildDesignShortcuts()` (from `rebuildShortcuts()`,
+  i.e. startup + every registry change) makes one ApplicationShortcut per key, owner id
+  `design:<index>`. The Save conflict check skips the registry's own `design:*` owners and
+  compares the dialog's fields instead, because Save rewrites the whole array from them.
 - **`QKeySequenceEdit` records the Enter that confirms it.** The editor keeps
   focus for ~1 s after a key; an Enter inside that window becomes the recorded
   shortcut. The Assign Shortcut dialog moves focus to OK on `editingFinished`

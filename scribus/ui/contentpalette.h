@@ -48,6 +48,11 @@ class SCRIBUS_API ContentPalette : public DockPanelBase
 		void updateTextDirection(int i);
 		void updateTextFontSize(int i);
 		void updateTextLanguage(const QString& language);
+		//! suneer: show the Text panel for a table with cells selected (or the table itself) - every
+		//! option then applies to those cells. Stays until another item is selected.
+		void suneerShowTextPanel();
+		//! "Cell Properties…": the Table panel (cell fill / borders) while this cell selection lasts
+		void suneerShowTablePanel();
 
 	public slots:
 		void setMainWindow(ScribusMainWindow *mw);
@@ -86,6 +91,9 @@ class SCRIBUS_API ContentPalette : public DockPanelBase
 		void updatePanelTitle();
 		
 		// the order must match the insertion of the widgets in the constructor
+		bool m_suneerPreferText {false};
+		bool m_suneerPreferTable {false};
+		PageItem* m_suneerPreferItem {nullptr};
 		enum class Panel {
 			empty,
 			group,

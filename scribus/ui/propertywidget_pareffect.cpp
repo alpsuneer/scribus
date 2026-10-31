@@ -7,6 +7,7 @@ for which a new license (GPL+exception) is in place.
 
 #include <QSignalBlocker>
 
+#include "suneertable.h"
 #include "propertywidget_pareffect.h"
 
 #include "appmodehelper.h"
@@ -105,7 +106,7 @@ void PropertyWidget_ParEffect::setCurrentItem(PageItem *item)
 	{
 		configureWidgets();
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 			m_item->currentTextProps(parStyle);
 		updateStyle(parStyle);
 		connectSignals();
@@ -314,7 +315,7 @@ void PropertyWidget_ParEffect::configureWidgets()
 	if (m_item && m_doc)
 	{
 		PageItem_TextFrame *textItem = m_item->asTextFrame();
-		if (m_doc->appMode == modeEditTable)
+		if (m_item->isTable())
 			textItem = m_item->asTable()->activeCell().textFrame();
 		if (textItem)// || m_item->isPathText())
 			enabled = true;
@@ -567,8 +568,7 @@ void PropertyWidget_ParEffect::changeEvent(QEvent *e)
 
 void PropertyWidget_ParEffect::handleChanges(PageItem *item, ParagraphStyle &newStyle)
 {
-	if (m_doc->appMode == modeEditTable)
-		item = item->asTable()->activeCell().textFrame();
+	item = SuneerTable::applyTarget(m_doc, item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (item != nullptr)
 	{
 		disconnect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));

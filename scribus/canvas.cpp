@@ -31,6 +31,7 @@
 #include "canvasmode.h"
 #include "framelinkrouter.h"
 #include "pageitem_textframe.h"
+#include "pageitem_table.h"
 #include "pageitem_group.h"
 #include "pageitemiterator.h"
 #include "prefsmanager.h"
@@ -2558,12 +2559,29 @@ QVariant Canvas::inputMethodQuery(Qt::InputMethodQuery query) const
     if (query == Qt::ImEnabled)
         return QVariant(true);
     if (query == Qt::ImCursorRectangle && m_doc) {
-        PageItem* currItem = m_doc->m_Selection->itemAt(0);
-        if (currItem && currItem->isTextFrame()) {
-            PageItem_TextFrame* tf = currItem->asTextFrame();
+        PageItem* currItem = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
+        PageItem_TextFrame* tf = nullptr;
+        QTransform extra;
+        QPointF offset;
+        // A table cell: the same chain the canvas paints the cell cursor with
+        // (CanvasMode_EditTable::drawTextCursor): table transform, then the cell frame's own
+        // (table-local) transform, the cursor line shifted by the grid offset.
+        PageItem_Table* table = nullptr;
+        if (currItem && currItem->isTable())
+            table = currItem->asTable();
+        else if (currItem && currItem->isTextFrame() && currItem->parentTable())
+            table = currItem->parentTable();     // a cell frame itself in the selection
+        if (table && m_doc->appMode == modeEditTable) {
+            tf = table->activeCell().textFrame();
+            extra = table->getTransform();
+            offset = table->gridOffset();
+        }
+        else if (currItem && currItem->isTextFrame())
+            tf = currItem->asTextFrame();
+        if (tf) {
             int curPos = tf->itemText.cursorPosition();
-            QLineF cursorLine = tf->textLayout.positionToPoint(curPos);
-            QTransform t = tf->getTransform();
+            QLineF cursorLine = tf->textLayout.positionToPoint(curPos).translated(offset);
+            QTransform t = tf->getTransform() * extra;
             QPoint lp1 = canvasToLocal(t.map(cursorLine.p1()));
             QPoint lp2 = canvasToLocal(t.map(cursorLine.p2()));
             int h = qAbs(lp2.y() - lp1.y());

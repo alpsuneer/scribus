@@ -34,6 +34,10 @@ for which a new license (GPL+exception) is in place.
 #include "colorpicker/colorpicker.h"
 #include "insertTable.h"
 #include "pageitem_table.h"
+#include <QLabel>
+#include "tablecell.h"
+#include "scrspinbox.h"
+#include "propertiespalette_table.h"
 #include "propertiespalette_attributes.h"
 #include "propertiespalette_line.h"
 #include "propertiespalette_fill.h"
@@ -87,6 +91,29 @@ PropertiesPalette::PropertiesPalette(QWidget *parent) : DockPanelBase("Propertie
 	scLine->setWidget(linePal);
 	scLine->restorePreferences();
 
+	// Table / Cell: the table panel (styles, fill, borders with side selection) plus rows x columns and cell padding
+	tablePal = new PropertiesPalette_Table(this);
+	{
+		QWidget* tw = new QWidget(this);
+		auto* tl = new QVBoxLayout(tw);
+		tl->setContentsMargins(0, 0, 0, 0);
+		tl->setSpacing(2);
+		tl->addWidget(tablePal);
+		auto* row = new QHBoxLayout();
+		m_tableInfo = new QLabel(tw);
+		row->addWidget(m_tableInfo, 1);
+		row->addWidget(new QLabel(tr("Padding:"), tw));
+		m_cellPadding = new ScrSpinBox(0.0, 100.0, tw, 0);
+		m_cellPadding->setToolTip(tr("Cell padding (all four sides) of the selected cells, or of every cell when the table is selected"));
+		row->addWidget(m_cellPadding);
+		tl->addLayout(row);
+		scTable = new SectionContainer(tr("Table"), "SectionPPTable", true, false);
+		scTable->setCanSaveState(true);
+		scTable->setWidget(tw);
+		scTable->restorePreferences();
+		connect(m_cellPadding, SIGNAL(valueChanged(double)), this, SLOT(onCellPaddingChanged(double)));
+	}
+
 	// Attributes
 	attributesPal = new PropertiesPalette_Attributes(this);
 	scAttributes = new SectionContainer("&Attributes", "SectionPPAttributes", true, false);
@@ -102,6 +129,7 @@ PropertiesPalette::PropertiesPalette(QWidget *parent) : DockPanelBase("Propertie
 	lyt->addWidget(scShape);
 	lyt->addWidget(scFill);
 	lyt->addWidget(scLine);
+	lyt->addWidget(scTable);
 	lyt->addWidget(scShadow);
 	lyt->addWidget(scAttributes);
 	lyt->addStretch(1);
@@ -160,6 +188,7 @@ void PropertiesPalette::setMainWindow(ScribusMainWindow* mw)
 	this->linePal->setMainWindow(mw);
 	this->fillPal->setMainWindow(mw);
 	this->attributesPal->setMainWindow(mw);
+	this->tablePal->setMainWindow(mw);
 
 	connect(m_ScMW->appModeHelper, SIGNAL(AppModeChanged(int,int)), this, SLOT(AppModeChanged()));
 }
@@ -190,6 +219,9 @@ void PropertiesPalette::setDoc(ScribusDoc *d)
 	linePal->setDoc(m_doc);
 	fillPal->setDoc(m_doc);
 	attributesPal->setDoc(m_doc);
+	tablePal->setDocument(m_doc);
+	tablePal->updateColorList();
+	m_cellPadding->setNewUnit(m_doc->unitIndex());
 
 	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));
 	connect(m_doc, SIGNAL(docChanged()), this, SLOT(handleSelectionChanged()));
@@ -228,6 +260,8 @@ void PropertiesPalette::unsetDoc()
 	fillPal->unsetDoc();
 	attributesPal->unsetItem();
 	attributesPal->unsetDoc();
+	tablePal->unsetItem();
+	tablePal->unsetDocument();
 
 	m_haveItem = false;
 	enablePalettes(false);
@@ -240,6 +274,8 @@ void PropertiesPalette::unsetItem()
 	shapePal->unsetItem();
 	linePal->unsetItem();
 	fillPal->unsetItem();
+	tablePal->unsetItem();
+	scTable->setBodyEnabled(false);
 	handleSelectionChanged();
 }
 
@@ -269,6 +305,7 @@ void PropertiesPalette::enablePalettes(bool enable)
 
 void PropertiesPalette::AppModeChanged()
 {
+	QTimer::singleShot(0, this, [this]() { updateTableSection(); });
 	if (!m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 	if ((m_haveDoc) && (m_haveItem))
@@ -328,6 +365,9 @@ void PropertiesPalette::setCurrentItem(PageItem *item)
 	{
 		xyzPal->handleSelectionChanged();
 		shadowPal->handleSelectionChanged();
+		tablePal->setItem(m_item);
+		if (!sender() || (m_doc->appMode == modeEditTable))
+			tablePal->handleSelectionChanged();
 		shapePal->handleSelectionChanged();
 		linePal->handleSelectionChanged();
 		fillPal->handleSelectionChanged();
@@ -438,7 +478,7 @@ void PropertiesPalette::handleSelectionChanged()
 	{
 		setCurrentItem(currItem);
 	}
-
+	updateTableSection();
 }
 
 void PropertiesPalette::unitChange()
@@ -455,6 +495,9 @@ void PropertiesPalette::unitChange()
 	shapePal->unitChange();
 	linePal->unitChange();
 	fillPal->unitChange();
+	tablePal->unitChange();
+	if (m_cellPadding)
+		m_cellPadding->setNewUnit(m_unitIndex);
 
 	m_haveItem = tmp;
 }
@@ -477,6 +520,74 @@ void PropertiesPalette::updateColorList()
 		return;
 
 	assert (m_doc->PageColors.document());
+	tablePal->updateColorList();
+}
+
+// The Table / Cell section: enabled for a table only; "Cell" in table edit mode (the borders, fill and
+// padding of the selected cells), "Table" otherwise (the table's own); rows x columns on the label.
+void PropertiesPalette::updateTableSection()
+{
+	if (!scTable)
+		return;
+	const bool table = m_haveDoc && m_haveItem && m_item && m_item->isTable();
+	scTable->setBodyEnabled(table);
+	if (!table)
+	{
+		scTable->setText(tr("&Table"));
+		if (m_tableInfo)
+			m_tableInfo->clear();
+		return;
+	}
+	PageItem_Table* t = m_item->asTable();
+	const bool editMode = m_doc && m_doc->appMode == modeEditTable;
+	scTable->setText(editMode ? tr("&Cell") : tr("&Table"));
+	if (m_tableInfo)
+	{
+		int sel = editMode ? t->selectedCells().size() : 0;
+		m_tableInfo->setText(editMode ? tr("%1 x %2, %n cell(s) selected", "", qMax(1, sel)).arg(t->rows()).arg(t->columns())
+		                              : tr("%1 rows x %2 columns").arg(t->rows()).arg(t->columns()));
+	}
+	if (m_cellPadding)
+	{
+		TableCell c = editMode ? (t->selectedCells().isEmpty() ? t->activeCell() : *t->selectedCells().constBegin()) : t->cellAt(0, 0);
+		QSignalBlocker b(m_cellPadding);
+		if (c.isValid())
+			m_cellPadding->setValue(c.leftPadding() * m_unitRatio);
+	}
+}
+
+void PropertiesPalette::onCellPaddingChanged(double v)
+{
+	if (!m_haveDoc || !m_haveItem || !m_item || !m_item->isTable() || !m_ScMW || m_ScMW->scriptIsRunning())
+		return;
+	PageItem_Table* t = m_item->asTable();
+	const double pt = v / m_unitRatio;
+	QList<TableCell> cells;
+	if (m_doc->appMode == modeEditTable)
+	{
+		for (const TableCell& c : t->selectedCells())
+			cells << c;
+		if (cells.isEmpty())
+			cells << t->activeCell();
+	}
+	else
+		for (int r = 0; r < t->rows(); ++r)
+			for (int c = 0; c < t->columns(); ++c)
+			{
+				TableCell cell = t->cellAt(r, c);
+				if (cell.isValid() && cell.row() == r && cell.column() == c)
+					cells << cell;
+			}
+	for (TableCell& c : cells)
+	{
+		c.setLeftPadding(pt);
+		c.setRightPadding(pt);
+		c.setTopPadding(pt);
+		c.setBottomPadding(pt);
+	}
+	t->update();
+	m_doc->changed();
+	m_doc->regionsChanged()->update(QRectF());
 }
 
 bool PropertiesPalette::userActionOn()
@@ -504,8 +615,10 @@ void PropertiesPalette::languageChange()
 	scLine->setText(tr("&Line"));
 	scFill->setText(tr("&Fill"));
 	scAttributes->setText(tr("&Attributes"));
+	updateTableSection();
 
 	xyzPal->languageChange();
+	tablePal->languageChange();
 	shadowPal->languageChange();
 	shapePal->languageChange();
 	linePal->languageChange();

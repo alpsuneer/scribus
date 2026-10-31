@@ -72,6 +72,8 @@ public slots:
 	void applyDesignStyle(const QStringList& styles, const QString& imgPos, int cols, const QString& colBreak, double savedImgOffX=0, double savedImgOffY=0, double savedImgW=0, double savedImgH=0, int clearMode = -1);
 	void applyColumnConfig(int configIndex);
 	void rebuildColumnShortcuts();
+	//! One application-wide QShortcut per Design Style that has a key (SuneerDesignStyle "shortcut").
+	void rebuildDesignShortcuts();
 	void syncCurrentStyle();
 private slots:
 	void filterStyles(const QString& filter);
@@ -131,6 +133,7 @@ private:
 	QList<QShortcut*> m_shortcuts;
 	QList<QShortcut*> m_columnShortcuts;
 	QList<QShortcut*> m_styleShortcuts; // per-style keys from ParagraphStyle::shortcut()
+	QList<QShortcut*> m_designShortcuts; // Design Style keys
 	QPushButton* m_shortcutButton {nullptr};
 	QPushButton* m_nextButton {nullptr};
 	QPushButton* m_cleanupButton {nullptr};

@@ -22,6 +22,7 @@ for which a new license (GPL+exception) is in place.
  ***************************************************************************/
 
 #include "scribusview.h"
+#include <execinfo.h>
 
 #include "scribus.h"
 
@@ -3598,8 +3599,69 @@ void ScribusView::setContentsPos(int x, int y)
 }
 
 
+// suneer: after typing, scroll only when the text cursor is really outside the viewport, and
+// then just enough (plus a small margin) to bring it back. The cursor rectangle comes from the same
+// query the input method uses (frame or table cell, any zoom), so the coordinates are the
+// canvas widget's, i.e. the scroll area's content coordinates.
+void ScribusView::suneerKeepCursorVisible()
+{
+	if (!m_doc || !m_canvas || (m_doc->appMode != modeEdit && m_doc->appMode != modeEditTable))
+		return;
+	const QVariant q = m_canvas->inputMethodQuery(Qt::ImCursorRectangle);
+	if (!q.isValid() || !q.canConvert<QRect>())
+		return;
+	const QRect cur = q.toRect();
+	if (cur.isNull() || cur.width() > 1000 || cur.height() > 1000)
+		return;
+	// Safety: the cursor must lie inside the edited item (frame, or the table of the active cell)
+	// as the canvas shows it. A rectangle that falls outside means the coordinates are not
+	// trustworthy - then no scroll at all, never a jump into the pasteboard.
+	{
+		PageItem* it = m_doc->m_Selection->isEmpty() ? nullptr : m_doc->m_Selection->itemAt(0);
+		if (it && it->isTextFrame() && it->parentTable())
+			it = it->parentTable();
+		if (!it)
+			return;
+		const QRectF br = it->getBoundingRect();
+		const QPoint a = m_canvas->canvasToLocal(QPointF(br.left(), br.top()));
+		const QPoint b = m_canvas->canvasToLocal(QPointF(br.right(), br.bottom()));
+		const QRect itemLocal = QRect(a, b).normalized().adjusted(-40, -40, 40, 40);
+		if (!itemLocal.contains(cur.topLeft()) || !itemLocal.contains(cur.bottomLeft()))
+		{
+			if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG"))
+				fprintf(stderr, "KEEPCURSOR skipped: cursor=(%d,%d) outside item rect (%d,%d %dx%d)\n", cur.x(), cur.y(), itemLocal.x(), itemLocal.y(), itemLocal.width(), itemLocal.height());
+			return;
+		}
+	}
+	// the part of the canvas widget that is on screen, in the widget's own coordinates
+	const QRect visible(-widget()->x(), -widget()->y(), viewport()->width(), viewport()->height());
+	const int margin = 24;
+	if (visible.adjusted(margin, margin, -margin, -margin).contains(cur))
+		return;
+	int dx = 0, dy = 0;
+	if (cur.left() < visible.left() + margin) dx = cur.left() - (visible.left() + margin);
+	else if (cur.right() > visible.right() - margin) dx = cur.right() - (visible.right() - margin);
+	if (cur.top() < visible.top() + margin) dy = cur.top() - (visible.top() + margin);
+	else if (cur.bottom() > visible.bottom() - margin) dy = cur.bottom() - (visible.bottom() - margin);
+	if (dx == 0 && dy == 0)
+		return;
+	if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG"))
+		fprintf(stderr, "KEEPCURSOR cursor=(%d,%d %dx%d) visible=(%d,%d %dx%d) -> scroll by %d,%d\n", cur.x(), cur.y(), cur.width(), cur.height(), visible.x(), visible.y(), visible.width(), visible.height(), dx, dy);
+	setContentsPos(horizontalScrollBar()->value() + dx, verticalScrollBar()->value() + dy);
+}
+
 void ScribusView::scrollContentsBy(int dx, int dy)
 {
+	// suneer: SUNEER_SCROLL_DEBUG=1 prints who scrolled the view while a text cursor is active
+	if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG") && m_doc && (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable))
+	{
+		void* frames[40];
+		const int n = backtrace(frames, 40);
+		char** syms = backtrace_symbols(frames, n);
+		fprintf(stderr, "SCROLL dx=%d dy=%d h=%d v=%d mode=%d\n", dx, dy, horizontalScrollBar()->value(), verticalScrollBar()->value(), (int) m_doc->appMode);
+		for (int i = 2; i < n && i < 22; ++i) fprintf(stderr, "   %s\n", syms[i]);
+		free(syms);
+	}
 	QScrollArea::scrollContentsBy(dx, dy);
 	setRulerPos(contentsX(), contentsY());
 	if (m_doc->guidesPrefs().linkShown ||

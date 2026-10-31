@@ -84,6 +84,8 @@ public:
 	 *  and for the item under the mouse / arrow keys in an open list. The list itself is widened to the
 	 *  longest name. A mixed selection shows "Mixed: A, B" instead of a name. */
 	void setMixedFonts(const QStringList& fonts);
+	//! both boxes empty (mixed selection); the popup lists the fonts
+	void showMixed(const QStringList& fonts);
 	QStringList mixedFonts() const { return m_mixedFonts; }
 	bool eventFilter(QObject* obj, QEvent* ev) override;
 

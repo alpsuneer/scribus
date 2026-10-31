@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #include <QSignalBlocker>
 
 #include "propertywidget_hyphenation.h"
+#include "suneertable.h"
 
 #include "appmodes.h"
 #include "iconmanager.h"
@@ -75,7 +76,7 @@ void PropertyWidget_Hyphenation::handleWordMin(int minWord)
 		return;
 
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetHyphenWordMin(minWord, &tempSelection);
 }
 
@@ -85,7 +86,7 @@ void PropertyWidget_Hyphenation::handleConsecutiveLines(int consecutiveLines)
 		return;
 
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetHyphenConsecutiveLines(consecutiveLines, &tempSelection);
 }
 
@@ -101,7 +102,7 @@ void PropertyWidget_Hyphenation::handleHyphenChar(const QString& hyphenText)
 	else
 		hyphenChar = hyphenText.toUcs4()[0];
 
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetHyphenChar(hyphenChar, &tempSelection);
 }
 
@@ -225,7 +226,7 @@ void PropertyWidget_Hyphenation::changeLang(int id)
 	LanguageManager::instance()->fillInstalledStringList(&languageList);
 	QString abrv = LanguageManager::instance()->getAbbrevFromLang(languageList.value(id),false);
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetLanguage(abrv, &tempSelection);
 }
 
@@ -257,7 +258,7 @@ void PropertyWidget_Hyphenation::configureWidgets()
 		if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 		{
 			const PageItem_TextFrame *textItem = m_item->asTextFrame();
-			if (m_doc->appMode == modeEditTable)
+			if (m_item->isTable())
 				textItem = m_item->asTable()->activeCell().textFrame();
 			if (textItem)
 				enabled = true;
@@ -293,7 +294,7 @@ void PropertyWidget_Hyphenation::setCurrentItem(PageItem *item)
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
 		if (m_doc->appMode == modeEdit)
 			m_item->currentTextProps(parStyle);
-		else if (m_doc->appMode == modeEditTable)
+		else if (m_item->isTable())
 			m_item->asTable()->activeCell().textFrame()->currentTextProps(parStyle);
 		updateStyle(parStyle);
 	}

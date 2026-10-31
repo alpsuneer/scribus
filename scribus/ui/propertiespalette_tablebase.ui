@@ -113,6 +113,40 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="labelRowHeight">
+        <property name="text">
+         <string>Rows:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QComboBox" name="rowHeightMode">
+        <property name="toolTip">
+         <string>Row height: Auto = rows grow downward while typing; Fixed = rows keep their height and an overflowing cell shows the red marker</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Auto (grow with text)</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Fixed</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="2" column="2">
+       <widget class="QToolButton" name="fitRowsButton">
+        <property name="toolTip">
+         <string>Fit rows to text: every row as high as its tallest cell text</string>
+        </property>
+        <property name="text">
+         <string>Fit</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

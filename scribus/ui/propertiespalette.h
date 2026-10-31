@@ -76,6 +76,8 @@ public:
 	PropertiesPalette_Shape* shapePal {nullptr};
 	PropertiesPalette_XYZ* xyzPal {nullptr};
 	PropertiesPalette_Attributes* attributesPal {nullptr};
+	//! Table (table selected) / Cell (table edit mode): styles, fill, borders with side selection, rows x columns, cell padding.
+	class PropertiesPalette_Table* tablePal {nullptr};
 
 protected:
 	void changeEvent(QEvent *e) override;
@@ -123,6 +125,13 @@ protected:
 	SectionContainer * scFill {nullptr};
 	SectionContainer * scShadow {nullptr};
 	SectionContainer * scAttributes {nullptr};
+	SectionContainer* scTable {nullptr};
+	class QLabel* m_tableInfo {nullptr};
+	class ScrSpinBox* m_cellPadding {nullptr};
+	void updateTableSection();
+private slots:
+	void onCellPaddingChanged(double v);
+private:
 
 	bool m_haveDoc {false};
 	bool m_haveItem {false};

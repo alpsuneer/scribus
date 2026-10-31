@@ -8,6 +8,7 @@ for which a new license (GPL+exception) is in place.
 #include <QButtonGroup>
 
 #include "propertywidget_fontfeatures.h"
+#include "suneertable.h"
 #include "iconmanager.h"
 #include "localemgr.h"
 #include "appmodes.h"
@@ -322,7 +323,7 @@ void PropertyWidget_FontFeatures::handleFontFeatures()
 		font_feature << "+ss20";
 
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetFontFeatures(font_feature.join(","), &tempSelection);
 }
 
@@ -940,7 +941,7 @@ void PropertyWidget_FontFeatures::setCurrentItem(PageItem *item)
 			ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
 			if (m_doc->appMode == modeEdit)
 				m_item->currentTextProps(parStyle);
-			else if (m_doc->appMode == modeEditTable)
+			else if (m_item->isTable())
 				m_item->asTable()->activeCell().textFrame()->currentTextProps(parStyle);
 			updateStyle(parStyle);
 		}

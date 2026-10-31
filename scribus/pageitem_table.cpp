@@ -83,7 +83,9 @@ void PageItem_Table::adjustTable()
 
 void PageItem_Table::currentTextProps(ParagraphStyle& parStyle) const
 {
-	if (m_Doc && (m_Doc->appMode == modeEditTable))
+	// suneer: a selected table (normal mode) reports its active cell's text too, so the Text
+	// Properties palette shows the cells' values instead of the table item's empty default style
+	if (m_activeCell.isValid() && m_activeCell.textFrame())
 		m_activeCell.textFrame()->currentTextProps(parStyle);
 	else
 		parStyle = this->itemText.defaultStyle();
@@ -963,6 +965,14 @@ void PageItem_Table::selectCell(int row, int column)
 		return;
 
 	m_selection.insert(cellAt(row, column));
+	emit selectionChanged();
+}
+
+void PageItem_Table::deselectCell(int row, int column)
+{
+	if (!validCell(row, column))
+		return;
+	m_selection.remove(cellAt(row, column));
 	emit selectionChanged();
 }
 

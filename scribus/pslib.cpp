@@ -1704,6 +1704,8 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 	int resolution = Options.imageResolution;
 	if (item->isLatexFrame())
 		resolution = item->asLatexFrame()->realDpi();
+	else if (extensionIndicatesPDF(ext) || extensionIndicatesEPS(ext))
+		resolution = qMax(300, resolution);   // a placed PDF / EPS is rasterised: never below 300 dpi, proof print included
 	else if (item->pixm.imgInfo.type == ImageType7)
 		resolution = 72;
 	//	int resolution = (item->pixm.imgInfo.type == ImageType7) ? 72 : 300;
@@ -1741,16 +1743,25 @@ bool PSLib::PS_image(PageItem *item, double x, double y, const QString& fn, doub
 
 	int w = image.width();
 	int h = image.height();
-	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
-	PutStream("0 " + ToStr(h*scaley) + " tr\n");
-	PutStream(ToStr(-item->imageRotation()) + " ro\n");
-	PutStream("0 " + ToStr(-h*scaley) + " tr\n");
-	if ((extensionIndicatesPDF(ext)) && (!item->isLatexFrame()))
+	// The offset (x, y) is in the units of the picture as shown on screen: for a PDF / EPS that is a
+	// raster at gs_Resolution, and the frame's image scale refers to it. The raster made for the
+	// print has 'resolution' dpi (the loader reports it), so its pixels are gs_Resolution/resolution
+	// of a screen pixel. Before: a fixed /300 (wrong at any other print resolution - the proof
+	// print's 150 dpi drew the page at half size) and the rotation pivot used the pixel height.
+	double drawSx = scalex, drawSy = scaley;
+	if ((extensionIndicatesPDF(ext) || extensionIndicatesEPS(ext)) && (!item->isLatexFrame()))
 	{
-		scalex *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
-		scaley *= PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / 300.0;
+		const double rasterDpi = image.imgInfo.xres > 0 ? image.imgInfo.xres : resolution;
+		const double rasterDpiY = image.imgInfo.yres > 0 ? image.imgInfo.yres : rasterDpi;
+		drawSx = scalex * PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / rasterDpi;
+		drawSy = scaley * PrefsManager::instance().appPrefs.extToolPrefs.gs_Resolution / rasterDpiY;
 	}
-	//	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
+	PutStream(ToStr(x*scalex) + " " + ToStr(y*scaley) + " tr\n");
+	PutStream("0 " + ToStr(h*drawSy) + " tr\n");
+	PutStream(ToStr(-item->imageRotation()) + " ro\n");
+	PutStream("0 " + ToStr(-h*drawSy) + " tr\n");
+	scalex = drawSx;
+	scaley = drawSy;
 	PutStream(ToStr(qRound(scalex*w)) + " " + ToStr(qRound(scaley*h)) + " sc\n");
 	PutStream(((!DoSep) && (!GraySc)) ? "/DeviceCMYK setcolorspace\n" : "/DeviceGray setcolorspace\n");
 	if ((maskArray.size() > 0) && (item->pixm.imgInfo.type != ImageType7))

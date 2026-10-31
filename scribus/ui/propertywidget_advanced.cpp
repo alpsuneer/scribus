@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 
+#include "suneertable.h"
 #include "propertywidget_advanced.h"
 
 #include "appmodes.h"
@@ -97,9 +98,15 @@ void PropertyWidget_Advanced::setCurrentItem(PageItem *item)
 		if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 		{
 			ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-			if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+			if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 				m_item->currentTextProps(parStyle);
 			updateStyle(parStyle);
+			// suneer: several table cells - a value that differs between the cells shows as "\u2014"
+			const QList<PageItem_TextFrame*> cells = SuneerTable::readFramesWithText(m_doc);
+			SuneerTable::showMixedSpin(tracking, SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).tracking(); }));
+			SuneerTable::showMixedSpin(scaleH,   SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).scaleH(); }));
+			SuneerTable::showMixedSpin(scaleV,   SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).scaleV(); }));
+			SuneerTable::showMixedSpin(textBase, SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).baselineOffset(); }));
 		}
 		connectSignals();
 	}
@@ -245,9 +252,8 @@ void PropertyWidget_Advanced::handleBaselineOffset()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	if (SuneerTable::spinIsMixed(textBase)) return;   // "\u2014"
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -260,9 +266,7 @@ void PropertyWidget_Advanced::handleMinWordTracking()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -277,9 +281,7 @@ void PropertyWidget_Advanced::handleNormWordTracking()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -294,9 +296,7 @@ void PropertyWidget_Advanced::handleMinGlyphExtension()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -311,9 +311,7 @@ void PropertyWidget_Advanced::handleMaxGlyphExtension()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -328,9 +326,8 @@ void PropertyWidget_Advanced::handleTextScaleH()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	if (SuneerTable::spinIsMixed(scaleH)) return;   // "\u2014"
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -343,9 +340,8 @@ void PropertyWidget_Advanced::handleTextScaleV()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	if (SuneerTable::spinIsMixed(scaleV)) return;   // "\u2014"
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -358,9 +354,8 @@ void PropertyWidget_Advanced::handleTracking()
 {
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	if (SuneerTable::spinIsMixed(tracking)) return;   // "\u2014"
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -375,9 +370,7 @@ void PropertyWidget_Advanced::handleUnderline()
 	{
 		int x = qRound(textEffects->UnderlineVal->LPos->value() * 10.0);
 		int y = qRound(textEffects->UnderlineVal->LWidth->value() * 10.0);
-		PageItem *i2 = m_item;
-		if (m_doc->appMode == modeEditTable)
-			i2 = m_item->asTable()->activeCell().textFrame();
+		PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 		if (i2 != nullptr)
 		{
 			Selection tempSelection(this, false);
@@ -392,9 +385,7 @@ void PropertyWidget_Advanced::handleOutlineWidth()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 	int x = qRound(textEffects->OutlineVal->LWidth->value() * 10.0);
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -409,9 +400,7 @@ void PropertyWidget_Advanced::handleShadowOffs()
 		return;
 	int x = qRound(textEffects->ShadowVal->Xoffset->value() * 10.0);
 	int y = qRound(textEffects->ShadowVal->Yoffset->value() * 10.0);
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -424,9 +413,7 @@ void PropertyWidget_Advanced::handleTypeStyle(int s)
 {
 	if (!m_ScMW || m_ScMW->scriptIsRunning())
 		return;
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
@@ -442,9 +429,7 @@ void PropertyWidget_Advanced::handleStrikeThru()
 		return;
 	int x = qRound(textEffects->StrikeVal->LPos->value() * 10.0);
 	int y = qRound(textEffects->StrikeVal->LWidth->value() * 10.0);
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable)
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);

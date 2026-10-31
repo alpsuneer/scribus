@@ -58,6 +58,14 @@ void AlignSelect::setStyle(int s, int d)
 {
 	if ((s >= 0) && (s < 5))
 		buttonGroup->button(s)->setChecked(true);
+	else
+	{
+		// suneer: -1 = mixed (table cells with different alignments): no button pressed
+		buttonGroup->setExclusive(false);
+		for (QAbstractButton* b : buttonGroup->buttons())
+			b->setChecked(false);
+		buttonGroup->setExclusive(true);
+	}
 
 	if (d == ParagraphStyle::RTL)
 		TextB->setIcon(IconManager::instance().loadIcon("format-justify-fill-block-right"));

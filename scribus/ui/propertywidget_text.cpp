@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "propertywidget_text.h"
+#include "suneertable.h"
 
 #include "appmodes.h"
 #include "commonstrings.h"
@@ -19,6 +20,7 @@ for which a new license (GPL+exception) is in place.
 #include "selection.h"
 #include "stylecombos.h"
 #include "undomanager.h"
+#include "undotransaction.h"
 
 PropertyWidget_Text::PropertyWidget_Text( QWidget* parent) : QFrame(parent)
 {
@@ -163,7 +165,7 @@ void PropertyWidget_Text::handleSelectionChanged()
 			setEnabled(true);
 			break;
 		case PageItem::Table:
-			setEnabled(m_doc->appMode == modeEditTable);
+			setEnabled(true);   // suneer: a selected table formats all its cells
 			break;
 		default:
 			setEnabled(false);
@@ -214,7 +216,7 @@ void PropertyWidget_Text::setCurrentItem(PageItem *item)
 	if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 	{
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 			m_item->currentTextProps(parStyle);
 
 		updateStyle(parStyle);
@@ -264,7 +266,7 @@ void PropertyWidget_Text::handleLineSpacingMode(int id)
 	if (!m_haveDoc || !m_haveItem)
 		return;
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetLineSpacingMode(id, &tempSelection);
 	m_doc->regionsChanged()->update(QRect());
 }
@@ -330,6 +332,40 @@ void PropertyWidget_Text::updateCharStyle(const CharStyle& charStyle)
 	showFontSize(charStyle.fontSize());
 	showTextColors(charStyle.fillColor(), charStyle.backColor(), charStyle.strokeColor(), charStyle.fillShade(), charStyle.backShade(), charStyle.strokeShade());
 	labelStrokeColor->setEnabled( (charStyle.effects() & 4) || (charStyle.effects() & 256) );
+	suneerShowMixed();
+}
+
+// suneer: several table cells selected (or the table itself): a value that differs between the cells
+// shows as "—" (font boxes empty), a common value as itself. Compared on each cell's first character.
+void PropertyWidget_Text::suneerShowMixed()
+{
+	const QList<PageItem_TextFrame*> frames = SuneerTable::readFrames(m_doc);
+	QList<PageItem_TextFrame*> withText;
+	for (PageItem_TextFrame* f : frames) if (f && f->itemText.length() > 0) withText << f;
+	auto spinMixed = [](ScrSpinBox* sb, bool on) {
+		if (!sb) return;
+		QSignalBlocker b(sb);
+		sb->setSpecialValueText(on ? QStringLiteral("\u2014") : QString());
+		if (on) sb->setValue(sb->minimum());
+	};
+	if (withText.size() < 2)
+	{
+		if (fontSize->specialValueText().isEmpty() && lineSpacing->specialValueText().isEmpty())
+			return;
+		spinMixed(fontSize, false); spinMixed(lineSpacing, false);
+		return;
+	}
+	const bool fontMixed = SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).font().scName(); });
+	const bool sizeMixed = SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).fontSize(); });
+	const bool lsMixed   = SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).lineSpacing(); });
+	if (fontMixed)
+	{
+		QStringList names;
+		for (PageItem_TextFrame* f : withText) if (!names.contains(f->itemText.charStyle(0).font().scName())) names << f->itemText.charStyle(0).font().scName();
+		fonts->showMixed(names);
+	}
+	spinMixed(fontSize, sizeMixed);
+	spinMixed(lineSpacing, lsMixed);
 }
 
 void PropertyWidget_Text::updateStyle(const ParagraphStyle& newCurrent)
@@ -340,14 +376,16 @@ void PropertyWidget_Text::updateStyle(const ParagraphStyle& newCurrent)
 	const CharStyle& charStyle = newCurrent.charStyle();
 	updateCharStyle(charStyle);
 	showLineSpacing(newCurrent);
+	suneerShowMixed();
 }
 
 void PropertyWidget_Text::handleLineSpacing()
 {
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
+	if (!lineSpacing->specialValueText().isEmpty() && lineSpacing->value() <= lineSpacing->minimum()) return;   // "—"
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetLineSpacing(lineSpacing->value(), &tempSelection);
 }
 
@@ -355,8 +393,9 @@ void PropertyWidget_Text::handleFontSize()
 {
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
+	if (!fontSize->specialValueText().isEmpty() && fontSize->value() <= fontSize->minimum()) return;   // "—"
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetFontSize(qRound(fontSize->value()*10.0), &tempSelection);
 }
 
@@ -365,7 +404,7 @@ void PropertyWidget_Text::handleTextFont(const QString& font)
 	if (!m_haveDoc || !m_haveItem || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_SetFont(font, &tempSelection);
 }
 
@@ -401,16 +440,20 @@ void PropertyWidget_Text::handleTextFill()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable && m_item->isTable())
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
 		tempSelection.addItem(i2);
 		m_blockUpdate = true;
+		// suneer: colour + shade as ONE undo step (several cells / one frame alike)
+		UndoTransaction colourTx;
+		if (UndoManager::undoEnabled())
+			colourTx = UndoManager::instance()->beginTransaction(i2->getUName(), i2->getUPixmap(), Um::ApplyTextStyle, QString(), Um::IFont);
 		m_doc->itemSelection_SetFillColor(buttonTextColor->colorName(), &tempSelection);
 		m_doc->itemSelection_SetFillShade(buttonTextColor->colorData().Shade, &tempSelection);
+		if (colourTx)
+			colourTx.commit();
 		m_blockUpdate = false;
 	}
 }
@@ -420,16 +463,20 @@ void PropertyWidget_Text::handleTextBackground()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable && m_item->isTable())
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
 		tempSelection.addItem(i2);
 		m_blockUpdate = true;
+		// suneer: colour + shade as ONE undo step (several cells / one frame alike)
+		UndoTransaction colourTx;
+		if (UndoManager::undoEnabled())
+			colourTx = UndoManager::instance()->beginTransaction(i2->getUName(), i2->getUPixmap(), Um::ApplyTextStyle, QString(), Um::IFont);
 		m_doc->itemSelection_SetBackgroundColor(buttonBackgroundColor->colorName(), &tempSelection);
 		m_doc->itemSelection_SetBackgroundShade(buttonBackgroundColor->colorData().Shade, &tempSelection);
+		if (colourTx)
+			colourTx.commit();
 		m_blockUpdate = false;
 	}
 }
@@ -439,16 +486,20 @@ void PropertyWidget_Text::handleTextStroke()
 	if (!m_doc || !m_item || !m_ScMW || m_ScMW->scriptIsRunning())
 		return;
 
-	PageItem *i2 = m_item;
-	if (m_doc->appMode == modeEditTable && m_item->isTable())
-		i2 = m_item->asTable()->activeCell().textFrame();
+	PageItem *i2 = SuneerTable::applyTarget(m_doc, m_item);   // suneer: the selected table (its selected cells), whatever item the widget holds
 	if (i2 != nullptr)
 	{
 		Selection tempSelection(this, false);
 		tempSelection.addItem(i2);
 		m_blockUpdate = true;
+		// suneer: colour + shade as ONE undo step (several cells / one frame alike)
+		UndoTransaction colourTx;
+		if (UndoManager::undoEnabled())
+			colourTx = UndoManager::instance()->beginTransaction(i2->getUName(), i2->getUPixmap(), Um::ApplyTextStyle, QString(), Um::IFont);
 		m_doc->itemSelection_SetStrokeColor(buttonStrokeColor->colorName(), &tempSelection);
 		m_doc->itemSelection_SetStrokeShade(buttonStrokeColor->colorData().Shade, &tempSelection);
+		if (colourTx)
+			colourTx.commit();
 		m_blockUpdate = false;
 	}
 }

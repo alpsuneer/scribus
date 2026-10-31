@@ -1,6 +1,7 @@
 #include "suneercontrolbar.h"
 #include "suneerboxfit.h"
 #include "fontcombo.h"
+#include "suneertable.h"
 #include "suneerweld.h"
 #include "stylecombos.h"
 #include "scribusstructs.h"
@@ -45,6 +46,9 @@
 #include "pageitem.h"
 #include "util.h"
 #include "pageitem_table.h"
+#include <QScopedValueRollback>
+#include "tableborder.h"
+#include "ui/propertiespalette_table.h"
 #include "pageitem_textframe.h"
 #include "selection.h"
 #include "suneergroupedit.h"
@@ -225,6 +229,7 @@ QDoubleSpinBox* SuneerControlBar::makeSpinBox(double min, double max, int dec, d
 	QDoubleSpinBox* sb = new QDoubleSpinBox();
 	sb->setRange(min, max);
 	sb->setDecimals(dec);
+	sb->setKeyboardTracking(false);   // suneer: one apply (one undo step) per typed value, not one per keystroke
 	sb->setSingleStep(step);
 	sb->setFixedWidth(72);
 	if (!suffix.isEmpty()) sb->setSuffix(suffix);
@@ -2381,7 +2386,9 @@ void SuneerControlBar::updateFromSelection()
 			const bool editing = (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable);
 			int from = 0, to = textItem->itemText.length();
 			bool scan = true;
-			if (editing)
+			// a table with cells selected: always compare the cells (no text selection needed)
+			const bool tableCells = item->isTable() && m_doc->appMode == modeEditTable && item->asTable()->hasSelection();
+			if (editing && !tableCells)
 			{
 				if (textItem->itemText.hasSelection())
 				{
@@ -2397,6 +2404,16 @@ void SuneerControlBar::updateFromSelection()
 				for (int k = 0; k < sel()->count(); ++k)
 					if (sel()->itemAt(k)->isTextFrame())
 						all << sel()->itemAt(k);
+				// a table: its selected cells (edit mode) or every cell - mixed across cells shows "—"
+				if (item->isTable())
+				{
+					all.clear();
+					for (PageItem_TextFrame* cf : SuneerTable::cellFrames(item->asTable(), m_doc->appMode == modeEditTable))
+						all << cf;
+					scan = !all.isEmpty();
+					from = 0; to = all.isEmpty() ? 0 : all.first()->itemText.length();
+					if (!all.isEmpty()) textItem = all.first();
+				}
 				if (all.isEmpty())
 					all << textItem;
 				for (PageItem* fr : all)
@@ -2533,6 +2550,22 @@ void SuneerControlBar::updateFromSelection()
 
 		// Line spacing
 		m_lineSpSpin->setValue(ps.lineSpacing());
+		// suneer: table cells with different values -> blank size / line spacing, no alignment button
+		if (item->isTable())
+		{
+			QList<PageItem_TextFrame*> withText;
+			for (PageItem_TextFrame* fr : SuneerTable::cellFrames(item->asTable(), m_doc->appMode == modeEditTable))
+				if (fr->itemText.length() > 0) withText << fr;
+			if (withText.size() > 1)
+			{
+				if (SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).fontSize(); }))
+					setSpinMixed(m_fontSizeSpin);
+				if (SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).lineSpacing(); }))
+					setSpinMixed(m_lineSpSpin);
+				if (SuneerTable::mixed(withText, [](PageItem_TextFrame* f) { return (int) f->itemText.paragraphStyle(0).alignment(); }))
+					m_alignSelect->setStyle(-1, 0);
+			}
+		}
 		m_lineSpModeCombo->setCurrentIndex(ps.lineSpacingMode());
 
 		// Text Wrap — visible and functional for text frames too
@@ -3218,8 +3251,12 @@ namespace
 	bool suneerApplyToWholeTable(ScribusDoc* doc, PageItem_Table* tbl,
 	                             const std::function<void(Selection&)>& apply)
 	{
+		// suneer 2026-10-25: the document's apply funnels now spread a selected table over every
+		// cell themselves (one undo step), so this wrapper steps aside and the callers fall through.
+		Q_UNUSED(apply);
 		if (!doc || !tbl)
 			return false;
+		return false;
 		Selection cellSel(doc, false);
 		for (int r = 0; r < tbl->rows(); ++r)
 		{
@@ -3300,23 +3337,7 @@ void SuneerControlBar::onFontSelected(const QString& fontName)
 		// routes through itemSelection_ApplyCharStyle and formats every selected cell
 		// (table->selectedCells) with proper single-Ctrl+Z undo — same path the working
 		// color handlers use.
-		if (item->isTable() && m_doc->appMode != modeEditTable) {
-			PageItem_Table* tbl = item->asTable();
-			ScFace face = PrefsManager::instance().appPrefs.fontPrefs.AvailFonts[fontName];
-			for (int r = 0; r < tbl->rows(); r++)
-				for (int c = 0; c < tbl->columns(); c++) {
-					PageItem_TextFrame* tf = tbl->cellAt(r, c).textFrame();
-					if (!tf) continue;
-					CharStyle cs; cs.setFont(face);
-					tf->itemText.applyCharStyle(0, tf->itemText.length(), cs);
-					tf->layout(); tf->update();
-				}
-			m_doc->changed();
-			m_doc->regionsChanged()->update(QRectF());
-			if (ScCore->primaryMainWindow() && ScCore->primaryMainWindow()->view)
-				ScCore->primaryMainWindow()->view->DrawNew();
-			return;
-		}
+		// suneer 2026-10-25: a selected table goes through the document funnel (every cell, one undo step)
 	}
 	m_doc->itemSelection_SetFont(fontName, tsel());
 	m_doc->changed();
@@ -3381,23 +3402,7 @@ void SuneerControlBar::onFontSizeChanged(double val)
 		// through to itemSelection_SetFontSize, which routes through
 		// itemSelection_ApplyCharStyle and formats every selected cell (table->selectedCells)
 		// with proper single-Ctrl+Z undo — same path the working color handlers use.
-		if (item->isTable() && m_doc->appMode != modeEditTable) {
-			PageItem_Table* tbl = item->asTable();
-			for (int r = 0; r < tbl->rows(); r++)
-				for (int c = 0; c < tbl->columns(); c++) {
-					PageItem_TextFrame* tf = tbl->cellAt(r, c).textFrame();
-					if (!tf) continue;
-					CharStyle cs;
-					cs.setFontSize(qRound(val * 10));
-					tf->itemText.applyCharStyle(0, tf->itemText.length(), cs);
-					tf->layout(); tf->update();
-				}
-			m_doc->changed();
-			m_doc->regionsChanged()->update(QRectF());
-			if (ScCore->primaryMainWindow() && ScCore->primaryMainWindow()->view)
-				ScCore->primaryMainWindow()->view->DrawNew();
-			return;
-		}
+		// suneer 2026-10-25: a selected table goes through the document funnel (every cell, one undo step)
 	}
 	m_doc->itemSelection_SetFontSize(qRound(val * 10), tsel());
 	m_doc->changed();
@@ -6157,6 +6162,42 @@ SuneerBorderSettings SuneerControlBar::borderSettingsFromUi() const
 // same code serves the preview (UndoBlocker active) and Apply.
 void SuneerControlBar::applyBorderToItem(PageItem* item, const SuneerBorderSettings& s, ScribusDoc* doc)
 {
+	if (item->isTable())
+	{
+		// A table: the chosen sides become table borders (the table's outer borders, or the selected
+		// cells' borders in table edit mode) with the line of the Properties palette's Table / Cell
+		// section; unchosen sides lose their border. Only on Apply (the preview cannot restore cell borders).
+		if (!UndoManager::undoEnabled())
+			return;
+		PageItem_Table* table = item->asTable();
+		TableBorder border;
+		if (ScribusMainWindow* mw = ScCore ? ScCore->primaryMainWindow() : nullptr)
+			if (mw->propertiesPalette && mw->propertiesPalette->tablePal)
+				border = mw->propertiesPalette->tablePal->currentBorder();
+		if (border.isNull())
+			border.addBorderLine(TableBorderLine(0.5, Qt::SolidLine, "Black", 100.0));
+		TableSides on = TableSide::None, off = TableSide::None;
+		(s.top ? on : off) |= TableSide::Top;
+		(s.bottom ? on : off) |= TableSide::Bottom;
+		(s.left ? on : off) |= TableSide::Left;
+		(s.right ? on : off) |= TableSide::Right;
+		QScopedValueRollback<bool> dontResizeRb(doc->dontResize, true);
+		if (doc->appMode == modeEditTable)
+		{
+			QSet<TableCell> cells = table->selectedCells();
+			if (cells.isEmpty())
+				cells.insert(table->activeCell());
+			table->setCellBorders(cells, border, on);
+			table->setCellBorders(cells, TableBorder(), off);
+		}
+		else
+		{
+			table->setBorders(border, on);
+			table->setBorders(TableBorder(), off);
+		}
+		table->update();
+		return;
+	}
 	const bool top = s.top, bottom = s.bottom, left = s.left, right = s.right;
 	const double cornerTL = s.cornerTL, cornerTR = s.cornerTR, cornerBL = s.cornerBL, cornerBR = s.cornerBR;
 

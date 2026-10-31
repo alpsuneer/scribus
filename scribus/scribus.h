@@ -412,6 +412,8 @@ public slots:
 	void suneerExtractImages();
 	//! SUNEER_EMBED_SELFTEST: unattended Embed All / Extract test, see scribus.cpp
 	void suneerEmbedSelfTest();
+	//! SUNEER_TABLETEXT_SELFTEST=<report>: every text setter on a 3x3 table with all cells selected, see scribus.cpp
+	void suneerTableTextSelfTest();
 	//! SUNEER_CAPTION_SELFTEST=<report>: resize every captioned photo of the loaded document, check the caption, undo, redo
 	void suneerCaptionSelfTest();
 	//! Extras > Clean Empty Lines & Fit Frames: the selected text frames, or the News Browser /
@@ -756,6 +758,8 @@ public slots:
 	//! Before Save / PDF export / Print / Proof Print: lists linked and missing
 	//! images and asks. False = the user cancelled, do not go on.
 	bool suneerLinkedImagesCheck(const QString& action);
+	//! Before Print / Proof Print / PDF export: image frames whose picture failed to load or whose visible window shows none of it (offset / scale). False = the user cancelled.
+	bool suneerImagePreflight(const QString& action);
 	bool suneerNonPrintingLayersCheck(const QString& action);
 	void setUndoMode(bool isObjectSpecific);
 	//! \brief Apply a Lorem Ipsum to the each item in a selection

@@ -248,6 +248,7 @@ void CanvasMode_Edit::keyPressEvent(QKeyEvent *e)
 		}
 		m_keyRepeat = oldKeyRepeat;
 		m_doc->regionsChanged()->update(QRectF());
+		m_view->suneerKeepCursorVisible();
 	}
 	m_keyRepeat = false;
 }
@@ -1477,5 +1478,6 @@ void CanvasMode_Edit::inputMethodEvent(QInputMethodEvent *event)
 	m_doc->regionsChanged()->update(QRectF());
 	QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
 	event->accept();
+	m_view->suneerKeepCursorVisible();
 }
 

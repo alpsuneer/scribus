@@ -1209,6 +1209,7 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 		rebuildShortcuts();
 		updateStylesList();
 		refreshColTabList();
+		refreshDesignIcons();
 	});
 
 	// Auto-load Column Styles
@@ -1424,41 +1425,11 @@ ParagraphStylesPanel::ParagraphStylesPanel(QWidget* parent)
 	designLayout->setContentsMargins(8, 8, 8, 8);
 	designLayout->setSpacing(8);
 
-	// Load icons from QSettings dynamically
-	QSettings dsCfg("Scribus", "SuneerDesignStyle");
-	int dsCount = dsCfg.beginReadArray("styles");
-	dsCfg.endArray();
+	// Icons from QSettings, built the same way as after a Save (each one
+	// reads its style at click time and shows its shortcut).
 	m_iconsGrid = new QGridLayout();
 	m_iconsGrid->setSpacing(6);
-	for (int i = 0; i < dsCount; ++i) {
-		dsCfg.beginReadArray("styles");
-		dsCfg.setArrayIndex(i);
-		QString iconPath = dsCfg.value("iconPath").toString();
-		QString tooltip = dsCfg.value("tooltip", QString("Style %1").arg(i+1)).toString();
-		QPushButton* btn = new QPushButton(designTab);
-		btn->setIcon(designIconFor(iconPath));
-		btn->setIconSize(QSize(100, 100));
-		btn->setFixedSize(110, 110);
-		btn->setToolTip(designIconToolTip(tooltip, iconPath));
-		btn->setStyleSheet("QPushButton { border: 2px solid #ddd; border-radius: 4px; }QPushButton:hover { border-color: #3498db; }");
-		// Apply styles on click
-		QStringList styles = dsCfg.value("styles").toStringList();
-		QString imgPos = dsCfg.value("imagePosition", "Right").toString();
-		int cols = dsCfg.value("columns", 3).toInt();
-		QString colBreak = dsCfg.value("colBreakStyle").toString();
-		QString shortcut = dsCfg.value("shortcut").toString();
-		// Load img settings before endArray
-		double sImgX = dsCfg.value("imgOffsetX", 0.0).toDouble();
-		double sImgY = dsCfg.value("imgOffsetY", 0.0).toDouble();
-		double sImgW = dsCfg.value("imgWidth", 0.0).toDouble();
-		double sImgH = dsCfg.value("imgHeight", 0.0).toDouble();
-		dsCfg.endArray();
-		connect(btn, &QPushButton::clicked, this, [this, styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH]() {
-			const bool shift = QApplication::keyboardModifiers() & Qt::ShiftModifier;
-			applyDesignStyle(styles, imgPos, cols, colBreak, sImgX, sImgY, sImgW, sImgH, shift ? 0 : -1);
-		});
-		m_iconsGrid->addWidget(btn, i/2, i%2);
-	}
+	refreshDesignIcons();
 	designLayout->addLayout(m_iconsGrid);
 	designLayout->addStretch();
 
@@ -2612,6 +2583,53 @@ void ParagraphStylesPanel::rebuildShortcuts()
 	// Auto Fit shortcut — handled via action in canvasmode
 	rebuildColumnShortcuts();
 	rebuildStyleShortcuts();
+	rebuildDesignShortcuts();
+}
+
+void ParagraphStylesPanel::rebuildDesignShortcuts()
+{
+	// See rebuildColumnShortcuts(): never delete a QShortcut that may be mid-emit.
+	for (QShortcut* sc : m_designShortcuts)
+	{
+		if (!sc)
+			continue;
+		sc->setEnabled(false);
+		sc->deleteLater();
+	}
+	m_designShortcuts.clear();
+
+	QWidget* parent = m_mainWindow ? m_mainWindow : (parentWidget() ? parentWidget() : this);
+	QSettings dsCfg("Scribus", "SuneerDesignStyle");
+	const int count = dsCfg.beginReadArray("styles");
+	for (int i = 0; i < count; ++i)
+	{
+		dsCfg.setArrayIndex(i);
+		const QKeySequence key(dsCfg.value("shortcut").toString(), QKeySequence::PortableText);
+		if (key.isEmpty())
+			continue;
+		const QString what = QString("shortcut of Design Style '%1'").arg(dsCfg.value("tooltip", QString("Style %1").arg(i + 1)).toString());
+		if (suneerKeyTakenByAction(m_mainWindow, key, what))
+			continue;
+		QShortcut* sc = new QShortcut(key, parent, nullptr, nullptr, Qt::ApplicationShortcut);
+		sc->setObjectName(what);
+		ScShortcutRegistry::instance().registerShortcut(sc, "Paragraph Styles panel", what, shortcutOwnerId("design", QString::number(i)));
+		// Same as clicking the icon: the style is read at press time, frame
+		// selected = whole frame, edit mode with a selection = that text only,
+		// one undo step (applyDesignStyle's own transaction).
+		connect(sc, &QShortcut::activated, this, [this, i]() {
+			if (!m_doc)
+				return;
+			applyDesignStyleByIndex(i, true);
+		});
+		connect(sc, &QShortcut::activatedAmbiguously, this, [this, key]() {
+			if (m_mainWindow)
+				m_mainWindow->setStatusBarInfoText(QString("%1 is assigned twice - Design Style not applied").arg(key.toString(QKeySequence::NativeText)));
+		});
+		m_designShortcuts.append(sc);
+	}
+	dsCfg.endArray();
+	if (m_mainWindow)
+		m_mainWindow->suneerLogShortcutConflicts(QStringLiteral("design shortcuts rebuilt"));
 }
 
 void ParagraphStylesPanel::rebuildStyleShortcuts()
@@ -3424,27 +3442,28 @@ void ParagraphStylesPanel::openDesignStyleSettings()
 
         // Shortcut
         gl->addWidget(new QLabel("Shortcut:"), 15, 0);
-        QKeySequenceEdit* scEdit = new QKeySequenceEdit(grp);
+        // The saved key is shown again: an empty field here used to be written
+        // back on Save, so reopening + Save silently removed the shortcut.
+        QKeySequenceEdit* scEdit = new QKeySequenceEdit(QKeySequence(savedShortcut, QKeySequence::PortableText), grp);
         scEdit->setObjectName("shortcutEdit");
-        QLabel* scConflictLabel = new QLabel("", grp);
-        scConflictLabel->setStyleSheet("color: #e74c3c; font-size: 9pt;");
-        connect(scEdit, &QKeySequenceEdit::keySequenceChanged, [scConflictLabel](const QKeySequence& ks) {
-            if (ks.isEmpty()) { scConflictLabel->setText(""); return; }
-            QString ksStr = ks.toString();
-            // Check against existing style shortcuts
-            for (auto it = s_styleShortcuts.begin(); it != s_styleShortcuts.end(); ++it) {
-                if (!it.value().isEmpty() && it.value().toString() == ksStr) {
-                    scConflictLabel->setText("⚠ Conflict: " + it.key());
-                    return;
-                }
-            }
-            scConflictLabel->setText("✓ OK");
-            scConflictLabel->setStyleSheet("color: #27ae60; font-size: 9pt;");
+        QPushButton* scClear = new QPushButton("Clear", grp);
+        // This entry's own key is not a conflict with itself (a new entry has no id yet).
+        const QString scOwnerId = idx < count ? shortcutOwnerId("design", QString::number(idx)) : QString();
+        grp->setProperty("shortcutOwnerId", scOwnerId);
+        ScShortcutConflictLabel* scConflictLabel = new ScShortcutConflictLabel(grp);
+        scConflictLabel->setKey(scEdit->keySequence(), scOwnerId);
+        connect(scEdit, &QKeySequenceEdit::keySequenceChanged, scConflictLabel, [scConflictLabel, scOwnerId](const QKeySequence& ks) {
+            scConflictLabel->setKey(ks, scOwnerId);
         });
+        connect(scClear, &QPushButton::clicked, scEdit, &QKeySequenceEdit::clear);
         QHBoxLayout* scRow = new QHBoxLayout();
         scRow->addWidget(scEdit, 1);
-        scRow->addWidget(scConflictLabel);
-        gl->addLayout(scRow, 15, 1);
+        scRow->addWidget(scClear);
+        QVBoxLayout* scCol = new QVBoxLayout();
+        scCol->setSpacing(2);
+        scCol->addLayout(scRow);
+        scCol->addWidget(scConflictLabel);
+        gl->addLayout(scCol, 15, 1);
 
         scrollLay->addWidget(grp);
     };
@@ -3470,7 +3489,53 @@ void ParagraphStylesPanel::openDesignStyleSettings()
     mainLay->addWidget(scroll);
 
     QDialogButtonBox* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, dlg);
-    connect(bb, &QDialogButtonBox::accepted, dlg, [this, dlg, scrollWidget, refreshColMgrList]() {
+    connect(bb, &QDialogButtonBox::accepted, dlg, [this, dlg, scroll, scrollWidget, refreshColMgrList]() {
+        // Shortcut conflicts first, before anything is written: "Ctrl+3 is
+        // already used by: Paragraph style: 03 BodyNoInd" -> Replace / Choose
+        // another key / Cancel. Choose another and Cancel keep the dialog open.
+        {
+            using Owner = ScShortcutRegistry::Owner;
+            QList<QGroupBox*> live;
+            for (auto* g : scrollWidget->findChildren<QGroupBox*>())
+                if (!g->property("removed").toBool()) live.append(g);
+            for (int gi = 0; gi < live.size(); ++gi) {
+                QKeySequenceEdit* ed = live[gi]->findChild<QKeySequenceEdit*>("shortcutEdit");
+                if (!ed || ed->keySequence().isEmpty())
+                    continue;
+                const QKeySequence k = ed->keySequence();
+                QList<Owner> owners;
+                // Saved Design Styles are rewritten from this dialog's fields,
+                // so they are checked there, not in the conf.
+                for (const Owner& o : ScShortcutRegistry::instance().ownersOf(k))
+                    if (!o.id.startsWith("design:")) owners.append(o);
+                for (int gj = 0; gj < live.size(); ++gj) {
+                    if (gj == gi)
+                        continue;
+                    QKeySequenceEdit* other = live[gj]->findChild<QKeySequenceEdit*>("shortcutEdit");
+                    if (!other || other->keySequence() != k)
+                        continue;
+                    QLineEdit* otherName = live[gj]->findChild<QLineEdit*>("styleName");
+                    Owner o;
+                    o.kind = QObject::tr("Design Style");
+                    o.name = otherName ? otherName->text() : QString("Style %1").arg(gj + 1);
+                    o.location = QObject::tr("this dialog");
+                    o.id = QString("dialog:%1").arg(gj);
+                    o.key = k;
+                    o.clear = [other]() { other->clear(); };
+                    owners.append(o);
+                }
+                if (owners.isEmpty())
+                    continue;
+                const auto answer = ScShortcutRegistry::instance().askOnConflict(dlg, k, owners);
+                if (answer == ScShortcutRegistry::Replace)
+                    continue;
+                if (answer == ScShortcutRegistry::ChooseAnother) {
+                    scroll->ensureWidgetVisible(ed);
+                    ed->setFocus();
+                }
+                return;
+            }
+        }
         QSettings cfg("Scribus", "SuneerDesignStyle");
         cfg.remove("styles");
         QList<QGroupBox*> allGroups = scrollWidget->findChildren<QGroupBox*>();
@@ -3544,8 +3609,13 @@ void ParagraphStylesPanel::openDesignStyleSettings()
         cfg.sync(); // ✅ Force write to disk
         dlg->accept();
         refreshDesignIcons();
+        // New keys work now, without a restart; every other place that shows
+        // keys (Keyboard Shortcuts, conflict checks) sees the change.
+        rebuildDesignShortcuts();
+        ScShortcutRegistry::instance().notifyChanged();
     });
-    connect(bb, &QDialogButtonBox::accepted, dlg, &QDialog::accept);
+    // No second accept(): the handler above closes the dialog itself, and must
+    // be able to keep it open when a shortcut conflict is not resolved.
     connect(bb, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
 
     mainLay->addWidget(bb);
@@ -3574,6 +3644,7 @@ void ParagraphStylesPanel::refreshDesignIcons()
         dsCfg.setArrayIndex(i);
         QString iconPath = dsCfg.value("iconPath").toString();
         QString tooltip  = dsCfg.value("tooltip", QString("Style %1").arg(i+1)).toString();
+        const QString keyText = QKeySequence(dsCfg.value("shortcut").toString(), QKeySequence::PortableText).toString(QKeySequence::NativeText);
         dsCfg.endArray();
         QPushButton* btn = new QPushButton(m_designTab);
         btn->setIcon(designIconFor(iconPath));
@@ -3588,8 +3659,27 @@ void ParagraphStylesPanel::refreshDesignIcons()
             const bool shift = QApplication::keyboardModifiers() & Qt::ShiftModifier;
             applyDesignStyleByIndex(i, true, shift ? 0 : -1);
         });
-        btn->show();
-        m_iconsGrid->addWidget(btn, i/2, i%2);
+        // Name and shortcut under the icon, as the Styles list shows them.
+        QWidget* cell = new QWidget(m_designTab);
+        QVBoxLayout* cellLay = new QVBoxLayout(cell);
+        cellLay->setContentsMargins(0, 0, 0, 0);
+        cellLay->setSpacing(1);
+        btn->setParent(cell);
+        cellLay->addWidget(btn, 0, Qt::AlignHCenter);
+        QString caption = tooltip;
+        if (!keyText.isEmpty())
+        {
+            caption += "\n[" + keyText + "]";
+            btn->setToolTip(btn->toolTip() + "\nShortcut: " + keyText);
+        }
+        QLabel* capLbl = new QLabel(caption, cell);
+        capLbl->setAlignment(Qt::AlignHCenter);
+        capLbl->setStyleSheet("font-size: 8pt;");
+        // Fixed to its text, so a short panel cannot squeeze it under the icon.
+        capLbl->setFixedHeight(capLbl->sizeHint().height());
+        cellLay->addWidget(capLbl);
+        cell->show();
+        m_iconsGrid->addWidget(cell, i/2, i%2);
     }
 	updateEnabledState();
 }

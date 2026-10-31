@@ -324,6 +324,8 @@ public:
 	void keyPressEvent(QKeyEvent *k) override;
 	void keyReleaseEvent(QKeyEvent *k) override;
 	void inputMethodEvent(QInputMethodEvent * event) override;
+	//! suneer: scroll minimally so the text cursor (frame or table cell) stays inside the viewport
+	void suneerKeepCursorVisible();
 	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 	
 	inline void registerMousePress(QPointF p);

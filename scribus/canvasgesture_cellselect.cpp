@@ -23,6 +23,7 @@ for which a new license (GPL+exception) is in place.
 #include "scribusview.h"
 #include "tablecell.h"
 #include "ui/scmwmenumanager.h"
+#include "ui/suneercontrolbar.h"
 
 void CellSelect::activate(bool fromGesture)
 {
@@ -52,9 +53,16 @@ void CellSelect::mousePressEvent(QMouseEvent* event)
 
 	if (event->button() == Qt::RightButton)
 	{
-		// Show the table popup menu.
+		// suneer: the selection stays; the table edit mode shows the full context menu
+		// (Text Properties, styles, rows...) for the selected cells
+		// (the gesture stays active: stopping it would clear the selection)
 		m_view->setCursor(Qt::ArrowCursor);
-		m_view->m_ScMW->scrMenuMgr->runMenuAtPos("ItemTable", event->globalPosition().toPoint());
+		delegate()->mousePressEvent(event);
+	}
+	else if (event->modifiers() & Qt::ControlModifier)
+	{
+		// suneer: Ctrl+click adds to / removes from the dragged selection; gesture stays active
+		delegate()->mousePressEvent(event);
 	}
 	else
 	{
@@ -78,6 +86,11 @@ void CellSelect::mouseReleaseEvent(QMouseEvent* event)
 	m_endCell = TableCell();
 
 	m_view->m_ScMW->updateTableMenuActions();
+	// suneer: toolbar + Properties show the common value / "—" of the selected cells
+	if (table()->activeCell().textFrame())
+		m_view->m_ScMW->setTBvals(table()->activeCell().textFrame());
+	if (m_view->m_ScMW->m_suneerControlBar)
+		m_view->m_ScMW->m_suneerControlBar->updateFromSelection();
 }
 
 void CellSelect::mouseMoveEvent(QMouseEvent* event)

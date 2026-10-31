@@ -42,6 +42,8 @@ public:
 	void activate(bool fromGesture) override;
 	void deactivate(bool forGesture) override;
 	void keyPressEvent(QKeyEvent* event) override;
+	//! Input method text (fcitx / ibus: Malayalam and other composed scripts) into the active cell, like CanvasMode_Edit.
+	void inputMethodEvent(QInputMethodEvent* event) override;
 	void mouseMoveEvent(QMouseEvent* event) override;
 	void mousePressEvent(QMouseEvent* event) override;
 	void mouseReleaseEvent(QMouseEvent* event) override;
@@ -73,6 +75,12 @@ private:
 	void createContextMenu(PageItem *currItem, double mx, double my);
 
 private:
+	//! The active cell grows by one line when its text no longer fits (typed keys and input method text alike).
+	void growActiveCellIfNeeded();
+	//! Cells whose font has no Malayalam glyphs take the house body style (Faircode/ScribusNews style/bodyStyle).
+	void applyMalayalamFallback();
+	QString m_preeditText;      //!< input method composition shown in the cell, replaced on the next event
+	int m_preeditPos { -1 };
 	/// Table being edited.
 	PageItem_Table *m_table {nullptr};
 

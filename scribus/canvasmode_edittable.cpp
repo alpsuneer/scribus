@@ -20,9 +20,19 @@ for which a new license (GPL+exception) is in place.
 #include "canvasgesture_rowresize.h"
 #include "canvasgesture_tableresize.h"
 #include "canvasmode_edittable.h"
+#include "suneertable.h"
 #include "fpoint.h"
 #include "iconmanager.h"
 #include "pageitem_table.h"
+#include "text/specialchars.h"
+#include "commonstrings.h"
+#include "hyphenator.h"
+#include "undostate.h"
+#include "undomanager.h"
+#include <QSettings>
+#include <QInputMethodEvent>
+#include <QInputMethod>
+#include <QGuiApplication>
 #include "scribus.h"
 #include "scribusdoc.h"
 #include "ui/suneercontrolbar.h"
@@ -74,8 +84,184 @@ void CanvasMode_EditTable::activate(bool fromGesture)
 	m_blinkTime.start();
 	m_canvasUpdateTimer->start(200);
 	makeLongTextCursorBlink();
+	m_preeditText.clear();
+	m_preeditPos = -1;
+	applyMalayalamFallback();
 
 	m_view->m_ScMW->updateTableMenuActions();
+}
+
+// The input method (fcitx5 + m17n Malayalam) sends its text as QInputMethodEvent, never as key
+// presses: without this the composition and the committed text were dropped in table edit mode.
+// Same rules as CanvasMode_Edit::inputMethodEvent, on the active cell's text frame.
+void CanvasMode_EditTable::inputMethodEvent(QInputMethodEvent* event)
+{
+	PageItem_TextFrame* tf = (m_table && !m_table->hasSelection()) ? m_table->activeCell().textFrame() : nullptr;
+	if (!tf)
+	{
+		event->accept();
+		return;
+	}
+	StoryText& text = tf->itemText;
+	// the composition shown so far goes away; the event brings the new one
+	if (!m_preeditText.isEmpty() && m_preeditPos >= 0 && m_preeditPos + m_preeditText.length() <= text.length())
+	{
+		text.removeChars(m_preeditPos, m_preeditText.length());
+		text.setCursorPosition(m_preeditPos);
+	}
+	m_preeditText.clear();
+	m_preeditPos = -1;
+
+	UndoTransaction replaceTrans;
+	if (text.hasSelection() && (!event->commitString().isEmpty() || !event->preeditString().isEmpty()))
+	{
+		CharStyle replacedStyle(text.charStyle(text.startOfSelection()));
+		if (UndoManager::undoEnabled())
+			replaceTrans = undoManager->beginTransaction(Um::Selection, Um::IGroup, Um::ReplaceText, "", Um::IDelete);
+		tf->deleteSelectedTextFromFrame();
+		text.setPendingCharStyle(replacedStyle);
+		tf->HasSel = false;
+	}
+	if (event->replacementLength() > 0)
+	{
+		const int pos = text.cursorPosition() + event->replacementStart();
+		if (pos >= 0 && pos + event->replacementLength() <= text.length())
+		{
+			text.removeChars(pos, event->replacementLength());
+			text.setCursorPosition(pos);
+		}
+	}
+	if (!event->commitString().isEmpty())
+	{
+		const int pos = text.cursorPosition();
+		if (UndoManager::undoEnabled())
+		{
+			SimpleState* ss = dynamic_cast<SimpleState*>(undoManager->getLastUndo());
+			if (ss && ss->get("ETEA") == "insert_frametext" && ss->undoObject() == tf)
+				ss->set("TEXT_STR", ss->get("TEXT_STR") + event->commitString());
+			else
+			{
+				ss = new SimpleState(Um::InsertText, "", Um::ICreate);
+				ss->set("INSERT_FRAMETEXT");
+				ss->set("ETEA", QString("insert_frametext"));
+				ss->set("TEXT_STR", event->commitString());
+				ss->set("START", pos);
+				undoManager->action(tf, ss);
+			}
+		}
+		text.insertChars(pos, event->commitString(), true);
+		text.setCursorPosition(pos + event->commitString().length());
+		// hyphenation as in a text frame: the word just finished
+		if (m_doc->docHyphenator && m_doc->docHyphenator->autoCheck() && event->commitString().contains(QLatin1Char(' ')))
+			m_doc->docHyphenator->slotHyphenate(tf);
+	}
+	if (replaceTrans)
+		replaceTrans.commit();
+	if (!event->preeditString().isEmpty())
+	{
+		m_preeditPos = text.cursorPosition();
+		m_preeditText = event->preeditString();
+		text.insertChars(m_preeditPos, m_preeditText, true);
+		text.setCursorPosition(m_preeditPos + m_preeditText.length());
+	}
+	tf->invalidateLayout();
+	tf->layout();
+	growActiveCellIfNeeded();
+	if (!event->commitString().isEmpty())
+		m_doc->changed();
+	makeLongTextCursorBlink();
+	updateCanvas(true);
+	m_view->suneerKeepCursorVisible();
+	QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+	event->accept();
+}
+
+void CanvasMode_EditTable::growActiveCellIfNeeded()
+{
+	PageItem_TextFrame* tf = m_table ? m_table->activeCell().textFrame() : nullptr;
+	if (!tf)
+		return;
+	tf->layout();
+	if (!tf->frameOverflows())
+		return;
+	if (!SuneerTable::rowsAuto(m_table))   // "Row height: Fixed": the cell shows the overflow marker instead
+		return;
+	const int row = m_table->activeCell().row();
+	// Calculate exact height needed
+	double lineH = 14.0;
+	if (tf->itemText.length() > 0)
+	{
+		const double fs = tf->itemText.charStyle(0).fontSize() / 10.0;
+		const ParagraphStyle& ps = tf->itemText.paragraphStyle(0);
+		if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
+			lineH = ps.lineSpacing();
+		else
+			lineH = fs * 1.2;
+	}
+	// Add exactly one line height
+	const double currentH = m_table->rowHeight(row);
+	m_table->resizeRow(row, currentH + lineH);
+	// the table frame grows with its rows (downward), as the Tab-new-row path does
+	m_doc->dontResize = true;
+	m_table->adjustFrameToTable();
+	m_doc->dontResize = false;
+	tf->layout();
+	tf->update();
+	m_doc->changed();
+}
+
+// Boxes instead of Malayalam: a cell whose default font cannot show U+0D15 takes the house body
+// style when the document has it and that style's font can. The frame default and the paragraphs
+// still on the document default style change; a paragraph styled by hand is left alone.
+void CanvasMode_EditTable::applyMalayalamFallback()
+{
+	if (!m_table || !m_doc)
+		return;
+	QSettings cfg("Faircode", "ScribusNews");
+	const QString body = cfg.value("style/bodyStyle", "02 BodyText").toString().trimmed();
+	if (body.isEmpty() || !m_doc->paragraphStyles().contains(body))
+		return;
+	const QChar ka(0x0D15);
+	if (!m_doc->paragraphStyles().get(body).charStyle().font().canRender(ka))
+		return;
+	int changed = 0;
+	for (int r = 0; r < m_table->rows(); ++r)
+		for (int c = 0; c < m_table->columns(); ++c)
+		{
+			TableCell cell = m_table->cellAt(r, c);
+			if (!cell.isValid() || cell.row() != r || cell.column() != c)
+				continue;
+			PageItem_TextFrame* tf = cell.textFrame();
+			if (!tf)
+				continue;
+			StoryText& st = tf->itemText;
+			if (st.defaultStyle().charStyle().font().canRender(ka))
+				continue;
+			ParagraphStyle ps(st.defaultStyle());
+			ps.setParent(body);
+			st.setDefaultStyle(ps);
+			for (int pos = 0; pos < st.length(); )
+			{
+				int end = pos;
+				while (end < st.length() && st.text(end) != SpecialChars::PARSEP)
+					++end;
+				const QString parent = st.paragraphStyle(pos).parent();
+				if (parent.isEmpty() || parent == CommonStrings::DefaultParagraphStyle || parent == CommonStrings::trDefaultParagraphStyle)
+				{
+					ParagraphStyle p;
+					p.setParent(body);
+					st.applyStyle(pos, p, false);
+				}
+				pos = end + 1;
+			}
+			tf->invalidateLayout();
+			++changed;
+		}
+	if (changed > 0)
+	{
+		m_table->update();
+		m_doc->changed();
+	}
 }
 
 void CanvasMode_EditTable::deactivate(bool forGesture)
@@ -143,19 +329,12 @@ void CanvasMode_EditTable::keyPressEvent(QKeyEvent* event)
 		}
 	}
 
-	// Ctrl+A → select all text in all cells
+	// Ctrl+A → every cell selected + the text of every cell (one multi-cell text target for the
+	// Text Properties palette, the toolbar and every document funnel; before: text only, so a
+	// setter fell back to the cursor character of the active cell)
 	if (event->key() == Qt::Key_A && (event->modifiers() & Qt::ControlModifier))
 	{
-		for (int r = 0; r < m_table->rows(); r++) {
-			for (int c = 0; c < m_table->columns(); c++) {
-				TableCell cell = m_table->cellAt(r, c);
-				PageItem_TextFrame* tf = cell.textFrame();
-				if (tf && tf->itemText.length() > 0) {
-					tf->itemText.selectAll();
-					tf->HasSel = true;
-				}
-			}
-		}
+		SuneerTable::selectAllCells(m_table);
 		updateCanvas(true);
 		return;
 	}
@@ -220,33 +399,21 @@ void CanvasMode_EditTable::keyPressEvent(QKeyEvent* event)
 	if (!m_table->hasSelection())
 	{
 		bool repeat;
+		// a composition in progress is dropped by a plain key (as the input method does)
+		if (!m_preeditText.isEmpty() && m_preeditPos >= 0)
+		{
+			PageItem_TextFrame* pf = m_table->activeCell().textFrame();
+			if (pf && m_preeditPos + m_preeditText.length() <= pf->itemText.length())
+				pf->itemText.removeChars(m_preeditPos, m_preeditText.length());
+			m_preeditText.clear();
+			m_preeditPos = -1;
+		}
 		m_table->activeCell().textFrame()->handleModeEditKey(event, repeat);
 		// Auto-grow: only when text needs a new line
-		PageItem_TextFrame* tf = m_table->activeCell().textFrame();
-		if (tf) {
-			tf->layout();
-			if (tf->frameOverflows()) {
-				int row = m_table->activeCell().row();
-				// Calculate exact height needed
-				double lineH = 14.0;
-				if (tf->itemText.length() > 0) {
-					double fs = tf->itemText.charStyle(0).fontSize() / 10.0;
-					const ParagraphStyle& ps = tf->itemText.paragraphStyle(0);
-					if (ps.lineSpacingMode() == ParagraphStyle::FixedLineSpacing)
-						lineH = ps.lineSpacing();
-					else
-						lineH = fs * 1.2;
-				}
-				// Add exactly one line height
-				double currentH = m_table->rowHeight(row);
-				m_table->resizeRow(row, currentH + lineH);
-				tf->layout();
-				tf->update();
-				m_doc->changed();
-			}
-		}
+		growActiveCellIfNeeded();
 	}
 	updateCanvas(true);
+	m_view->suneerKeepCursorVisible();
 }
 
 void CanvasMode_EditTable::mouseMoveEvent(QMouseEvent* event)
@@ -361,6 +528,26 @@ void CanvasMode_EditTable::mousePressEvent(QMouseEvent* event)
 				m_view->startGesture(m_tableResizeGesture);
 				break;
 			case TableHandle::CellSelect:
+				// suneer: Ctrl+click adds / removes one cell (non-adjacent selections)
+				if (event->modifiers() & Qt::ControlModifier)
+				{
+					cell = m_table->cellAt(canvasPoint);
+					if (cell.isValid())
+					{
+						if (!m_table->hasSelection())
+							m_table->selectCell(m_table->activeCell().row(), m_table->activeCell().column());
+						if (m_table->selectedCells().contains(cell))
+							m_table->deselectCell(cell.row(), cell.column());
+						else
+							m_table->selectCell(cell.row(), cell.column());
+						m_table->moveTo(cell);
+						m_view->m_ScMW->setTBvals(m_table->activeCell().textFrame());
+						if (m_view->m_ScMW->m_suneerControlBar)
+							m_view->m_ScMW->m_suneerControlBar->updateFromSelection();
+						updateCanvas(true);
+					}
+					break;
+				}
 				// Move to the pressed cell and position the text cursor.
 				m_table->clearSelection();
 				m_table->moveTo(m_table->cellAt(canvasPoint));

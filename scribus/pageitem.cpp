@@ -23,6 +23,7 @@ for which a new license (GPL+exception) is in place.
 
 #include "pageitem.h"
 #include "suneerweld.h"
+#include "suneertable.h"
 
 #include <utility>
 
@@ -5279,6 +5280,8 @@ void PageItem::restore(UndoState *state, bool isUndo)
 			restoreInsertFrameText(ss, isUndo);
 		else if (ss->contains("APPLY_CHARSTYLE"))
 			restoreCharStyle(ss, isUndo);
+		else if (ss->contains("SUNEER_ROWHEIGHTS") && isTable())
+			SuneerTable::restoreRowHeights(asTable(), isUndo ? ss->get("OLD") : ss->get("NEW"));
 		else if (ss->contains("AUTOFIT_TEXT"))
 			m_autoFitText = isUndo ? ss->getBool("OLD") : ss->getBool("NEW");
 		else if (ss->contains("AUTOFIT_FACTORS"))
@@ -7507,6 +7510,9 @@ void PageItem::restoreCharStyle(SimpleState *ss, bool isUndo)
 	}
 	int length = is->getInt("LENGTH");
 	int start = is->getInt("START");
+	if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG"))
+		fprintf(stderr, "RESTORE_CHARSTYLE %s undo=%d start=%d len=%d old=%g new=%g textlen=%d parentTable=%d\n", qPrintable(itemName()), isUndo ? 1 : 0, start, length,
+		        (double) is->getOldState().fontSize(), (double) is->getNewState().fontSize(), itemText.length(), parentTable() ? 1 : 0);
 	if (isUndo)
 	{
 		itemText.eraseCharStyle(start,length, is->getNewState());
@@ -7514,6 +7520,13 @@ void PageItem::restoreCharStyle(SimpleState *ss, bool isUndo)
 	}
 	else
 		itemText.applyCharStyle(start,length, is->getNewState());
+	// suneer: a table cell's text is laid out by its table - without this the cell kept showing the
+	// undone style until something else touched the table
+	if (PageItem_Table* tbl = parentTable())
+	{
+		invalidateLayout();
+		tbl->update();
+	}
 }
 
 void PageItem::restoreCaseTransform(SimpleState* state, bool isUndo)

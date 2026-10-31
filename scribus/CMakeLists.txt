@@ -253,6 +253,7 @@ if(HAVE_OSG)
 		suneertextclean.cpp
 		suneerweld.cpp
 		suneerwatchdog.cpp
+		suneertable.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp
@@ -386,6 +387,7 @@ else()
 		suneertextclean.cpp
 		suneerweld.cpp
 		suneerwatchdog.cpp
+		suneertable.cpp
 		suneerimageresample.cpp
 		suneercursor.cpp
 		util_contour.cpp

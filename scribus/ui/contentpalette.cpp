@@ -177,7 +177,8 @@ void ContentPalette::AppModeChanged()
 			// in the future we will probably add a multiple panes at once
 			// (on top of each other? switching?)
 			// tablePal->setEnabled(m_doc->appMode == modeEditTable);
-			textPal->setEnabled(m_doc->appMode == modeEditTable);
+			// suneer: enabled for a selected table too - the options then apply to every cell
+			textPal->setEnabled(true);
 			if (m_doc->appMode == modeEditTable)
 			{
 				connect(m_item->asTable(), &PageItem_Table::selectionChanged, this, &ContentPalette::handleSelectionChanged);
@@ -188,6 +189,12 @@ void ContentPalette::AppModeChanged()
 			}
 		}
 		textPal->handleSelectionChanged();
+		// suneer: entering / leaving table edit mode changes the default panel (Text in edit mode)
+		if (m_item->isTable())
+		{
+			m_suneerPreferText = m_suneerPreferTable = false;
+			handleSelectionChanged();
+		}
 	}
 }
 
@@ -259,7 +266,17 @@ void  ContentPalette::handleSelectionChanged()
 			newPanel = Panel::text;
 			break;
 		case PageItem::Table:
-			newPanel = (m_doc->appMode == modeEditTable) ? Panel::text : Panel::table;
+			// suneer: table edit mode (one cell or several selected) -> Text panel, the text palette for the
+			// selected cells. "Cell Properties…" switches to the Table panel for that selection; a selected
+			// table (normal mode) shows the Table panel unless "Text Properties…" asked for the Text panel.
+			if (m_suneerPreferItem != currItem)
+				m_suneerPreferText = m_suneerPreferTable = false;
+			if (m_suneerPreferTable)
+				newPanel = Panel::table;
+			else if (m_suneerPreferText || m_doc->appMode == modeEditTable)
+				newPanel = Panel::text;
+			else
+				newPanel = Panel::table;
 			break;
 		case PageItem::Group:
 			newPanel = Panel::group;
@@ -275,6 +292,43 @@ void  ContentPalette::handleSelectionChanged()
 		stackedWidget->setCurrentIndex((int) newPanel);
 		updatePanelTitle();
 	}
+	updateGeometry();
+	DockPanelBase::update();
+}
+
+void ContentPalette::suneerShowTextPanel()
+{
+	if (!m_haveDoc || !m_ScMW)
+		return;
+	PageItem* currItem = currentItemFromSelection();
+	if (!currItem)
+		return;
+	m_suneerPreferText = currItem->isTable();
+	m_suneerPreferTable = false;
+	m_suneerPreferItem = currItem;
+	textPal->setEnabled(true);
+	textPal->handleSelectionChanged();
+	stackedWidget->setCurrentIndex((int) Panel::text);
+	updatePanelTitle();
+	updateGeometry();
+	DockPanelBase::update();
+	textPal->setFocus(Qt::OtherFocusReason);
+}
+
+void ContentPalette::suneerShowTablePanel()
+{
+	if (!m_haveDoc || !m_ScMW)
+		return;
+	PageItem* currItem = currentItemFromSelection();
+	if (!currItem || !currItem->isTable())
+		return;
+	m_suneerPreferTable = true;
+	m_suneerPreferText = false;
+	m_suneerPreferItem = currItem;
+	tablePal->setEnabled(true);
+	tablePal->handleSelectionChanged();
+	stackedWidget->setCurrentIndex((int) Panel::table);
+	updatePanelTitle();
 	updateGeometry();
 	DockPanelBase::update();
 }

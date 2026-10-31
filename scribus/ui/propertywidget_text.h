@@ -51,6 +51,7 @@ public slots:
 
 	void showFontFace(const QString&);
 	void showFontSize(double s);
+	void suneerShowMixed();
 	void showLineSpacing(const ParagraphStyle &newCurrent);
 	void showTextColors(const QString& fillCol, const QString& backCol, const QString& strokeCol, double fillShd, double backShd, double strokeShd);
 

@@ -314,6 +314,8 @@ public:
 	 * If there's no cell at @a row, @a column, this function does nothing.
 	 */
 	void selectCell(int row, int column);
+	//! suneer: removes one cell from the selection (Ctrl+click)
+	void deselectCell(int row, int column);
 
 	/**
 	 * Adds the cells in the area between two cells to the selection.

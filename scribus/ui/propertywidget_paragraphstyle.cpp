@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "propertywidget_paragraphstyle.h"
+#include "suneertable.h"
 
 #include "appmodes.h"
 #include "commonstrings.h"
@@ -162,7 +163,7 @@ void PropertyWidget_ParagraphStyle::handleSelectionChanged()
 			setEnabled(true);
 			break;
 		case PageItem::Table:
-			setEnabled(m_doc->appMode == modeEditTable);
+			setEnabled(true);   // suneer: a selected table formats all its cells
 			break;
 		default:
 			setEnabled(false);
@@ -222,7 +223,7 @@ void PropertyWidget_ParagraphStyle::setCurrentItem(PageItem *item)
 	if (m_item->isTextFrame() || m_item->isPathText() || m_item->isTable())
 	{
 		ParagraphStyle parStyle =  m_item->itemText.defaultStyle();
-		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable)
+		if (m_doc->appMode == modeEdit || m_doc->appMode == modeEditTable || m_item->isTable())   // suneer: selected table reads its active cell
 			m_item->currentTextProps(parStyle);
 		updateStyle(parStyle);
 
@@ -292,6 +293,18 @@ void PropertyWidget_ParagraphStyle::updateStyle(const ParagraphStyle& newCurrent
 		showCharStyle(charStyle.parent());
 	}
 
+	// suneer: several table cells with different named styles -> the box shows nothing
+	const QList<PageItem_TextFrame*> cells = SuneerTable::readFramesWithText(m_doc);
+	if (m_hasParagraph && SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.paragraphStyle(0).parent(); }))
+	{
+		QSignalBlocker b(paraStyleCombo);
+		paraStyleCombo->setCurrentIndex(-1);
+	}
+	if (m_hasCharacter && SuneerTable::mixed(cells, [](PageItem_TextFrame* f) { return f->itemText.charStyle(0).parent(); }))
+	{
+		QSignalBlocker b(charStyleCombo);
+		charStyleCombo->setCurrentIndex(-1);
+	}
 }
 
 void PropertyWidget_ParagraphStyle::updateTextStyles()
@@ -330,7 +343,7 @@ void PropertyWidget_ParagraphStyle::doClearCStyle()
 	if (!m_ScMW || !m_hasCharacter || m_ScMW->scriptIsRunning() || !m_haveDoc || !m_haveItem)
 		return;
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_EraseCharStyle(&tempSelection);
 }
 
@@ -344,7 +357,7 @@ void PropertyWidget_ParagraphStyle::doClearPStyle()
 		activeTransaction = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::RemoveTextStyle, tr( "remove direct paragraph formatting" ), Um::IFont);
 
 	Selection tempSelection(this, false);
-	tempSelection.addItem(m_item);
+	tempSelection.addItem(SuneerTable::applyTarget(m_doc, m_item));
 	m_doc->itemSelection_ClearBulNumStrings(&tempSelection);
 	m_doc->itemSelection_EraseParagraphStyle(&tempSelection);
 	CharStyle emptyCStyle;

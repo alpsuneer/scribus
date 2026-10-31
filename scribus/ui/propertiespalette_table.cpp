@@ -19,6 +19,7 @@ for which a new license (GPL+exception) is in place.
 #include "iconmanager.h"
 #include "pageitem_table.h"
 #include "propertiespalette_table.h"
+#include "suneertable.h"
 #include "sccolorengine.h"
 #include "scribus.h"
 #include "scribusapp.h"
@@ -95,6 +96,7 @@ void PropertiesPalette_Table::setDocument(ScribusDoc *doc)
 
 	tableStyleCombo->setDoc(m_doc);
 	cellStyleCombo->setDoc(m_doc);
+	updateColorList();   // the fill / border colour combos: the document's colours (with None) from the start
 
 	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));
 	connect(m_doc             , SIGNAL(docChanged())      , this, SLOT(handleSelectionChanged()));
@@ -145,6 +147,7 @@ void PropertiesPalette_Table::handleSelectionChanged()
 
 	updateFillControls();
 	updateStyleControls();
+	updateRowControls();
 }
 
 void PropertiesPalette_Table::handleCellSelectionChanged()
@@ -269,7 +272,7 @@ void PropertiesPalette_Table::on_sideSelector_selectionChanged()
 	if (selectedSides & TableSide::Top)
 	{
 		TableBorder topBorder = tableEditMode ? table->activeCell().topBorder() : table->topBorder();
-		if (borderState == Unset && !table->topBorder().isNull())
+		if (borderState == Unset && !topBorder.isNull())
 		{
 			m_currentBorder = topBorder;
 			borderState = Set;
@@ -315,6 +318,10 @@ void PropertiesPalette_Table::on_sideSelector_selectionChanged()
 	}
 
 	updateBorderLineList();
+	// a side clicked in the selector: its (first) border line is the one being edited right away -
+	// width, type, colour and shade are enabled without a second click on the list
+	if (borderLineList->isEnabled() && borderLineList->count() > 0 && borderLineList->currentRow() < 0)
+		borderLineList->setCurrentRow(0);
 }
 
 void PropertiesPalette_Table::updateBorderLineList()
@@ -648,4 +655,32 @@ void PropertiesPalette_Table::languageChange()
 void PropertiesPalette_Table::unitChange()
 {
 	// Not implemented.
+}
+
+// ── suneer: row height mode / fit rows ───────────────────────────────────────
+
+void PropertiesPalette_Table::updateRowControls()
+{
+	const bool have = m_item && m_item->isTable();
+	rowHeightMode->setEnabled(have);
+	fitRowsButton->setEnabled(have);
+	if (!have)
+		return;
+	QSignalBlocker b(rowHeightMode);
+	rowHeightMode->setCurrentIndex(SuneerTable::rowsAuto(m_item) ? 0 : 1);
+}
+
+void PropertiesPalette_Table::on_rowHeightMode_activated(int index)
+{
+	if (!m_doc || !m_item || !m_item->isTable())
+		return;
+	SuneerTable::setRowsAuto(m_item, index == 0);
+	m_doc->changed();
+}
+
+void PropertiesPalette_Table::on_fitRowsButton_clicked()
+{
+	if (!m_doc || !m_item || !m_item->isTable())
+		return;
+	SuneerTable::fitRowsToText(m_doc, m_item->asTable());
 }

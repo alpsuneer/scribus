@@ -92,6 +92,8 @@ for which a new license (GPL+exception) is in place.
 #include "scribusXml.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include <execinfo.h>
+#include "suneertable.h"
 #include "suneerweld.h"
 #include "scribusview.h"
 #include "selection.h"
@@ -9899,15 +9901,22 @@ void ScribusDoc::itemSelection_EraseParagraphStyle(Selection* customSelection)
 	UndoTransaction activeTransaction;
 	if (UndoManager::undoEnabled())
 		activeTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::RemoveTextStyle, tr( "remove direct paragraph formatting" ), Um::IFont);
-	for (int i = 0; i < selectedItemCount; ++i)
+	QList<PageItem*> suneerTargets;
+	QSet<PageItem*> suneerWhole;
+	SuneerTable::expandTargets(this, itemSelection, suneerTargets, suneerWhole);
+	for (PageItem* currItem : suneerTargets)
 	{
-		PageItem *currItem = itemSelection->itemAt(i);
 		int currItemTextCount = currItem->itemText.length();
-		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable)))
+		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable) || suneerWhole.contains(currItem)))
 		{
 			int start = currItem->firstInFrame();
 			int stop = currItem->lastInFrame()+1;
-			if ((appMode == modeEdit) || (appMode == modeEditTable))
+			if (suneerWhole.contains(currItem))
+			{
+				start = 0;
+				stop = currItem->itemText.length();
+			}
+			else if ((appMode == modeEdit) || (appMode == modeEditTable))
 			{
 				start = currItem->itemText.startOfSelection();
 				stop = currItem->itemText.endOfSelection();
@@ -10201,35 +10210,11 @@ void ScribusDoc::itemSelection_ApplyParagraphStyle(const ParagraphStyle & newSty
 	// alignment, line spacing and its mode, direction, word tracking, hyphenation --
 	// gains multi-cell support at once, from the Properties palette and Style
 	// Manager as well as the control bar.
+	// suneer: one rule for every text setter - SuneerTable::expandTargets (selected cells / all cells /
+	// the text-of-every-cell selection -> whole cell text; a single edited cell -> its cursor or text selection)
 	QList<PageItem*> targetFrames;
 	QSet<PageItem*> wholeTextFrames;
-	for (int i = 0; i < selectedItemCount; ++i)
-	{
-		PageItem *selItem = itemSelection->itemAt(i);
-		if (selItem->isTable() && appMode == modeEditTable)
-		{
-			PageItem_Table* table = selItem->asTable();
-			if (table->hasSelection())
-			{
-				const QSet<TableCell>& cells = table->selectedCells();
-				for (const TableCell& cell : cells)
-				{
-					PageItem_TextFrame* cellFrame = cell.textFrame();
-					if (cellFrame)
-					{
-						targetFrames.append(cellFrame);
-						// Whole cell story, not a text range: the operator selected
-						// cells, not characters inside one.
-						wholeTextFrames.insert(cellFrame);
-					}
-				}
-			}
-			else if (table->activeCell().textFrame())
-				targetFrames.append(table->activeCell().textFrame());
-		}
-		else
-			targetFrames.append(selItem);
-	}
+	SuneerTable::expandTargets(this, itemSelection, targetFrames, wholeTextFrames);
 
 	for (PageItem* currItem : targetFrames)
 	{
@@ -10332,38 +10317,18 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 	// A table in edit mode with a multi-cell selection contributes every selected
 	// cell's text frame (whole cell text is formatted); other items contribute the
 	// item itself, or the active cell for a plain single-cell table edit.
+	// suneer: one rule for every text setter - SuneerTable::expandTargets (selected cells / all cells /
+	// the text-of-every-cell selection -> whole cell text; a single edited cell -> its cursor or text selection)
 	QList<PageItem*> targetFrames;
 	QSet<PageItem*> wholeTextFrames;
-	for (uint aa = 0; aa < selectedItemCount; ++aa)
-	{
-		PageItem *selItem = itemSelection->itemAt(aa);
-		if (selItem->isTable() && appMode == modeEditTable)
-		{
-			PageItem_Table* table = selItem->asTable();
-			if (table->hasSelection())
-			{
-				const QSet<TableCell>& cells = table->selectedCells();
-				for (const TableCell& cell : cells)
-				{
-					PageItem_TextFrame* cellFrame = cell.textFrame();
-					if (cellFrame)
-					{
-						targetFrames.append(cellFrame);
-						wholeTextFrames.insert(cellFrame);
-					}
-				}
-			}
-			else
-				targetFrames.append(table->activeCell().textFrame());
-		}
-		else
-			targetFrames.append(selItem);
-	}
+	SuneerTable::expandTargets(this, itemSelection, targetFrames, wholeTextFrames);
 
 	for (PageItem* currItem : targetFrames)
 	{
 		bool applyWholeText = wholeTextFrames.contains(currItem);
 		int currItemTextCount = currItem->itemText.length();
+		if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG"))
+			fprintf(stderr, "APPLYCS %s len=%d whole=%d mode=%d plain=%s\n", qPrintable(currItem->itemName()), currItemTextCount, applyWholeText ? 1 : 0, (int) appMode, qPrintable(currItem->itemText.plainText().left(8)));
 		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable)))
 		{
 			int start = currItem->firstInFrame();
@@ -10407,7 +10372,7 @@ void ScribusDoc::itemSelection_ApplyCharStyle(const CharStyle & newStyle, Select
 							ss = dynamic_cast<SimpleState*>(ts->last());
 							state = ts->last();
 						}
-						if (ts && ss && ss->get("ETEA") == ETEA)
+						if (ts && ss && !ETEA.isEmpty() && ss->get("ETEA") == ETEA)   // suneer: merge only typed (ETEA-tagged) changes, never a plain apply into the previous step
 						{
 							for (int i = ts->sizet() - 1; i >= 0; --i)
 							{
@@ -10532,17 +10497,25 @@ void ScribusDoc::itemSelection_SetCharStyle(const CharStyle & newStyle, Selectio
 	UndoTransaction activeTransaction;
 	if (UndoManager::undoEnabled())
 		activeTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::ApplyTextStyle, newStyle.asString(), Um::IFont);
-	for (int i = 0; i < selectedItemCount; ++i)
+	// suneer: a table contributes its selected cells (edit mode) or every cell (table selected), whole text
+	QList<PageItem*> suneerTargets;
+	QSet<PageItem*> suneerWhole;
+	SuneerTable::expandTargets(this, itemSelection, suneerTargets, suneerWhole);
+	for (PageItem* currItem : suneerTargets)
 	{
-		PageItem *currItem = itemSelection->itemAt(i);
 		int currItemTextCount = currItem->itemText.length();
-		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable)))
+		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable) || suneerWhole.contains(currItem)))
 		{
 			int start = currItem->firstInFrame();
 			int length = currItem->lastInFrame() - start + 1;
-			if ((appMode == modeEdit) || (appMode == modeEditTable))
+			if ((appMode == modeEdit) || (appMode == modeEditTable) || suneerWhole.contains(currItem))
 			{
-				if (currItem->itemText.hasSelection())
+				if (suneerWhole.contains(currItem))
+				{
+					start = 0;
+					length = currItem->itemText.length();
+				}
+				else if (currItem->itemText.hasSelection())
 				{
 					start = currItem->itemText.startOfSelection();
 					length = currItem->itemText.endOfSelection() - start;
@@ -10617,17 +10590,25 @@ void ScribusDoc::itemSelection_EraseCharStyle(Selection* customSelection)
 	UndoTransaction activeTransaction;
 	if (UndoManager::undoEnabled())
 		activeTransaction = m_undoManager->beginTransaction(Um::SelectionGroup, Um::IGroup, Um::RemoveTextStyle, tr( "remove direct char formatting" ), Um::IFont);
-	for (int i = 0; i < selectedItemCount; ++i)
+	// suneer: a table contributes its selected cells (edit mode) or every cell (table selected), whole text
+	QList<PageItem*> suneerTargets;
+	QSet<PageItem*> suneerWhole;
+	SuneerTable::expandTargets(this, itemSelection, suneerTargets, suneerWhole);
+	for (PageItem* currItem : suneerTargets)
 	{
-		PageItem *currItem = itemSelection->itemAt(i);
 		int currItemTextCount = currItem->itemText.length();
-		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable)))
+		if ((currItemTextCount > 0) && ((appMode == modeEdit) || (appMode == modeEditTable) || suneerWhole.contains(currItem)))
 		{
 			int start = currItem->firstInFrame();
 			int length = currItem->lastInFrame() - start + 1;
-			if ((appMode == modeEdit) || (appMode == modeEditTable))
+			if ((appMode == modeEdit) || (appMode == modeEditTable) || suneerWhole.contains(currItem))
 			{
-				if (currItem->itemText.hasSelection())
+				if (suneerWhole.contains(currItem))
+				{
+					start = 0;
+					length = currItem->itemText.length();
+				}
+				else if (currItem->itemText.hasSelection())
 				{
 					start = currItem->itemText.startOfSelection();
 					length = currItem->itemText.endOfSelection() - start;
@@ -10854,6 +10835,11 @@ void ScribusDoc::setFrameOval()
 
 void ScribusDoc::setRedrawBounding(PageItem *currItem)
 {
+	// suneer: a table cell's text frame lives in TABLE coordinates. Its bounding box must never
+	// feed the canvas size - that pulled minCanvasCoordinate into the pasteboard every time a row
+	// grew while typing, and the whole view jumped sideways. The table itself is in canvas space.
+	if (currItem && currItem->parentTable())
+		currItem = currItem->parentTable();
 	currItem->setRedrawBounding();
 	FPoint maxSize(currItem->BoundingX+currItem->BoundingW+m_docPrefsData.displayPrefs.scratch.right(), currItem->BoundingY+currItem->BoundingH+m_docPrefsData.displayPrefs.scratch.bottom());
 	FPoint minSize(currItem->BoundingX-m_docPrefsData.displayPrefs.scratch.left(), currItem->BoundingY-m_docPrefsData.displayPrefs.scratch.top());
@@ -10879,6 +10865,14 @@ void ScribusDoc::adjustCanvas(const FPoint& minPos, const FPoint& maxPos, bool a
 		newMaxY = qMax(maxCanvasCoordinate.y(), maxPos.y());
 		newMinX = qMin(minCanvasCoordinate.x(), minPos.x());
 		newMinY = qMin(minCanvasCoordinate.y(), minPos.y());
+	}
+	if (qEnvironmentVariableIsSet("SUNEER_SCROLL_DEBUG") && (newMinX != minCanvasCoordinate.x() || newMinY != minCanvasCoordinate.y() || newMaxX != maxCanvasCoordinate.x() || newMaxY != maxCanvasCoordinate.y()))
+	{
+		fprintf(stderr, "ADJUSTCANVAS min (%.1f,%.1f)->(%.1f,%.1f) max (%.1f,%.1f)->(%.1f,%.1f) absolute=%d req min(%.1f,%.1f) max(%.1f,%.1f)\n",
+		        minCanvasCoordinate.x(), minCanvasCoordinate.y(), newMinX, newMinY, maxCanvasCoordinate.x(), maxCanvasCoordinate.y(), newMaxX, newMaxY, absolute ? 1 : 0, minPos.x(), minPos.y(), maxPos.x(), maxPos.y());
+		void* frames[24]; const int nf = backtrace(frames, 24); char** syms = backtrace_symbols(frames, nf);
+		for (int k = 1; k < nf && k < 12; ++k) fprintf(stderr, "   %s\n", syms[k]);
+		free(syms);
 	}
 	if ((newMaxX != maxCanvasCoordinate.x()) || (newMaxY != maxCanvasCoordinate.y())
 	|| (newMinX != minCanvasCoordinate.x()) || (newMinY != minCanvasCoordinate.y()))
