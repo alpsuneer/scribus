@@ -154,7 +154,8 @@ void UndoWidget::updateUndoActions()
 
 void UndoWidget::updateUndo(int steps)
 {
-	for (int i = 0; i < steps; ++i)
+	// suneer: an undo step this widget never saw (recorded before it was connected) must not crash it
+	for (int i = 0; i < steps && !undoItems.empty(); ++i)
 	{
 		redoItems.insert(redoItems.begin(), undoItems[0]);
 		undoItems.erase(undoItems.begin());
@@ -165,7 +166,7 @@ void UndoWidget::updateUndo(int steps)
 
 void UndoWidget::updateRedo(int steps)
 {
-	for (int i = 0; i < steps; ++i)
+	for (int i = 0; i < steps && !redoItems.empty(); ++i)
 	{
 		undoItems.insert(undoItems.begin(), redoItems[0]);
 		redoItems.erase(redoItems.begin());

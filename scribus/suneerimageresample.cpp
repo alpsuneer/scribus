@@ -513,6 +513,134 @@ QString SuneerImageResample::resample(ScribusDoc* doc, PageItem* item, int newW,
 	return QString();
 }
 
+// ---------------------------------------------------------------------------
+// Edits lost to the old resample (before 2026-10-31): found on open, restored
+// ---------------------------------------------------------------------------
+// The bug left a fingerprint: the frame still carries its edit (the Edit photo output /
+// the processed obituary file exists), but its picture is a resample copy
+// "<name>_WxH_Ndpi.<ext>" made from the ORIGINAL (SuneerImgOriginal / news.original /
+// obit.src). Only that is restored - the original itself (Reset to original, a relink by
+// hand) or a resample of the edit is never touched.
+QString SuneerImageResample::lostEditOf(const PageItem* item, QString* lostFile)
+{
+	if (!item || !item->isImageFrame())
+		return QString();
+	auto attr = [item](const char* name) {
+		const QList<ObjectAttribute> l = item->getObjectAttributes(QString::fromLatin1(name));
+		return l.isEmpty() ? QString() : l.first().value;
+	};
+	QString edit = attr("suneer.photoEditOutput");
+	if (edit.isEmpty())
+		edit = attr("obit.out");
+	if (edit.isEmpty())
+		return QString();
+	// what the frame shows: its file, or for an embedded picture the file it was embedded from
+	QString cur = item->Pfile;
+	if (item->isInlineImage)
+		cur = attr("suneer.embeddedFrom");
+	if (cur.isEmpty())
+		return QString();
+	const QFileInfo ci(cur);
+	if (QFileInfo(edit).absoluteFilePath() == ci.absoluteFilePath())
+		return QString();
+	static const QRegularExpression tag(QStringLiteral("_\\d+x\\d+_\\d+dpi(-\\d+)?$"));
+	QString base = ci.completeBaseName();
+	if (!base.contains(tag))
+		return QString();                                    // not a resample copy: not this bug
+	base.remove(tag);
+	const QString made = base + QLatin1Char('.') + ci.suffix();
+	if (QFileInfo(edit).fileName().compare(made, Qt::CaseInsensitive) == 0)
+		return QString();                                    // a resample of the edit: fine
+	for (const char* name : { "SuneerImgOriginal", "news.original", "obit.src" })
+	{
+		const QString orig = attr(name);
+		if (!orig.isEmpty() && QFileInfo(orig).fileName().compare(made, Qt::CaseInsensitive) == 0)
+		{
+			if (lostFile)
+				*lostFile = cur;
+			return edit;                                     // made from the original: the edit was lost
+		}
+	}
+	return QString();
+}
+
+int SuneerImageResample::restoreLostEdits(ScribusDoc* doc, QStringList* restored, QStringList* failed)
+{
+	if (!doc)
+		return 0;
+	QList<PageItem*> frames;
+	for (int i = 0; i < doc->Items->count(); ++i)
+	{
+		PageItem* it = doc->Items->at(i);
+		if (it->isGroup())
+		{
+			for (PageItem* c : it->getAllChildren())
+				if (c && c->isImageFrame())
+					frames << c;
+		}
+		else if (it->isImageFrame())
+			frames << it;
+	}
+	struct Lost { PageItem* item; QString edit, was; };
+	QList<Lost> lost;
+	for (PageItem* f : std::as_const(frames))
+	{
+		QString was;
+		const QString edit = lostEditOf(f, &was);
+		if (edit.isEmpty())
+			continue;
+		if (!QFileInfo(edit).isFile())
+		{
+			if (failed)
+				failed->append(QObject::tr("%1: the edited file is missing (%2) - Edit photo > Apply makes it again").arg(f->itemName(), QDir::toNativeSeparators(edit)));
+			continue;
+		}
+		lost << Lost { f, edit, was };
+	}
+	if (lost.isEmpty())
+		return 0;
+	UndoTransaction tx;
+	if (UndoManager::undoEnabled())
+		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IImageFrame, QObject::tr("Restore lost photo edits"), QString(), Um::IGetImage);
+	int n = 0;
+	for (const Lost& l : std::as_const(lost))
+	{
+		PageItem* f = l.item;
+		const bool wasInline = f->isInlineImage;
+		if (wasInline)
+			f->isTempFile = false;                           // undo reloads the embedded copy: keep it
+		if (!doc->loadPict(l.edit, f, false, true))
+		{
+			if (wasInline)
+				f->isTempFile = true;
+			if (failed)
+				failed->append(QObject::tr("%1: %2 could not be loaded").arg(f->itemName(), QDir::toNativeSeparators(l.edit)));
+			continue;
+		}
+		f->isInlineImage = false;
+		// as Edit photo > Apply / the obituary pipeline left it: the picture fitted to the frame
+		f->setImageScalingMode(false, true);
+		f->adjustPictScale();
+		f->setImageXYOffset(0, 0);
+		if (wasInline)
+			SuneerImageLinks::embedItem(doc, f);             // it was embedded: embedded again
+		f->updateClip();
+		f->update();
+		++n;
+		if (restored)
+			restored->append(QObject::tr("%1: %2 -> %3%4").arg(f->itemName(), QFileInfo(l.was).fileName(), QFileInfo(l.edit).fileName(),
+			                                                    wasInline ? QObject::tr(" (embedded again)") : QString()));
+	}
+	if (tx)
+		tx.commit();
+	if (n > 0)
+	{
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+	}
+	return n;
+}
+
 void SuneerImageResample::offerDownsampleAfterImport(ScribusDoc* doc, PageItem* item, QWidget* parent)
 {
 	if (!doc || !item || !item->isImageFrame() || !item->imageIsAvailable)
@@ -625,13 +753,120 @@ void SuneerImageResample::runKeepEditSelfTestIfAsked(ScribusMainWindow* mw, Scri
 				return doc->Items->at(i);
 		return nullptr;
 	};
-	for (UndoGui* g : mw->findChildren<UndoGui*>())
-		UndoManager::instance()->removeGui(g);
+	// the undo GUIs stay registered: phase 4's undo must work as a user's Ctrl+Z does (an unregistered
+	// UndoWidget still listens to undoSignal with an empty list and crashes - a test artifact)
 	const double px = doc->Pages->at(0)->xOffset(), py = doc->Pages->at(0)->yOffset();
 	const QString want[2] = { QStringLiteral("blue(edited)"), QStringLiteral("grey(processed)") };
 	const QString names[2] = { QStringLiteral("NEWS"), QStringLiteral("OBIT") };
 
-	if (phase != 2)
+	// a NEWS-type frame after Edit photo > Apply (background green -> blue)
+	auto makeEdited = [&](const QString& name, double x, double y) -> PageItem* {
+		const int i = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + x, py + y, 200, 150, 1, CommonStrings::None, CommonStrings::None);
+		PageItem* f = doc->Items->at(i);
+		f->setItemName(name);
+		doc->loadPict(fix + QStringLiteral("/photo.jpg"), f, false, true);
+		f->setImageScalingMode(false, true);
+		f->adjustPictScale();
+		QImage ed = QImage(fix + QStringLiteral("/photo.jpg")).convertToFormat(QImage::Format_ARGB32);
+		for (int yy = 0; yy < ed.height(); ++yy)
+		{
+			QRgb* row = reinterpret_cast<QRgb*>(ed.scanLine(yy));
+			for (int xx = 0; xx < ed.width(); ++xx)
+				if (qGreen(row[xx]) > 150 && qRed(row[xx]) < 110)
+					row[xx] = qRgb(20, 40, 230);
+		}
+		SuneerPhotoEdit::Settings st;
+		st.removeBg = true;
+		SuneerPhotoEdit::apply(doc, f, ed, QImage(), QImage(), st, fix + QStringLiteral("/photo.jpg"), nullptr, QImage(), true);
+		return f;
+	};
+	// what the OLD resample did: a resample of the frame built from \a original (the edit lost)
+	auto damage = [&](PageItem* f, const QString& original) {
+		setAttrOfItem(f, QStringLiteral("SuneerResampleOf"), original);
+		setAttrOfItem(f, QStringLiteral("SuneerResampleOut"), QFileInfo(f->Pfile).absoluteFilePath());
+		Options o;
+		o.targetDpi = 300;
+		const Info cur = probe(f);
+		resample(doc, f, qMax(1, cur.width / 2), qMax(1, cur.height / 2), o);
+	};
+	const QString rnames[5] = { QStringLiteral("NEWS"), QStringLiteral("OBIT"), QStringLiteral("NEWSEMB"), QStringLiteral("RESET"), QStringLiteral("EDITRES") };
+	if (phase == 3)
+	{
+		PageItem* n = makeEdited(rnames[0], 40, 60);
+		damage(n, fix + QStringLiteral("/photo.jpg"));
+		const int ib = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + 300, py + 60, 120, 140, 1, CommonStrings::None, CommonStrings::None);
+		PageItem* b = doc->Items->at(ib);
+		b->setItemName(rnames[1]);
+		doc->loadPict(fix + QStringLiteral("/obit_out.png"), b, false, true);
+		b->setImageScalingMode(false, true);
+		b->adjustPictScale();
+		setAttrOfItem(b, QStringLiteral("obit.src"), fix + QStringLiteral("/obit_orig.jpg"));
+		setAttrOfItem(b, QStringLiteral("obit.out"), fix + QStringLiteral("/obit_out.png"));
+		setAttrOfItem(b, QStringLiteral("news.original"), fix + QStringLiteral("/obit_orig.jpg"));
+		damage(b, fix + QStringLiteral("/obit_orig.jpg"));
+		PageItem* e = makeEdited(rnames[2], 40, 260);
+		damage(e, fix + QStringLiteral("/photo.jpg"));
+		SuneerImageLinks::embedItem(doc, e);
+		PageItem* r = makeEdited(rnames[3], 300, 260);
+		SuneerPhotoEdit::resetToOriginal(doc, r);              // the user's own choice: the original
+		Options o;
+		o.targetDpi = 300;
+		resample(doc, r, 800, 600, o);                          // a resample of the original: legitimately green
+		PageItem* ok = makeEdited(rnames[4], 40, 460);
+		resample(doc, ok, 800, 600, o);                         // a resample of the edit: fine
+		QStringList st;
+		for (const QString& nm : rnames)
+			st << QStringLiteral("%1=%2 (%3%4)").arg(nm, cornerKind(frame(nm)), QFileInfo(frame(nm)->isInlineImage ? attrOfItem(frame(nm), "suneer.embeddedFrom") : frame(nm)->Pfile).fileName(),
+			                                       frame(nm)->isInlineImage ? QStringLiteral(", embedded") : QString());
+		note(QStringLiteral("as the old build left them: ") + st.join(QStringLiteral("; ")));
+		check(QStringLiteral("damaged as by the old build: NEWS / OBIT / NEWSEMB show the original, RESET the original, EDITRES the edit"),
+		      cornerKind(frame(rnames[0])) == QLatin1String("GREEN(original)") && cornerKind(frame(rnames[1])) == QLatin1String("GREEN(original)")
+		      && cornerKind(frame(rnames[2])) == QLatin1String("GREEN(original)") && frame(rnames[2])->isInlineImage
+		      && cornerKind(frame(rnames[3])) == QLatin1String("GREEN(original)") && cornerKind(frame(rnames[4])) == want[0]);
+		doc->setSuneerLinkedImagesNoAsk(true);
+		check(QStringLiteral("saved (%1)").arg(doc->documentFileName()), mw->slotFileSave());
+	}
+	else if (phase == 4 || phase == 5)
+	{
+		// opened: the restore has run (scribus.cpp loadDoc) - what each frame shows now
+		QFile lf(QDir::homePath() + QStringLiteral("/scribus-crashlogs/photo-restore.log"));
+		const QString log = lf.open(QIODevice::ReadOnly) ? QString::fromUtf8(lf.readAll()) : QString();
+		const int restores = log.count(QStringLiteral("were restored"));
+		note(QStringLiteral("photo-restore.log: %1 restore message(s)").arg(restores));
+		QStringList st;
+		for (const QString& nm : rnames)
+			if (frame(nm))
+				st << QStringLiteral("%1=%2 (%3%4)").arg(nm, cornerKind(frame(nm)), QFileInfo(frame(nm)->Pfile).fileName(), frame(nm)->isInlineImage ? QStringLiteral(", embedded") : QString());
+		note(st.join(QStringLiteral("; ")));
+		const bool shown = cornerKind(frame(rnames[0])) == want[0] && cornerKind(frame(rnames[1])) == want[1] && cornerKind(frame(rnames[2])) == want[0]
+		                   && cornerKind(frame(rnames[3])) == QLatin1String("GREEN(original)") && cornerKind(frame(rnames[4])) == want[0];
+		if (phase == 4)
+		{
+			check(QStringLiteral("on open: NEWS, OBIT, NEWSEMB restored to their edit (NEWSEMB embedded again: %1); RESET (reset by the user) and EDITRES (fine) untouched; one restore message")
+			      .arg(frame(rnames[2])->isInlineImage), shown && frame(rnames[2])->isInlineImage && restores == 1 && log.contains(QStringLiteral("NEWSEMB")) && !log.contains(QStringLiteral("RESET:")));
+			check(QStringLiteral("restored NEWS fills its frame (scale %1, frame %2 x %3)").arg(frame(rnames[0])->imageXScale()).arg(frame(rnames[0])->width()).arg(frame(rnames[0])->height()),
+			      frame(rnames[0])->imageXScale() > 0 && qAbs(frame(rnames[0])->width() - 200) < 0.01);
+			// the Undo widget saw the restore (the only step of a freshly opened document): Edit > Undo enabled
+			const bool undoOn = mw->scrActions.contains("editUndoAction") && mw->scrActions["editUndoAction"]->isEnabled();
+			check(QStringLiteral("the restore is an undo step the Undo widget knows (Edit > Undo enabled: %1)").arg(undoOn), undoOn);
+			UndoManager::instance()->undo(1);
+			QCoreApplication::processEvents();
+			const bool undone = cornerKind(frame(rnames[0])) == QLatin1String("GREEN(original)") && cornerKind(frame(rnames[1])) == QLatin1String("GREEN(original)");
+			UndoManager::instance()->redo(1);
+			QCoreApplication::processEvents();
+			check(QStringLiteral("one undo step: undo shows the lost state again (%1), redo the edits (%2)").arg(undone).arg(cornerKind(frame(rnames[0]))),
+			      undone && cornerKind(frame(rnames[0])) == want[0] && cornerKind(frame(rnames[1])) == want[1]);
+			check(QStringLiteral("Edit photo still opens the original for NEWS (%1)").arg(QFileInfo(SuneerPhotoEdit::sourcePathOf(frame(rnames[0]))).fileName()),
+			      QFileInfo(SuneerPhotoEdit::sourcePathOf(frame(rnames[0]))).fileName() == QLatin1String("photo.jpg"));
+			mw->grab().save(prefix + QStringLiteral("-restored.png"));
+			doc->setSuneerLinkedImagesNoAsk(true);
+			check(QStringLiteral("saved"), mw->slotFileSave());
+		}
+		else
+			check(QStringLiteral("opened again after the save: nothing more to restore (still %1 message), all as restored").arg(restores), shown && restores == 1);
+		doc->setModified(false);
+	}
+	else if (phase != 2)
 	{
 		// NEWS: a photo, Edit photo > Apply with the background removed (here: green -> blue)
 		const int ia = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + 40, py + 60, 200, 150, 1, CommonStrings::None, CommonStrings::None);

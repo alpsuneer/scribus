@@ -4722,6 +4722,42 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		doc->Last = bookmarkPalette->BView->Last;
 		if (doc->drawAsPreview)
 			view->togglePreview(true);
+		// Suneer: photo edits the old resample lost (it rebuilt edited photos from their original after a
+		// resize, before 2026-10-31) are put back: one undo step, always said, logged.
+		// After loadDoc is done (the document's undo stack and the undo widgets set up): a step made inside
+		// loadDoc reached the undo manager but not the Undo widget's list, and Ctrl+Z crashed (updateUndo).
+		if (ScCore->usingGUI() && !scriptIsRunning() && (!suneerUnattendedTest() || qEnvironmentVariableIsSet("SUNEER_IMGKEEP_SELFTEST")))
+		QTimer::singleShot(0, this, [this, d = QPointer<ScribusDoc>(doc)]() {
+			if (!d || d != doc)
+				return;
+			QStringList restored, failed;
+			const int n = SuneerImageResample::restoreLostEdits(d, &restored, &failed);
+			if (n > 0 || !failed.isEmpty())
+			{
+				const QString head = n > 0 ? tr("%n photo edit(s) lost by an earlier resize were restored - Undo (Ctrl+Z) takes them back", "", n)
+				                           : tr("Photo edits lost by an earlier resize could not all be restored");
+				QStringList lines;
+				if (!restored.isEmpty())
+					lines << tr("Restored:") + QStringLiteral("\n\u2022 ") + restored.join(QStringLiteral("\n\u2022 "));
+				if (!failed.isEmpty())
+					lines << tr("Not restored:") + QStringLiteral("\n\u2022 ") + failed.join(QStringLiteral("\n\u2022 "));
+				setStatusBarInfoText(head);
+				const QString logDir = QDir::homePath() + QStringLiteral("/scribus-crashlogs");
+				QDir().mkpath(logDir);
+				QFile lf(logDir + QStringLiteral("/photo-restore.log"));
+				if (lf.open(QIODevice::Append | QIODevice::Text))
+					lf.write(QStringLiteral("%1  %2: %3\n%4\n").arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"),
+					         d->documentFileName(), head, lines.join('\n')).toUtf8());
+				if (!suneerUnattendedTest())
+				{
+					auto* box = new QMessageBox(failed.isEmpty() ? QMessageBox::Information : QMessageBox::Warning, tr("Photo edits restored"),
+					                            head + QStringLiteral("\n\n") + tr("Save the document to keep them."), QMessageBox::Ok, this);
+					box->setDetailedText(lines.join(QStringLiteral("\n")));
+					box->setAttribute(Qt::WA_DeleteOnClose);
+					box->open();
+				}
+			}
+		});
 		// Suneer: a workflow page (downloaded, or with placed stories) - its used / unused can be synced.
 		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel
 		    && (!suneerUnattendedTest() || qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST")))

@@ -104,6 +104,12 @@ namespace SuneerImageResample
 	//! After an image import: when the preference is on and the picture is
 	//! far above 400 dpi on the page, offer to fit it to the frame.
 	SCRIBUS_API void offerDownsampleAfterImport(ScribusDoc* doc, PageItem* item, QWidget* parent);
+	/*! A photo whose edit the old resample lost (before 2026-10-31): the frame keeps its edit (Edit photo
+	    output / obit.out on disk) but shows a resample copy of the ORIGINAL. Returns the edited file, empty
+	    when the frame is fine (\a lostFile: what it shows now). */
+	SCRIBUS_API QString lostEditOf(const PageItem* item, QString* lostFile = nullptr);
+	//! Every such frame back on its edit (fitted to the frame, embedded again if it was), one undo step.
+	SCRIBUS_API int restoreLostEdits(ScribusDoc* doc, QStringList* restored = nullptr, QStringList* failed = nullptr);
 	//! tests/suneer/image_keep_edit.sh: an edited / processed photo stays so through resize and resample (SUNEER_IMGKEEP_SELFTEST).
 	SCRIBUS_API void runKeepEditSelfTestIfAsked(ScribusMainWindow* mw, ScribusDoc* doc);
 }

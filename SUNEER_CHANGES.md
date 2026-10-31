@@ -1584,3 +1584,11 @@ scribus
   (`SuneerResampleOf/Out`; പഴയ documents-ൽ resample file-ന്റെ പേരിൽ നിന്ന്).
 - Test: `tests/suneer/image_keep_edit.sh <dir>` (pixel നോക്കി; embedded, save/reopen ഉൾപ്പെടെ).
 
+### 106. പഴയ resize-ൽ നഷ്ടപ്പെട്ട photo edits — document തുറക്കുമ്പോൾ സ്വയം തിരികെ
+- #105-ന് മുമ്പുള്ള build-ൽ resize കാരണം original തിരികെ വന്ന ഫോട്ടോകൾ (edit / obituary processed file ഇപ്പോഴും ഉണ്ട്,
+  പക്ഷേ frame original-ന്റെ resample copy കാണിക്കുന്നു) — document തുറക്കുമ്പോൾ edit-ലേക്ക് തിരികെ (frame-ൽ fit, embed
+  ആയിരുന്നെങ്കിൽ വീണ്ടും embed). ഒരു undo step; box + status bar + `~/scribus-crashlogs/photo-restore.log`. Save ചെയ്താൽ സ്ഥിരം.
+- "Reset to original" ചെയ്തതും edit-ന്റെ resample-ഉം തൊടില്ല. Edit file ഇല്ലെങ്കിൽ കാരണം പറയും.
+- Fix: load സമയത്ത് ഉണ്ടാക്കിയ undo step Ctrl+Z-ൽ crash ആക്കിയിരുന്നു (Undo widget); restore ഇപ്പോൾ load കഴിഞ്ഞ്,
+  Undo widget ശൂന്യമായ list-ൽ crash ആകില്ല.
+
