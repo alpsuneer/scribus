@@ -1489,3 +1489,13 @@ scribus
 - ഓരോ login step-ഉം സമയത്തോടെ `~/scribus-crashlogs/login.log`-ൽ (password / token ഒരിക്കലും ഇല്ല).
 - install.sh summary-യിൽ user-ന്റെ keyring check, ശരിയാക്കാനുള്ള വഴിയോടെ.
 
+### 98. News Browser — "Page 2 is opened by …" (workflow Layout page-ലെ പോലെ)
+- Page box-ൽ മറ്റൊരാൾ തുറന്ന page ചാരനിറത്തിൽ, പേരോടെ: "Page 2 – Suneer". List തുറക്കുമ്പോൾ വീണ്ടും server-നോട് ചോദിക്കും.
+- അത്തരം page തിരഞ്ഞെടുത്താൽ (അല്ലെങ്കിൽ Fetch News): Page box-ന് താഴെ "Page 2 is opened by Suneer (since 09:12)",
+  ചോദ്യം: [Continue anyway] [Choose another page].
+- ഒഴിഞ്ഞ page തിരഞ്ഞെടുക്കുമ്പോൾ workflow-ൽ അത് നിങ്ങളുടെ പേരിൽ lock ആകും (web Layout page-ന്റെ അതേ lock).
+  മറ്റൊരു page / date, edition മാറ്റം, document close, Logout, Scribus close — lock വിടും.
+- Browser-ൽ നിങ്ങൾ തന്നെ മുമ്പേ lock ചെയ്ത page Scribus വിടില്ല.
+- ഓരോ മിനിറ്റിലും check: admin unlock ചെയ്താൽ വീണ്ടും lock; മറ്റൊരാൾ എടുത്താൽ കാണിക്കും.
+- Server ഉത്തരം തന്നില്ലെങ്കിൽ 5 സെക്കൻഡിൽ "Lock status … unknown" — Scribus ഒരിക്കലും നിൽക്കില്ല.
+

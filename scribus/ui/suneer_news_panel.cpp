@@ -300,6 +300,26 @@ public:
 };
 
 
+// Page lock (see the "Page lock" section below).
+namespace {
+const int kLockTimeoutMs = 5000;
+const int kPageNameRole = Qt::UserRole + 1;
+
+// QComboBox that says when its list is about to open (lock status refresh).
+class SuneerPopupCombo : public QComboBox
+{
+public:
+	using QComboBox::QComboBox;
+	std::function<void()> onPopup;
+	void showPopup() override
+	{
+		if (onPopup)
+			onPopup();
+		QComboBox::showPopup();
+	}
+};
+}
+
 namespace {
 
 const double  kMmToPt        = 2.8346;
@@ -425,10 +445,21 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 
 	// Page
 	vl->addWidget(new QLabel(tr("Page:"), w));
-	m_pageCombo = new QComboBox(w);
+	auto* pageCombo = new SuneerPopupCombo(w);
+	m_pageCombo = pageCombo;
 	narrowCombo(m_pageCombo);
-	connect(m_pageCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) { preselectLayoutModel(); });
+	// The list shows who has which page open: asked again (async) whenever it opens.
+	pageCombo->onPopup = [this]() { refreshPageLocks(); };
+	connect(m_pageCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int i) { preselectLayoutModel(); onPageSelected(i); });
 	vl->addWidget(m_pageCombo);
+	m_pageLockLabel = new QLabel(w);
+	m_pageLockLabel->setWordWrap(true);
+	m_pageLockLabel->hide();
+	vl->addWidget(m_pageLockLabel);
+	m_lockKeepAlive = new QTimer(this);
+	m_lockKeepAlive->setInterval(qEnvironmentVariableIsSet("SUNEER_PAGELOCK_KEEPALIVE_MS") ? qEnvironmentVariableIntValue("SUNEER_PAGELOCK_KEEPALIVE_MS") : 60000);
+	connect(m_lockKeepAlive, &QTimer::timeout, this, &SuneerNewsPanel::keepPageLockAlive);
+	connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() { releasePageLockOnExit(); });
 
 	// Date
 	vl->addWidget(new QLabel(tr("Date:"), w));
@@ -436,6 +467,11 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_dateEdit->setDisplayFormat("yyyy-MM-dd");
 	m_dateEdit->setCalendarPopup(true);
 	vl->addWidget(m_dateEdit);
+	m_lockDateDebounce = new QTimer(this);
+	m_lockDateDebounce->setSingleShot(true);
+	m_lockDateDebounce->setInterval(600);   // typing a date: one check when it settles
+	connect(m_lockDateDebounce, &QTimer::timeout, this, &SuneerNewsPanel::onLockDateChanged);
+	connect(m_dateEdit, &QDateEdit::dateChanged, this, [this]() { m_lockDateDebounce->start(); });
 
 	// (Title style and Photo position are no longer chosen here: the headline size comes from the
 	// placed width - Workflow columns -> width -> the model's / house headline rule - and the photo from
@@ -808,6 +844,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	// The keychain is touched after main-window construction so a keyring
 	// prompt never lands in the middle of start-up.
 	QTimer::singleShot(800, this, &SuneerNewsPanel::startupSession);
+	if (qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST"))
+		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST"))
 	{
 		// After the startup session check; _EARLY: while it still runs (a
@@ -843,6 +881,8 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			connect(UndoManager::instance(), &UndoManager::redoSignal, this, [this](int) { QTimer::singleShot(0, this, [this]() { reevaluateAfterUndo(); }); });
 		}
 	}
+	if (!doc && m_doc && m_heldDocBound && m_heldDoc == m_doc)
+		releasePageLock(false, QStringLiteral("document closed"));
 	if (doc != m_doc)
 	{
 		// another document: what was noted for the old one is void (the same document is set again
@@ -2960,6 +3000,8 @@ void SuneerNewsPanel::parseUser(const QJsonObject& user)
 	QString name = (user["firstName"].toString() + " " + user["lastName"].toString()).trimmed();
 	if (!name.isEmpty())
 		m_userName = name;
+	if (!user["id"].toString().isEmpty())
+		m_userId = user["id"].toString();
 	// The server's IP table (Admin > IP access): clientIp is what it saw,
 	// code is the approval code, ipAllowed the table's verdict. The API does
 	// not enforce it (its checkIP middleware is disabled); only the web app
@@ -3419,6 +3461,7 @@ void SuneerNewsPanel::onLogout()
 {
 	ensureSecretsLoaded();
 	loginLog(QStringLiteral("logout"));
+	releasePageLock(true, QStringLiteral("logout"));
 	if (!m_accessToken.isEmpty())
 	{
 		// Best effort: the server revokes the refresh session it finds in the cookie.
@@ -3500,6 +3543,877 @@ void SuneerNewsPanel::writeLoginSelfTestReport(const QString& report, int keyrin
 	QTimer::singleShot(200, qApp, []() { QApplication::exit(0); });
 }
 
+
+// ============================================================================
+// Page lock: "Page 2 is opened by …" like the workflow's Layout page
+// ============================================================================
+//
+// The workflow keeps one LayoutPageStatus row per page and publish date;
+// lockedById / lockedAt say who has the page open in the Layout page. The web
+// app reads it with GET /news/layout/pages?publishDate&editionGroup (status
+// .lockedBy.username) and sets it with PATCH /news/layout/pages/lock
+// {pageIds, publishDate}: that list is the user's WHOLE set of locked pages
+// for the date - pages missing from it are unlocked, and a page another user
+// holds is refused (HTTP 400). So the set is always rebuilt here from the
+// user's current locks over all their editions before one page is added or
+// removed. There is no expiry and no heartbeat on the server: a lock lasts
+// until it is released (or an admin unlocks it in Locked Pages).
+
+
+QString SuneerNewsPanel::pageNameAt(int index) const
+{
+	if (index < 0 || index >= m_pageCombo->count())
+		return QString();
+	const QString name = m_pageCombo->itemData(index, kPageNameRole).toString();
+	return name.isEmpty() ? m_pageCombo->itemText(index) : name;
+}
+
+QString SuneerNewsPanel::currentPageKey() const
+{
+	const QString id = m_pageCombo->currentData().toString();
+	return id.isEmpty() ? QString() : id + QLatin1Char('|') + m_dateEdit->date().toString("yyyy-MM-dd");
+}
+
+QString SuneerNewsPanel::formatLockSince(const QDateTime& since)
+{
+	if (!since.isValid())
+		return QString();
+	const QDateTime local = since.toLocalTime();
+	return local.date() == QDate::currentDate() ? local.toString("HH:mm") : local.toString("d MMM HH:mm");
+}
+
+// One asynchronous request with the login token and a short timeout. A 401
+// gets one token refresh and one retry; nothing here ever waits on its own.
+void SuneerNewsPanel::lockCall(const QByteArray& verb, const QUrl& url, const QByteArray& body,
+                               std::function<void(QNetworkReply*)> done, bool retried)
+{
+	QNetworkRequest req = apiRequest(url, true);
+	req.setTransferTimeout(kLockTimeoutMs);
+	if (!body.isEmpty())
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+	QNetworkReply* reply = m_nam->sendCustomRequest(req, verb, body);
+	auto t = std::make_shared<QElapsedTimer>();
+	t->start();
+	connect(reply, &QNetworkReply::finished, this, [this, reply, verb, url, body, done, retried, t]() {
+		reply->deleteLater();
+		const int status = httpStatus(reply);
+		apiLog(QStringLiteral("page lock: %1 %2 -> %3 (%4 ms)").arg(QString::fromLatin1(verb), url.path(),
+		       status > 0 ? QStringLiteral("HTTP %1").arg(status) : reply->errorString()).arg(t->elapsed()));
+		if ((status == 401 || status == 403) && !retried && !m_refreshToken.isEmpty())
+		{
+			m_quietAuth = true;
+			const bool ok = refreshAccessToken();
+			m_quietAuth = false;
+			if (ok)
+			{
+				lockCall(verb, url, body, done, true);
+				return;
+			}
+		}
+		if (done)
+			done(reply);
+	});
+}
+
+void SuneerNewsPanel::refreshPageLocks(std::function<void(bool, const QString&)> done)
+{
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	const QString gid = editionGroupIdFor(m_lastEdition);
+	if (m_accessToken.isEmpty() || gid.isEmpty() || m_pageCombo->count() == 0)
+	{
+		if (done)
+			done(false, m_accessToken.isEmpty() ? tr("not logged in") : tr("no edition group for %1").arg(m_lastEdition));
+		return;
+	}
+	QUrl u(apiUrl("/news/layout/pages"));
+	QUrlQuery q;
+	q.addQueryItem("publishDate", date);
+	q.addQueryItem("editionGroup", gid);
+	u.setQuery(q);
+	const QString edition = m_lastEdition;
+	lockCall("GET", u, QByteArray(), [this, date, edition, done](QNetworkReply* reply) {
+		if (reply->error() != QNetworkReply::NoError || httpStatus(reply) != 200)
+		{
+			const QString err = describeError(reply);
+			if (done)
+				done(false, err);
+			return;
+		}
+		// The edition or date changed while the answer travelled: it is not about the Page box any more.
+		if (edition != m_lastEdition || date != m_dateEdit->date().toString("yyyy-MM-dd"))
+		{
+			if (done)
+				done(false, tr("selection changed"));
+			return;
+		}
+		const QJsonValue d = QJsonDocument::fromJson(reply->readAll()).object()["data"];
+		const QJsonArray pages = d.isArray() ? d.toArray() : d.toObject()["pages"].toArray();
+		m_pageLocks.clear();
+		for (const QJsonValue& v : pages)
+		{
+			const QJsonObject pg = v.toObject();
+			const QJsonObject st = pg["status"].toObject();
+			if (st.isEmpty() || st["lockedAt"].isNull() || st["lockedAt"].toString().isEmpty() || st["lockedById"].toString().isEmpty())
+				continue;
+			PageLockInfo info;
+			info.userId = st["lockedById"].toString();
+			info.userName = st["lockedBy"].toObject()["username"].toString();
+			if (info.userName.isEmpty())
+				info.userName = tr("another user");
+			info.since = QDateTime::fromString(st["lockedAt"].toString(), Qt::ISODateWithMs);
+			info.completed = st["isCompleted"].toBool();
+			m_pageLocks.insert(pg["id"].toString(), info);
+		}
+		m_pageLocksDate = date;
+		m_pageLocksKnown = true;
+		applyPageLockLabels();
+		showPageLockLine();
+		if (done)
+			done(true, QString());
+	});
+}
+
+// "Page 2 – Suneer" in grey for pages other users hold; the plain name otherwise.
+void SuneerNewsPanel::applyPageLockLabels()
+{
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	const bool known = m_pageLocksKnown && m_pageLocksDate == date;
+	for (int i = 0; i < m_pageCombo->count(); ++i)
+	{
+		const QString id = m_pageCombo->itemData(i).toString();
+		const QString name = pageNameAt(i);
+		const auto it = known ? m_pageLocks.constFind(id) : m_pageLocks.constEnd();
+		const bool other = known && it != m_pageLocks.constEnd() && it->userId != m_userId;
+		m_pageCombo->setItemText(i, other ? QStringLiteral("%1 – %2").arg(name, it->userName) : name);
+		m_pageCombo->setItemData(i, other ? QVariant(QColor("#8A8A8A")) : QVariant(), Qt::ForegroundRole);
+		m_pageCombo->setItemData(i, other ? QVariant(tr("Opened by %1 since %2").arg(it->userName, formatLockSince(it->since))) : QVariant(), Qt::ToolTipRole);
+	}
+}
+
+// The line under the Page box for the selected page + date.
+void SuneerNewsPanel::showPageLockLine()
+{
+	if (!m_pageLockLabel)
+		return;
+	const int idx = m_pageCombo->currentIndex();
+	const QString id = m_pageCombo->currentData().toString();
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	if (idx < 0 || id.isEmpty())
+	{
+		m_pageLockLabel->hide();
+		return;
+	}
+	const QString name = pageNameAt(idx);
+	QString text, style;
+	if (m_heldPageId == id && m_heldDate == date)
+	{
+		text = tr("%1 is opened by you (the workflow shows it locked for others)").arg(name);
+		style = "color:#2E7D32;";
+	}
+	else if (m_pageLocksKnown && m_pageLocksDate == date && m_pageLocks.contains(id))
+	{
+		const PageLockInfo info = m_pageLocks.value(id);
+		if (info.userId == m_userId)
+		{
+			text = tr("%1 is opened by you since %2").arg(name, formatLockSince(info.since));
+			style = "color:#2E7D32;";
+		}
+		else
+		{
+			text = tr("\U0001F512 %1 is opened by %2 (since %3)").arg(name, info.userName, formatLockSince(info.since));
+			if (m_lockOverride.contains(id + QLatin1Char('|') + date))
+				text += tr(" - you continued anyway; it is not locked for you");
+			style = "color:#B00020; font-weight:bold;";
+		}
+	}
+	else
+	{
+		m_pageLockLabel->hide();
+		return;
+	}
+	m_pageLockLabel->setText(text);
+	m_pageLockLabel->setStyleSheet(style + " font-size:11px;");
+	m_pageLockLabel->show();
+}
+
+void SuneerNewsPanel::syncMyPageLocks(const QString& date, const QString& add, const QString& remove,
+                                      std::function<void(bool, const QSet<QString>&, const QString&)> done)
+{
+	m_lockQueue << [this, date, add, remove, done]() {
+		syncMyPageLocksNow(date, add, remove, [this, done](bool ok, const QSet<QString>& mine, const QString& err) {
+			done(ok, mine, err);
+			if (!m_lockQueue.isEmpty())
+				m_lockQueue.takeFirst()();   // still busy: the next one runs
+			else
+				m_lockQueueBusy = false;
+		});
+	};
+	if (!m_lockQueueBusy)
+	{
+		m_lockQueueBusy = true;
+		m_lockQueue.takeFirst()();
+	}
+}
+
+void SuneerNewsPanel::syncMyPageLocksNow(const QString& date, const QString& add, const QString& remove,
+                                         std::function<void(bool, const QSet<QString>&, const QString&)> done)
+{
+	// Every edition group of the user: the PATCH list must hold the user's
+	// locks in all editions for this date, or the server unlocks the others.
+	QSet<QString> groups;
+	for (auto it = m_editionGroupIds.constBegin(); it != m_editionGroupIds.constEnd(); ++it)
+		if (!it.value().isEmpty())
+			groups.insert(it.value());
+	if (groups.isEmpty() || m_userId.isEmpty())
+	{
+		done(false, {}, m_userId.isEmpty() ? tr("the login did not say who you are") : tr("no edition groups"));
+		return;
+	}
+	struct State { int pending; QSet<QString> mine; QString error; };
+	auto st = std::make_shared<State>();
+	st->pending = groups.size();
+	for (const QString& gid : groups)
+	{
+		QUrl u(apiUrl("/news/layout/pages"));
+		QUrlQuery q;
+		q.addQueryItem("publishDate", date);
+		q.addQueryItem("editionGroup", gid);
+		u.setQuery(q);
+		lockCall("GET", u, QByteArray(), [this, st, date, add, remove, done](QNetworkReply* reply) {
+			if (reply->error() != QNetworkReply::NoError || httpStatus(reply) != 200)
+				st->error = describeError(reply);
+			else
+			{
+				const QJsonValue d = QJsonDocument::fromJson(reply->readAll()).object()["data"];
+				for (const QJsonValue& v : d.isArray() ? d.toArray() : d.toObject()["pages"].toArray())
+				{
+					const QJsonObject s = v.toObject()["status"].toObject();
+					if (s["lockedById"].toString() == m_userId && !s["lockedAt"].isNull() && !s["lockedAt"].toString().isEmpty())
+						st->mine.insert(v.toObject()["id"].toString());
+				}
+			}
+			if (--st->pending > 0)
+				return;
+			if (!st->error.isEmpty())
+			{
+				// Without the full list a PATCH could unlock the user's other pages: send nothing.
+				done(false, {}, st->error);
+				return;
+			}
+			QSet<QString> want = st->mine;
+			if (!add.isEmpty())
+				want.insert(add);
+			if (!remove.isEmpty())
+				want.remove(remove);
+			if (want == st->mine)
+			{
+				done(true, st->mine, QString());
+				return;
+			}
+			QJsonObject body;
+			QJsonArray ids;
+			for (const QString& id : want)
+				ids << id;
+			body["pageIds"] = ids;
+			body["publishDate"] = date;
+			lockCall("PATCH", QUrl(apiUrl("/news/layout/pages/lock")), QJsonDocument(body).toJson(QJsonDocument::Compact),
+			         [this, done](QNetworkReply* r) {
+				if (r->error() != QNetworkReply::NoError || httpStatus(r) != 200)
+				{
+					const QString msg = serverMessage(r->peek(r->bytesAvailable()));
+					done(false, {}, msg.isEmpty() ? describeError(r) : tr("%1 (HTTP %2)").arg(msg).arg(httpStatus(r)));
+					return;
+				}
+				QSet<QString> now;
+				for (const QJsonValue& v : QJsonDocument::fromJson(r->readAll()).object()["data"].toObject()["lockedPages"].toArray())
+				{
+					const QJsonObject o = v.toObject();
+					now.insert(o["pageId"].toString().isEmpty() ? o["page"].toObject()["id"].toString() : o["pageId"].toString());
+				}
+				done(true, now, QString());
+			});
+		});
+	}
+}
+
+void SuneerNewsPanel::onPageSelected(int index)
+{
+	if (index < 0 || m_pageLockAsking)
+		return;
+	checkAndTakePageLock();
+}
+
+// The lock is per page AND date: a new date is a new page to take (the old
+// date's lock goes once the new choice stands).
+void SuneerNewsPanel::onLockDateChanged()
+{
+	m_pageLocksKnown = false;
+	applyPageLockLabels();
+	showPageLockLine();
+	if (m_pageCombo->currentIndex() < 0)
+		return;
+	if (!m_heldPageId.isEmpty() || m_pageCombo->currentIndex() == m_prevPageIndex)
+		checkAndTakePageLock();
+	else
+		refreshPageLocks();
+}
+
+// The one flow behind choosing a page and Fetch News: ask the server (async,
+// 5 s); another user's page -> the line + the question; a free page (or one
+// already this user's) -> take it. A network problem never stops the work.
+void SuneerNewsPanel::checkAndTakePageLock(std::function<void()> then)
+{
+	const int idx = m_pageCombo->currentIndex();
+	const QString id = m_pageCombo->currentData().toString();
+	const QString name = pageNameAt(idx);
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	if (idx < 0 || id.isEmpty() || m_accessToken.isEmpty() || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+	{
+		m_lockGateKey = currentPageKey();
+		if (then)
+			then();
+		return;
+	}
+	const int gen = ++m_lockCheckGen;
+	// The page held so far is let go only once the new choice stands
+	// ("Choose another page" goes back to it, still locked).
+	auto releaseOld = [this, id, date]() {
+		if (!m_heldPageId.isEmpty() && (m_heldPageId != id || m_heldDate != date))
+			releasePageLock(false, QStringLiteral("another page or date chosen"));
+	};
+	refreshPageLocks([this, gen, idx, id, name, date, then, releaseOld](bool ok, const QString& err) {
+		if (gen != m_lockCheckGen)
+			return;   // a newer choice is being checked
+		const QString key = id + QLatin1Char('|') + date;
+		if (!ok)
+		{
+			m_pageLockLabel->setText(tr("Lock status of %1 unknown (%2) - not locked").arg(name, err));
+			m_pageLockLabel->setStyleSheet("color:#8A6D00; font-size:11px;");
+			m_pageLockLabel->show();
+			apiLog(QStringLiteral("page lock: check of %1 %2 failed (%3) - going on without a lock").arg(name, date, err));
+			releaseOld();
+			m_prevPageIndex = idx;
+			m_lockGateKey = key;
+			if (then)
+				then();
+			return;
+		}
+		const auto it = m_pageLocks.constFind(id);
+		if (it != m_pageLocks.constEnd() && it->userId != m_userId && !m_lockOverride.contains(key))
+		{
+			const PageLockInfo info = *it;
+			if (!askLockedPage(name, info))
+			{
+				// Choose another page: back to the previous one, list open.
+				apiLog(QStringLiteral("page lock: %1 %2 is opened by %3 - the user chose another page").arg(name, date, info.userName));
+				m_lockGateKey.clear();
+				m_pageCombo->blockSignals(true);
+				m_pageCombo->setCurrentIndex(m_prevPageIndex >= 0 && m_prevPageIndex != idx ? m_prevPageIndex : -1);
+				m_pageCombo->blockSignals(false);
+				// The held page's date may differ from the date box only when the
+				// date was changed: then the old page is not the user's choice any more.
+				if (!m_heldPageId.isEmpty() && m_heldDate != date)
+					releasePageLock(false, QStringLiteral("date changed"));
+				showPageLockLine();
+				if (qEnvironmentVariableIsEmpty("SUNEER_PAGELOCK_SELFTEST"))
+					QTimer::singleShot(0, m_pageCombo, [this]() { if (m_pageCombo->isVisible()) m_pageCombo->showPopup(); });
+				return;
+			}
+			apiLog(QStringLiteral("page lock: %1 %2 is opened by %3 - the user continued anyway").arg(name, date, info.userName));
+			releaseOld();
+			m_lockOverride.insert(key);
+			showPageLockLine();
+		}
+		else if (it == m_pageLocks.constEnd() || it->userId == m_userId)
+		{
+			releaseOld();
+			takePageLock(id, name, date);
+		}
+		m_prevPageIndex = idx;
+		m_lockGateKey = key;
+		if (then)
+			then();
+	});
+}
+
+bool SuneerNewsPanel::askLockedPage(const QString& pageName, const PageLockInfo& info)
+{
+	m_pageLockAsking = true;
+	QMessageBox box(QMessageBox::Warning, tr("Page already opened"),
+	                tr("%1 for %2 is opened by %3 (since %4).\n\nIf you both lay out this page, one of you overwrites the other's work.")
+	                    .arg(pageName, m_dateEdit->date().toString("yyyy-MM-dd"), info.userName, formatLockSince(info.since)),
+	                QMessageBox::NoButton, this);
+	QPushButton* cont = box.addButton(tr("Continue anyway"), QMessageBox::AcceptRole);
+	QPushButton* other = box.addButton(tr("Choose another page"), QMessageBox::RejectRole);
+	box.setDefaultButton(other);
+	const QString answer = m_pageLockTestAnswer;
+	if (!answer.isEmpty())
+		QTimer::singleShot(300, &box, [&box, cont, other, answer]() {
+			box.grab().save(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST") + "-question.png");
+			(answer == QLatin1String("continue") ? cont : other)->click();
+		});
+	box.exec();
+	m_pageLockAsking = false;
+	return box.clickedButton() == cont;
+}
+
+void SuneerNewsPanel::takePageLock(const QString& pageId, const QString& pageName, const QString& date)
+{
+	if (m_heldPageId == pageId && m_heldDate == date)
+		return;
+	const bool wasMine = m_pageLocks.contains(pageId) && m_pageLocks.value(pageId).userId == m_userId;
+	syncMyPageLocks(date, pageId, QString(), [this, pageId, pageName, date, wasMine](bool ok, const QSet<QString>& mine, const QString& err) {
+		const bool stillCurrent = m_pageCombo->currentData().toString() == pageId && m_dateEdit->date().toString("yyyy-MM-dd") == date;
+		if (!ok || !mine.contains(pageId))
+		{
+			apiLog(QStringLiteral("page lock: could not lock %1 %2: %3").arg(pageName, date, err.isEmpty() ? QStringLiteral("not in the reply") : err));
+			if (stillCurrent)
+			{
+				m_pageLockLabel->setText(tr("%1 could not be locked for you (%2)").arg(pageName, err.isEmpty() ? tr("taken meanwhile?") : err));
+				m_pageLockLabel->setStyleSheet("color:#8A6D00; font-size:11px;");
+				m_pageLockLabel->show();
+				refreshPageLocks();
+			}
+			return;
+		}
+		if (!stillCurrent)
+		{
+			// Another page was chosen while this one was being locked: let it go again.
+			if (!wasMine)
+				syncMyPageLocks(date, QString(), pageId, [](bool, const QSet<QString>&, const QString&) {});
+			return;
+		}
+		m_heldPageId = pageId;
+		m_heldPageName = pageName;
+		m_heldDate = date;
+		m_heldWasMineBefore = wasMine;
+		m_heldDoc = m_doc;
+		m_heldDocBound = (m_doc != nullptr);
+		apiLog(QStringLiteral("page lock: %1 %2 locked for you%3").arg(pageName, date, wasMine ? QStringLiteral(" (it already was - e.g. in the browser; not released by Scribus)") : QString()));
+		m_lockKeepAlive->start();
+		showPageLockLine();
+	});
+}
+
+void SuneerNewsPanel::releasePageLock(bool blocking, const QString& why)
+{
+	if (m_heldPageId.isEmpty())
+		return;
+	const QString id = m_heldPageId, name = m_heldPageName, date = m_heldDate;
+	const bool keep = m_heldWasMineBefore;
+	m_heldPageId.clear();
+	m_heldPageName.clear();
+	m_heldDate.clear();
+	m_heldWasMineBefore = false;
+	m_heldDocBound = false;
+	m_heldDoc = nullptr;
+	m_lockKeepAlive->stop();
+	showPageLockLine();
+	if (keep)
+	{
+		apiLog(QStringLiteral("page lock: %1 %2 left locked (%3): it was yours before Scribus took it").arg(name, date, why));
+		return;
+	}
+	auto finished = std::make_shared<bool>(false);
+	++m_lockReleasesInFlight;
+	syncMyPageLocks(date, QString(), id, [this, name, date, why, finished](bool ok, const QSet<QString>&, const QString& err) {
+		*finished = true;
+		--m_lockReleasesInFlight;
+		apiLog(ok ? QStringLiteral("page lock: %1 %2 released (%3)").arg(name, date, why)
+		          : QStringLiteral("page lock: release of %1 %2 failed (%3): %4").arg(name, date, why, err));
+	});
+	if (blocking && !*finished)
+	{
+		// Exit / logout: wait a little for the answer, never more than 3 s.
+		QEventLoop loop;
+		QTimer poll;
+		poll.setInterval(20);
+		connect(&poll, &QTimer::timeout, &loop, [&loop, finished]() { if (*finished) loop.quit(); });
+		QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+		poll.start();
+		loop.exec(QEventLoop::ExcludeUserInputEvents);
+	}
+}
+
+// Every minute while a page is held: still ours? The server has no heartbeat,
+// but an admin can unlock a page (Locked Pages) or another user can take it
+// once it is free. A free page is taken again; another user's is shown.
+void SuneerNewsPanel::keepPageLockAlive()
+{
+	if (m_heldPageId.isEmpty())
+	{
+		m_lockKeepAlive->stop();
+		return;
+	}
+	if (m_heldDocBound && !m_heldDoc)
+	{
+		releasePageLock(false, QStringLiteral("document closed"));
+		return;
+	}
+	const QString id = m_heldPageId, name = m_heldPageName, date = m_heldDate;
+	if (m_pageCombo->currentData().toString() != id || m_dateEdit->date().toString("yyyy-MM-dd") != date)
+		return;
+	refreshPageLocks([this, id, name, date](bool ok, const QString& err) {
+		if (!ok || m_heldPageId != id)
+		{
+			if (!ok)
+				apiLog(QStringLiteral("page lock: keep-alive check of %1 failed (%2) - kept as it was").arg(name, err));
+			return;
+		}
+		const auto it = m_pageLocks.constFind(id);
+		if (it != m_pageLocks.constEnd() && it->userId == m_userId)
+			return;
+		m_heldPageId.clear();
+		m_heldDate.clear();
+		if (it == m_pageLocks.constEnd())
+		{
+			apiLog(QStringLiteral("page lock: %1 %2 was unlocked on the server - locked again").arg(name, date));
+			takePageLock(id, name, date);
+		}
+		else
+		{
+			apiLog(QStringLiteral("page lock: %1 %2 is now opened by %3").arg(name, date, it->userName));
+			setStatus(tr("%1 is now opened by %2").arg(name, it->userName), true);
+			showPageLockLine();
+		}
+	});
+}
+
+void SuneerNewsPanel::releasePageLockOnExit()
+{
+	QElapsedTimer t;
+	t.start();
+	releasePageLock(true, QStringLiteral("Scribus closed"));
+	if (m_lockReleasesInFlight > 0)
+	{
+		// A release started a moment ago (the document was closed on the way out).
+		QEventLoop loop;
+		QTimer poll;
+		poll.setInterval(20);
+		connect(&poll, &QTimer::timeout, &loop, [this, &loop]() { if (m_lockReleasesInFlight <= 0) loop.quit(); });
+		QTimer::singleShot(qMax<qint64>(1, 3000 - t.elapsed()), &loop, &QEventLoop::quit);
+		poll.start();
+		loop.exec(QEventLoop::ExcludeUserInputEvents);
+	}
+	if (t.elapsed() > 5)
+		apiLog(QStringLiteral("page lock: exit waited %1 ms for the release").arg(t.elapsed()));
+}
+
+// SUNEER_PAGELOCK_SELFTEST=<report prefix>: the page lock end to end against
+// tests/suneer/fixtures/news_page_lock_mock.py (two users, the workflow's own
+// lock rules). This Scribus is user A; user B acts through the same API with
+// its own token. Each step waits for the server, then checks the Page box and
+// the server's state. Ends by closing Scribus with a page held (the test
+// script checks afterwards that the exit released it).
+void SuneerNewsPanel::runPageLockSelfTest(const QString& report)
+{
+	struct Ctx
+	{
+		QStringList lines;
+		int fails = 0;
+		QList<std::function<void(std::function<void()>)>> steps;
+		int step = 0;
+		QJsonArray serverPages;   // last GET as A
+		QString date, date2;
+		QPointer<QWidget> page;   // the News Browser page in its tab stack
+	};
+	auto c = std::make_shared<Ctx>();
+	c->date = qEnvironmentVariable("SUNEER_PAGELOCK_DATE", "2026-11-02");
+	c->date2 = QDate::fromString(c->date, "yyyy-MM-dd").addDays(1).toString("yyyy-MM-dd");
+	auto check = [c](const QString& what, bool ok) {
+		c->lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		c->fails += ok ? 0 : 1;
+	};
+	auto note = [c](const QString& l) { c->lines << QStringLiteral("  ") + l; };
+	auto indexOf = [this](const QString& pageId) { return m_pageCombo->findData(pageId); };
+	// a request with any token (user B, or A for the server's view)
+	auto call = [this](const QByteArray& token, const QByteArray& verb, const QString& path, const QJsonObject& body,
+	                   std::function<void(int, QJsonObject)> done) {
+		QNetworkRequest req(QUrl(apiUrl(path)));
+		req.setRawHeader("Authorization", "Bearer " + token);
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+		req.setTransferTimeout(5000);
+		QNetworkReply* r = m_nam->sendCustomRequest(req, verb, body.isEmpty() ? QByteArray() : QJsonDocument(body).toJson(QJsonDocument::Compact));
+		connect(r, &QNetworkReply::finished, this, [r, done]() {
+			r->deleteLater();
+			done(httpStatus(r), QJsonDocument::fromJson(r->readAll()).object());
+		});
+	};
+	// who holds page \a id on \a date in the server's eyes ("" = free)
+	auto holder = [call](const QString& group, const QString& date, std::function<void(QHash<QString, QString>)> done) {
+		call("AT-A", "GET", QStringLiteral("/news/layout/pages?publishDate=%1&editionGroup=%2").arg(date, group), {},
+		     [done](int, QJsonObject o) {
+			QHash<QString, QString> h;
+			for (const QJsonValue& v : o["data"].toArray())
+			{
+				const QJsonObject st = v.toObject()["status"].toObject();
+				h[v.toObject()["id"].toString()] = st["lockedAt"].isNull() ? QString() : st["lockedBy"].toObject()["username"].toString();
+			}
+			done(h);
+		});
+	};
+	auto waitFor = [this](std::function<bool()> cond, int ms, std::function<void(bool)> done) {
+		auto* t = new QTimer(this);
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		t->setInterval(50);
+		connect(t, &QTimer::timeout, this, [t, el, cond, ms, done]() {
+			const bool ok = cond();
+			if (!ok && el->elapsed() < ms)
+				return;
+			t->stop();
+			t->deleteLater();
+			done(ok);
+		});
+		t->start();
+	};
+	auto select = [this](int index) { m_pageCombo->setCurrentIndex(index); };
+	auto run = std::make_shared<std::function<void()>>();
+	*run = [this, c, run, report]() {
+		if (c->step >= c->steps.size())
+		{
+			c->lines << (c->fails ? QStringLiteral("FAILED: %1").arg(c->fails) : QStringLiteral("ALL PASS"));
+			QFile f(report + "-report.txt");
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(c->lines.join('\n').toUtf8() + "\n");
+			f.close();
+			fprintf(stderr, "PAGELOCK-SELFTEST done\n");
+			// Exit with Page 5 held: closeEvent -> releasePageLockOnExit (checked by the script).
+			QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+			return;
+		}
+		auto st = c->steps[c->step++];
+		st([run]() { QTimer::singleShot(100, *run); });
+	};
+
+	// 0. log in as A, edition KNR, the test date; A already has a TVM page locked (the browser)
+	c->steps << [this, c, check, call, waitFor](std::function<void()> next) {
+		// The News Browser page to the front of its tab stack (screenshots of the panel).
+		// (widget() is null: the page lives in the Styles dock's tabs.)
+		for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+			if (auto* sw = qobject_cast<QStackedWidget*>(w->parentWidget()))
+			{
+				sw->setCurrentWidget(w);
+				c->page = w;
+			}
+		m_dateEdit->blockSignals(true);
+		m_dateEdit->setDate(QDate::fromString(c->date, "yyyy-MM-dd"));
+		m_dateEdit->blockSignals(false);
+		QNetworkReply* r = startLoginRequest(QStringLiteral("a@test.local"), QStringLiteral("S3cret-right"));
+		connect(r, &QNetworkReply::finished, this, [this, r, c, check, call, waitFor, next]() {
+			QString e;
+			const bool ok = finishLogin(r, QStringLiteral("a@test.local"), false, 0, e);
+			r->deleteLater();
+			check(QStringLiteral("login as A (user id %1)").arg(m_userId), ok && !m_userId.isEmpty());
+			setLocked(false);
+			onFetchStatic();
+			const int k = m_editionCombo->findData("KNR");
+			if (k >= 0)
+				m_editionCombo->setCurrentIndex(k);
+			waitFor([this]() { return m_pageCombo->count() >= 8; }, 8000, [this, c, check, call, next](bool ok) {
+				check(QStringLiteral("KNR pages listed (%1)").arg(m_pageCombo->count()), ok);
+				call("AT-A", "PATCH", "/news/layout/pages/lock", QJsonObject{{"pageIds", QJsonArray{"p-tvm-2"}}, {"publishDate", c->date}},
+				     [check, next](int s, QJsonObject) { check(QStringLiteral("A's TVM Page 2 locked in the 'browser' (HTTP %1)").arg(s), s == 200); next(); });
+			});
+		});
+	};
+	// 1. B opens KNR Page 2 -> the Page box shows it
+	c->steps << [this, c, check, call, note](std::function<void()> next) {
+		call("AT-B", "PATCH", "/news/layout/pages/lock", QJsonObject{{"pageIds", QJsonArray{"p-knr-2"}}, {"publishDate", c->date}},
+		     [this, check, note, next](int s, QJsonObject) {
+			check(QStringLiteral("B locks KNR Page 2 (HTTP %1)").arg(s), s == 200);
+			refreshPageLocks([this, check, note, next](bool ok, const QString& err) {
+				const int i = m_pageCombo->findData("p-knr-2");
+				const QString text = m_pageCombo->itemText(i);
+				const QColor fg = m_pageCombo->itemData(i, Qt::ForegroundRole).value<QColor>();
+				check(QStringLiteral("dropdown shows \"%1\" in grey (%2)").arg(text, fg.name()), ok && text == QStringLiteral("Page 2 – otheruser") && fg.isValid());
+				check(QStringLiteral("other pages unmarked (\"%1\")").arg(m_pageCombo->itemText(m_pageCombo->findData("p-knr-1"))), m_pageCombo->itemText(m_pageCombo->findData("p-knr-1")) == QStringLiteral("Page 1"));
+				m_pageCombo->showPopup();
+				QTimer::singleShot(400, this, [this, err, next]() {
+					m_pageCombo->view()->window()->grab().save(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST") + "-dropdown.png");
+					m_pageCombo->hidePopup();
+					next();
+				});
+			});
+		});
+	};
+	// 2. A takes Page 1 (free): locked for A, A's TVM page kept (the PATCH list is the whole set)
+	c->steps << [this, c, check, holder, waitFor, select, indexOf](std::function<void()> next) {
+		// Page 1 is the page the list opened on (restored, not chosen): choosing it again = the check.
+		if (m_pageCombo->currentIndex() == indexOf("p-knr-1"))
+			checkAndTakePageLock();
+		else
+			select(indexOf("p-knr-1"));
+		waitFor([this]() { return m_heldPageId == "p-knr-1"; }, 6000, [this, c, check, holder, next](bool ok) {
+			check(QStringLiteral("selecting Page 1 takes its lock (held: %1)").arg(m_heldPageId), ok);
+			check(QStringLiteral("line under the Page box: \"%1\"").arg(m_pageLockLabel->text()), !m_pageLockLabel->isHidden() && m_pageLockLabel->text().contains("opened by you"));
+			holder("eg-A-knr", c->date, [c, check, holder, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: KNR Page 1 locked by %1").arg(h["p-knr-1"]), h["p-knr-1"] == "suneer");
+				holder("eg-A-tvm", c->date, [check, next](QHash<QString, QString> t) {
+					check(QStringLiteral("server: A's TVM Page 2 still locked by %1 (not dropped by the PATCH)").arg(t["p-tvm-2"]), t["p-tvm-2"] == "suneer");
+					next();
+				});
+			});
+		});
+	};
+	// 3. A chooses Page 2 (B's) -> question -> Choose another page: back to Page 1, still held
+	c->steps << [this, c, check, holder, waitFor, select, indexOf](std::function<void()> next) {
+		m_pageLockTestAnswer = "choose";
+		const int gen = m_lockCheckGen;
+		select(indexOf("p-knr-2"));
+		waitFor([this, gen]() { return m_lockCheckGen > gen && !m_pageLockAsking && m_pageCombo->currentData().toString() == "p-knr-1"; }, 8000,
+		        [this, c, check, holder, next](bool ok) {
+			check(QStringLiteral("B's Page 2 asked; 'Choose another page' went back to %1").arg(pageNameAt(m_pageCombo->currentIndex())), ok);
+			check(QStringLiteral("Page 1 still held (%1)").arg(m_heldPageId), m_heldPageId == "p-knr-1");
+			holder("eg-A-knr", c->date, [check, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: Page 1 %1, Page 2 %2").arg(h["p-knr-1"], h["p-knr-2"]), h["p-knr-1"] == "suneer" && h["p-knr-2"] == "otheruser");
+				next();
+			});
+		});
+	};
+	// 4. Page 2 again -> Continue anyway: the line says so, Page 1 released, Page 2 stays B's
+	c->steps << [this, c, check, holder, waitFor, select, indexOf](std::function<void()> next) {
+		m_pageLockTestAnswer = "continue";
+		select(indexOf("p-knr-2"));
+		waitFor([this, c]() { return m_lockOverride.contains("p-knr-2|" + c->date) && m_lockReleasesInFlight == 0; }, 8000,
+		        [this, c, check, holder, next](bool ok) {
+			check(QStringLiteral("Continue anyway: \"%1\"").arg(m_pageLockLabel->text()), ok && m_pageLockLabel->text().contains("is opened by otheruser") && m_pageLockLabel->text().contains("continued anyway"));
+			(c->page ? c->page.data() : static_cast<QWidget*>(m_stack))->grab().save(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST") + "-continued.png");
+			holder("eg-A-knr", c->date, [check, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: Page 1 released (\"%1\"), Page 2 still %2").arg(h["p-knr-1"], h["p-knr-2"]), h["p-knr-1"].isEmpty() && h["p-knr-2"] == "otheruser");
+				next();
+			});
+		});
+	};
+	// 5. Page 3 (free) -> held
+	c->steps << [this, c, check, holder, waitFor, select, indexOf](std::function<void()> next) {
+		select(indexOf("p-knr-3"));
+		waitFor([this]() { return m_heldPageId == "p-knr-3"; }, 6000, [this, c, check, holder, next](bool ok) {
+			check(QStringLiteral("Page 3 held (%1)").arg(m_heldPageId), ok);
+			holder("eg-A-knr", c->date, [check, next](QHash<QString, QString> h) {
+				check(QStringLiteral("server: Page 3 %1").arg(h["p-knr-3"]), h["p-knr-3"] == "suneer");
+				next();
+			});
+		});
+	};
+	// 6. date +1 -> Page 3 of the next day taken, today's released; and back
+	c->steps << [this, c, check, holder, waitFor](std::function<void()> next) {
+		m_dateEdit->setDate(QDate::fromString(c->date2, "yyyy-MM-dd"));
+		waitFor([this, c]() { return m_heldPageId == "p-knr-3" && m_heldDate == c->date2 && m_lockReleasesInFlight == 0; }, 8000,
+		        [this, c, check, holder, next](bool ok) {
+			check(QStringLiteral("date changed: Page 3 held for %1").arg(m_heldDate), ok);
+			holder("eg-A-knr", c->date, [this, c, check, holder, next](QHash<QString, QString> h) {
+				holder("eg-A-knr", c->date2, [this, c, check, h, next](QHash<QString, QString> h2) {
+					check(QStringLiteral("server: Page 3 %1 \"%2\", %3 \"%4\"").arg(c->date, h["p-knr-3"], c->date2, h2["p-knr-3"]), h["p-knr-3"].isEmpty() && h2["p-knr-3"] == "suneer");
+					m_dateEdit->setDate(QDate::fromString(c->date, "yyyy-MM-dd"));
+					next();
+				});
+			});
+		});
+	};
+	c->steps << [this, c, check, waitFor](std::function<void()> next) {
+		waitFor([this, c]() { return m_heldPageId == "p-knr-3" && m_heldDate == c->date && m_lockReleasesInFlight == 0; }, 8000,
+		        [this, c, check, next](bool ok) { check(QStringLiteral("date back: Page 3 held for %1").arg(m_heldDate), ok); next(); });
+	};
+	// 7. an admin unlocks Page 3 (Locked Pages) -> keep-alive takes it again
+	c->steps << [this, c, check, call, holder, waitFor](std::function<void()> next) {
+		call("AT-B", "PATCH", "/news/layout/pages/p-knr-3/toggle-lock", QJsonObject{{"isLocked", false}, {"publishDate", c->date}},
+		     [this, c, check, holder, waitFor, next](int s, QJsonObject) {
+			check(QStringLiteral("admin unlock of Page 3 (HTTP %1)").arg(s), s == 200);
+			keepPageLockAlive();
+			waitFor([this]() { return false; }, 1500, [this, c, check, holder, next](bool) {
+				holder("eg-A-knr", c->date, [this, check, next](QHash<QString, QString> h) {
+					check(QStringLiteral("keep-alive: Page 3 locked again (%1, held %2)").arg(h["p-knr-3"], m_heldPageId), h["p-knr-3"] == "suneer" && m_heldPageId == "p-knr-3");
+					next();
+				});
+			});
+		});
+	};
+	// 8. admin unlock + B takes Page 3 -> keep-alive shows it, no longer held
+	c->steps << [this, c, check, call, waitFor](std::function<void()> next) {
+		call("AT-B", "PATCH", "/news/layout/pages/p-knr-3/toggle-lock", QJsonObject{{"isLocked", false}, {"publishDate", c->date}},
+		     [this, c, check, call, waitFor, next](int, QJsonObject) {
+			call("AT-B", "PATCH", "/news/layout/pages/lock", QJsonObject{{"pageIds", QJsonArray{"p-knr-2", "p-knr-3"}}, {"publishDate", c->date}},
+			     [this, check, waitFor, next](int s, QJsonObject) {
+				keepPageLockAlive();
+				waitFor([this]() { return m_heldPageId.isEmpty(); }, 6000, [this, check, s, next](bool ok) {
+					check(QStringLiteral("B took Page 3 (HTTP %1): keep-alive lets go, line \"%2\"").arg(s).arg(m_pageLockLabel->text()),
+					      ok && m_pageLockLabel->text().contains("opened by otheruser"));
+					next();
+				});
+			});
+		});
+	};
+	// 9. Page 6 already A's (the browser) -> held but never released by Scribus
+	c->steps << [this, c, check, call, holder, waitFor, select, indexOf](std::function<void()> next) {
+		call("AT-A", "PATCH", "/news/layout/pages/lock", QJsonObject{{"pageIds", QJsonArray{"p-tvm-2", "p-knr-6"}}, {"publishDate", c->date}},
+		     [this, c, check, holder, waitFor, select, indexOf, next](int, QJsonObject) {
+			select(indexOf("p-knr-6"));
+			waitFor([this]() { return m_heldPageId == "p-knr-6"; }, 6000, [this, c, check, holder, waitFor, select, indexOf, next](bool ok) {
+				check(QStringLiteral("Page 6 (already A's in the browser) held, marked as A's before (%1)").arg(m_heldWasMineBefore ? "yes" : "no"), ok && m_heldWasMineBefore);
+				select(indexOf("p-knr-7"));
+				waitFor([this]() { return m_heldPageId == "p-knr-7" && m_lockReleasesInFlight == 0; }, 6000, [c, check, holder, next](bool ok2) {
+					holder("eg-A-knr", c->date, [check, ok2, next](QHash<QString, QString> h) {
+						check(QStringLiteral("moved to Page 7 (%1): Page 6 left as it was in the browser (%2)").arg(h["p-knr-7"], h["p-knr-6"]), ok2 && h["p-knr-7"] == "suneer" && h["p-knr-6"] == "suneer");
+						next();
+					});
+				});
+			});
+		});
+	};
+	// 10. Fetch News on a page chosen without the check -> the check runs first, then the fetch
+	c->steps << [this, c, check, waitFor, indexOf](std::function<void()> next) {
+		m_pageCombo->blockSignals(true);
+		m_pageCombo->setCurrentIndex(indexOf("p-knr-8"));
+		m_pageCombo->blockSignals(false);
+		onFetchNews();
+		waitFor([this]() { return m_heldPageId == "p-knr-8" && m_fetchPageId == "p-knr-8"; }, 8000, [this, check, next](bool ok) {
+			check(QStringLiteral("Fetch News: Page 8 checked + locked first, then fetched (held %1, fetched %2)").arg(m_heldPageId, m_fetchPageId), ok);
+			next();
+		});
+	};
+	// 11. the document closes -> its page lock is released
+	c->steps << [this, c, check, holder, waitFor](std::function<void()> next) {
+		const bool hadDoc = m_heldDocBound;
+		if (m_mw && m_mw->HaveDoc)
+			m_mw->slotFileClose();
+		waitFor([this]() { return m_heldPageId.isEmpty() && m_lockReleasesInFlight == 0; }, 6000, [c, check, holder, hadDoc, next](bool ok) {
+			holder("eg-A-knr", c->date, [check, ok, hadDoc, next](QHash<QString, QString> h) {
+				check(QStringLiteral("document closed: Page 8 released (bound to the document: %1, server \"%2\")").arg(hadDoc ? "yes" : "no", h["p-knr-8"]), hadDoc && ok && h["p-knr-8"].isEmpty());
+				next();
+			});
+		});
+	};
+	// 12. the server stops answering -> after ~5 s "unknown", Scribus never stops
+	c->steps << [this, c, check, call, waitFor, select, indexOf](std::function<void()> next) {
+		call("AT-A", "POST", "/mock/hang", QJsonObject{{"on", true}}, [this, c, check, call, waitFor, select, indexOf, next](int, QJsonObject) {
+			auto ticks = std::make_shared<int>(0);
+			auto* tick = new QTimer(this);
+			tick->setInterval(100);
+			connect(tick, &QTimer::timeout, this, [ticks]() { ++*ticks; });
+			tick->start();
+			auto el = std::make_shared<QElapsedTimer>();
+			el->start();
+			select(indexOf("p-knr-4"));
+			waitFor([this]() { return m_pageLockLabel->text().contains("unknown"); }, 9000, [this, c, check, call, tick, ticks, el, next](bool ok) {
+				tick->stop();
+				tick->deleteLater();
+				check(QStringLiteral("server hangs: \"%1\" after %2 ms, event loop ran %3 ticks of 100 ms").arg(m_pageLockLabel->text()).arg(el->elapsed()).arg(*ticks),
+				      ok && el->elapsed() < 7000 && *ticks >= el->elapsed() / 100 - 5);
+				call("AT-A", "POST", "/mock/hang", QJsonObject{{"on", false}}, [next](int, QJsonObject) { next(); });
+			});
+		});
+	};
+	// 13. Page 5 held, then Scribus is closed (the script checks the release)
+	c->steps << [this, c, check, waitFor, select, indexOf](std::function<void()> next) {
+		select(indexOf("p-knr-5"));
+		waitFor([this]() { return m_heldPageId == "p-knr-5"; }, 6000, [this, check, next](bool ok) {
+			check(QStringLiteral("Page 5 held before closing Scribus (%1)").arg(m_heldPageId), ok);
+			next();
+		});
+	};
+	(*run)();
+}
 
 // ============================================================================
 // Editions / pages / news (the /external routes, no login)
@@ -3619,7 +4533,13 @@ void SuneerNewsPanel::onFetchStatic()
 
 void SuneerNewsPanel::onEditionChanged(int index)
 {
+	releasePageLock(false, QStringLiteral("edition changed"));
+	m_pageLocks.clear();
+	m_pageLocksKnown = false;
+	m_prevPageIndex = -1;
 	m_pageCombo->clear();
+	if (m_pageLockLabel)
+		m_pageLockLabel->hide();
 	m_pages = QJsonArray();
 	if (index < 0)
 		return;
@@ -3688,17 +4608,25 @@ void SuneerNewsPanel::onFetchPages()
 		for (const QJsonObject& pg : pages)
 		{
 			m_pageCombo->addItem(pg["name"].toString(), pg["id"].toString());
+			m_pageCombo->setItemData(m_pageCombo->count() - 1, pg["name"].toString(), kPageNameRole);
 			QString type = pg["pageType"].toString();
 			if (type.isEmpty())
 				type = pg["type"].toString();
 			if (!type.isEmpty())
 				m_pageTypes[pg["id"].toString()] = type;
 		}
-		int idx = m_lastPage.isEmpty() ? -1 : m_pageCombo->findText(m_lastPage);
+		int idx = -1;
+		for (int i = 0; i < m_pageCombo->count() && !m_lastPage.isEmpty(); ++i)
+			if (pageNameAt(i) == m_lastPage)
+				idx = i;
 		if (idx >= 0)
 			m_pageCombo->setCurrentIndex(idx);
 		m_pageCombo->blockSignals(false);
+		m_prevPageIndex = m_pageCombo->currentIndex();
 		preselectLayoutModel();
+		// Who has which page open (no lock is taken until a page is chosen or fetched).
+		m_pageLocksKnown = false;
+		refreshPageLocks();
 		setStatus(tr("%1: %2 pages").arg(m_lastEdition).arg(pages.size()));
 	});
 }
@@ -3729,9 +4657,23 @@ void SuneerNewsPanel::onFetchNews()
 		setStatus(tr("Error: Edition %1 is not assigned to your account").arg(m_lastEdition));
 		return;
 	}
+	// The page lock first (async, at most 5 s): another user's page asks;
+	// "Choose another page" stops here. A network problem never stops it.
+	if (m_lockGateKey != currentPageKey())
+	{
+		m_fetchBtn->setEnabled(false);
+		const QString key = currentPageKey();
+		checkAndTakePageLock([this, key]() {
+			m_fetchBtn->setEnabled(true);
+			if (m_lockGateKey == key && currentPageKey() == key)
+				onFetchNews();
+		});
+		QTimer::singleShot(kLockTimeoutMs + 1000, m_fetchBtn, [this]() { m_fetchBtn->setEnabled(true); });
+		return;
+	}
 	m_fetchPageId = m_pageCombo->currentData().toString();
 	m_fetchDate   = m_dateEdit->date().toString("yyyy-MM-dd");
-	m_lastPage    = m_pageCombo->currentText();
+	m_lastPage    = pageNameAt(m_pageCombo->currentIndex());
 	saveConfig();
 	statusProgress(tr("Fetching"), 0, 0);
 	m_newsList->clear();
@@ -4173,7 +5115,7 @@ void SuneerNewsPanel::showNewsList()
 	relabelNewsList();
 	refreshPlacedMarks();
 	if (m_newsData.isEmpty())
-		setStatus(tr("No news for %1 on %2").arg(m_pageCombo->currentText(), m_fetchDate));
+		setStatus(tr("No news for %1 on %2").arg(pageNameAt(m_pageCombo->currentIndex()), m_fetchDate));
 	else
 		applyListFilter(true);     // "N stories - X USD, Y UNUSD, Z BAL (showing: f)" or "No f stories (N total) - change Show:"
 	m_placeBtn->setEnabled(!m_newsData.isEmpty());

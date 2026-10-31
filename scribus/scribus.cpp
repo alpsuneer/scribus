@@ -382,7 +382,8 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_BADGE_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :
@@ -2550,6 +2551,9 @@ void ScribusMainWindow::closeEvent(QCloseEvent *ce)
 	// Every document window is closed by now; drop any lock still held
 	// (e.g. one whose document was closed some other way).
 	DocumentLock::releaseAll();
+	// The News Browser's workflow page lock (released here, while the network still runs).
+	if (m_suneerNewsPanel)
+		m_suneerNewsPanel->releasePageLockOnExit();
 
 	// Clean up plugins, THEN save prefs to disk
 	ScCore->pluginManager->cleanupPlugins();

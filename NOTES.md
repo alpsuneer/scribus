@@ -2984,3 +2984,28 @@ Traps:
   SUNEER_LOGIN_SELFTEST(_EMAIL/_PASS/_CANCEL_MS/_EARLY/_SHOT). Trap: xdg-desktop-portal (started by Qt)
   activates org.freedesktop.secrets itself at start-up — not Scribus, and it prompts nothing.
 - install.sh: keyring_check in the summary (read only, the user's /run/user/UID/bus).
+
+## News Browser page lock — "Page 2 is opened by …" (2026-10-30, NOT committed, NOT verified by the user, NOT tried on the test server)
+- Workflow (dbi-workflow, read only): table LayoutPageStatus (page_id, publish_date, locked_by_id, locked_at,
+  is_complted, …), one row per page + date. GET /news/layout/pages?publishDate&editionGroup (the user's
+  UserEditionGroup id) → [{id, name, status:{lockedAt, lockedById, lockedBy{id,username}, isCompleted}}].
+  PATCH /news/layout/pages/lock {pageIds, publishDate} = the user's WHOLE set for that date over all editions:
+  missing pages are unlocked, a page another user holds → 400 "Some selected pages are locked by others".
+  PATCH /news/layout/pages/:id/toggle-lock {isLocked, publishDate}: no owner check (admin Locked Pages).
+  No expiry, no heartbeat: a lock lasts until released. Web UI: "Page locked by <username>" tooltip + FaLock.
+- Scribus: syncMyPageLocks = GET every edition group of the user → union of own locks ± one page → one PATCH.
+  Calls are QUEUED (m_lockQueue): a release and a take at once both read the old set and the later PATCH put
+  the released page back (found by the test). lockCall: async, 5 s transfer timeout, one refresh on 401.
+- Take on: choosing a page, a date change with a page chosen, Fetch News (gate m_lockGateKey). Not on the
+  restored page at start-up (only the labels). Release on: another page/date (only once the new choice
+  stands — "Choose another page" goes back to the old one, still held), edition change, the document it was
+  taken with closing (setDocument(nullptr)), logout (blocking 3 s), closeEvent → releasePageLockOnExit (also
+  waits for in-flight releases), aboutToQuit as a backup. A page already this user's (browser) is held but
+  never released by Scribus (m_heldWasMineBefore). Keep-alive 60 s (SUNEER_PAGELOCK_KEEPALIVE_MS): lost to an
+  admin unlock → taken again; taken by another user → line + status, no longer held.
+- UI: SuneerPopupCombo (refresh on showPopup), page name in kPageNameRole (item text gets " – user"), grey
+  ForegroundRole + tooltip; m_pageLockLabel under the Page box; QMessageBox Continue anyway / Choose another
+  page (default: choose); "unknown (…) - not locked" on errors, the work goes on.
+- Test: tests/suneer/news_page_lock.sh <dir> <doc.sla> [scribus] with fixtures/news_page_lock_mock.py (port of
+  the workflow service, users A/B, /mock/hang). Trap: QDockWidget::widget() is null for this panel (its page
+  lives in the Styles dock's tabs) — find it from m_stack's parents.

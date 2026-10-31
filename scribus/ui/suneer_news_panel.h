@@ -2,6 +2,7 @@
 #define SUNEER_NEWS_PANEL_H
 
 #include <QPointer>
+#include <QDateTime>
 #include "suneerspacing.h"
 #include "suneerlayoutmodel.h"
 #include "ui/suneerlayoutmodels.h"
@@ -77,6 +78,8 @@ public:
 	void setStatusDetails(const QString& text);
 	explicit SuneerNewsPanel(ScribusMainWindow* parent);
 	void setDocument(ScribusDoc* doc);
+	//! Exit: release the workflow page lock this Scribus holds and wait (at most 3 s) for releases on the way.
+	void releasePageLockOnExit();
 
 	//! Plain paragraphs from the server's content field, which may be HTML.
 	//! Tags are dropped, <p>/<br>/<div>/<li> ends become paragraph breaks and
@@ -197,6 +200,69 @@ private:
 	QComboBox*   m_editionCombo  {nullptr};
 	QComboBox*   m_pageCombo     {nullptr};
 	QDateEdit*   m_dateEdit      {nullptr};
+
+	// ---- page lock: the workflow's LayoutPageStatus (lockedById / lockedAt per page + publish date),
+	// the same lock the web Layout page sets. GET /news/layout/pages reads it, PATCH
+	// /news/layout/pages/lock sets the user's whole set of locked pages for a date (the server refuses a
+	// page another user holds). The server has no expiry: a lock lasts until it is released.
+	struct PageLockInfo
+	{
+		QString userId;
+		QString userName;
+		QDateTime since;
+		bool completed {false};
+	};
+	QHash<QString, PageLockInfo> m_pageLocks;   // page id -> lock on m_pageLocksDate (no entry = free)
+	QString m_pageLocksDate;
+	bool    m_pageLocksKnown {false};           // m_pageLocks answered for the current edition + date
+	QString m_userId;                           // the logged-in user's id (login reply / users/me)
+	QString m_heldPageId;                       // the page this Scribus holds the lock for
+	QString m_heldPageName;
+	QString m_heldDate;
+	bool    m_heldWasMineBefore {false};        // already this user's (e.g. in the browser): never released here
+	bool    m_heldDocBound {false};             // taken with a document open: released when it closes
+	QPointer<ScribusDoc> m_heldDoc;
+	QSet<QString> m_lockOverride;               // "pageId|date": Continue anyway was chosen
+	QString m_lockGateKey;                      // "pageId|date" whose lock check finished (Fetch News may go on)
+	int     m_lockCheckGen {0};                 // newer page / date choice: an older answer is dropped
+	int     m_prevPageIndex {-1};
+	bool    m_pageLockAsking {false};
+	class QTimer* m_lockKeepAlive {nullptr};
+	class QTimer* m_lockDateDebounce {nullptr};
+	QLabel* m_pageLockLabel {nullptr};          // the line under the Page box
+	QString pageNameAt(int index) const;
+	QString currentPageKey() const;             // "pageId|date" of the Page box and date
+	static QString formatLockSince(const QDateTime& since);
+	void lockCall(const QByteArray& verb, const QUrl& url, const QByteArray& body,
+	              std::function<void(QNetworkReply*)> done, bool retried = false);
+	//! Async GET /news/layout/pages for the edition + date (5 s); updates m_pageLocks and the Page box.
+	void refreshPageLocks(std::function<void(bool ok, const QString& error)> done = {});
+	void applyPageLockLabels();
+	void showPageLockLine();
+	//! The user's locked pages for \a date over all their editions, \a add / \a remove applied, as one PATCH.
+	void syncMyPageLocks(const QString& date, const QString& add, const QString& remove,
+	                     std::function<void(bool ok, const QSet<QString>& mine, const QString& error)> done);
+	//! The PATCH carries the whole set: two read-modify-writes at once would undo each other
+	//! (a release and a take racing put the released page back). They run one after another.
+	void syncMyPageLocksNow(const QString& date, const QString& add, const QString& remove,
+	                        std::function<void(bool ok, const QSet<QString>& mine, const QString& error)> done);
+	QList<std::function<void()>> m_lockQueue;
+	bool m_lockQueueBusy {false};
+	void onPageSelected(int index);
+	void onLockDateChanged();
+	//! Check the Page box's page + date; ask when another user holds it; take the lock when free.
+	//! \a then runs afterwards unless the user chose another page.
+	void checkAndTakePageLock(std::function<void()> then = {});
+	bool askLockedPage(const QString& pageName, const PageLockInfo& info);   // true = Continue anyway
+	void takePageLock(const QString& pageId, const QString& pageName, const QString& date);
+	//! Releases the lock this Scribus took; \a blocking waits up to 3 s (exit, logout).
+	void releasePageLock(bool blocking = false, const QString& why = QString());
+	void keepPageLockAlive();
+	//! SUNEER_PAGELOCK_SELFTEST=<report>: scripted steps against a (mock) server (tests/suneer/news_page_lock.sh).
+	void runPageLockSelfTest(const QString& report);
+	QStringList m_pageLockTestLog;
+	QString m_pageLockTestAnswer;               // self-test: "continue" / "choose" for the question
+	int     m_lockReleasesInFlight {0};
 	QListWidget* m_newsList      {nullptr};
 	QPushButton* m_fetchBtn      {nullptr};
 	QPushButton* m_placeBtn      {nullptr};
