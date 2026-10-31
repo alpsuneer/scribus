@@ -158,6 +158,9 @@ def main():
             stop(3, "latest.json is not a signed Scribus update manifest")
         if not re.fullmatch(r"[0-9A-Za-z.+~-]{1,64}", version) or not re.fullmatch(r"[0-9a-f]{64}", sha):
             stop(3, "latest.json has an invalid version or sha256")
+        # releases are <upstream>-YYYYMMDD-N only; a DDMMYY number ranks below every release (2026-10-31)
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-20[2-9][0-9](0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])-[1-9][0-9]*", version):
+            stop(3, "release number %s is not <upstream>-YYYYMMDD-N" % version)
         if len(key) != 32 or len(sig) != 64:
             stop(3, "the public key or the signature has the wrong length")
         parts = urlsplit(url)

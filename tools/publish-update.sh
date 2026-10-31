@@ -99,6 +99,12 @@ PY
 	return $rc
 }
 
+# Release numbers: <upstream>-YYYYMMDD-N only. A DDMMYY number (the checkinstall test debs,
+# 1.7.3-311026-1) ranks below every YYYYMMDD release in the updater and in dpkg: a PC holding
+# one would be "updated" back to an older release.
+RELEASE_RE="^[0-9]+\\.[0-9]+\\.[0-9]+-20[2-9][0-9](0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])-[1-9][0-9]*$"
+valid_release() { [[ "$1" =~ $RELEASE_RE ]]; }
+
 # ---------------------------------------------------------------- --list ---
 if [ "$MODE" = list ]; then
 	say "On the server ($UPLOAD_TARGET)"
@@ -117,6 +123,9 @@ fi
 # ---------------------------------------------------------- --rollback ---
 if [ "$MODE" = rollback ]; then
 	say "Rollback: latest.json -> $ROLLBACK_TO"
+	valid_release "$ROLLBACK_TO" || die "$ROLLBACK_TO is not <upstream>-YYYYMMDD-N"
+	echo "   NOTE: PCs already on a newer release keep it (the updater and the install helper only go up);"
+	echo "         a PC whose package is a DDMMYY test deb WOULD take $ROLLBACK_TO - check them first."
 	DEB_NAME="scribus_${ROLLBACK_TO}_amd64.deb"
 	lsrv | grep -qx "$DEB_NAME" || die "$DEB_NAME is not on the server (--list shows what is)"
 	OUT="$BUILD/release/$ROLLBACK_TO"; mkdir -p "$OUT"
@@ -141,6 +150,8 @@ if [ $NO_TAG -eq 0 ]; then
 fi
 tools/release.sh --dry-run --allow-dirty "${CHANGELOG[@]}" || die "release.sh failed"
 VERSION=$(ls -t "$BUILD/release" | grep -E '^1\.[0-9]+\.[0-9]+-[0-9]{8}-[0-9]+$' | head -1)
+valid_release "$VERSION" || die "release number '$VERSION' is not <upstream>-YYYYMMDD-N"
+[ "$(dpkg-deb -f "$BUILD/release/$VERSION/scribus_${VERSION}_amd64.deb" Version 2>/dev/null)" = "$VERSION" ] || die "the .deb in $BUILD/release/$VERSION is not version $VERSION"
 if [ $NO_TAG -eq 0 ] && [ -n "$(git -c core.fileMode=false status --porcelain -- resources/keysets resources/pdf-presets)" ]; then
 	git add -A resources/keysets resources/pdf-presets
 	git commit -q -m "suneer: keyset / office presets as shipped with $VERSION" && echo "   shipped keyset/presets committed: $(git rev-parse --short HEAD)"

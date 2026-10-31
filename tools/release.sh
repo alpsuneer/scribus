@@ -218,6 +218,14 @@ for v in "$LAST_VERSION" "$SERVER_VERSION" "$(cat "$BUILD/release/.last-version"
 	case "$v" in "$UPSTREAM-$TODAY-"*) n=${v##*-}; [ "$n" -ge "$N" ] 2>/dev/null && N=$((n+1)) ;; esac
 done
 VERSION="$UPSTREAM-$TODAY-$N"
+# Only <upstream>-YYYYMMDD-N, dated today: a DDMMYY number (checkinstall test debs: 1.7.3-311026-1) ranks
+# below every YYYYMMDD release in the updater and in dpkg, and a PC would be "updated" back to it.
+RELEASE_RE="^[0-9]+\\.[0-9]+\\.[0-9]+-20[2-9][0-9](0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])-[1-9][0-9]*$"
+[[ "$VERSION" =~ $RELEASE_RE ]] || die "release number $VERSION is not <upstream>-YYYYMMDD-N"
+[ "$(echo "$VERSION" | cut -d- -f2)" = "$TODAY" ] || die "release number $VERSION is not dated today ($TODAY)"
+for older in "$LAST_VERSION" "$SERVER_VERSION"; do
+	[ -z "$older" ] || [[ "$older" =~ $RELEASE_RE ]] || echo "   NOTE: $older (tag / server) is not in the YYYYMMDD-N format"
+done
 echo "   last release tag:      ${LAST_VERSION:-none}"
 echo "   on the server now:     ${SERVER_VERSION:-unknown (not reachable or not configured)}"
 echo "   this release:          $VERSION"
