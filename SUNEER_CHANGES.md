@@ -1519,3 +1519,21 @@ scribus
   മറ്റൊരു page-ന്റെ news ഈ document-ൽ Place / Mark ചെയ്യുമ്പോൾ ആദ്യം ചോദിക്കും.
 - Template ഇല്ലെങ്കിൽ അത് വ്യക്തമായി പറയും. Login, server error (401/403/404/500), timeout എന്നിവയുടെ സന്ദേശങ്ങൾ വ്യക്തം.
 
+### 101. News Browser — page-ലെ വാർത്തകളും workflow-ലെ Used / Unused-ഉം ഒരുപോലെ (page sync)
+- Workflow-ൽ നിന്ന് download ചെയ്ത page-ലെ frames-ൽ story id ഇല്ല. തുറക്കുമ്പോൾ workflow-ന്റെ layout rows (സ്ഥാനം) നോക്കി
+  ഓരോ frame-നെയും അതിന്റെ വാർത്തയുമായി ബന്ധിപ്പിക്കും. Headline മാത്രം ഒക്കുന്നവ ചോദിച്ചിട്ടേ ബന്ധിപ്പിക്കൂ.
+- Page തുറക്കുമ്പോഴും (workflow-ൽ നിന്നോ disk-ൽ നിന്നോ) Fetch News / Check ചെയ്യുമ്പോഴും:
+  - page-ൽ ഉള്ള വാർത്ത → workflow-ൽ USED (ആ page-ന്).
+  - USED എന്ന് കാണിക്കുന്നു, പക്ഷേ page-ൽ ഇല്ല → list കാണിക്കും: [Mark unused] [Keep]. സ്വയം ഒന്നും മാറ്റില്ല.
+    Keep പറഞ്ഞത് ഓർക്കും — Scribus restart കഴിഞ്ഞും (settings `sync/kept`).
+    Settings → Connection → "Page sync": എത്ര Keep ഉണ്ട് എന്ന് കാണാം; **Forget Keep...** എല്ലാം മറക്കും (workflow-ൽ ഒന്നും മാറ്റില്ല).
+  - Disk-ൽ നിന്ന് workflow page തുറക്കുമ്പോൾ എപ്പോഴും "Sync now?" ചോദിക്കും (News Browser അതേ page-ൽ ആണെങ്കിലും).
+  - id ഇല്ലാത്ത frames → list; headline ഒക്കുന്നവ [Link ticked].
+- Place → USED, story-യുടെ അവസാന frame delete → UNUSED: download ചെയ്ത page-ലും ഇപ്പോൾ പ്രവർത്തിക്കും.
+- Save-ലും close-ലും ബാക്കിയുള്ള marks വീണ്ടും അയയ്ക്കും (close-ൽ പരമാവധി 3 s). അയയ്ക്കാനായില്ലെങ്കിൽ
+  `~/.cache/scribus/news/pending-marks.json`-ൽ സൂക്ഷിച്ച് അടുത്ത തവണ അയയ്ക്കും.
+- Page lock ഉള്ള ആൾ മാത്രം ആ page-ന്റെ Used / Unused മാറ്റും. മറ്റൊരാൾ തുറന്ന page-ന് ഒന്നും അയയ്ക്കില്ല.
+- Log: `~/scribus-crashlogs/news-sync.log` (token ഇല്ല).
+- Fix: USED-ന് `fromStatus` അയച്ചിരുന്നു; workflow അത് 400 കൊണ്ട് നിരസിക്കും (undo-ക്ക് ശേഷമുള്ള USED പരാജയപ്പെട്ടിരുന്നു).
+- Test: `tests/suneer/news_page_sync.sh <dir>` (mock workflow, രണ്ട് ഘട്ടം).
+

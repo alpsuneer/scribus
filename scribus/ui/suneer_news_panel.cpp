@@ -10,6 +10,7 @@
 #include "scpage.h"
 #include "scribus.h"
 #include "scribusdoc.h"
+#include "scribuscore.h"
 #include "sccolor.h"
 #include "scupdatekeystore.h"
 #include "suneerboxfit.h"
@@ -869,6 +870,15 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST"))
+		QTimer::singleShot(4000, this, [this]() { runSyncSelfTest(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST")); });
+	loadPendingMarks();                        // marks a closed Scribus could not send
+	{
+		// "Keep" answers of the page sync, across restarts
+		QSettings ks("Faircode", "ScribusNews");
+		const QStringList kept = ks.value("sync/kept").toStringList();
+		m_syncKept = QSet<QString>(kept.begin(), kept.end());
+	}
 	if (qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST"))
 	{
 		// After the startup session check; _EARLY: while it still runs (a
@@ -913,7 +923,7 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 		m_deleted.clear();
 		m_cutStories.clear();
 		m_autoUnused.clear();
-		m_autoRetry.clear();
+		// m_autoRetry stays: it is per story and page, not per document (kept on disk as well)
 		m_storyIndex.clear();
 		m_storyIndexDoc = nullptr;
 	}
@@ -1451,6 +1461,19 @@ bool SuneerNewsPanel::markOnServerBatch(const QStringList& newsIds, const QStrin
 		for (const QString& id : newsIds) m_lastMarkError[id] = tr("no story id / page id");
 		return false;
 	}
+	if (!fixture)
+	{
+		QString why;
+		if (markGate(pageId, &why) == MarkGate::Blocked)
+		{
+			// only the holder of the page lock changes used / unused of that page
+			const QString e = tr("not changed: %1").arg(why);
+			if (error) *error = e;
+			for (const QString& id : newsIds) m_lastMarkError[id] = e;
+			syncLog(QStringLiteral("mark %1 of %2 stor(ies) on page ..%3 NOT sent - %4").arg(dtpStatus).arg(newsIds.size()).arg(pageId.right(6), why));
+			return false;
+		}
+	}
 	QStringList errors;
 	QHash<QString, QStringList> byFrom;        // current status -> ids to move
 	for (const QString& id : newsIds)
@@ -1498,7 +1521,8 @@ bool SuneerNewsPanel::markOnServerBatch(const QStringList& newsIds, const QStrin
 		QJsonObject body;
 		body["newsIds"]    = QJsonArray::fromStringList(it.value());
 		body["dtpStatus"]  = dtpStatus;
-		body["fromStatus"] = it.key();
+		if (dtpStatus == unusedStatus())          // the workflow refuses fromStatus with USED / BALANCED
+			body["fromStatus"] = it.key();
 		body["pageId"]     = pageId;
 		QString err;
 		int status = 0;
@@ -1541,6 +1565,19 @@ bool SuneerNewsPanel::markOnServer(const QStringList& newsIds, const QString& pa
 		for (const QString& id : newsIds) m_lastMarkError[id] = tr("no story id / page id");
 		return false;
 	}
+	if (!fixture)
+	{
+		QString why;
+		if (markGate(pageId, &why) == MarkGate::Blocked)
+		{
+			// only the holder of the page lock changes used / unused of that page
+			const QString e = tr("not changed: %1").arg(why);
+			if (error) *error = e;
+			for (const QString& id : newsIds) m_lastMarkError[id] = e;
+			syncLog(QStringLiteral("mark %1 of %2 stor(ies) on page ..%3 NOT sent - %4").arg(dtpStatus).arg(newsIds.size()).arg(pageId.right(6), why));
+			return false;
+		}
+	}
 	QStringList errors;
 	auto fail = [&](const QString& id, const QString& why) { errors << why; m_lastMarkError[id] = why; };
 	for (const QString& id : newsIds)
@@ -1582,7 +1619,8 @@ bool SuneerNewsPanel::markOnServer(const QStringList& newsIds, const QString& pa
 		QJsonObject body;
 		body["newsIds"]    = QJsonArray::fromStringList(QStringList() << id);
 		body["dtpStatus"]  = dtpStatus;
-		body["fromStatus"] = current;
+		if (dtpStatus == unusedStatus())          // the workflow refuses fromStatus with USED / BALANCED
+			body["fromStatus"] = current;
 		body["pageId"]     = pageId;
 		QString err;
 		int status = 0;
@@ -2454,7 +2492,9 @@ void SuneerNewsPanel::checkDeletedStories()
 
 // One asynchronous PATCH per page (the server takes a list of ids); the UI never waits. The
 // reply updates the rows, the status line and the main window's status bar; a failure goes
-// to the retry queue, which is tried again on the next delete and on Save.
+// to the retry queue, which is tried again on the next delete, Fetch News, Save and close (and
+// is kept on disk for the next start). Only the holder of the page lock changes a page: another
+// user's page is left alone, a page this Scribus has not locked waits in the queue.
 void SuneerNewsPanel::autoMarkStories(const QList<DeletedStory>& stories, const QString& status, const QString& expected, const QString& why)
 {
 	if (stories.isEmpty())
@@ -2478,22 +2518,45 @@ void SuneerNewsPanel::autoMarkStories(const QList<DeletedStory>& stories, const 
 			}
 			else
 				m_autoUnused.remove(d.storyId);
-			m_autoRetry.remove(d.storyId);
+			m_autoRetry.remove(retryKey(d));
 		}
 		m_autoMarkLog << QStringLiteral("%1 %2 [%3]").arg(status, why, storyIds.join(','));
 		const QString pageId = it.key();
 		const QList<DeletedStory> group = it.value();
+		auto queue = [this, &group, &status]() {
+			for (const DeletedStory& d : group) { DeletedStory r = d; r.title = status; m_autoRetry.insert(retryKey(r), r); }
+		};
 		if (fixture || pageId.isEmpty())
 		{
-			apiLog(QStringLiteral("auto mark %1 (%2): %3 - %4").arg(status, why, ids.join(','), fixture ? QStringLiteral("fixture, no request") : QStringLiteral("no page id, queued")));
+			syncLog(QStringLiteral("auto mark %1 (%2): %3 - %4").arg(status, why, ids.join(','), fixture ? QStringLiteral("fixture, no request") : QStringLiteral("no page id, queued")));
 			if (!fixture)
-				for (const DeletedStory& d : group) { DeletedStory r = d; r.title = status; m_autoRetry.insert(d.storyId, r); }
+				queue();
+			continue;
+		}
+		QString gateWhy;
+		const MarkGate gate = markGate(pageId, &gateWhy);
+		if (gate == MarkGate::Blocked)
+		{
+			syncLog(QStringLiteral("auto mark %1 (%2): %3 on page ..%4 NOT sent - %5").arg(status, why, ids.join(','), pageId.right(6), gateWhy));
+			const QString msg = tr("Used / unused not changed: %1").arg(gateWhy);
+			setStatus(msg, true);
+			if (m_mw)
+				m_mw->setStatusBarInfoText(msg);
+			continue;
+		}
+		if (gate == MarkGate::Deferred)
+		{
+			syncLog(QStringLiteral("auto mark %1 (%2): %3 on page ..%4 queued - %5").arg(status, why, ids.join(','), pageId.right(6), gateWhy));
+			queue();
 			continue;
 		}
 		QJsonObject body;
 		body["newsIds"]    = QJsonArray::fromStringList(ids);
 		body["dtpStatus"]  = status;
-		body["fromStatus"] = expected;
+		// The workflow's validator wants fromStatus with UNUSED only and refuses it with USED /
+		// BALANCED ("fromStatus" is not allowed): a re-mark USED after an undo used to fail there.
+		if (status == unusedStatus())
+			body["fromStatus"] = expected;
 		body["pageId"]     = pageId;
 		ensureSecretsLoaded();
 		QNetworkRequest req = apiRequest(QUrl(apiUrl("/news/dtp-status")), true);
@@ -2501,12 +2564,21 @@ void SuneerNewsPanel::autoMarkStories(const QList<DeletedStory>& stories, const 
 		req.setTransferTimeout(8000);               // short: a dead server never holds anything up
 		QNetworkReply* reply = m_nam->sendCustomRequest(req, "PATCH", QJsonDocument(body).toJson(QJsonDocument::Compact));
 		const bool unused = status == unusedStatus();
+		++m_marksInFlight;
+		for (const DeletedStory& d : group)
+			m_inFlightMarks.insert(retryKey(d), status);
 		connect(reply, &QNetworkReply::finished, this, [this, reply, group, ids, status, why, unused, pageId]() {
 			reply->deleteLater();
+			--m_marksInFlight;
+			for (const DeletedStory& d : group)
+				if (m_inFlightMarks.value(retryKey(d)) == status)
+					m_inFlightMarks.remove(retryKey(d));
 			const int http = httpStatus(reply);
 			const bool ok = reply->error() == QNetworkReply::NoError && http >= 200 && http < 300;
-			apiLog(QStringLiteral("PATCH /news/dtp-status {newsIds:[%1] (%2), dtpStatus:%3, pageId:..%4} -> HTTP %5 %6 (async, %7)")
-			       .arg(ids.join(',')).arg(ids.size()).arg(status, pageId.right(6)).arg(http).arg(ok ? QStringLiteral("ok") : describeError(reply), why));
+			const QJsonValue count = QJsonDocument::fromJson(reply->readAll()).object()["data"].toObject()["updatedCount"];
+			syncLog(QStringLiteral("PATCH /news/dtp-status {newsIds:[%1] (%2), dtpStatus:%3, pageId:..%4} -> HTTP %5 %6%7 (async, %8)")
+			        .arg(ids.join(',')).arg(ids.size()).arg(status, pageId.right(6)).arg(http).arg(ok ? QStringLiteral("ok") : describeError(reply),
+			             count.isDouble() ? QStringLiteral(", updatedCount %1").arg(count.toInt()) : QString(), why));
 			QStringList names;
 			for (const DeletedStory& d : group)
 			{
@@ -2521,15 +2593,16 @@ void SuneerNewsPanel::autoMarkStories(const QList<DeletedStory>& stories, const 
 				{
 					DeletedStory r = d;
 					r.title = status;                 // the retry remembers which status it wants
-					m_autoRetry.insert(d.storyId, r);
+					m_autoRetry.insert(retryKey(r), r);
 				}
 			}
+			savePendingMarks();
 			QString msg;
 			if (ok)
 				msg = unused ? tr("%n story(ies) marked unused on the server (%1) - Undo (Ctrl+Z) brings them back and marks them used again", "", names.size()).arg(why)
-				             : tr("%n story(ies) marked used again on the server (%1)", "", names.size()).arg(why);
+				             : tr("%n story(ies) marked used on the server (%1)", "", names.size()).arg(why);
 			else
-				msg = tr("Warning: %n story(ies) could not be marked %1 on the server (%2) - kept for a retry on the next delete or Save: %3", "", names.size())
+				msg = tr("Warning: %n story(ies) could not be marked %1 on the server (%2) - kept for a retry on the next delete, Fetch News, Save or close: %3", "", names.size())
 				          .arg(unused ? tr("unused") : tr("used"), describeError(reply), names.join(QStringLiteral(", ")));
 			setStatus(msg, !ok);
 			if (m_mw)
@@ -2537,6 +2610,7 @@ void SuneerNewsPanel::autoMarkStories(const QList<DeletedStory>& stories, const 
 			refreshUsedBadges();
 		});
 	}
+	savePendingMarks();
 }
 
 void SuneerNewsPanel::refreshUsedBadges()
@@ -2548,7 +2622,7 @@ void SuneerNewsPanel::refreshUsedBadges()
 	}
 }
 
-// Retry of failed marks: called from the next delete check and from Save - never from a timer.
+// Retry of failed / waiting marks: the next delete check, Fetch News, Save and close - never a timer.
 void SuneerNewsPanel::retryAutoMarks()
 {
 	if (m_autoRetry.isEmpty() || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
@@ -2556,15 +2630,71 @@ void SuneerNewsPanel::retryAutoMarks()
 	QHash<QString, QList<DeletedStory>> byStatus;
 	for (const DeletedStory& d : m_autoRetry)
 		byStatus[d.title] << d;
-	m_autoRetry.clear();                          // a failure puts them back
+	m_autoRetry.clear();                          // a failure (or a page not locked) puts them back
 	for (auto it = byStatus.constBegin(); it != byStatus.constEnd(); ++it)
 		autoMarkStories(it.value(), it.key(), it.key() == unusedStatus() ? QStringLiteral("USED") : unusedStatus(), tr("retry"));
 }
 
-//! Save: the moment to send what failed earlier.
+//! Save: what is on the page goes USED, what failed earlier is sent again.
 void SuneerNewsPanel::noteSaved()
 {
+	pushOnPage(tr("Save"));
 	retryAutoMarks();
+}
+
+// The retry queue on disk (no token, no story text): serverId, pageId, wanted status, story name.
+static QString pendingMarksPath()
+{
+	return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/news/pending-marks.json");
+}
+
+void SuneerNewsPanel::loadPendingMarks()
+{
+	QFile f(pendingMarksPath());
+	if (!f.open(QIODevice::ReadOnly))
+		return;
+	int n = 0;
+	for (const QJsonValue& v : QJsonDocument::fromJson(f.readAll()).array())
+	{
+		const QJsonObject o = v.toObject();
+		DeletedStory d;
+		d.serverId = o["serverId"].toString();
+		d.pageId = o["pageId"].toString();
+		d.title = o["status"].toString();
+		d.storyId = o["story"].toString();
+		if (d.serverId.isEmpty() || d.pageId.isEmpty() || d.title.isEmpty() || m_autoRetry.contains(retryKey(d)))
+			continue;
+		m_autoRetry.insert(retryKey(d), d);
+		++n;
+	}
+	if (n > 0)
+		syncLog(QStringLiteral("pending marks from the last session: %1 (sent on the next Fetch News / Save / delete)").arg(n));
+}
+
+void SuneerNewsPanel::savePendingMarks() const
+{
+	if (!qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return;
+	QJsonArray a;
+	for (const DeletedStory& d : m_autoRetry)
+	{
+		QJsonObject o;
+		o["serverId"] = d.serverId;
+		o["pageId"] = d.pageId;
+		o["status"] = d.title;
+		o["story"] = d.storyId;
+		a.append(o);
+	}
+	const QString path = pendingMarksPath();
+	if (a.isEmpty() && !QFileInfo::exists(path))
+		return;
+	QDir().mkpath(QFileInfo(path).absolutePath());
+	QSaveFile f(path);
+	if (f.open(QIODevice::WriteOnly))
+	{
+		f.write(QJsonDocument(a).toJson(QJsonDocument::Indented));
+		f.commit();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2755,7 +2885,7 @@ void SuneerNewsPanel::reevaluateAfterUndo()
 	for (const DeletedStory& d : back)
 	{
 		m_deleted.insert(d.storyId, d);       // watched again: a redo of the delete takes it away once more
-		m_autoRetry.remove(d.storyId);        // a pending "unused" for it is void now
+		m_autoRetry.remove(retryKey(d));      // a pending "unused" for it is void now
 	}
 	if (!back.isEmpty())
 		autoMarkStories(back, QStringLiteral("USED"), unusedStatus(), tr("undo"));
@@ -4985,6 +5115,8 @@ void SuneerNewsPanel::onFetchNews()
 	if (m_newsData.isEmpty() && !m_fetchNote.isEmpty())
 		setStatus(statusText() + QStringLiteral(" · ") + m_fetchNote);
 	m_fetchBtn->setEnabled(true);
+	// the open document is this page: what is on it -> used / unused in the workflow
+	QTimer::singleShot(0, this, [this]() { reconcilePage(tr("Fetch News")); });
 }
 
 // The user's edition GROUP id (what /news/used, /news/balanced and
@@ -7704,6 +7836,34 @@ void SuneerNewsPanel::onSettings()
 		if (!d.isEmpty())
 			pagesEdit->setText(d);
 	});
+	// Page sync: the "Keep" answers (used in the workflow, not on the page, left used) - forget them all
+	QLabel* keptLbl = new QLabel(connTab);
+	QPushButton* forgetBtn = new QPushButton(tr("Forget Keep..."), connTab);
+	forgetBtn->setObjectName("forgetKeepBtn");
+	forgetBtn->setToolTip(tr("The stories you answered Keep for (marked used but not on the page) are asked about again on the next sync"));
+	auto showKept = [this, keptLbl, forgetBtn]() {
+		const int n = m_syncKept.size();
+		keptLbl->setText(n == 0 ? tr("No story kept as used") : n == 1 ? tr("1 story kept as used (Keep)") : tr("%1 stories kept as used (Keep)").arg(n));
+		forgetBtn->setEnabled(!m_syncKept.isEmpty());
+	};
+	showKept();
+	QHBoxLayout* keptRow = new QHBoxLayout();
+	keptRow->addWidget(keptLbl, 1);
+	keptRow->addWidget(forgetBtn);
+	fl->addRow(tr("Page sync:"), keptRow);
+	connect(forgetBtn, &QPushButton::clicked, connTab, [this, showKept]() {
+		const bool test = m_syncTestAnswer.contains(QLatin1String("forget"));
+		if (!test && QMessageBox::question(this, tr("Forget Keep"),
+		        (m_syncKept.size() == 1 ? tr("Forget Keep for 1 story?") : tr("Forget Keep for %1 stories?").arg(m_syncKept.size()))
+		        + QStringLiteral("\n\n") + tr("The next sync of their page lists them again under "
+		           "\"marked used but not on the page\" (nothing is changed in the workflow now)."),
+		        QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+			return;
+		const int n = forgetSyncKept();
+		m_syncTestLog << QStringLiteral("forgot keep: %1").arg(n);
+		showKept();
+		setStatus(n == 1 ? tr("Forgot Keep for 1 story") : tr("Forgot Keep for %1 stories").arg(n));
+	});
 	QLabel* note = new QLabel(tr("Login is per user (Logout in the panel). The password is never stored; "
 	                             "the session tokens are kept in the system keychain."), connTab);
 	note->setWordWrap(true);
@@ -8336,7 +8496,10 @@ bool SuneerNewsPanel::openWorkflowPage(const QString& path, const QMap<QString, 
 			break;
 		}
 	}
-	if (!switched && !m_mw->loadDoc(path))
+	m_wfOpening = true;                        // noteDocOpened: this route syncs on its own
+	const bool loaded = switched || m_mw->loadDoc(path);
+	m_wfOpening = false;
+	if (!loaded)
 		return false;
 	ScribusDoc* doc = m_mw->doc;
 	if (!doc || QFileInfo(doc->documentFileName()).canonicalFilePath() != QFileInfo(path).canonicalFilePath())
@@ -8462,7 +8625,10 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 		{
 			apiLog(QStringLiteral("open from workflow: %1 %2 %3 - the existing %4 opened").arg(edition, pageName, date, path));
 			if (openWorkflowPage(path, ids))
+			{
 				setStatus(tr("Opened the existing %1").arg(QFileInfo(path).fileName()));
+				QTimer::singleShot(0, this, [this]() { onFetchNews(); });   // the list, then the used / unused sync
+			}
 			else
 				setStatus(tr("Could not open %1").arg(path), true);
 			return;
@@ -8562,8 +8728,1269 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			finish(tr("Opened %1 (%2, %3) from the workflow%4").arg(pageName, edition, date,
 			       images ? tr(", %n picture(s)", nullptr, images) : QString()), false);
 			setStatusDetails(tr("Saved as %1").arg(QDir::toNativeSeparators(path)));
+			// the page's news list, then the sync: frames linked to their stories, used / unused checked
+			QTimer::singleShot(0, this, [this]() { onFetchNews(); });
 		});
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Page sync: the stories in the document <-> used / unused of its workflow page
+// ---------------------------------------------------------------------------
+// The workflow keeps "which story is on which page" in news_pages (dtpStatus per story + page, no
+// date) and the web editor's frames in NewsLayoutSetting (page + date + position). Its .sla download
+// carries neither: every frame has a random ItemID and no name or attribute (checked on real
+// downloads, see the change report). So a downloaded page's frames are linked here once, by the
+// workflow's own layout rows (position), and every other untagged frame only on the user's word
+// (headline match). From then on the frames carry news.story / news.serverId / news.pageId like
+// placed ones, and the existing place / delete marks work on them.
+
+// "Keep" (used but not on the page, left used) is remembered per page and story in the settings,
+// so a restart does not ask again. The newest 2000 are kept.
+void SuneerNewsPanel::saveSyncKept()
+{
+	QStringList kept;
+	{
+		QSettings ks("Faircode", "ScribusNews");
+		kept = ks.value("sync/kept").toStringList();
+	}
+	for (const QString& k : std::as_const(m_syncKept))
+		if (!kept.contains(k))
+			kept << k;
+	while (kept.size() > 2000)
+		kept.removeFirst();
+	QSettings ks("Faircode", "ScribusNews");
+	ks.setValue("sync/kept", kept);
+	ks.sync();
+}
+
+int SuneerNewsPanel::forgetSyncKept()
+{
+	QSettings ks("Faircode", "ScribusNews");
+	QStringList all = ks.value("sync/kept").toStringList();
+	for (const QString& k : std::as_const(m_syncKept))
+		if (!all.contains(k))
+			all << k;
+	ks.remove("sync/kept");
+	ks.sync();
+	m_syncKept.clear();
+	syncLog(QStringLiteral("sync: Forget Keep - %1 kept stor(ies) forgotten").arg(all.size()));
+	return all.size();
+}
+
+void SuneerNewsPanel::syncLog(const QString& line) const
+{
+	apiLog(line);
+	const QString dir = QDir::homePath() + QStringLiteral("/scribus-crashlogs");
+	QDir().mkpath(dir);
+	QFile f(dir + QStringLiteral("/news-sync.log"));
+	if (f.open(QIODevice::Append | QIODevice::Text))
+	{
+		QTextStream out(&f);
+		out << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss") << "  " << line << "\n";
+	}
+}
+
+SuneerNewsPanel::MarkGate SuneerNewsPanel::markGate(const QString& pageId, QString* why) const
+{
+	auto say = [why](const QString& s) { if (why) *why = s; };
+	if (!qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return MarkGate::Allowed;
+	if (pageId.isEmpty())
+	{
+		say(tr("no page id"));
+		return MarkGate::Deferred;
+	}
+	if (m_heldPageId == pageId)
+		return MarkGate::Allowed;
+	const int idx = m_pageCombo ? m_pageCombo->findData(pageId) : -1;
+	const QString name = idx >= 0 ? pageNameAt(idx) : tr("page ..%1").arg(pageId.right(6));
+	const auto it = m_pageLocks.constFind(pageId);
+	if (m_pageLocksKnown && it != m_pageLocks.constEnd() && !it->userId.isEmpty() && it->userId != m_userId)
+	{
+		say(tr("%1 is opened by %2 - only they change its used / unused").arg(name, it->userName));
+		return MarkGate::Blocked;
+	}
+	// The News Browser's own page whose lock could not be checked (network, older server): work
+	// goes on as it always did there.
+	if (m_lockGateKey.startsWith(pageId + QLatin1Char('|')))
+	{
+		say(tr("lock of %1 not known").arg(name));
+		return MarkGate::Allowed;
+	}
+	say(tr("this Scribus does not hold the page lock of %1 - kept until it does").arg(name));
+	return MarkGate::Deferred;
+}
+
+SuneerNewsPanel::SyncPage SuneerNewsPanel::docSyncPage(ScribusDoc* doc) const
+{
+	SyncPage sp;
+	if (!doc)
+		return sp;
+	const QMap<QString, QString> wf = doc->suneerWorkflow();
+	if (!wf.value("pageId").isEmpty())
+	{
+		sp.pageId = wf.value("pageId");
+		sp.date = wf.value("date");
+		sp.pageName = wf.value("pageName");
+		sp.edition = wf.value("edition");
+		sp.workflow = true;
+		return sp;
+	}
+	// A document of placed stories: the page most of them came from.
+	QHash<QString, int> count;
+	for (int i = 0; i < doc->Items->count(); ++i)
+	{
+		PageItem* it = doc->Items->at(i);
+		QList<PageItem*> parts { it };
+		if (it->isGroup())
+			parts << it->getAllChildren();
+		for (PageItem* p : parts)
+			if (!attr(p, "news.serverId").isEmpty() && !attr(p, "news.pageId").isEmpty())
+				++count[attr(p, "news.pageId")];
+	}
+	int best = 0;
+	for (auto it = count.constBegin(); it != count.constEnd(); ++it)
+		if (it.value() > best)
+		{
+			best = it.value();
+			sp.pageId = it.key();
+		}
+	const int idx = sp.pageId.isEmpty() ? -1 : m_pageCombo->findData(sp.pageId);
+	if (idx >= 0)
+		sp.pageName = pageNameAt(idx);
+	return sp;
+}
+
+// The status of a story for one page: page.dtpStatus (the list is per page), else its newsPages[] entry.
+QString SuneerNewsPanel::pageStatusOf(const QJsonObject& news, const QString& pageId) const
+{
+	const QJsonObject pg = news["page"].toObject();
+	const QString pid = pg["id"].toString().isEmpty() ? pg["pageId"].toString() : pg["id"].toString();
+	if (!pg.isEmpty() && (pid.isEmpty() || pid == pageId) && !pg["dtpStatus"].toString().isEmpty())
+		return pg["dtpStatus"].toString().toUpper();
+	for (const QJsonValue& v : news["newsPages"].toArray())
+	{
+		const QJsonObject p = v.toObject();
+		if (p["pageId"].toString() == pageId || p["page"].toObject()["id"].toString() == pageId)
+			return p["dtpStatus"].toString().toUpper();
+	}
+	return QStringLiteral("UNUSED");
+}
+
+// A headline for comparing: NFC, without soft hyphens / zero-width marks (the workflow's .sla
+// hyphenates its headlines with U+00AD), punctuation as space, lower case, single spaces.
+QString SuneerNewsPanel::headlineKey(const QString& s)
+{
+	QString out;
+	for (const QChar ch : s.normalized(QString::NormalizationForm_C))
+	{
+		const ushort u = ch.unicode();
+		if (u == 0x00AD || u == 0x200B || u == 0x200C || u == 0x200D || u == 0x2060 || u == 0xFEFF)
+			continue;
+		out += (ch.isSpace() || ch.isPunct() || ch == SpecialChars::PARSEP || ch.category() == QChar::Other_Control) ? QChar(' ') : ch.toLower();
+	}
+	return out.simplified();
+}
+
+bool SuneerNewsPanel::headlinesMatch(const QString& a, const QString& b)
+{
+	const QString ka = headlineKey(a), kb = headlineKey(b);
+	if (ka.isEmpty() || kb.isEmpty())
+		return false;
+	if (ka == kb)
+		return true;
+	const QString& shorter = ka.size() < kb.size() ? ka : kb;
+	const QString& longer = ka.size() < kb.size() ? kb : ka;
+	return shorter.size() >= 8 && longer.startsWith(shorter);
+}
+
+// The first paragraphs of a text frame, joined by PARSEP (a kicker may come before the headline).
+QString SuneerNewsPanel::frameHeadline(PageItem* text)
+{
+	if (!text || !text->isTextFrame())
+		return QString();
+	const int len = qMin(text->itemText.length(), 600);
+	const QStringList paras = text->itemText.text(0, len).split(SpecialChars::PARSEP);
+	return paras.mid(0, 3).join(SpecialChars::PARSEP);
+}
+
+// The photo frames welded to a story's text frame and the captions welded to those (the
+// workflow's export welds them so); nothing that already belongs to a story.
+QList<PageItem*> SuneerNewsPanel::weldedStoryParts(PageItem* text) const
+{
+	QList<PageItem*> out { text };
+	QList<PageItem*> todo { text };
+	while (!todo.isEmpty())
+	{
+		PageItem* cur = todo.takeFirst();
+		for (PageItem* w : cur->itemsWeldedTo())
+		{
+			if (!w || out.contains(w) || !attr(w, "news.story").isEmpty())
+				continue;
+			const bool photo = w->isImageFrame();
+			const bool caption = w->isTextFrame() && w->itemName().startsWith(QLatin1String("caption_"));
+			if (!photo && !caption)
+				continue;
+			out << w;
+			if (photo)
+				todo << w;
+		}
+	}
+	return out;
+}
+
+void SuneerNewsPanel::linkStoryFrames(PageItem* text, const QString& title, const QString& serverId, const QString& pageId)
+{
+	const QList<PageItem*> parts = weldedStoryParts(text);
+	QString base = collapseSpaces(title).left(30).trimmed();
+	if (base.isEmpty())
+		base = tr("News story");
+	QString id = base;
+	for (int n = 2; !storyItems(id).isEmpty() && n < 1000; ++n)
+		id = QStringLiteral("%1 (%2)").arg(base).arg(n);
+	for (PageItem* p : parts)
+	{
+		setAttr(p, "news.story", id);
+		setAttr(p, "news.serverId", serverId);
+		setAttr(p, "news.pageId", pageId);
+		setAttr(p, "news.role", p == text ? QStringLiteral("text") : p->isImageFrame() ? QStringLiteral("photo") : QStringLiteral("caption"));
+	}
+	indexAdd(parts);
+}
+
+// GET /news-layout-settings rows (page-local pt, the workflow's own record of where each story's
+// frame is) -> the untagged text frame the export wrote there: same left edge and width, top
+// inside the row (an obituary cell's text starts under its photo). The export adds the page's
+// position to the row (PAGE_X/Y_OFFSET_PT), so the first page's offsets are used here.
+int SuneerNewsPanel::linkWorkflowFrames(const QJsonArray& rows, const QString& pageId)
+{
+	if (!m_doc || m_doc->Pages->isEmpty())
+		return 0;
+	const double xo = m_doc->Pages->at(0)->xOffset(), yo = m_doc->Pages->at(0)->yOffset();
+	QList<PageItem*> free;
+	for (int i = 0; i < m_doc->Items->count(); ++i)
+	{
+		PageItem* it = m_doc->Items->at(i);
+		if (it->isTextFrame() && attr(it, "news.story").isEmpty() && !it->itemName().startsWith(QLatin1String("caption_")))
+			free << it;
+	}
+	QHash<QString, QString> titles;
+	for (const QJsonValue& v : m_newsData)
+		titles.insert(newsServerId(v.toObject()), v.toObject()["title"].toString());
+	int linked = 0;
+	for (const QJsonValue& v : rows)
+	{
+		const QJsonObject r = v.toObject();
+		const QString sid = r["news_id"].toString(r["newsId"].toString());
+		if (sid.isEmpty() || r["frame_type"].toString(r["frameType"].toString("news")) != QLatin1String("news") || r["hidden"].toBool())
+			continue;
+		if (findStoryItemInDoc(sid))
+			continue;
+		const QJsonValue xv = r.contains("x_pos") ? r["x_pos"] : r["xPos"];
+		const QJsonValue yv = r.contains("y_pos") ? r["y_pos"] : r["yPos"];
+		const QJsonValue wv = r.contains("frame_width") ? r["frame_width"] : r["frameWidth"];
+		const QJsonValue hv = r["height"];
+		PageItem* best = nullptr;
+		if (xv.isDouble() && wv.isDouble())
+		{
+			const double x = xo + xv.toDouble(), y = yo + yv.toDouble(0), w = wv.toDouble(), h = qMax(1.0, hv.toDouble(100));
+			double bestDy = 1e9;
+			for (PageItem* f : std::as_const(free))
+			{
+				if (qAbs(f->xPos() - x) > 1.5 || qAbs(f->width() - w) > 1.5)
+					continue;
+				const double dy = f->yPos() - y;
+				if (dy < -1.5 || dy > h + 1.5)
+					continue;
+				if (qAbs(dy) < bestDy)
+				{
+					bestDy = qAbs(dy);
+					best = f;
+				}
+			}
+		}
+		const QString title = titles.value(sid);
+		if (!best && !title.isEmpty())
+		{
+			// a row without a saved position (grid default): its headline, when exactly one frame has it
+			QList<PageItem*> hits;
+			for (PageItem* f : std::as_const(free))
+				for (const QString& h : frameHeadline(f).split(SpecialChars::PARSEP))
+					if (headlinesMatch(h, title)) { hits << f; break; }
+			if (hits.size() == 1)
+				best = hits.first();
+		}
+		if (!best)
+		{
+			syncLog(QStringLiteral("sync: layout row of story ..%1 - no frame at its place").arg(sid.right(6)));
+			continue;
+		}
+		bool headOk = title.isEmpty();
+		for (const QString& h : frameHeadline(best).split(SpecialChars::PARSEP))
+			headOk = headOk || headlinesMatch(h, title);
+		linkStoryFrames(best, title.isEmpty() ? frameHeadline(best).section(SpecialChars::PARSEP, 0, 0) : title, sid, pageId);
+		free.removeAll(best);
+		++linked;
+		syncLog(QStringLiteral("sync: frame at %1,%2 linked to story ..%3 by the workflow's layout row%4")
+		        .arg(best->xPos() - xo, 0, 'f', 1).arg(best->yPos() - yo, 0, 'f', 1).arg(sid.right(6), headOk ? QString() : QStringLiteral(" (its headline differs from the list's)")));
+	}
+	return linked;
+}
+
+// Fetch News done (or a workflow page opened): the document's page is the list's page -> link a
+// downloaded page's frames, mark what is on the page USED, ask about what is not.
+void SuneerNewsPanel::reconcilePage(const QString& trigger)
+{
+	if (!m_doc || m_fetchPageId.isEmpty() || m_syncRunning || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return;
+	const SyncPage sp = docSyncPage(m_doc);
+	if (sp.pageId.isEmpty())
+		return;
+	if (sp.pageId != m_fetchPageId || (!sp.date.isEmpty() && sp.date != m_fetchDate))
+	{
+		syncLog(QStringLiteral("sync (%1): the document is page ..%2 %3, the list is page ..%4 %5 - not compared")
+		        .arg(trigger, sp.pageId.right(6), sp.date, m_fetchPageId.right(6), m_fetchDate));
+		return;
+	}
+	const QString pageId = sp.pageId;
+	const int idx = m_pageCombo->findData(pageId);
+	const QString pageName = idx >= 0 ? pageNameAt(idx) : sp.pageName;
+	if (m_accessToken.isEmpty())
+	{
+		setStatus(tr("Log in to sync used / unused of %1 with the workflow").arg(pageName), true);
+		return;
+	}
+	QString why;
+	if (markGate(pageId, &why) == MarkGate::Blocked)
+	{
+		setStatus(tr("Sync with the workflow skipped: %1").arg(why), true);
+		syncLog(QStringLiteral("sync (%1) of %2 skipped: %3").arg(trigger, pageName, why));
+		m_syncTestLog << QStringLiteral("blocked: ") + why;
+		return;
+	}
+	retryAutoMarks();
+	// A downloaded page: its frames carry no story ids. The workflow's layout rows for the page and
+	// date give them, by position - once per document, right after it is opened.
+	const QString linkKey = QStringLiteral("%1|%2|%3").arg(quintptr(m_doc.data())).arg(pageId, m_fetchDate);
+	if (sp.workflow && !m_syncLinkTried.contains(linkKey))
+	{
+		m_syncLinkTried.insert(linkKey);
+		m_syncRunning = true;
+		QUrl u(apiUrl("/news-layout-settings"));
+		QUrlQuery q;
+		q.addQueryItem("pageId", pageId);
+		q.addQueryItem("publishDate", m_fetchDate);
+		u.setQuery(q);
+		QPointer<ScribusDoc> doc = m_doc;
+		wfGet(u, 15000, [this, doc, trigger, pageId](QNetworkReply* r) {
+			m_syncRunning = false;
+			if (!doc || doc != m_doc)
+				return;
+			if (r->error() == QNetworkReply::NoError && httpStatus(r) == 200)
+			{
+				const QJsonValue d = QJsonDocument::fromJson(r->readAll()).object()["data"];
+				const QJsonArray rows = d.isArray() ? d.toArray() : d.toObject()["rows"].toArray();
+				const bool wasModified = doc->isModified();
+				const int n = linkWorkflowFrames(rows, pageId);
+				syncLog(QStringLiteral("sync: %1 layout rows for page ..%2, %3 frame(s) linked").arg(rows.size()).arg(pageId.right(6)).arg(n));
+				m_syncTestLog << QStringLiteral("linked by layout rows: %1 of %2").arg(n).arg(rows.size());
+				if (n > 0)
+				{
+					doc->changed();
+					// a page just downloaded and untouched: the ids go into its file at once
+					if (!wasModified && doc->hasName && m_mw && m_mw->doc == doc)
+						m_mw->slotFileSave();
+				}
+			}
+			else
+				syncLog(QStringLiteral("sync: layout rows not read (%1) - frames are linked by headline only").arg(wfErrorText(r, r->error() == QNetworkReply::OperationCanceledError, 15000)));
+			reconcilePage(trigger);
+		});
+		return;
+	}
+
+	// what the document has
+	QHash<QString, QString> onDoc;                 // serverId -> story name
+	QStringList noId;
+	QList<PageItem*> untagged;
+	for (int i = 0; i < m_doc->Items->count(); ++i)
+	{
+		PageItem* it = m_doc->Items->at(i);
+		QList<PageItem*> parts { it };
+		if (it->isGroup())
+			parts << it->getAllChildren();
+		for (PageItem* p : parts)
+		{
+			const QString st = attr(p, "news.story");
+			if (st.isEmpty())
+			{
+				if (p->isTextFrame() && !p->itemName().startsWith(QLatin1String("caption_")) && p->itemText.length() > 0)
+					untagged << p;
+				continue;
+			}
+			const QString sid = attr(p, "news.serverId");
+			const QString pid = attr(p, "news.pageId");
+			if (sid.isEmpty())
+			{
+				if (!noId.contains(st))
+					noId << st;
+			}
+			else if (pid.isEmpty() || pid == pageId)
+				onDoc.insert(sid, st);
+		}
+	}
+	// what the workflow says for this page
+	QHash<QString, QString> srv, titles;
+	for (const QJsonValue& v : m_newsData)
+	{
+		const QJsonObject n = v.toObject();
+		const QString sid = newsServerId(n);
+		if (sid.isEmpty())
+			continue;
+		srv.insert(sid, pageStatusOf(n, pageId));
+		titles.insert(sid, collapseSpaces(n["title"].toString()));
+	}
+	auto pending = [this, &pageId](const QString& sid) {
+		DeletedStory k;
+		k.serverId = sid;
+		k.pageId = pageId;
+		const QString key = retryKey(k);
+		return m_inFlightMarks.contains(key) ? m_inFlightMarks.value(key) : m_autoRetry.contains(key) ? m_autoRetry.value(key).title : QString();
+	};
+	QSet<QString> deciding;                        // deleted / cut a moment ago: the delete check decides
+	for (const DeletedStory& d : std::as_const(m_deleted))
+		deciding.insert(d.serverId);
+	QList<DeletedStory> toUsed;
+	QStringList notAssigned;
+	for (auto it = onDoc.constBegin(); it != onDoc.constEnd(); ++it)
+	{
+		if (!srv.contains(it.key()))
+		{
+			notAssigned << it.value();
+			continue;
+		}
+		if (srv.value(it.key()) == QLatin1String("USED") || !pending(it.key()).isEmpty())
+			continue;
+		DeletedStory d;
+		d.storyId = it.value();
+		d.serverId = it.key();
+		d.pageId = pageId;
+		toUsed << d;
+	}
+	QList<SyncFinding> stale, candidates;
+	for (auto it = srv.constBegin(); it != srv.constEnd(); ++it)
+		if (it.value() == QLatin1String("USED") && !onDoc.contains(it.key()) && !deciding.contains(it.key())
+		    && pending(it.key()).isEmpty() && !m_syncKept.contains(pageId + QLatin1Char('|') + it.key()))
+			stale << SyncFinding { it.key(), titles.value(it.key()), nullptr };
+	QSet<QString> offered;
+	for (PageItem* f : std::as_const(untagged))
+	{
+		const QStringList heads = frameHeadline(f).split(SpecialChars::PARSEP);
+		for (auto it = titles.constBegin(); it != titles.constEnd(); ++it)
+		{
+			if (onDoc.contains(it.key()) || offered.contains(it.key()))
+				continue;
+			bool hit = false;
+			for (const QString& h : heads)
+				hit = hit || headlinesMatch(h, it.value());
+			if (hit)
+			{
+				candidates << SyncFinding { it.key(), it.value(), f };
+				offered.insert(it.key());
+				break;
+			}
+		}
+	}
+	if (!toUsed.isEmpty())
+		autoMarkStories(toUsed, QStringLiteral("USED"), QString(), tr("on the page, %1").arg(trigger));
+	const QString summary = QStringLiteral("sync (%1) of %2 %3: %4 stories on the page, %5 marked used now, %6 used but not on the page, %7 to link by headline, %8 without id, %9 not in the page's list")
+	                        .arg(trigger, pageName, m_fetchDate).arg(onDoc.size()).arg(toUsed.size()).arg(stale.size()).arg(candidates.size()).arg(noId.size()).arg(notAssigned.size());
+	syncLog(summary);
+	m_syncTestLog << summary;
+	if (!toUsed.isEmpty())
+		setStatus(tr("Sync: %n story(ies) on the page marked used in the workflow", "", toUsed.size()));
+	// stories missing from the list only count when the list itself came without errors
+	if (!m_fetchNote.isEmpty())
+		notAssigned.clear();
+	if (!stale.isEmpty() || !candidates.isEmpty() || !noId.isEmpty() || !notAssigned.isEmpty())
+		showSyncDialog(pageId, pageName, stale, candidates, noId, notAssigned);
+}
+
+// Save / close: the stories in the document go USED (when the list is the document's page); no questions.
+void SuneerNewsPanel::pushOnPage(const QString& why)
+{
+	if (!m_doc || m_accessToken.isEmpty() || m_newsData.isEmpty() || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return;
+	const SyncPage sp = docSyncPage(m_doc);
+	if (sp.pageId.isEmpty() || sp.pageId != m_fetchPageId || (!sp.date.isEmpty() && sp.date != m_fetchDate))
+		return;
+	QHash<QString, QString> srv;
+	for (const QJsonValue& v : m_newsData)
+		srv.insert(newsServerId(v.toObject()), pageStatusOf(v.toObject(), sp.pageId));
+	QHash<QString, DeletedStory> want;
+	for (int i = 0; i < m_doc->Items->count(); ++i)
+	{
+		PageItem* it = m_doc->Items->at(i);
+		QList<PageItem*> parts { it };
+		if (it->isGroup())
+			parts << it->getAllChildren();
+		for (PageItem* p : parts)
+		{
+			const QString sid = attr(p, "news.serverId");
+			const QString pid = attr(p, "news.pageId");
+			if (sid.isEmpty() || (!pid.isEmpty() && pid != sp.pageId) || !srv.contains(sid) || srv.value(sid) == QLatin1String("USED"))
+				continue;
+			DeletedStory d;
+			d.storyId = attr(p, "news.story");
+			d.serverId = sid;
+			d.pageId = sp.pageId;
+			if (m_inFlightMarks.contains(retryKey(d)) || m_autoRetry.contains(retryKey(d)))
+				continue;
+			want.insert(sid, d);
+		}
+	}
+	if (!want.isEmpty())
+		autoMarkStories(want.values(), QStringLiteral("USED"), QString(), tr("on the page, %1").arg(why));
+}
+
+void SuneerNewsPanel::showSyncDialog(const QString& pageId, const QString& pageName, const QList<SyncFinding>& stale,
+                                     const QList<SyncFinding>& candidates, const QStringList& noId, const QStringList& notAssigned)
+{
+	if (m_syncDialog)
+		m_syncDialog->close();
+	auto* dlg = new QDialog(this);
+	m_syncDialog = dlg;
+	dlg->setAttribute(Qt::WA_DeleteOnClose);
+	dlg->setWindowTitle(tr("Sync with the workflow - %1").arg(pageName));
+	auto* lay = new QVBoxLayout(dlg);
+	QPointer<ScribusDoc> doc = m_doc;
+	auto stillThere = [doc](PageItem* f) {
+		if (!doc || !f)
+			return false;
+		for (int i = 0; i < doc->Items->count(); ++i)
+		{
+			PageItem* it = doc->Items->at(i);
+			if (it == f || (it->isGroup() && it->getAllChildren().contains(f)))
+				return true;
+		}
+		return false;
+	};
+	QListWidget* staleList = nullptr;
+	QPushButton* unusedBtn = nullptr;
+	QPushButton* keepBtn = nullptr;
+	if (!stale.isEmpty())
+	{
+		auto* l = new QLabel((stale.size() == 1 ? tr("This story is marked used for %1 in the workflow but is not on the page.").arg(pageName)
+		                                        : tr("These %1 stories are marked used for %2 in the workflow but are not on the page.").arg(stale.size()).arg(pageName))
+		                     + QLatin1Char('\n') + (stale.size() == 1 ? tr("It may be on another page or edition - nothing is changed unless you say so.")
+		                                                               : tr("They may be on another page or edition - nothing is changed unless you say so.")), dlg);
+		l->setWordWrap(true);
+		lay->addWidget(l);
+		staleList = new QListWidget(dlg);
+		for (const SyncFinding& f : stale)
+		{
+			auto* it = new QListWidgetItem(f.title.isEmpty() ? f.serverId : f.title, staleList);
+			it->setData(Qt::UserRole, f.serverId);
+			it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+			it->setCheckState(Qt::Checked);
+		}
+		staleList->setMaximumHeight(qMin(8, staleList->count()) * staleList->sizeHintForRow(0) + 2 * staleList->frameWidth() + 4);
+		lay->addWidget(staleList);
+		auto* row = new QHBoxLayout;
+		unusedBtn = new QPushButton(tr("Mark unused"), dlg);
+		unusedBtn->setToolTip(tr("The ticked stories go back to the workflow's Unused list for %1").arg(pageName));
+		keepBtn = new QPushButton(tr("Keep"), dlg);
+		keepBtn->setToolTip(tr("Leave them used; not asked again for this page (also after a restart)"));
+		row->addWidget(unusedBtn);
+		row->addWidget(keepBtn);
+		row->addStretch();
+		lay->addLayout(row);
+	}
+	QListWidget* candList = nullptr;
+	QPushButton* linkBtn = nullptr;
+	if (!candidates.isEmpty())
+	{
+		auto* l = new QLabel(tr("These frames are on the page but carry no workflow story id, so they cannot be synced. "
+		                        "Their headline matches a story of %1 - link them?").arg(pageName), dlg);
+		l->setWordWrap(true);
+		lay->addWidget(l);
+		candList = new QListWidget(dlg);
+		for (const SyncFinding& f : candidates)
+		{
+			const QString head = collapseSpaces(frameHeadline(f.frame).section(SpecialChars::PARSEP, 0, 0)).left(50);
+			auto* it = new QListWidgetItem(QStringLiteral("%1  →  %2").arg(head, f.title.left(50)), candList);
+			it->setData(Qt::UserRole, f.serverId);
+			it->setData(Qt::UserRole + 1, QVariant::fromValue(static_cast<void*>(f.frame)));
+			it->setData(Qt::UserRole + 2, f.title);
+			it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+			it->setCheckState(Qt::Checked);
+		}
+		candList->setMaximumHeight(qMin(8, candList->count()) * candList->sizeHintForRow(0) + 2 * candList->frameWidth() + 4);
+		lay->addWidget(candList);
+		linkBtn = new QPushButton(tr("Link ticked"), dlg);
+		auto* row = new QHBoxLayout;
+		row->addWidget(linkBtn);
+		row->addStretch();
+		lay->addLayout(row);
+	}
+	if (!noId.isEmpty())
+	{
+		auto* l = new QLabel(tr("Story frames without a workflow id (cannot be synced): %1").arg(noId.join(QStringLiteral(", "))), dlg);
+		l->setWordWrap(true);
+		lay->addWidget(l);
+	}
+	if (!notAssigned.isEmpty())
+	{
+		auto* l = new QLabel(tr("On the page but not in the workflow's list for %1 (placed from another page?), not changed: %2")
+		                     .arg(pageName, notAssigned.join(QStringLiteral(", "))), dlg);
+		l->setWordWrap(true);
+		lay->addWidget(l);
+	}
+	auto* box = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
+	lay->addWidget(box);
+	connect(box, &QDialogButtonBox::rejected, dlg, &QDialog::close);
+	auto staleDone = [staleList, unusedBtn, keepBtn]() {
+		staleList->setEnabled(false);
+		unusedBtn->setEnabled(false);
+		keepBtn->setEnabled(false);
+	};
+	if (unusedBtn)
+	{
+		connect(unusedBtn, &QPushButton::clicked, this, [this, staleList, staleDone, pageId]() {
+			QList<DeletedStory> go;
+			for (int i = 0; i < staleList->count(); ++i)
+			{
+				QListWidgetItem* it = staleList->item(i);
+				if (it->checkState() != Qt::Checked)
+				{
+					m_syncKept.insert(pageId + QLatin1Char('|') + it->data(Qt::UserRole).toString());
+					saveSyncKept();
+					continue;
+				}
+				DeletedStory d;
+				d.serverId = it->data(Qt::UserRole).toString();
+				d.storyId = collapseSpaces(it->text()).left(30);
+				d.pageId = pageId;
+				go << d;
+			}
+			syncLog(QStringLiteral("sync: user chose Mark unused for %1 stor(ies) used but not on page ..%2").arg(go.size()).arg(pageId.right(6)));
+			m_syncTestLog << QStringLiteral("answer: mark unused %1").arg(go.size());
+			autoMarkStories(go, unusedStatus(), QStringLiteral("USED"), tr("not on the page"));
+			staleDone();
+		});
+		connect(keepBtn, &QPushButton::clicked, this, [this, staleList, staleDone, pageId]() {
+			for (int i = 0; i < staleList->count(); ++i)
+				m_syncKept.insert(pageId + QLatin1Char('|') + staleList->item(i)->data(Qt::UserRole).toString());
+			saveSyncKept();
+			syncLog(QStringLiteral("sync: user chose Keep for %1 stor(ies) used but not on page ..%2").arg(staleList->count()).arg(pageId.right(6)));
+			m_syncTestLog << QStringLiteral("answer: keep %1").arg(staleList->count());
+			staleDone();
+		});
+	}
+	if (linkBtn)
+	{
+		connect(linkBtn, &QPushButton::clicked, this, [this, candList, linkBtn, stillThere, pageId, doc]() {
+			if (!doc || doc != m_doc)
+				return;
+			QList<DeletedStory> used;
+			int n = 0;
+			for (int i = 0; i < candList->count(); ++i)
+			{
+				QListWidgetItem* it = candList->item(i);
+				auto* f = static_cast<PageItem*>(it->data(Qt::UserRole + 1).value<void*>());
+				const QString sid = it->data(Qt::UserRole).toString();
+				if (it->checkState() != Qt::Checked || !stillThere(f) || findStoryItemInDoc(sid) || !attr(f, "news.story").isEmpty())
+					continue;
+				linkStoryFrames(f, it->data(Qt::UserRole + 2).toString(), sid, pageId);
+				++n;
+				DeletedStory d;
+				d.storyId = attr(f, "news.story");
+				d.serverId = sid;
+				d.pageId = pageId;
+				for (const QJsonValue& v : m_newsData)
+					if (newsServerId(v.toObject()) == sid && pageStatusOf(v.toObject(), pageId) != QLatin1String("USED"))
+						used << d;
+			}
+			if (n > 0)
+				m_doc->changed();
+			syncLog(QStringLiteral("sync: user linked %1 frame(s) by headline on page ..%2").arg(n).arg(pageId.right(6)));
+			m_syncTestLog << QStringLiteral("answer: linked %1").arg(n);
+			autoMarkStories(used, QStringLiteral("USED"), QString(), tr("linked by headline"));
+			candList->setEnabled(false);
+			linkBtn->setEnabled(false);
+			setStatus(tr("Linked %n frame(s) to their workflow story - save the document to keep the link", "", n));
+		});
+	}
+	if (!m_syncTestAnswer.isEmpty())
+	{
+		const QString answer = m_syncTestAnswer;
+		QTimer::singleShot(400, dlg, [this, dlg, answer, unusedBtn, keepBtn, linkBtn]() {
+			QStringList seen;
+			for (QLabel* l : dlg->findChildren<QLabel*>())
+				seen << l->text().simplified();
+			for (QListWidget* lw : dlg->findChildren<QListWidget*>())
+				for (int i = 0; i < lw->count(); ++i)
+					seen << QStringLiteral("[%1]").arg(lw->item(i)->text());
+			m_syncTestLog << QStringLiteral("dialog: ") + seen.join(QStringLiteral(" | "));
+			dlg->grab().save(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST") + QStringLiteral("-dialog-%1.png").arg(m_syncTestLog.size()));
+			if (answer.contains(QLatin1String("link")) && linkBtn)
+				linkBtn->click();
+			if (answer.contains(QLatin1String("unused")) && unusedBtn)
+				unusedBtn->click();
+			else if (answer.contains(QLatin1String("keep")) && keepBtn)
+				keepBtn->click();
+			dlg->close();
+		});
+	}
+	dlg->resize(560, dlg->sizeHint().height());
+	dlg->show();                                    // not modal: the page stays workable
+}
+
+void SuneerNewsPanel::switchPanelToPage(const SyncPage& sp, std::function<void(bool)> then)
+{
+	if (!sp.edition.isEmpty() && sp.edition != m_lastEdition)
+	{
+		const int e = m_editionCombo->findData(sp.edition);
+		if (e < 0)
+		{
+			then(false);
+			return;
+		}
+		m_editionCombo->setCurrentIndex(e);
+	}
+	if (!sp.date.isEmpty())
+	{
+		const QDate d = QDate::fromString(sp.date, "yyyy-MM-dd");
+		if (d.isValid() && d != m_dateEdit->date())
+			m_dateEdit->setDate(d);
+	}
+	auto* t = new QTimer(this);
+	auto el = std::make_shared<QElapsedTimer>();
+	el->start();
+	auto picked = std::make_shared<bool>(false);
+	t->setInterval(100);
+	connect(t, &QTimer::timeout, this, [this, t, el, sp, then, picked]() {
+		const int idx = m_pageCombo->findData(sp.pageId);
+		if (idx >= 0 && !*picked)
+		{
+			*picked = true;
+			if (m_pageCombo->currentIndex() != idx)
+				m_pageCombo->setCurrentIndex(idx);
+			else if (m_lockGateKey != currentPageKey())
+				checkAndTakePageLock();
+		}
+		const bool ready = *picked && m_lockGateKey == currentPageKey() && m_pageCombo->currentData().toString() == sp.pageId;
+		if (!ready && el->elapsed() < 8000)
+			return;
+		t->stop();
+		t->deleteLater();
+		then(ready);
+	});
+	t->start();
+}
+
+void SuneerNewsPanel::noteDocOpened(ScribusDoc* doc)
+{
+	if (!doc || !ScCore->usingGUI() || m_wfOpening)
+		return;                                     // Open page from workflow syncs on its own
+	QPointer<ScribusDoc> d = doc;
+	QTimer::singleShot(0, this, [this, d]() {
+		if (!d || m_wfBusy)
+			return;
+		const SyncPage sp = docSyncPage(d);
+		if (sp.pageId.isEmpty())
+			return;
+		const QString name = sp.pageName.isEmpty() ? tr("page ..%1").arg(sp.pageId.right(6)) : sp.pageName;
+		syncLog(QStringLiteral("opened %1: workflow page %2 %3 %4 (%5)").arg(QFileInfo(d->documentFileName()).fileName(), name, sp.edition, sp.date,
+		        sp.workflow ? QStringLiteral("downloaded page") : QStringLiteral("placed stories")));
+		if (m_accessToken.isEmpty())
+		{
+			setStatus(tr("%1 is %2 in the workflow - log in and Fetch News to sync used / unused").arg(QFileInfo(d->documentFileName()).fileName(), name), true);
+			return;
+		}
+		// asked every time a workflow page is opened (also when the News Browser is on that page already)
+		{
+			QString answer = m_syncTestAnswer;
+			if (answer.isEmpty())
+			{
+				const int r = QMessageBox::question(this, tr("Sync with the workflow"),
+				    tr("%1 is %2%3%4 in the workflow.\n\nSync its used / unused with the workflow now?\n"
+				       "The News Browser shows that page and takes its page lock.")
+				        .arg(QFileInfo(d->documentFileName()).fileName(), name,
+				             sp.edition.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(sp.edition),
+				             sp.date.isEmpty() ? QString() : QStringLiteral(", %1").arg(sp.date)),
+				    QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+				answer = r == QMessageBox::Yes ? QStringLiteral("sync") : QString();
+			}
+			m_syncTestLog << QStringLiteral("open question: %1").arg(answer.contains(QLatin1String("sync")) ? QStringLiteral("sync") : QStringLiteral("not now"));
+			if (!answer.contains(QLatin1String("sync")))
+				return;
+		}
+		switchPanelToPage(sp, [this, d, sp](bool ok) {
+			if (!d)
+				return;
+			if (!ok)
+			{
+				setStatus(tr("Could not switch the News Browser to %1 - choose it and press Fetch News").arg(sp.pageName.isEmpty() ? sp.pageId : sp.pageName), true);
+				return;
+			}
+			onFetchNews();                          // the list, then reconcilePage()
+		});
+	});
+}
+
+void SuneerNewsPanel::noteDocClosing(ScribusDoc* doc)
+{
+	if (!doc || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return;
+	QElapsedTimer t;
+	t.start();
+	if (doc == m_doc)
+	{
+		if (m_deleteCheckTimer && m_deleteCheckTimer->isActive())
+		{
+			m_deleteCheckTimer->stop();
+			checkDeletedStories();                  // a delete of the last seconds still counts
+		}
+		pushOnPage(tr("close"));
+	}
+	retryAutoMarks();                               // the queue is per story and page, whatever document
+	if (m_marksInFlight > 0)
+	{
+		// the page lock is let go right after this: the answers first, never more than 3 s
+		QEventLoop loop;
+		QTimer poll;
+		poll.setInterval(20);
+		connect(&poll, &QTimer::timeout, &loop, [this, &loop]() { if (m_marksInFlight <= 0) loop.quit(); });
+		QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+		poll.start();
+		loop.exec(QEventLoop::ExcludeUserInputEvents);
+	}
+	savePendingMarks();
+	syncLog(QStringLiteral("closing %1: %2 ms, %3 mark(s) unanswered, %4 kept for later (pending-marks.json)")
+	        .arg(QFileInfo(doc->documentFileName()).fileName()).arg(t.elapsed()).arg(m_marksInFlight).arg(m_autoRetry.size()));
+}
+
+// SUNEER_WFSYNC_SELFTEST=<report prefix>, SUNEER_WFSYNC_PHASE=1|2: the page sync end to end against
+// the mock workflow of tests/suneer/news_page_sync.sh (fixtures/news_page_lock_mock.py), user A.
+// Phase 1: Open page from workflow (KNR Page 2: two story frames the workflow's layout rows know,
+// one frame only its headline links, one story used but not on the page), place 3 stories, a
+// change on a page another user holds, delete 1 story while the server refuses the marks, Save,
+// quit. Phase 2 (the saved file opened from disk, the server answering again): the open question,
+// the sync, the waiting mark sent, the list; then another PC marks n-3 used again -> Keep.
+// Phase 3 (restart, the News Browser already on Page 2): still asked; Keep remembered, no dialog.
+// The script checks the server afterwards.
+void SuneerNewsPanel::runSyncSelfTest(const QString& report)
+{
+	struct Ctx
+	{
+		QStringList lines;
+		int fails = 0;
+		QList<std::function<void(std::function<void()>)>> steps;
+		int step = 0;
+		QString date, path;
+	};
+	auto c = std::make_shared<Ctx>();
+	const int phase = qEnvironmentVariableIntValue("SUNEER_WFSYNC_PHASE");
+	c->date = qEnvironmentVariable("SUNEER_WFSYNC_DATE", "2026-11-02");
+	c->path = pagesFolder() + QStringLiteral("/KNR/") + c->date + QStringLiteral("/Page_2.sla");
+	auto check = [c](const QString& what, bool ok) {
+		c->lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		c->fails += ok ? 0 : 1;
+	};
+	auto note = [c](const QString& l) { c->lines << QStringLiteral("  ") + l; };
+	auto waitFor = [this](std::function<bool()> cond, int ms, std::function<void(bool)> done) {
+		auto* t = new QTimer(this);
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		t->setInterval(100);
+		connect(t, &QTimer::timeout, this, [t, el, cond, ms, done]() {
+			const bool ok = cond();
+			if (!ok && el->elapsed() < ms)
+				return;
+			t->stop();
+			t->deleteLater();
+			done(ok);
+		});
+		t->start();
+	};
+	// the mock's news_pages: "n-1" -> {"p-knr-2": "USED", ...}; plus every PATCH it took
+	auto server = std::make_shared<QJsonObject>();
+	auto poll = [this, server](std::function<void()> done) {
+		QNetworkReply* r = m_nam->get(QNetworkRequest(QUrl(apiUrl(QStringLiteral("/mock/news")))));
+		connect(r, &QNetworkReply::finished, this, [r, server, done]() {
+			r->deleteLater();
+			*server = QJsonDocument::fromJson(r->readAll()).object()["data"].toObject();
+			done();
+		});
+	};
+	auto st = [server](const QString& sid, const QString& page = QStringLiteral("p-knr-2")) {
+		return (*server)["news"].toObject()[sid].toObject()[page].toString();
+	};
+	// wait until the server shows \a want ("n-1=USED", ...)
+	auto waitServer = [this, poll, st, server](const QStringList& want, int ms, std::function<void(bool, QString)> done) {
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		auto again = std::make_shared<std::function<void()>>();
+		*again = [this, poll, st, want, ms, done, el, again]() {
+			poll([this, st, want, ms, done, el, again]() {
+				QStringList got;
+				bool ok = true;
+				for (const QString& w : want)
+				{
+					const QString sid = w.section('=', 0, 0);
+					got << sid + QLatin1Char('=') + st(sid);
+					ok = ok && st(sid) == w.section('=', 1);
+				}
+				if (ok || el->elapsed() > ms)
+				{
+					done(ok, got.join(' '));
+					return;
+				}
+				QTimer::singleShot(200, this, *again);
+			});
+		};
+		(*again)();
+	};
+	auto mockPost = [this](const QString& path, const QJsonObject& body, const QByteArray& token, std::function<void()> done) {
+		QNetworkRequest req(QUrl(apiUrl(path)));
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+		req.setRawHeader("Authorization", "Bearer " + token);
+		QNetworkReply* r = path.endsWith(QLatin1String("/lock")) ? m_nam->sendCustomRequest(req, "PATCH", QJsonDocument(body).toJson())
+		                                                         : m_nam->post(req, QJsonDocument(body).toJson());
+		connect(r, &QNetworkReply::finished, this, [r, done]() { r->deleteLater(); done(); });
+	};
+	auto framesOf = [this](const QString& sid) {
+		QList<PageItem*> out;
+		if (!m_doc)
+			return out;
+		for (int i = 0; i < m_doc->Items->count(); ++i)
+			if (attr(m_doc->Items->at(i), "news.serverId") == sid)
+				out << m_doc->Items->at(i);
+		return out;
+	};
+	auto syncLogHas = [this](const QString& s) {
+		for (const QString& l : m_syncTestLog)
+			if (l.contains(s))
+				return true;
+		return false;
+	};
+	auto run = std::make_shared<std::function<void()>>();
+	*run = [this, c, run, report]() {
+		if (c->step >= c->steps.size())
+		{
+			c->lines << (c->fails ? QStringLiteral("FAILED: %1").arg(c->fails) : QStringLiteral("ALL PASS"));
+			QFile f(report + "-report.txt");
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(c->lines.join('\n').toUtf8() + "\n");
+			f.close();
+			fprintf(stderr, "WFSYNC-SELFTEST done\n");
+			QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+			return;
+		}
+		auto s = c->steps[c->step++];
+		s([run]() { QTimer::singleShot(100, *run); });
+	};
+	for (UndoGui* g : m_mw->findChildren<UndoGui*>())
+		UndoManager::instance()->removeGui(g);
+
+	// 0. log in as A, KNR, the test date (phase 2: another date and page, so opening the file asks)
+	c->steps << [this, c, check, waitFor, phase](std::function<void()> next) {
+		for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+			if (auto* sw = qobject_cast<QStackedWidget*>(w->parentWidget()))
+				sw->setCurrentWidget(w);
+		m_dateEdit->blockSignals(true);
+		m_dateEdit->setDate(phase == 2 ? QDate::fromString(c->date, "yyyy-MM-dd").addDays(1) : QDate::fromString(c->date, "yyyy-MM-dd"));
+		m_dateEdit->blockSignals(false);
+		QNetworkReply* r = startLoginRequest(QStringLiteral("a@test.local"), QStringLiteral("S3cret-right"));
+		connect(r, &QNetworkReply::finished, this, [this, r, check, waitFor, next, phase]() {
+			QString e;
+			const bool ok = finishLogin(r, QStringLiteral("a@test.local"), false, 0, e);
+			r->deleteLater();
+			check(QStringLiteral("login as A"), ok);
+			setLocked(false);
+			onFetchStatic();
+			const int k = m_editionCombo->findData("KNR");
+			if (k >= 0)
+				m_editionCombo->setCurrentIndex(k);
+			waitFor([this]() { return m_pageCombo->count() >= 8; }, 8000, [this, waitFor, next, phase](bool) {
+				m_pageCombo->setCurrentIndex(m_pageCombo->findData(phase == 2 ? "p-knr-5" : "p-knr-2"));   // phase 3: already the page
+				waitFor([this]() { return m_lockGateKey == currentPageKey(); }, 8000, [next](bool) { next(); });
+			});
+		});
+	};
+
+	if (phase != 2 && phase != 3)
+	{
+		// 1. Open page from workflow: link by layout rows, mark the page's story USED, ask about the rest
+		c->steps << [this, c, check, note, waitFor, waitServer, framesOf, syncLogHas](std::function<void()> next) {
+			m_syncTestAnswer = QStringLiteral("unused,link");
+			m_syncTestLog.clear();
+			onOpenPageFromWorkflow();
+			waitFor([syncLogHas]() { return syncLogHas(QStringLiteral("answer: linked")) && syncLogHas(QStringLiteral("answer: mark unused")); }, 25000,
+			        [this, c, check, note, waitServer, framesOf, next](bool asked) {
+				for (const QString& l : m_syncTestLog)
+					note(l);
+				const QString docFile = m_mw->doc ? m_mw->doc->documentFileName() : QString();
+				check(QStringLiteral("Page 2 downloaded and opened (%1)").arg(docFile), docFile == c->path);
+				check(QStringLiteral("the dialog asked (used but not on the page, headline link) and was answered"), asked);
+				PageItem* f1 = framesOf("n-1").value(0);
+				bool welded = false;
+				for (PageItem* p : framesOf("n-1"))
+					welded |= p->isImageFrame();
+				QString head = f1 ? frameHeadline(f1).section(SpecialChars::PARSEP, 0, 0) : QString();
+				bool ml = false;
+				for (const QChar ch : head)
+					ml |= ch.unicode() >= 0x0D00 && ch.unicode() <= 0x0D7F;
+				check(QStringLiteral("layout rows linked frame 1 to n-1 (with its welded photo: %1) and frame 2 to n-2; Malayalam headline \"%2\"")
+				      .arg(welded).arg(head.left(30)), f1 && welded && !framesOf("n-2").isEmpty() && ml);
+				check(QStringLiteral("headline link: the moved frame is n-4 (%1 frame)").arg(framesOf("n-4").size()), framesOf("n-4").size() == 1);
+				QFile sla(c->path);
+				const QByteArray bytes = sla.open(QIODevice::ReadOnly) ? sla.readAll() : QByteArray();
+				check(QStringLiteral("the downloaded file was saved with the linked ids (news.serverId n-1 in %1 bytes)").arg(bytes.size()),
+				      bytes.contains("news.serverId") && bytes.contains("\"n-1\""));
+				waitServer({ "n-1=USED", "n-2=USED", "n-3=UNUSED", "n-4=USED" }, 8000, [check, next](bool ok, QString got) {
+					check(QStringLiteral("server: frame stories USED, the one not on the page UNUSED (%1)").arg(got), ok);
+					next();
+				});
+			});
+		};
+		// 2. a page another user holds: no change goes out, nothing is queued
+		c->steps << [this, c, check, note, mockPost, waitFor, poll, server](std::function<void()> next) {
+			QJsonObject body;
+			body["pageIds"] = QJsonArray { QStringLiteral("p-knr-1") };
+			body["publishDate"] = c->date;
+			mockPost(QStringLiteral("/news/layout/pages/lock"), body, "AT-B", [this, c, check, note, waitFor, poll, server, next]() {
+				refreshPageLocks([this, c, check, note, waitFor, poll, server, next](bool ok, const QString&) {
+					const int before = (*server)["patches"].toArray().size();
+					DeletedStory d;
+					d.storyId = QStringLiteral("other page story");
+					d.serverId = QStringLiteral("n-8");
+					d.pageId = QStringLiteral("p-knr-1");
+					autoMarkStories({ d }, unusedStatus(), QStringLiteral("USED"), QStringLiteral("selftest"));
+					QString err;
+					const bool manual = markOnServer({ QStringLiteral("n-8") }, QStringLiteral("p-knr-1"), unusedStatus(), &err, QStringLiteral("USED"));
+					note(QStringLiteral("manual mark answer: %1").arg(err));
+					QTimer::singleShot(1500, this, [this, check, poll, server, next, before, ok, manual, d]() {
+						poll([this, check, server, next, before, ok, manual, d]() {
+							bool touched = false;
+							for (const QJsonValue& v : (*server)["patches"].toArray())
+								touched |= v.toObject()["newsIds"].toArray().contains(QStringLiteral("n-8"));
+							check(QStringLiteral("Page 1 held by user B (lock list read %1): no PATCH for n-8 (%2 patches before), not queued, manual mark refused")
+							      .arg(ok).arg(before), ok && !touched && !m_autoRetry.contains(retryKey(d)) && !manual
+							      && (*server)["news"].toObject()["n-8"].toObject()["p-knr-1"].toString() == QLatin1String("USED"));
+							next();
+						});
+					});
+				});
+			});
+		};
+		// 3. place three stories from the list -> USED
+		c->steps << [this, check, note, waitFor, waitServer, framesOf](std::function<void()> next) {
+			onFetchNews();
+			int ticked = 0;
+			for (int i = 0; i < m_newsList->count(); ++i)
+			{
+				QListWidgetItem* row = m_newsList->item(i);
+				const int idx = row->data(Qt::UserRole).toInt();
+				const QString sid = idx >= 0 && idx < m_newsData.size() ? newsServerId(m_newsData[idx].toObject()) : QString();
+				const bool want = sid == QLatin1String("n-5") || sid == QLatin1String("n-6") || sid == QLatin1String("n-7");
+				row->setCheckState(want ? Qt::Checked : Qt::Unchecked);
+				ticked += want ? 1 : 0;
+			}
+			onPlaceSelected();
+			note(QStringLiteral("ticked %1, status: %2").arg(ticked).arg(statusText()));
+			check(QStringLiteral("placed n-5, n-6, n-7 (frames %1/%2/%3)").arg(framesOf("n-5").size()).arg(framesOf("n-6").size()).arg(framesOf("n-7").size()),
+			      ticked == 3 && !framesOf("n-5").isEmpty() && !framesOf("n-6").isEmpty() && !framesOf("n-7").isEmpty());
+			waitServer({ "n-5=USED", "n-6=USED", "n-7=USED" }, 8000, [check, next](bool ok, QString got) {
+				check(QStringLiteral("server: the placed stories USED (%1)").arg(got), ok);
+				next();
+			});
+		};
+		// 4. the server refuses marks; delete n-6 -> queued, Save -> still queued (on disk)
+		c->steps << [this, check, note, mockPost, waitFor, framesOf](std::function<void()> next) {
+			QJsonObject on;
+			on["on"] = true;
+			mockPost(QStringLiteral("/mock/fail-patch"), on, "AT-A", [this, check, note, waitFor, framesOf, next]() {
+				QList<PageItem*> items;
+				const QString story = framesOf("n-6").isEmpty() ? QString() : attr(framesOf("n-6").first(), "news.story");
+				if (!story.isEmpty())
+					items = storyItems(story);
+				Selection sel(this, false);
+				for (PageItem* it : items)
+					sel.addItem(it);
+				m_doc->itemSelection_DeleteItem(&sel);
+				DeletedStory k;
+				k.serverId = QStringLiteral("n-6");
+				k.pageId = QStringLiteral("p-knr-2");
+				waitFor([this, k]() { return m_autoRetry.contains(retryKey(k)) && m_marksInFlight == 0; }, 12000, [this, check, note, k, framesOf, next](bool queued) {
+					check(QStringLiteral("deleted n-6 (frames left %1) with the server refusing: UNUSED kept in the retry queue").arg(framesOf("n-6").size()),
+					      queued && framesOf("n-6").isEmpty() && m_autoRetry.value(retryKey(k)).title == unusedStatus());
+					m_mw->slotFileSave();
+					QTimer::singleShot(2500, this, [this, check, note, k, next]() {
+						QFile f(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/news/pending-marks.json"));
+						const QByteArray j = f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+						note(QStringLiteral("pending-marks.json: ") + QString::fromUtf8(j).simplified());
+						check(QStringLiteral("Save: the retry failed again, n-6 UNUSED still queued and on disk"),
+						      m_autoRetry.contains(retryKey(k)) && j.contains("\"n-6\"") && j.contains("UNUSED"));
+						m_syncTestAnswer.clear();
+						next();
+					});
+				});
+			});
+		};
+		// 5. quit: the close tries once more (the script checks the server: n-6 still USED, the file keeps it)
+	}
+	else if (phase == 3)
+	{
+		// 1. restart; the News Browser is on Page 2 already: still asked; n-3 was kept -> no dialog, stays USED
+		c->steps << [this, c, check, note, waitFor, waitServer, syncLogHas](std::function<void()> next) {
+			check(QStringLiteral("phase 3: Keep remembered after the restart (%1 kept: p-knr-2|n-3 %2)").arg(m_syncKept.size()).arg(m_syncKept.contains("p-knr-2|n-3")),
+			      m_syncKept.contains("p-knr-2|n-3"));
+			m_syncTestAnswer = QStringLiteral("sync,unused");   // a wrong question would mark n-3 unused - visible on the server
+			m_syncTestLog.clear();
+			noteDocOpened(m_mw->doc);
+			waitFor([syncLogHas]() { return syncLogHas(QStringLiteral("sync (Fetch News)")); }, 20000, [this, c, check, note, waitServer, next](bool ok) {
+				for (const QString& l : m_syncTestLog)
+					note(l);
+				bool dialog = false;
+				for (const QString& l : m_syncTestLog)
+					dialog |= l.startsWith(QLatin1String("dialog:"));
+				check(QStringLiteral("asked on open although the News Browser was on Page 2 (%1); synced; no dialog for the kept story (%2)")
+				      .arg(m_syncTestLog.value(0)).arg(dialog), ok && m_syncTestLog.value(0) == QLatin1String("open question: sync") && !dialog);
+				QTimer::singleShot(1500, this, [waitServer, check, next]() {
+					waitServer({ "n-3=USED", "n-5=USED", "n-6=UNUSED", "n-7=USED" }, 3000, [check, next](bool ok, QString got) {
+						check(QStringLiteral("server: the kept n-3 still USED, the rest as before (%1)").arg(got), ok);
+						next();
+					});
+				});
+			});
+		};
+		// 2. Settings > Connection > Forget Keep -> forgotten (settings too); the next Check asks about n-3 again
+		c->steps << [this, check, note, waitFor, syncLogHas](std::function<void()> next) {
+			m_syncTestAnswer = QStringLiteral("forget");
+			m_syncTestLog.clear();
+			auto shown = std::make_shared<QString>();
+			QTimer::singleShot(800, this, [this, shown]() {
+				for (QWidget* w : QApplication::topLevelWidgets())
+				{
+					auto* dlg = qobject_cast<QDialog*>(w);
+					QPushButton* b = dlg ? dlg->findChild<QPushButton*>("forgetKeepBtn") : nullptr;
+					if (!b || !dlg->isVisible())
+						continue;
+					if (auto* tabs = dlg->findChild<QTabWidget*>())
+						tabs->setCurrentIndex(0);
+					QWidget* row = b->parentWidget();
+					*shown = QStringLiteral("enabled %1").arg(b->isEnabled());
+					for (QLabel* l : row->findChildren<QLabel*>())
+						if (l->text().contains(QLatin1String("kept")))
+							*shown += QStringLiteral(", \"%1\"").arg(l->text());
+					dlg->grab().save(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST") + "-settings.png");
+					b->click();
+					for (QLabel* l : row->findChildren<QLabel*>())
+						if (l->text().contains(QLatin1String("kept")))
+							*shown += QStringLiteral(" -> \"%1\" (button enabled %2)").arg(l->text()).arg(b->isEnabled());
+					dlg->reject();
+				}
+			});
+			onSettings();
+			const QStringList inConf = QSettings("Faircode", "ScribusNews").value("sync/kept").toStringList();
+			note(QStringLiteral("Settings: ") + *shown);
+			check(QStringLiteral("Settings > Forget Keep: %1; kept now %2, in the settings %3")
+			      .arg(m_syncTestLog.join(' ')).arg(m_syncKept.size()).arg(inConf.size()),
+			      shown->startsWith(QLatin1String("enabled 1")) && m_syncTestLog.contains(QStringLiteral("forgot keep: 1")) && m_syncKept.isEmpty() && inConf.isEmpty());
+			m_syncTestAnswer = QStringLiteral("keep");
+			m_syncTestLog.clear();
+			onCheck();
+			waitFor([syncLogHas]() { return syncLogHas(QStringLiteral("answer: keep")); }, 15000, [this, check, note, next](bool ok) {
+				for (const QString& l : m_syncTestLog)
+					note(l);
+				check(QStringLiteral("after Forget Keep the next Check asks about n-3 again (answered Keep again)"),
+				      ok && m_syncKept.contains("p-knr-2|n-3"));
+				m_syncTestAnswer.clear();
+				next();
+			});
+		};
+	}
+	else
+	{
+		// 1. the file opened from disk; logged in now -> the open question, the switch, the sync
+		c->steps << [this, c, check, note, waitFor, syncLogHas](std::function<void()> next) {
+			const QString docFile = m_mw->doc ? m_mw->doc->documentFileName() : QString();
+			check(QStringLiteral("phase 2: Page_2.sla opened from disk (%1), %2 pending mark(s) loaded from the last session").arg(docFile).arg(m_autoRetry.size()),
+			      docFile == c->path && m_autoRetry.size() == 1);
+			m_syncTestAnswer = QStringLiteral("sync,keep");
+			m_syncTestLog.clear();
+			noteDocOpened(m_mw->doc);
+			waitFor([syncLogHas]() { return syncLogHas(QStringLiteral("sync (Fetch News)")); }, 20000, [this, c, check, note, next](bool ok) {
+				for (const QString& l : m_syncTestLog)
+					note(l);
+				bool dialog = false;
+				for (const QString& l : m_syncTestLog)
+					dialog |= l.startsWith(QLatin1String("dialog:"));
+				check(QStringLiteral("asked to sync, switched to Page 2 %1 (panel: %2 %3), synced without a question (dialog shown: %4)")
+				      .arg(c->date, m_pageCombo->currentText(), m_dateEdit->date().toString("yyyy-MM-dd")).arg(dialog),
+				      ok && m_pageCombo->currentData().toString() == QLatin1String("p-knr-2") && !dialog
+				      && m_syncTestLog.value(0) == QLatin1String("open question: sync"));
+				next();
+			});
+		};
+		// 2. the waiting UNUSED went out; the list shows the page as it is
+		c->steps << [this, check, note, waitServer, waitFor](std::function<void()> next) {
+			waitServer({ "n-5=USED", "n-6=UNUSED", "n-7=USED" }, 10000, [this, check, note, waitFor, next](bool ok, QString got) {
+				check(QStringLiteral("server: 2 used, 1 unused of the 3 placed (%1)").arg(got), ok);
+				onCheck();
+				waitFor([this]() { return m_fetchBtn->isEnabled(); }, 10000, [this, check, note, next](bool) {
+					QStringList rows;
+					QHash<QString, QString> shown;
+					for (const QJsonValue& v : m_newsData)
+					{
+						const QString sid = newsServerId(v.toObject());
+						shown[sid] = newsDtpStatus(v.toObject());
+						rows << sid + QLatin1Char('=') + shown[sid];
+					}
+					rows.sort();
+					note(QStringLiteral("News Browser list: ") + rows.join(' '));
+					check(QStringLiteral("News Browser shows n-5 USED, n-7 USED, n-6 UNUSED; queue empty (%1)").arg(m_autoRetry.size()),
+					      shown.value("n-5") == "USED" && shown.value("n-7") == "USED" && shown.value("n-6") == "UNUSED" && m_autoRetry.isEmpty());
+					check(QStringLiteral("whole page: n-1 n-2 n-4 USED, n-3 UNUSED"),
+					      shown.value("n-1") == "USED" && shown.value("n-2") == "USED" && shown.value("n-4") == "USED" && shown.value("n-3") == "UNUSED");
+					QWidget* page = m_stack;
+					for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+						if (qobject_cast<QStackedWidget*>(w->parentWidget()))
+							page = w;
+					if (!page->isVisible())
+						page->resize(320, 900);
+					page->grab().save(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST") + "-panel.png");
+					m_mw->grab().save(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST") + "-window.png");
+					next();
+				});
+			});
+		};
+		// 3. another PC marks n-3 used for Page 2 again -> Check -> the dialog -> Keep (kept in the settings)
+		c->steps << [this, check, note, mockPost, waitFor, syncLogHas](std::function<void()> next) {
+			QJsonObject b;
+			b["news"] = QStringLiteral("n-3");
+			b["page"] = QStringLiteral("p-knr-2");
+			b["status"] = QStringLiteral("USED");
+			mockPost(QStringLiteral("/mock/set"), b, "AT-A", [this, check, note, waitFor, syncLogHas, next]() {
+				m_syncTestAnswer = QStringLiteral("keep");
+				m_syncTestLog.clear();
+				onCheck();
+				waitFor([syncLogHas]() { return syncLogHas(QStringLiteral("answer: keep")); }, 15000, [this, check, note, next](bool ok) {
+					for (const QString& l : m_syncTestLog)
+						note(l);
+					const QStringList kept = QSettings("Faircode", "ScribusNews").value("sync/kept").toStringList();
+					check(QStringLiteral("n-3 used again by another PC: asked, Keep -> in the settings (%1)").arg(kept.join(',')),
+					      ok && kept.contains("p-knr-2|n-3"));
+					m_syncTestAnswer.clear();
+					next();
+				});
+			});
+		};
+	}
+	(*run)();
 }
 
 // SUNEER_WFOPEN_SELFTEST=<report prefix>: Open page from workflow end to end against the mock

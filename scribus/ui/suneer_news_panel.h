@@ -33,6 +33,7 @@
 class QCheckBox;
 class QComboBox;
 class QDateEdit;
+class QDialog;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
@@ -519,6 +520,10 @@ public:
 	void notePasted();
 	//! Save: failed automatic marks are sent again (the retry queue is also tried on the next delete).
 	void noteSaved();
+	//! A document was opened (any route): a workflow page offers to sync its used / unused.
+	void noteDocOpened(ScribusDoc* doc);
+	//! A document is about to close: pending deletes checked, marks pushed (at most 3 s), the rest kept on disk.
+	void noteDocClosing(ScribusDoc* doc);
 	static bool markUnusedOnDeletePref();
 private slots:
 	void checkDeletedStories();
@@ -529,7 +534,51 @@ private:
 	QSet<QString> m_cutStories;                 // story ids whose frames sit on the clipboard
 	QTimer* m_deleteCheckTimer {nullptr};       // the one timer: a single-shot debounce of ~2 s after the last delete
 	QHash<QString, DeletedStory> m_autoUnused;  // story id -> marked UNUSED by a delete (re-marked USED when its frames come back)
-	QHash<QString, DeletedStory> m_autoRetry;   // story id -> failed server mark, retried on the next delete / Save
+	QHash<QString, DeletedStory> m_autoRetry;   // retryKey -> failed / deferred server mark (title = wanted status), kept on disk
+	static QString retryKey(const DeletedStory& d) { return d.serverId + QLatin1Char('|') + d.pageId; }
+	int m_marksInFlight {0};                    // automatic PATCHes not answered yet (close waits for them)
+	QHash<QString, QString> m_inFlightMarks;    // retryKey -> status of a PATCH on its way (not sent twice)
+	void loadPendingMarks();
+	void savePendingMarks() const;
+
+	// ---- page sync: the stories in the document <-> used / unused of its workflow page ----
+	struct SyncPage { QString pageId, date, pageName, edition; bool workflow {false}; };
+	//! The workflow page of \a doc: its SuneerWf* ids, else the page most of its story frames were placed from.
+	SyncPage docSyncPage(ScribusDoc* doc) const;
+	enum class MarkGate { Allowed, Deferred, Blocked };
+	//! Who may change used / unused of \a pageId: the holder of its page lock only (another user's -> Blocked;
+	//! a page this Scribus has not locked -> Deferred, kept in the retry queue).
+	MarkGate markGate(const QString& pageId, QString* why = nullptr) const;
+	//! After Fetch News: link a downloaded page's frames, mark what is on the page USED, ask about the rest.
+	void reconcilePage(const QString& trigger);
+	//! Save / close: what is on the page and not USED yet is sent (no questions).
+	void pushOnPage(const QString& why);
+	//! Layout-settings rows of the page (GET /news-layout-settings) -> its untagged frames, by position.
+	int linkWorkflowFrames(const QJsonArray& rows, const QString& pageId);
+	void linkStoryFrames(PageItem* text, const QString& title, const QString& serverId, const QString& pageId);
+	QList<PageItem*> weldedStoryParts(PageItem* text) const;
+	static QString headlineKey(const QString& s);
+	static QString frameHeadline(PageItem* text);
+	static bool headlinesMatch(const QString& a, const QString& b);
+	QString pageStatusOf(const QJsonObject& news, const QString& pageId) const;
+	struct SyncFinding { QString serverId, title; PageItem* frame {nullptr}; };
+	void showSyncDialog(const QString& pageId, const QString& pageName, const QList<SyncFinding>& stale,
+	                    const QList<SyncFinding>& candidates, const QStringList& noId, const QStringList& notAssigned);
+	//! api.log and ~/scribus-crashlogs/news-sync.log (never a token)
+	void syncLog(const QString& line) const;
+	QSet<QString> m_syncLinkTried;              // "doc|pageId|date": layout-settings link done for this document
+	QSet<QString> m_syncKept;                   // "pageId|serverId": Keep chosen (QSettings sync/kept, survives a restart)
+	void saveSyncKept();
+	//! Settings > Forget Keep: every Keep answer forgotten (memory and settings); returns how many.
+	int forgetSyncKept();
+	bool m_syncRunning {false};
+	bool m_wfOpening {false};                   // openWorkflowPage() is in loadDoc()
+	QPointer<QDialog> m_syncDialog;
+	QStringList m_syncTestLog;                  // self-test: what the sync decided / asked
+	QString m_syncTestAnswer;                   // self-test: "unused" / "keep" (+ ",link"), "sync" for the open question
+	//! The Page box (edition, date, page) set to \a sp; \a then once its lock check is done (8 s at most).
+	void switchPanelToPage(const SyncPage& sp, std::function<void(bool)> then);
+	void runSyncSelfTest(const QString& report);
 	QHash<QString, QSet<PageItem*>> m_storyIndex;   // story id -> its live frames (see indexBuild)
 	ScribusDoc* m_storyIndexDoc {nullptr};
 	qint64 m_autoHookNs {0};                    // UI time spent in noteDeleting + checkDeletedStories (tests)

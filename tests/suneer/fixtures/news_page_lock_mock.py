@@ -15,6 +15,12 @@ usage: news_page_lock_mock.py <port>
     GET /sla-templates/<id>/download?date&pageId  -> page.sla (octet-stream) or obit.zip (zip)
   KNR Page 1 tpl-p1 (.sla), Page 3 tpl-obit (zip with images/), Page 4 "no template" chosen,
   Page 5 only the page's last-used tpl-p5, Page 6 -> 500, Page 7 -> never answers, Page 8 -> 400.
+  Page sync (tests/suneer/news_page_sync.sh): KNR Page 2 tpl-sync (sync.sla from $WFOPEN_FIXTURES),
+  stories n-1..n-8 with news_pages statuses (news.service.ts getLayoutNews = UNUSED of the page,
+  /news/used = USED of the page, updateNewsDtpStatus + the Joi rule of newsDtpStatusUpdateSchema),
+  GET /news-layout-settings (toWireRow, page-local pt) for Page 2;
+  test-only: GET /mock/news (statuses + every PATCH), POST /mock/fail-patch {"on"} -> PATCH 503,
+             POST /mock/set {"news", "page", "status"} (another PC changed a status).
 """
 import os
 import json
@@ -45,7 +51,43 @@ FIX = os.environ.get("WFOPEN_FIXTURES", "")
 CONTEXT = {"p-knr-1": ("tpl-p1", True, "tpl-p1"), "p-knr-3": ("tpl-obit", True, "tpl-obit"),
            "p-knr-4": (None, True, "tpl-p1"), "p-knr-5": (None, False, "tpl-p5"),
            "p-knr-6": ("tpl-500", True, None), "p-knr-7": ("tpl-hang", True, None), "p-knr-8": ("tpl-gone", True, None)}
-TEMPLATE_FILE = {"tpl-p1": ("page.sla", False), "tpl-p5": ("page.sla", False), "tpl-obit": ("obit.zip", True)}
+CONTEXT["p-knr-2"] = ("tpl-sync", True, "tpl-sync")
+TEMPLATE_FILE = {"tpl-p1": ("page.sla", False), "tpl-p5": ("page.sla", False), "tpl-obit": ("obit.zip", True),
+                 "tpl-sync": ("sync.sla", False)}
+BODY = "ജില്ലയിൽ ഇന്നലെ നടന്ന പരിപാടിയിൽ നിരവധി പേർ പങ്കെടുത്തു. വിശദമായ റിപ്പോർട്ട് താഴെ."
+# news id -> title, news_pages {pageId: dtpStatus} (no date: news_pages has none)
+NEWS = {
+    "n-1": ("തിരുവനന്തപുരത്ത് കനത്ത മഴ", {"p-knr-2": "UNUSED"}),
+    "n-2": ("കണ്ണൂരിൽ പുതിയ പാലം തുറന്നു", {"p-knr-2": "USED"}),
+    "n-3": ("കൊച്ചി മെട്രോ രണ്ടാം ഘട്ടം തുടങ്ങി", {"p-knr-2": "USED"}),
+    "n-4": ("കോഴിക്കോട് പുസ്തകോത്സവം തുടങ്ങി", {"p-knr-2": "UNUSED"}),
+    "n-5": ("സ്കൂൾ കലോത്സവം ഇന്ന് സമാപിക്കും", {"p-knr-2": "UNUSED"}),
+    "n-6": ("നെല്ല് സംഭരണം വൈകുന്നു", {"p-knr-2": "UNUSED"}),
+    "n-7": ("വിമാനത്താവളത്തിൽ പുതിയ ടെർമിനൽ", {"p-knr-2": "UNUSED"}),
+    "n-8": ("മറ്റൊരു പേജിലെ വാർത്ത", {"p-knr-1": "USED"}),
+}
+# NewsLayoutSetting rows of Page 2 (page-local pt; the .sla frame = row + the page's position)
+LAYOUT_ROWS = {"p-knr-2": [
+    {"id": "ls-1", "news_id": "n-1", "frame_type": "news", "x_pos": 30, "y_pos": 40, "frame_width": 200, "height": 300, "hidden": False},
+    {"id": "ls-2", "news_id": "n-2", "frame_type": "news", "x_pos": 250, "y_pos": 40, "frame_width": 200, "height": 150, "hidden": False},
+    {"id": "ls-3", "news_id": "n-3", "frame_type": "news", "x_pos": 250, "y_pos": 600, "frame_width": 200, "height": 100, "hidden": True},
+]}
+PATCHES = []
+FAIL_PATCH = {"on": False}
+
+
+def page_name(pid):
+    return next(p["name"] for p in PAGES[PAGE_EDITION[pid]] if p["id"] == pid)
+
+
+def news_json(nid, page_id=None):
+    title, pages = NEWS[nid]
+    n = {"id": nid, "refId": "R" + nid, "title": title, "content": "<p>%s</p>" % BODY, "kicker": None, "byline": None,
+         "createdAt": "2026-11-01T08:00:00.000Z", "status": "PUBLISHED", "newsMedia": [],
+         "newsPages": [{"pageId": p, "page": {"id": p, "name": page_name(p)}, "dtpStatus": st} for p, st in pages.items()]}
+    if page_id:
+        n["page"] = {"pageId": page_id, "page": {"id": page_id, "name": page_name(page_id)}, "dtpStatus": pages.get(page_id, "UNUSED")}
+    return n
 
 
 def now():
@@ -122,13 +164,76 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/common/web/initial-data/static":
             return self.ok({"editions": [{"id": ed, "shortName": sn, "name": nm, "isPrintEdition": True}
                                          for ed, (sn, nm, _) in EDITIONS.items()]})
+        if method == "GET" and path.startswith("/external/edition-pages/") and path.endswith("/news"):
+            pid = path[len("/external/edition-pages/"):-len("/news")]
+            with LOCK:
+                return self.ok([news_json(n, pid) for n, (_, pg) in NEWS.items() if pg.get(pid) == "UNUSED"])
+        if path == "/mock/news":
+            with LOCK:
+                return self.ok({"news": {n: dict(pg) for n, (_, pg) in NEWS.items()}, "patches": PATCHES})
         if path == "/mock/state":
             with LOCK:
                 return self.ok([{"pageId": k[0], "date": k[1], **v} for k, v in sorted(STATUS.items())])
         u = self.user()
         if u is None:
             return self.bad(401, "Unauthorized")
-        if method == "POST" and path == "/mock/hang":
+        if method == "POST" and path == "/mock/set":
+            b = self.body()
+            with LOCK:
+                NEWS[b["news"]][1][b["page"]] = b["status"]
+            return self.ok({})
+        if method == "POST" and path == "/mock/fail-patch":
+            FAIL_PATCH["on"] = bool(self.body().get("on"))
+            return self.ok({"failPatch": FAIL_PATCH["on"]})
+        if method == "GET" and path == "/news-layout-settings":
+            pid, date = (q.get("pageId") or [""])[0], (q.get("publishDate") or [""])[0]
+            if not pid or not date:
+                return self.bad(400, "pageId and publishDate are required")
+            return self.ok(LAYOUT_ROWS.get(pid, []))
+        if method == "GET" and path == "/news/layout":
+            pid = (q.get("pageId") or [""])[0]
+            with LOCK:
+                rows = [news_json(n, pid) for n, (_, pg) in NEWS.items() if pg.get(pid) == "UNUSED"]
+            return self.ok({"page": 1, "pageSize": 100, "totalNewses": len(rows), "newses": rows})
+        if method == "GET" and path in ("/news/used", "/news/balanced"):
+            pid = (q.get("editionPage") or [""])[0]
+            want = "USED" if path == "/news/used" else "BALANCED"
+            with LOCK:
+                rows = [{"id": n, "refId": "R" + n, "title": t, "createdAt": "2026-11-01T08:00:00.000Z",
+                         "newsPages": news_json(n)["newsPages"]}
+                        for n, (t, pg) in NEWS.items() if (pg.get(pid) == want if pid else want in pg.values())]
+            key = "usedNews" if want == "USED" else "balancedNews"
+            return self.ok({key: rows, "total" + key[0].upper() + key[1:]: len(rows)})
+        if method == "PATCH" and path == "/news/dtp-status":
+            b = self.body()
+            st, ids, pid, frm = b.get("dtpStatus"), b.get("newsIds") or [], b.get("pageId"), b.get("fromStatus")
+            with LOCK:
+                PATCHES.append({"user": u["id"], "newsIds": ids, "dtpStatus": st, "pageId": pid, "fromStatus": frm,
+                                "refused": FAIL_PATCH["on"]})
+            if FAIL_PATCH["on"]:
+                return self.bad(503, "Service unavailable (test)")
+            # newsDtpStatusUpdateSchema
+            if st not in ("USED", "BALANCED", "UNUSED") or not ids:
+                return self.bad(400, '"dtpStatus" must be one of [USED, BALANCED, UNUSED]')
+            if st != "UNUSED" and not pid:
+                return self.bad(400, '"pageId" is required')
+            if st == "UNUSED" and frm not in ("USED", "BALANCED"):
+                return self.bad(400, '"fromStatus" is required')
+            if st != "UNUSED" and "fromStatus" in b:
+                return self.bad(400, '"fromStatus" is not allowed')
+            missing = [i for i in ids if i not in NEWS]
+            if missing:
+                return self.bad(400, "Unable to find %d news item(s)" % len(missing))
+            n = 0
+            with LOCK:
+                for i in ids:
+                    for p, cur in NEWS[i][1].items():
+                        if st == "UNUSED":
+                            if cur == frm and (not pid or p == pid):
+                                NEWS[i][1][p] = "UNUSED"; n += 1
+                        elif p == pid:
+                            NEWS[i][1][p] = st; n += 1
+            return self.ok({"updatedCount": n, "status": st})
             HANG["on"] = bool(self.body().get("on"))
             return self.ok({"hang": HANG["on"]})
         if method == "GET" and path == "/users/me":
@@ -207,6 +312,9 @@ class Handler(BaseHTTPRequestHandler):
                 locked = bool(b.get("isLocked"))
                 STATUS[(pid, date)] = {"lockedAt": now() if locked else None, "lockedById": u["id"] if locked else None}
                 return self.ok(status_json(pid, date))
+        if method == "GET" and path.startswith("/news/") and path.count("/") == 2 and path[6:] in NEWS:
+            with LOCK:
+                return self.ok(news_json(path[6:]))
         return self.bad(404, "Route not found")
 
     def do_GET(self):

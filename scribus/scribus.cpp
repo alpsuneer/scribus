@@ -384,7 +384,7 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST");
 }
 
@@ -4720,6 +4720,13 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		doc->Last = bookmarkPalette->BView->Last;
 		if (doc->drawAsPreview)
 			view->togglePreview(true);
+		// Suneer: a workflow page (downloaded, or with placed stories) - its used / unused can be synced.
+		if (ScCore->usingGUI() && !scriptIsRunning() && m_suneerNewsPanel
+		    && (!suneerUnattendedTest() || qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST")))
+		{
+			m_suneerNewsPanel->setDocument(doc);
+			m_suneerNewsPanel->noteDocOpened(doc);
+		}
 	}
 	else
 	{
@@ -5853,6 +5860,9 @@ bool ScribusMainWindow::slotFileClose()
 
 bool ScribusMainWindow::DoFileClose()
 {
+	// Suneer: used / unused of the document's workflow page pushed while its page lock is still held.
+	if (m_suneerNewsPanel && doc)
+		m_suneerNewsPanel->noteDocClosing(doc);
 	// Give up the network lock before anything else: if this throws or returns
 	// early, another machine would be blocked by a document nobody has open.
 	if (doc && !DocumentLock::releaseDocument(doc) && !doc->documentFileName().isEmpty() && !doc->openedReadOnly())
