@@ -34,6 +34,13 @@ ATTRDEF(double, strikethruWidth, StrikethruWidth, 0, false)
 ATTRDEF(double, tracking, Tracking, 0, false)
 ATTRDEF(double, wordTracking, WordTracking, 1.0, false)
 ATTRDEF(QString, fillColor, FillColor, "None", false)
+// Suneer: gradient text fill. A document gradient name ("" = solid fill colour),
+// 0 linear / 1 radial, the linear angle in degrees (90 = top to bottom) and
+// 0 = one gradient per line / 1 = one across the frame's text.
+ATTRDEF(QString, fillGradient, FillGradient, "", false)
+ATTRDEF(int, fillGradientType, FillGradientType, 0, false)
+ATTRDEF(double, fillGradientAngle, FillGradientAngle, 90, false)
+ATTRDEF(int, fillGradientMapping, FillGradientMapping, 0, false)
 ATTRDEF(QString, strokeColor, StrokeColor, "Black", false)
 ATTRDEF(QString, backColor, BackColor, "None", false)
 ATTRDEF(double, backShade, BackShade, 100, false)

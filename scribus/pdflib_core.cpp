@@ -234,6 +234,64 @@ class PdfPainter: public TextLayoutPainter
 	PdfTextState m_textState;
 	PdfTextState m_prevState;
 
+	// Suneer: gradient text. The frame places the pattern on the page; one pattern per
+	// gradient + line (or frame) area; a transparent gradient leaves a soft mask in the
+	// graphics state, so the next solid fill (and the end of the text) resets it.
+	const PageItem* m_item { nullptr };
+	QHash<QByteArray, QByteArray> m_gradientFills;
+	QByteArray m_noSMaskGState;
+	bool m_smaskActive { false };
+
+	QByteArray noSMaskGState()
+	{
+		if (m_noSMaskGState.isEmpty())
+		{
+			m_noSMaskGState = m_pdf->ResNam + Pdf::toPdf(m_pdf->ResCount);
+			m_pdf->ResCount++;
+			m_pdf->Transpar[m_noSMaskGState] = m_pdf->writeGState("/SMask /None\n");
+		}
+		return m_noSMaskGState;
+	}
+
+	// The fill operators for the current fill: the gradient pattern when there is one,
+	// else \a solid. Keeps track of the soft mask a transparent gradient sets.
+	QByteArray fillOperators(const QByteArray& solid)
+	{
+		const TextLayoutGradient& g = fillGradient();
+		QByteArray ops;
+		if (!g.isNull() && m_item)
+		{
+			QPointF a, b;
+			g.axis(a, b);
+			a = matrix().map(a);
+			b = matrix().map(b);
+			const QByteArray key = g.name.toUtf8() + '|' + QByteArray::number(g.type) + '|' + FToStr(a.x()) + ' ' + FToStr(a.y()) + ' ' + FToStr(b.x()) + ' ' + FToStr(b.y());
+			auto it = m_gradientFills.constFind(key);
+			if (it == m_gradientFills.constEnd())
+			{
+				QByteArray out;
+				if (!m_pdf->PDF_TextGradientFill(out, m_item, g.name, g.type, a, b))
+					out.clear();
+				it = m_gradientFills.insert(key, out);
+			}
+			ops = it.value();
+		}
+		if (ops.isEmpty())
+		{
+			if (m_smaskActive && !solid.isEmpty())
+			{
+				m_smaskActive = false;
+				return Pdf::toName(noSMaskGState()) + " gs\n" + solid;
+			}
+			return solid;
+		}
+		const bool smask = ops.contains(" gs\n");
+		if (m_smaskActive && !smask)
+			ops = Pdf::toName(noSMaskGState()) + " gs\n" + ops;
+		m_smaskActive = smask;
+		return ops;
+	}
+
 	QByteArray transformToStr(const QTransform& tr) const
 	{
 		return FToStr(tr.m11()) + " " + FToStr(-tr.m12()) + " " + FToStr(-tr.m21()) + " " + FToStr(tr.m22()) + " " + FToStr(tr.dx()) + " " + FToStr(-tr.dy());
@@ -277,10 +335,11 @@ class PdfPainter: public TextLayoutPainter
 	}
 
 public:
-	PdfPainter(PDFLibCore *pdf, uint num, const ScPage* pag) :
+	PdfPainter(PDFLibCore *pdf, uint num, const ScPage* pag, const PageItem* item = nullptr) :
 		m_pdf(pdf),
 		m_PNr(num),
-		m_page(pag)
+		m_page(pag),
+		m_item(item)
 	{}
 
 	void drawGlyph(const GlyphCluster& gc) override
@@ -305,6 +364,7 @@ public:
 				StrokeColor = m_pdf->putColor(strokeColor().color, strokeColor().shade, false);
 			if (fillColor().color != CommonStrings::None)
 				FillColor = m_pdf->putColor(fillColor().color, fillColor().shade, true);
+			FillColor = fillOperators(FillColor);
 
 			QTransform transform = matrix();
 			if (pdfFont.method == Use_XForm)
@@ -410,6 +470,8 @@ public:
 				StrokeColor = m_pdf->putColor(strokeColor().color, strokeColor().shade, false);
 			if (fill && fillColor().color != CommonStrings::None)
 				FillColor = m_pdf->putColor(fillColor().color, fillColor().shade, true);
+			if (fill)
+				FillColor = fillOperators(FillColor);
 
 			if (pdfFont.method == Use_XForm)
 			{
@@ -626,9 +688,13 @@ public:
 		m_pathBuffer += "Q\n";
 	}
 
-	QByteArray getBuffer() const
+	QByteArray getBuffer()
 	{
-		return m_backBuffer + "BT\n" + m_glyphBuffer + "ET\n" + m_pathBuffer;
+		// a soft mask left by a transparent gradient must not reach what follows the text
+		QByteArray tail;
+		if (m_smaskActive)
+			tail = Pdf::toName(noSMaskGState()) + " gs\n";
+		return m_backBuffer + "BT\n" + m_glyphBuffer + tail + "ET\n" + m_pathBuffer + tail;
 	}
 
 	void drawRect(const QRectF& rect) override
@@ -6017,7 +6083,7 @@ QByteArray PDFLibCore::setTextSt(PageItem *ite, uint PNr, const ScPage* pag)
 	ite->layout();
 	ite->OwnPage = savedOwnPage;
 	
-	PdfPainter p(this, PNr, pag);
+	PdfPainter p(this, PNr, pag, ite);
 	ite->textLayout.renderBackground(&p);
 	ite->textLayout.renderParagraphShading(&p);
 	ite->textLayout.renderParagraphRules(&p);
@@ -8336,12 +8402,6 @@ bool PDFLibCore::PDF_TensorGradientFill(QByteArray& output, const PageItem *c)
 
 bool PDFLibCore::PDF_GradientFillStroke(QByteArray& output, const PageItem *currItem, bool stroke, bool forArrow)
 {
-	QList<double> stopVec;
-	QList<double> transVec;
-	QStringList gColors;
-	QStringList colorNames;
-	QList<int> colorShades;
-	QStringList spotColorSet;
 	VGradient gradient;
 	double StartX, StartY, EndX, EndY, FocalX, FocalY, Gscale, Gskew;
 	int GType;
@@ -8388,6 +8448,23 @@ bool PDFLibCore::PDF_GradientFillStroke(QByteArray& output, const PageItem *curr
 			gradient = currItem->fill_gradient;
 		gradient.setRepeatMethod(currItem->getGradientExtend());
 	}
+
+	return PDF_GradientFillStrokeCore(output, currItem, stroke, forArrow, gradient, GType, StartX, StartY, EndX, EndY, FocalX, FocalY, Gscale, Gskew);
+}
+
+// Suneer: the shading pattern part of PDF_GradientFillStroke, taking the gradient
+// and its geometry as values, so gradient text can use it with its own coordinates.
+// currItem places the pattern on the page (position, rotation, group) and gives the
+// area of the transparency mask.
+bool PDFLibCore::PDF_GradientFillStrokeCore(QByteArray& output, const PageItem *currItem, bool stroke, bool forArrow, const VGradient& gradient, int GType,
+                                            double StartX, double StartY, double EndX, double EndY, double FocalX, double FocalY, double Gscale, double Gskew)
+{
+	QList<double> stopVec;
+	QList<double> transVec;
+	QStringList gColors;
+	QStringList colorNames;
+	QList<int> colorShades;
+	QStringList spotColorSet;
 
 	QTransform mpa;
 	bool spotMode = false;
@@ -8798,6 +8875,21 @@ bool PDFLibCore::PDF_GradientFillStroke(QByteArray& output, const PageItem *curr
 	}
 	output = tmp;
 	return true;
+}
+
+bool PDFLibCore::PDF_TextGradientFill(QByteArray& output, const PageItem* frame, const QString& gradientName, int type, const QPointF& start, const QPointF& end)
+{
+	output.clear();
+	if (!frame || !doc.docGradients.contains(gradientName))
+		return false;
+	VGradient gradient = doc.docGradients[gradientName];
+	if (gradient.stops() == 0)
+		return false;
+	gradient.setRepeatMethod(VGradient::pad);
+	// Scribus radial gradients: Start = centre, End on the circle, Focal = centre
+	const int gType = (type == 1) ? Gradient_Radial : Gradient_Linear;
+	return PDF_GradientFillStrokeCore(output, frame, false, false, gradient, gType,
+	                                  start.x(), start.y(), end.x(), end.y(), start.x(), start.y(), 1.0, 0.0);
 }
 
 #ifdef HAVE_OSG

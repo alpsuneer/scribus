@@ -3453,6 +3453,23 @@ void Scribus171Format::readCharacterStyleAttrs(ScribusDoc *doc, const ScXmlStrea
 		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD, 0));
 	else if (attrs.hasAttribute(TXTOUTWARD171))
 		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD171, 0));
+	// Suneer: gradient text fill. Missing attributes = inherited (solid fill), old files unchanged.
+	if (attrs.hasAttribute("TextFillGradient"))
+		newStyle.setFillGradient(attrs.valueAsString("TextFillGradient"));
+	else if (attrs.hasAttribute("TXTFILLGRAD"))
+		newStyle.setFillGradient(attrs.valueAsString("TXTFILLGRAD"));
+	if (attrs.hasAttribute("TextFillGradientType"))
+		newStyle.setFillGradientType(attrs.valueAsInt("TextFillGradientType", 0));
+	else if (attrs.hasAttribute("TXTFILLGRADTYPE"))
+		newStyle.setFillGradientType(attrs.valueAsInt("TXTFILLGRADTYPE", 0));
+	if (attrs.hasAttribute("TextFillGradientAngle"))
+		newStyle.setFillGradientAngle(attrs.valueAsDouble("TextFillGradientAngle"));
+	else if (attrs.hasAttribute("TXTFILLGRADANGLE"))
+		newStyle.setFillGradientAngle(attrs.valueAsDouble("TXTFILLGRADANGLE"));
+	if (attrs.hasAttribute("TextFillGradientMapping"))
+		newStyle.setFillGradientMapping(attrs.valueAsInt("TextFillGradientMapping", 0));
+	else if (attrs.hasAttribute("TXTFILLGRADMAP"))
+		newStyle.setFillGradientMapping(attrs.valueAsInt("TXTFILLGRADMAP", 0));
 
 	static const QString TXTULP("TXTULP");
 	static const QString TXTULP171("TextUnderlineOffset");

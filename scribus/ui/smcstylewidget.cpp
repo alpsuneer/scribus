@@ -14,6 +14,9 @@ for which a new license (GPL+exception) is in place.
 #include "scribus.h"
 #include "scribusapp.h"
 #include "smcstylewidget.h"
+#include "ui/suneertextgradient.h"
+#include <QGroupBox>
+#include <QVBoxLayout>
 #include "util.h"
 #include "units.h"
 
@@ -41,6 +44,19 @@ SMCStyleWidget::SMCStyleWidget(QWidget *parent)
 	hyphenCharLineEdit->setMaxLength(1);
 
 	fontFace_->setGuestWidget(fontSizeLabel_);
+
+	// Suneer: gradient text fill, saved in the character style (and a paragraph
+	// style's character part); "Inherited" takes the parent's
+	{
+		QGroupBox* gradGroup = new QGroupBox(tr("Text Gradient"), this);
+		QVBoxLayout* gl = new QVBoxLayout(gradGroup);
+		gl->setContentsMargins(8, 8, 8, 8);
+		textGradient = new SuneerTextGradientWidget(SuneerTextGradientWidget::StyleEditor, gradGroup);
+		gl->addWidget(textGradient);
+		gridLayout->addWidget(gradGroup, 3, 0);
+		gridLayout->setRowStretch(3, 0);
+		gridLayout->setRowStretch(4, 1);
+	}
 
 	iconSetChange();
 
@@ -160,6 +176,8 @@ void SMCStyleWidget::setDoc(ScribusDoc *doc)
 		disconnect(m_Doc->scMW(), SIGNAL(UpdateRequest(int)), this , SLOT(handleUpdateRequest(int)));
 
 	m_Doc = doc;
+	if (textGradient)
+		textGradient->setDoc(doc);
 	if (!m_Doc)
 		return;
 
@@ -181,6 +199,8 @@ void SMCStyleWidget::show(const CharStyle *cstyle, const QList<CharStyle> &cstyl
 	parentCombo->setEnabled(!cstyle->isDefaultStyle());
 	const CharStyle *parent = dynamic_cast<const CharStyle*>(cstyle->parentStyle());
 	bool hasParent =  cstyle->hasParent() && parent != nullptr && parent->hasName() && cstyle->parent() != "";
+	if (textGradient)
+		textGradient->showStyle(*cstyle, hasParent && cstyle->isInhFillGradient());
 	if (hasParent)
 	{
 		fontSize_->setValue(cstyle->fontSize() / 10.0, cstyle->isInhFontSize());
@@ -341,6 +361,8 @@ void SMCStyleWidget::show(const QList<CharStyle*> &cstyles, const QList<CharStyl
 		show(cstyles[0], cstylesAll, defLang, unitIndex);
 	else if (cstyles.count() > 1)
 	{
+		if (textGradient)
+			textGradient->showStyle(*cstyles[0], cstyles[0]->hasParent() && cstyles[0]->isInhFillGradient());
 		showSizeAndPosition(cstyles);
 		showEffects(cstyles);
 		showColors(cstyles);

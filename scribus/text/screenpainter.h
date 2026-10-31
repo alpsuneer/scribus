@@ -35,6 +35,10 @@ public:
 
 private:
 	void setupState(bool rect);
+	/// Suneer: the fill gradient as a cairo pattern for the current user space, given
+	/// the cairo matrix \a xySpace of the painter's x() / y() space. Null when the fill
+	/// is solid, the text is selected or the gradient is not in the document.
+	cairo_pattern_t* gradientPattern(const cairo_matrix_t& xySpace) const;
 
 	ScPainter *m_painter { nullptr };
 	PageItem *m_item { nullptr };

@@ -33,6 +33,7 @@ for which a new license (GPL+exception) is in place.
 #include "smspinbox.h"
 #include "smtabruler.h"
 #include "smtextstyles.h"
+#include "ui/suneertextgradient.h"
 #include "storyeditor.h"
 #include "style.h"
 #include "styleselect.h"
@@ -484,6 +485,13 @@ void SMParagraphStyle::reloadTmpStyles()
 
 void SMParagraphStyle::setupConnections()
 {
+	// Suneer: gradient text fill of the paragraph style's character part
+	if (m_pwidget && m_pwidget->cpage && m_pwidget->cpage->textGradient)
+		connect(m_pwidget->cpage->textGradient, &SuneerTextGradientWidget::changed, this, [this]() {
+			for (int i = 0; i < m_selection.count(); ++i)
+				m_pwidget->cpage->textGradient->writeTo(m_selection[i]->charStyle());
+			slotSelectionDirty();
+		});
 	if (!m_pwidget)
 		return;
 
@@ -591,6 +599,8 @@ void SMParagraphStyle::setupConnections()
 
 void SMParagraphStyle::removeConnections()
 {
+	if (m_pwidget && m_pwidget->cpage && m_pwidget->cpage->textGradient)
+		disconnect(m_pwidget->cpage->textGradient, &SuneerTextGradientWidget::changed, this, nullptr);
 	if (!m_pwidget)
 		return;
 
@@ -2519,6 +2529,13 @@ void SMCharacterStyle::reloadTmpStyles()
 
 void SMCharacterStyle::setupConnections()
 {
+	// Suneer: gradient text fill
+	if (m_page && m_page->textGradient)
+		connect(m_page->textGradient, &SuneerTextGradientWidget::changed, this, [this]() {
+			for (int i = 0; i < m_selection.count(); ++i)
+				m_page->textGradient->writeTo(*m_selection[i]);
+			slotSelectionDirty();
+		});
 	if (!m_page)
 		return;
 
@@ -2556,6 +2573,8 @@ void SMCharacterStyle::setupConnections()
 
 void SMCharacterStyle::removeConnections()
 {
+	if (m_page && m_page->textGradient)
+		disconnect(m_page->textGradient, &SuneerTextGradientWidget::changed, this, nullptr);
 	if (!m_page)
 		return;
 

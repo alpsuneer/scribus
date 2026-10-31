@@ -312,6 +312,8 @@ public:
 	QToolButton*    m_outlineIncBtn       {nullptr};
 	QToolButton*    m_outlineDecBtn       {nullptr};
 	QCheckBox*      m_outlineOutwardChk   {nullptr};
+	class SuneerTextGradientWidget* m_textGradient {nullptr};
+	QToolButton*    m_textGradientBtn     {nullptr};
 	QToolButton*    m_padResetBtn         {nullptr};
 	QToolButton*    m_padAllPlusBtn       {nullptr};
 	QToolButton*    m_padAllMinusBtn      {nullptr};

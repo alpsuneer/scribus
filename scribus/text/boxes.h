@@ -202,6 +202,11 @@ public:
 
 	bool containsPoint(const QPointF& coord) const override;
 
+	/// Suneer: the part of the line the glyphs cover (x from the first to the last box,
+	/// y over the glyphs' ink), relative to the line's top-left corner. Null for an empty line.
+	QRectF textRect() const;
+	/// Suneer: whether a glyph of the line has a gradient fill (only then textRect() is needed).
+	bool hasGradientText() const;
 	void render(TextLayoutPainter *p) const override;
 	void render(ScreenPainter *p, ITextContext *ctx) const override;
 	void drawSelection(ScreenPainter *p, ITextContext *ctx) const override;

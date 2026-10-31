@@ -17,6 +17,9 @@
 #include "prefsmanager.h"
 #include "scribusapp.h"
 #include "util.h"
+#include "vgradient.h"
+
+#include <QLineF>
 
 ScreenPainter::ScreenPainter(ScPainter *p, PageItem *item)
 	: m_painter(p)
@@ -42,6 +45,37 @@ ScreenPainter::~ScreenPainter()
 	m_painter->restore();
 }
 
+cairo_pattern_t* ScreenPainter::gradientPattern(const cairo_matrix_t& xySpace) const
+{
+	const TextLayoutGradient& g = fillGradient();
+	if (g.isNull() || selected())
+		return nullptr;
+	const ScribusDoc* doc = m_item->doc();
+	const auto it = doc->docGradients.constFind(g.name);
+	if (it == doc->docGradients.constEnd() || it->stops() == 0)
+		return nullptr;
+	QPointF a, b;
+	g.axis(a, b);
+	cairo_pattern_t* pat = (g.type == 1)
+		? cairo_pattern_create_radial(a.x(), a.y(), 0.0, a.x(), a.y(), QLineF(a, b).length())
+		: cairo_pattern_create_linear(a.x(), a.y(), b.x(), b.y());
+	const double opacity = m_painter->brushOpacity();
+	for (const VColorStop* stop : it->colorStops())
+	{
+		QColor c;
+		m_item->SetQColor(&c, stop->name, stop->shade);
+		cairo_pattern_add_color_stop_rgba(pat, stop->rampPoint, c.redF(), c.greenF(), c.blueF(), stop->opacity * opacity);
+	}
+	cairo_pattern_set_extend(pat, CAIRO_EXTEND_PAD);
+	// pattern space = the x() / y() space; cairo wants user -> pattern space
+	cairo_matrix_t user, inv = xySpace, toPattern;
+	cairo_get_matrix(m_painter->context(), &user);
+	cairo_matrix_invert(&inv);
+	cairo_matrix_multiply(&toPattern, &user, &inv);
+	cairo_pattern_set_matrix(pat, &toPattern);
+	return pat;
+}
+
 void ScreenPainter::drawGlyph(const GlyphCluster& gc)
 {
 	bool showControls = gc.isEmpty() || (m_item->doc()->guidesPrefs().showControls &&
@@ -51,12 +85,22 @@ void ScreenPainter::drawGlyph(const GlyphCluster& gc)
 	{
 		m_painter->save();
 
+		cairo_t* cr = m_painter->context();
+		cairo_matrix_t xySpace;
+		cairo_get_matrix(cr, &xySpace);
 		setupState(false);
 
-		cairo_t* cr = m_painter->context();
-		float r, g, b;
-		m_painter->brush().getRgbF(&r, &g, &b);
-		cairo_set_source_rgba(cr, r, g, b, m_painter->brushOpacity());
+		if (cairo_pattern_t* pat = gradientPattern(xySpace))
+		{
+			cairo_set_source(cr, pat);
+			cairo_pattern_destroy(pat);
+		}
+		else
+		{
+			float r, g, b;
+			m_painter->brush().getRgbF(&r, &g, &b);
+			cairo_set_source_rgba(cr, r, g, b, m_painter->brushOpacity());
+		}
 		m_painter->setRasterOp(m_painter->blendModeFill());
 
 		if (m_fontPath != font().fontFilePath() || m_faceIndex != font().faceIndex() || m_cairoFace == nullptr)
@@ -92,6 +136,8 @@ void ScreenPainter::drawGlyph(const GlyphCluster& gc)
 #endif
 	m_painter->save();
 
+	cairo_matrix_t xySpace;
+	cairo_get_matrix(m_painter->context(), &xySpace);
 	setupState(false);
 
 	bool fr = m_painter->fillRule();
@@ -234,7 +280,22 @@ void ScreenPainter::drawGlyph(const GlyphCluster& gc)
 			m_painter->scale(gl.scaleH * sizeFactor, gl.scaleV * sizeFactor);
 			m_painter->setupPolygon(&outline, true);
 			if (outline.size() > 3)
-				m_painter->fillPath();
+			{
+				// Suneer: gradient text, filled straight through cairo (ScPainter's own
+				// gradient fill takes item coordinates, not the line's)
+				if (cairo_pattern_t* pat = gradientPattern(xySpace))
+				{
+					cairo_t* cr = m_painter->context();
+					cairo_save(cr);
+					cairo_set_source(cr, pat);
+					cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+					cairo_fill_preserve(cr);
+					cairo_restore(cr);
+					cairo_pattern_destroy(pat);
+				}
+				else
+					m_painter->fillPath();
+			}
 			m_painter->restore();
 			m_painter->translate(gl.xadvance * gl.scaleH, 0.0);
 		}

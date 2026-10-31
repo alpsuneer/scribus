@@ -19,6 +19,7 @@
 #include "fpointarray.h"
 #include "suneerimagelinks.h"
 #include "suneerphotobadges.h"
+#include "ui/suneertextgradient.h"
 #include "ui/faircodehelpviewer.h"
 #include "undomanager.h"
 #include "undogui.h"
@@ -870,6 +871,22 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(2500, this, [this, repackTest]() { runRepackSelfTest(repackTest); });
+		});
+		wait->start();
+	}
+	// SUNEER_TEXTGRAD_SELFTEST: gradient text fill apply / undo / save (tests/suneer/text_gradient.sh)
+	static bool textGradTestStarted = false;
+	if (doc && qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST") && !textGradTestStarted)
+	{
+		textGradTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait]() {
+			if (!m_doc || m_doc->isLoading() || !m_mw || !m_mw->HaveDoc || !m_mw->view)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			SuneerTextGradientWidget::runSelfTestIfAsked(m_mw->view, m_doc);
 		});
 		wait->start();
 	}

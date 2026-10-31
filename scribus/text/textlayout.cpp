@@ -114,9 +114,31 @@ void TextLayout::removeLastLine ()
 	}
 }
 
+// Suneer: the area all the lines' text covers, for gradient text mapped across the
+// frame, in the painter coordinates the line boxes are drawn in.
+static QRectF suneerFrameTextRect(const Box* frameBox, double ox, double oy)
+{
+	QRectF all;
+	for (const Box* column : frameBox->boxes())
+	{
+		for (const Box* box : column->boxes())
+		{
+			const LineBox* line = dynamic_cast<const LineBox*>(box);
+			if (!line || !line->hasGradientText())
+				continue;
+			const QRectF r = line->textRect();
+			if (r.isNull())
+				continue;
+			all = all.united(r.translated(ox + frameBox->x() + column->x() + line->x(), oy + frameBox->y() + column->y() + line->y()));
+		}
+	}
+	return all;
+}
+
 void TextLayout::render(ScreenPainter *p, ITextContext *ctx) const
 {
 	p->save();
+	p->setGradientFrameRect(suneerFrameTextRect(m_box, p->x(), p->y()));
 	m_box->render(p, ctx);
 	p->restore();
 }
@@ -625,6 +647,7 @@ void TextLayout::renderParagraphShading(TextLayoutPainter *p) const
 void TextLayout::render(TextLayoutPainter *p) const
 {
 	p->save();
+	p->setGradientFrameRect(suneerFrameTextRect(m_box, p->x(), p->y()));
 	m_box->render(p);
 	p->restore();
 }

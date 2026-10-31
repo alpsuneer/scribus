@@ -2996,6 +2996,15 @@ void Scribus150Format::readCharacterStyleAttrs(ScribusDoc *doc, const ScXmlStrea
 	static const QString TXTOUTWARD("TXTOUTWARD");
 	if (attrs.hasAttribute(TXTOUTWARD))
 		newStyle.setOutlineOutward(attrs.valueAsInt(TXTOUTWARD, 0));
+	// Suneer: gradient text fill. Missing attributes = inherited (solid fill), old files unchanged.
+	if (attrs.hasAttribute("TXTFILLGRAD"))
+		newStyle.setFillGradient(attrs.valueAsString("TXTFILLGRAD"));
+	if (attrs.hasAttribute("TXTFILLGRADTYPE"))
+		newStyle.setFillGradientType(attrs.valueAsInt("TXTFILLGRADTYPE", 0));
+	if (attrs.hasAttribute("TXTFILLGRADANGLE"))
+		newStyle.setFillGradientAngle(attrs.valueAsDouble("TXTFILLGRADANGLE"));
+	if (attrs.hasAttribute("TXTFILLGRADMAP"))
+		newStyle.setFillGradientMapping(attrs.valueAsInt("TXTFILLGRADMAP", 0));
 
 	static const QString TXTULP("TXTULP");
 	if (attrs.hasAttribute(TXTULP))
@@ -5639,6 +5648,15 @@ PageItem* Scribus150Format::pasteItem(ScribusDoc *doc, const ScXmlStreamAttribut
 		pstyle.charStyle().setOutlineWidth(qRound(attrs.valueAsDouble("TXTOUT") * 10));
 	if (attrs.hasAttribute("TXTOUTWARD"))
 		pstyle.charStyle().setOutlineOutward(attrs.valueAsInt("TXTOUTWARD", 0));
+	// Suneer: gradient text fill. Missing attributes = inherited (solid fill), old files unchanged.
+	if (attrs.hasAttribute("TXTFILLGRAD"))
+		pstyle.charStyle().setFillGradient(attrs.valueAsString("TXTFILLGRAD"));
+	if (attrs.hasAttribute("TXTFILLGRADTYPE"))
+		pstyle.charStyle().setFillGradientType(attrs.valueAsInt("TXTFILLGRADTYPE", 0));
+	if (attrs.hasAttribute("TXTFILLGRADANGLE"))
+		pstyle.charStyle().setFillGradientAngle(attrs.valueAsDouble("TXTFILLGRADANGLE"));
+	if (attrs.hasAttribute("TXTFILLGRADMAP"))
+		pstyle.charStyle().setFillGradientMapping(attrs.valueAsInt("TXTFILLGRADMAP", 0));
 	if (attrs.hasAttribute("TXTULP"))
 		pstyle.charStyle().setUnderlineOffset(qRound(attrs.valueAsDouble("TXTULP") * 10));
 	if (attrs.hasAttribute("TXTULW"))

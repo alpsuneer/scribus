@@ -254,6 +254,15 @@ private:
 	bool    PDF_DiamondGradientFill(QByteArray& output, const PageItem *currItem);
 	bool    PDF_TensorGradientFill(QByteArray& output, const PageItem *currItem);
 	bool    PDF_GradientFillStroke(QByteArray& output, const PageItem *currItem, bool stroke = false, bool forArrow = false);
+	bool    PDF_GradientFillStrokeCore(QByteArray& output, const PageItem *currItem, bool stroke, bool forArrow, const VGradient& gradient, int GType,
+	                                   double StartX, double StartY, double EndX, double EndY, double FocalX, double FocalY, double Gscale, double Gskew);
+public:
+	/*! Suneer: the fill operators ("/PatternN scn", with a soft-mask gs when a stop
+	    is transparent) for gradient text. \a start / \a end are in the frame's own
+	    coordinates (y down), as TextLayoutGradient::axis() gives them; \a type 0 linear,
+	    1 radial. False when the gradient is not in the document. */
+	bool    PDF_TextGradientFill(QByteArray& output, const PageItem* frame, const QString& gradientName, int type, const QPointF& start, const QPointF& end);
+private:
 	QByteArray PDF_TransparenzFill(const PageItem *currItem);
 	QByteArray PDF_TransparenzStroke(const PageItem *currItem);
 #ifdef HAVE_OSG

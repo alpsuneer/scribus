@@ -38,6 +38,8 @@ for which a new license (GPL+exception) is in place.
 #include "colormgmt/sccolormgmtengine.h"
 #include "tableborder.h"
 
+class VGradient;
+
 
 class ScPage;
 class ScribusDoc;
@@ -190,6 +192,8 @@ class SCRIBUS_API PSLib : public QObject
 		virtual void HandleDiamondGradient(PageItem* item);
 		virtual void HandleTensorGradient(PageItem* item);
 		virtual void HandleGradientFillStroke(PageItem *item, bool stroke = true, bool forArrow = false);
+		//! Suneer: a shading pattern from \a gradient made current (setpattern), coordinates y down in the current space
+		void PS_GradientPattern(const VGradient& gradient, int GType, double StartX, double StartY, double EndX, double EndY, double FocalX, double FocalY, double Gscale, double Gskew, bool defineOnly = false);
 		virtual void SetColor(const QString& color, double shade, double *c, double *m, double *y, double *k);
 		virtual void SetColor(const ScColor& color, double shade, double *c, double *m, double *y, double *k);
 		virtual void setTextSt(PageItem* ite, uint a, ScPage* pg, bool master);

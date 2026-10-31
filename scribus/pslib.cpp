@@ -96,7 +96,8 @@ class PSPainter:public TextLayoutPainter
 		m_argh(argh),
 		m_page(page),
 		m_master(master),
-		m_ps(ps)
+		m_ps(ps),
+		m_doc(Doc)
 	{}
 
 	void drawGlyph(const GlyphCluster& gc) override;
@@ -111,6 +112,36 @@ class PSPainter:public TextLayoutPainter
 		ScPage* m_page {nullptr};
 		bool m_master;
 		PSLib* m_ps {nullptr};
+		ScribusDoc* m_doc {nullptr};
+		// Suneer: gradient text. Each gradient + area is defined once per frame as a
+		// named pattern (made in the frame's text space) and selected with setpattern.
+		QHash<QString, QString> m_gradientNames;
+
+		//! Makes the fill gradient the current colour; false for a solid fill. Call it in
+		//! the text space (right after applyTransform()), before the glyph translations.
+		bool setGradientColor()
+		{
+			const TextLayoutGradient& g = fillGradient();
+			if (g.isNull() || !m_doc || !m_doc->docGradients.contains(g.name) || m_doc->docGradients[g.name].stops() == 0)
+				return false;
+			QPointF a, b;
+			g.axis(a, b);
+			const QString key = g.name + QChar('|') + QString::number(g.type) + QChar('|')
+			                  + QString::number(a.x(), 'f', 3) + QChar(' ') + QString::number(a.y(), 'f', 3) + QChar(' ')
+			                  + QString::number(b.x(), 'f', 3) + QChar(' ') + QString::number(b.y(), 'f', 3);
+			QString name = m_gradientNames.value(key);
+			if (name.isEmpty())
+			{
+				name = QStringLiteral("SuGrad%1").arg(m_gradientNames.count());
+				m_gradientNames.insert(key, name);
+				VGradient gradient = m_doc->docGradients[g.name];
+				gradient.setRepeatMethod(VGradient::pad);
+				m_ps->PutStream("/" + name + " ");
+				m_ps->PS_GradientPattern(gradient, g.type == 1 ? Gradient_Radial : Gradient_Linear, a.x(), a.y(), b.x(), b.y(), a.x(), a.y(), 1.0, 0.0, true);
+			}
+			m_ps->PutStream(name + " setpattern\n");
+			return true;
+		}
 
 		void applyTransform()
 		{
@@ -131,6 +162,7 @@ void PSPainter::drawGlyph(const GlyphCluster& gc)
 
 	m_ps->PS_save();
 	applyTransform();
+	const bool gradient = setGradientColor();
 	m_ps->PS_translate(x(), -(y() - fontSize()));
 
 	double current_x = 0.0;
@@ -147,7 +179,7 @@ void PSPainter::drawGlyph(const GlyphCluster& gc)
 		if (gl.scaleH != 1.0 || (gl.scaleV != 1.0))
 			m_ps->PS_scale(gl.scaleH, gl.scaleV);
 
-		if (fillColor().color != CommonStrings::None)
+		if (!gradient && fillColor().color != CommonStrings::None)
 			m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
 		m_ps->PS_showSub(gl.glyph, m_ps->FontSubsetMap[font().scName()], fontSize(), false);
 		m_ps->PS_restore();
@@ -169,6 +201,7 @@ void PSPainter::drawGlyphOutline(const GlyphCluster& gc, bool fill)
 
 	m_ps->PS_save();
 	applyTransform();
+	const bool gradient = fill && setGradientColor();
 	m_ps->PS_setlinewidth(strokeWidth());
 	m_ps->PS_setcapjoin(Qt::FlatCap, Qt::MiterJoin);
 	m_ps->PS_setdash(Qt::SolidLine, 0, dum);
@@ -195,7 +228,10 @@ void PSPainter::drawGlyphOutline(const GlyphCluster& gc, bool fill)
 			m_ps->PS_save();
 			if (gc.scaleH() != 1.0 || gc.scaleV() != 1.0)
 				m_ps->PS_scale(gc.scaleH(), gc.scaleV());
-			m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
+			if (gradient)
+				setGradientColor();
+			else
+				m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
 			m_ps->PS_showSub(gl.glyph, m_ps->FontSubsetMap[font().scName()], fontSize(), false);
 			m_ps->PS_restore();
 		}
@@ -212,7 +248,10 @@ void PSPainter::drawGlyphOutline(const GlyphCluster& gc, bool fill)
 			m_ps->PS_save();
 			if (gc.scaleH() != 1.0 || gc.scaleV() != 1.0)
 				m_ps->PS_scale(gc.scaleH(), gc.scaleV());
-			m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
+			if (gradient)
+				setGradientColor();
+			else
+				m_ps->putColorNoDraw(fillColor().color, fillColor().shade);
 			m_ps->PS_showSub(gl.glyph, m_ps->FontSubsetMap[font().scName()], fontSize(), false);
 			m_ps->PS_restore();
 		}
@@ -4138,10 +4177,6 @@ void PSLib::HandleGradientFillStroke(PageItem *item, bool stroke, bool forArrow)
 	double StartX, StartY, EndX, EndY, FocalX, FocalY, Gscale, Gskew;
 	int GType;
 	VGradient gradient;
-	QList<double> StopVec;
-	QStringList colorNames;
-	QList<int> colorShades;
-	QStringList spotColorSet;
 	if (stroke)
 	{
 		GType = item->GrTypeStroke;
@@ -4220,6 +4255,37 @@ void PSLib::HandleGradientFillStroke(PageItem *item, bool stroke, bool forArrow)
 			return;
 		}
 	}
+	PS_GradientPattern(gradient, GType, StartX, StartY, EndX, EndY, FocalX, FocalY, Gscale, Gskew);
+	if (forArrow)
+	{
+		if (fillRule)
+			PutStream("eofill\n");
+		else
+			PutStream("fill\n");
+	}
+	else
+	{
+		if (stroke)
+			PutStream("stroke\n");
+		else
+		{
+			if (fillRule)
+				PutStream("eofill\n");
+			else
+				PutStream("fill\n");
+		}
+	}
+}
+
+// Suneer: the shading pattern part of HandleGradientFillStroke, made current with
+// setpattern (no painting), so gradient text can fill its glyphs with it. The
+// coordinates are in the current user space with y down (they are negated here).
+void PSLib::PS_GradientPattern(const VGradient& gradient, int GType, double StartX, double StartY, double EndX, double EndY, double FocalX, double FocalY, double Gscale, double Gskew, bool defineOnly)
+{
+	QList<double> StopVec;
+	QStringList colorNames;
+	QList<int> colorShades;
+	QStringList spotColorSet;
 	QList<VColorStop*> cstops = gradient.colorStops();
 	PutStream("<<\n");
 	PutStream("/PatternType 2\n");
@@ -4432,27 +4498,8 @@ void PSLib::HandleGradientFillStroke(PageItem *item, bool stroke, bool forArrow)
 		qmatrix.translate(-StartX, StartY);
 		qmatrix.scale(1, Gscale);
 	}
-	PutStream("[" + ToStr(qmatrix.m11()) + " " + ToStr(qmatrix.m12()) + " " + ToStr(qmatrix.m21()) + " " + ToStr(qmatrix.m22()) + " " + ToStr(qmatrix.dx()) + " " + ToStr(qmatrix.dy()) + "] makepattern setpattern\n");
+	PutStream("[" + ToStr(qmatrix.m11()) + " " + ToStr(qmatrix.m12()) + " " + ToStr(qmatrix.m21()) + " " + ToStr(qmatrix.m22()) + " " + ToStr(qmatrix.dx()) + " " + ToStr(qmatrix.dy()) + (defineOnly ? "] makepattern def\n" : "] makepattern setpattern\n"));
 //	PutStream("[1 0 0 1 0 0] makepattern setpattern\n");
-	if (forArrow)
-	{
-		if (fillRule)
-			PutStream("eofill\n");
-		else
-			PutStream("fill\n");
-	}
-	else
-	{
-		if (stroke)
-			PutStream("stroke\n");
-		else
-		{
-			if (fillRule)
-				PutStream("eofill\n");
-			else
-				PutStream("fill\n");
-		}
-	}
 }
 
 void PSLib::PS_HatchFill(PageItem *currItem)

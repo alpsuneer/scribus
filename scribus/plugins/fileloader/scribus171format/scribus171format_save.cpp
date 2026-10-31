@@ -1092,6 +1092,15 @@ void Scribus171Format::putCStyle(ScXmlStreamWriter & docu, const CharStyle & sty
 	// part and inline runs all come through here).
 	if (!style.isInhOutlineOutward())
 		docu.writeAttribute("TextOutlineOutward", style.outlineOutward());
+	// Suneer: gradient text fill (a document gradient by name, type, angle, per line / per frame)
+	if (!style.isInhFillGradient())
+		docu.writeAttribute("TextFillGradient", style.fillGradient());
+	if (!style.isInhFillGradientType())
+		docu.writeAttribute("TextFillGradientType", style.fillGradientType());
+	if (!style.isInhFillGradientAngle())
+		docu.writeAttribute("TextFillGradientAngle", style.fillGradientAngle());
+	if (!style.isInhFillGradientMapping())
+		docu.writeAttribute("TextFillGradientMapping", style.fillGradientMapping());
 	if (!style.isInhUnderlineOffset())
 		docu.writeAttribute("TextUnderlineOffset", style.underlineOffset() / 10.0);
 	if (!style.isInhUnderlineWidth())

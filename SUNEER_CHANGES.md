@@ -1455,3 +1455,15 @@ scribus
 - LINK badge ചെറുതും പാതി സുതാര്യവും. Obituary check flag ഇനി ചുവപ്പ് (LINK-ന്റെ orange-ൽ നിന്ന് വേർതിരിക്കാൻ).
 - Badge-കൾ screen-ൽ മാത്രം: print, PDF, export, thumbnail-ൽ ഒരിക്കലും ഇല്ല.
 
+### 95. Text-ന് gradient fill — text ആയിത്തന്നെ (edit ചെയ്യാം, PDF-ൽ തിരയാം)
+- Properties > Text > "Text Gradient & Shadow", മുകളിലെ toolbar-ലെ "Grad" button, Style Manager (character style-ഉം paragraph
+  style-ന്റെ character ഭാഗവും): Text fill = Solid / Gradient (style-ൽ Inherited-ഉം).
+- Gradient = document gradient (Edit > Colours and Fills > Gradients). Presets: "Red headline" (കടും ചുവപ്പ് → ചുവപ്പ്),
+  "Grey headline" (കടും ചാര → ചാര); തിരഞ്ഞെടുക്കുമ്പോൾ CMYK colours-ഓടെ document-ൽ ചേരും. "Save as preset" — എല്ലാ document-നും.
+- Linear (angle, default 90° = മുകളിൽ നിന്ന് താഴേക്ക്) / Radial. Per line (ഓരോ വരിക്കും മുഴുവൻ gradient, അക്ഷരങ്ങളുടെ
+  മുകൾ മുതൽ താഴെ വരെ) / Per frame (frame-ലെ മുഴുവൻ text-നും ഒരൊറ്റ gradient).
+- Select ചെയ്ത അക്ഷരങ്ങൾക്ക് / മുഴുവൻ frame-ന് / table-ലെ select ചെയ്ത cell-കൾക്ക്; ഒരു Undo step. SLA-ൽ save ആകും.
+- PDF: അക്ഷരങ്ങൾ text തന്നെ (font embed, select / search ചെയ്യാം), gradient vector shading, CMYK അതേപടി.
+  PostScript / print-ലും gradient.
+- അതേ panel-ൽ frame-ന്റെ soft shadow (X, Y, blur, colour, opacity). Blur ഉള്ളതുകൊണ്ട് PDF-ൽ image; PostScript print-ൽ ഇല്ല.
+

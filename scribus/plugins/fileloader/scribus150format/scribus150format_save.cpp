@@ -1089,6 +1089,14 @@ void Scribus150Format::putCStyle(ScXmlStreamWriter & docu, const CharStyle & sty
 		docu.writeAttribute("TXTOUT", style.outlineWidth() / 10.0);
 	if ( ! style.isInhOutlineOutward())
 		docu.writeAttribute("TXTOUTWARD", style.outlineOutward());
+	if (!style.isInhFillGradient())
+		docu.writeAttribute("TXTFILLGRAD", style.fillGradient());
+	if (!style.isInhFillGradientType())
+		docu.writeAttribute("TXTFILLGRADTYPE", style.fillGradientType());
+	if (!style.isInhFillGradientAngle())
+		docu.writeAttribute("TXTFILLGRADANGLE", style.fillGradientAngle());
+	if (!style.isInhFillGradientMapping())
+		docu.writeAttribute("TXTFILLGRADMAP", style.fillGradientMapping());
 	if ( ! style.isInhUnderlineOffset())
 		docu.writeAttribute("TXTULP", style.underlineOffset() / 10.0);
 	if ( ! style.isInhUnderlineWidth())

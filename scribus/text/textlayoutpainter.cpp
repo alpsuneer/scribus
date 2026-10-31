@@ -65,6 +65,53 @@ double TextLayoutPainter::strokeWidth() const
 	return m_stack.top().strokeWidth;
 }
 
+void TextLayoutPainter::setFillGradient(const TextLayoutGradient& g)
+{
+	m_stack.top().fillGradient = g;
+}
+
+const TextLayoutGradient& TextLayoutPainter::fillGradient() const
+{
+	return m_stack.top().fillGradient;
+}
+
+void TextLayoutPainter::setGradientLineRect(const QRectF& r)
+{
+	m_stack.top().gradientLineRect = r;
+}
+
+const QRectF& TextLayoutPainter::gradientLineRect() const
+{
+	return m_stack.top().gradientLineRect;
+}
+
+void TextLayoutPainter::setGradientFrameRect(const QRectF& r)
+{
+	m_stack.top().gradientFrameRect = r;
+}
+
+const QRectF& TextLayoutPainter::gradientFrameRect() const
+{
+	return m_stack.top().gradientFrameRect;
+}
+
+void TextLayoutGradient::axis(QPointF& start, QPointF& end) const
+{
+	const QPointF c = rect.center();
+	if (type == 1)
+	{
+		start = c;
+		end = rect.bottomRight();
+		return;
+	}
+	const double a = angle * M_PI / 180.0;
+	const QPointF d(cos(a), sin(a));
+	// half the rect's extent along the axis, so the gradient runs edge to edge
+	const double half = fabs(rect.width() / 2.0 * d.x()) + fabs(rect.height() / 2.0 * d.y());
+	start = c - d * half;
+	end = c + d * half;
+}
+
 void TextLayoutPainter::setOutlineOutward(int v)
 {
 	m_stack.top().outlineOutward = v;

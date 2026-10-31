@@ -366,9 +366,67 @@ bool LineBox::containsPoint(const QPointF& coord) const
 	return QRectF(0, m_y, m_width, height()).contains(coord);
 }
 
+bool LineBox::hasGradientText() const
+{
+	for (const Box *box : boxes())
+	{
+		const GlyphBox* gb = dynamic_cast<const GlyphBox*>(box);
+		if (gb && !gb->style().fillGradient().isEmpty())
+			return true;
+	}
+	return false;
+}
+
+QRectF LineBox::textRect() const
+{
+	// across: from the first to the last box; down: the ink of the glyphs (their
+	// outline boxes), so a per-line gradient runs from the tops of the letters to
+	// the bottoms, not over the font's whole ascent + descent
+	double left = 0.0, right = 0.0, top = 0.0, bottom = 0.0;
+	bool any = false, ink = false;
+	for (const Box *box : boxes())
+	{
+		if (box->width() <= 0)
+			continue;
+		if (!any || box->x() < left)
+			left = box->x();
+		if (!any || box->x() + box->width() > right)
+			right = box->x() + box->width();
+		any = true;
+		const GlyphBox* gb = dynamic_cast<const GlyphBox*>(box);
+		if (!gb)
+			continue;
+		const GlyphCluster run = gb->glyphRun();
+		const ScFace& font = run.style().font();
+		const double size = run.style().fontSize() / 10.0;
+		for (const GlyphLayout& gl : run.glyphs())
+		{
+			if (gl.glyph >= ScFace::CONTROL_GLYPHS)
+				continue;
+			const GlyphMetrics m = font.glyphBBox(gl.glyph, size);
+			if (m.ascent == 0.0 && m.descent == 0.0)
+				continue;
+			const double gTop = ascent() + gb->y() + gl.yoffset - m.ascent * gl.scaleV;
+			const double gBottom = ascent() + gb->y() + gl.yoffset + m.descent * gl.scaleV;
+			if (!ink || gTop < top)
+				top = gTop;
+			if (!ink || gBottom > bottom)
+				bottom = gBottom;
+			ink = true;
+		}
+	}
+	if (!any)
+		return QRectF();
+	if (!ink || bottom - top < 0.5)
+		return QRectF(left, 0, right - left, ascent() + descent());
+	return QRectF(left, top, right - left, bottom - top);
+}
+
 void LineBox::render(TextLayoutPainter *p) const
 {
 	p->translate(x(), y());
+	if (hasGradientText())
+		p->setGradientLineRect(textRect().translated(p->x(), p->y()));
 
 	if (!p->glyphBoxRendering())
 		drawBackGround(p);
@@ -385,6 +443,8 @@ void LineBox::render(TextLayoutPainter *p) const
 void LineBox::render(ScreenPainter *p, ITextContext *ctx) const
 {
 	p->translate(x(), y());
+	if (hasGradientText())
+		p->setGradientLineRect(textRect().translated(p->x(), p->y()));
 
 	if (!p->glyphBoxRendering())
 		drawBackGround(p);
@@ -782,6 +842,23 @@ void GlyphBox::render(TextLayoutPainter *p) const
 		p->setFillColor(TextLayoutColor(charStyle.fillColor(), charStyle.fillShade()));
 	if (hasStrokeColor)
 		p->setStrokeColor(TextLayoutColor(charStyle.strokeColor(), charStyle.strokeShade()));
+	// Suneer: gradient fill. The glyphs are drawn even with fill colour None; the
+	// fill colour stays the fallback for painters without gradients.
+	if (!charStyle.fillGradient().isEmpty())
+	{
+		TextLayoutGradient g;
+		g.name = charStyle.fillGradient();
+		g.type = charStyle.fillGradientType();
+		g.angle = charStyle.fillGradientAngle();
+		g.rect = charStyle.fillGradientMapping() == 1 ? p->gradientFrameRect() : p->gradientLineRect();
+		if (g.rect.isEmpty())
+			g.rect = p->gradientLineRect();
+		p->setFillGradient(g);
+		if (!g.isNull())
+			hasFillColor = true;
+	}
+	else if (!p->fillGradient().isNull())
+		p->setFillGradient(TextLayoutGradient());
 
 	p->save();
 
@@ -851,15 +928,19 @@ void GlyphBox::render(TextLayoutPainter *p) const
 			bool s = p->selected();
 			TextLayoutColor fc = p->fillColor();
 
+			const TextLayoutGradient fg = p->fillGradient();
+
 			p->translate(xoff, -yoff);
 
 			p->setFillColor(p->strokeColor());
+			p->setFillGradient(TextLayoutGradient());
 			p->setSelected(false);
 			p->drawGlyph(m_glyphRun);
 
 			p->translate(-xoff, yoff);
 			p->setSelected(s);
 			p->setFillColor(fc);
+			p->setFillGradient(fg);
 		}
 
 		if ((charStyle.effects() & ScStyle_Outline) && hasStrokeColor && ((charStyle.fontSize() * m_glyphRun.scaleV() * charStyle.outlineWidth() / 10000.0) != 0))

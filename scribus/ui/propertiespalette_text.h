@@ -94,6 +94,7 @@ protected:
 	PropertyWidget_ParagraphStyle* styleWidgets;
 	PropertyWidget_ParEffect* parEffectWidgets;
 	PropertyWidget_PathText* pathTextWidgets;
+	class SuneerTextGradientWidget* textGradientWidget { nullptr };
 	PropertyWidget_Text* textWidgets;
 
 	SectionContainer * scStyles= {nullptr};
@@ -105,6 +106,7 @@ protected:
 	SectionContainer * scOrphans = {nullptr};
 	SectionContainer * scParEffect = {nullptr};
 	SectionContainer * scPathText = {nullptr};
+	SectionContainer * scTextGradient = {nullptr};
 	SectionContainer * scText = {nullptr};
 	SectionContainer * scTextColor = {nullptr};
 

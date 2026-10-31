@@ -2924,3 +2924,34 @@ Traps:
 - Test: `tests/suneer/photo_badges.sh page.sla prefix` (SUNEER_BADGE_SELFTEST, viewport grabs at
   25/50/100/200 %, selected, nothing, off, key). Fixture /home/s1/tmp-badge/b.sla (tmp-obit band/b.sla
   with lowres/bg/noface/manual/missing set by surgery).
+
+## Gradient text fill (2026-10-29, NOT committed, NOT verified by the user, NOT printed on HP_M706n)
+- CharStyle attrs (charstyle.attrdefs.cxx, BREAKSHAPING false so shaping is untouched): FillGradient (doc
+  gradient name, "" = solid), FillGradientType 0 linear / 1 radial, FillGradientAngle (90 = top→bottom),
+  FillGradientMapping 0 per line / 1 per frame. SLA 1.7.1: TextFillGradient*, 1.5/1.7.0: TXTFILLGRAD*.
+  getNamedResources collects the gradient; replaceNamedResources follows renames. ABI: CharStyle grew → full
+  reinstall (deb) or the file-loader plugins read garbage.
+- Geometry in TextLayoutPainter state: TextLayoutGradient {name,type,angle,rect}; LineBox::render sets
+  gradientLineRect = LineBox::textRect() (x: first→last box, y: the glyphs' INK from ScFace::glyphBBox, not the
+  line's ascent/descent — with the box metrics the Malayalam letters only covered the middle third of the
+  ramp); TextLayout::render sets gradientFrameRect = union of the gradient lines. Both only computed when
+  LineBox::hasGradientText(). GlyphBox::render sets the gradient (fill None still draws); hard shadow clears it.
+- Screen (ScreenPainter): cairo linear/radial pattern built in the painter's x/y space, pattern matrix =
+  user × inverse(x/y-space matrix captured before setupState). Both the cairo glyph path and the outline
+  fallback (frame gradient left fillMode != Solid) use it. Selected text stays highlight colour.
+- PDF: PDF_GradientFillStroke split into PDF_GradientFillStrokeCore (takes the gradient + coordinates; the item
+  only places the pattern: mpa from position/rotation/group/bleed, SMask bbox). PDF_TextGradientFill →
+  "/PatternN scn" becomes the glyph's fill in PdfTextState, so glyphs stay Tj text. PdfPainter caches one
+  pattern per gradient+area, and resets a stop-opacity SMask ("/SMask /None" gs) before the next solid fill and
+  at the end of the text (gs inside BT is legal).
+- PS: HandleGradientFillStroke split → PS_GradientPattern(defineOnly). PSPainter::setGradientColor() defines
+  "/SuGradN … makepattern def" once per frame in the text space (right after applyTransform) and selects it
+  with setpattern; shgf's fill then paints the glyph with it. Stop opacity is ignored in PS.
+- UI: ui/suneertextgradient.{h,cpp} (ApplyToSelection: Properties > Text section + top-bar "Grad" popup,
+  applies via itemSelection_ApplyCharStyle with ETEA SUNEER_TEXTGRADIENT; StyleEditor: SMCStyleWidget group,
+  SMCharacterStyle / SMParagraphStyle write it). Presets: built-in + prefs context suneer_textgradient (JSON);
+  ensureGradient() creates the CMYK colours + doc gradient. Soft shadow = the frame's existing soft shadow.
+- Matrix: rects are in the painter's x/y space; PDF maps them through matrix() (GlyphBox m_matrix), screen
+  through the cairo matrix — text on a path / flipped frames are not checked.
+- Test: tests/suneer/text_gradient.sh <dir> (fixture fixtures/text_gradient_make.py; SUNEER_TEXTGRAD_SELFTEST).
+  The scripter Printer to "File" tiles an A3 page into 9 tiles; each tile re-renders → 9× pattern defs (fine).

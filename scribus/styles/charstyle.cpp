@@ -215,6 +215,8 @@ QString CharStyle::asString() const
 		result += (QObject::tr("+style") + " ");
 	if (!inh_StrokeColor || !inh_StrokeShade || !inh_FillColor || !inh_FillShade)
 		result += (QObject::tr("+color") + " ");
+	if (!inh_FillGradient || !inh_FillGradientType || !inh_FillGradientAngle || !inh_FillGradientMapping)
+		result += ((fillGradient().isEmpty() ? QObject::tr("-gradient") : QObject::tr("+gradient %1").arg(fillGradient())) + " ");
 	if (!inh_UnderlineWidth || !inh_UnderlineOffset)
 		result += ((underlineWidth() > 0 ? QObject::tr("+underline") : QObject::tr("-underline")) + " ");
 	if (!inh_StrikethruWidth || !inh_StrikethruOffset )
@@ -414,6 +416,7 @@ void CharStyle::getNamedResources(ResourceCollection& lists) const
 	const QString& fillColorName = fillColor();
 	if (fillColorName != CommonStrings::None)
 		lists.collectColor(fillColorName);
+	lists.collectGradient(fillGradient());
 
 	lists.collectFontfeatures(fontFeatures());
 
@@ -434,6 +437,9 @@ void CharStyle::replaceNamedResources(ResourceCollection& newNames)
 
 	if (!inh_FillColor && (it = newNames.colors().find(fillColor())) != newNames.colors().end())
 		setFillColor(it.value());
+
+	if (!inh_FillGradient && (it = newNames.gradients().find(fillGradient())) != newNames.gradients().end())
+		setFillGradient(it.value());
 
 	if (!inh_FontFeatures && (it = newNames.fontfeatures().find(fontFeatures())) != newNames.fontfeatures().end())
 		setFontFeatures(it.value());

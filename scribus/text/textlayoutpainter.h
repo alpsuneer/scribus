@@ -10,6 +10,9 @@
 
 #include <stack>
 
+#include <QPointF>
+#include <QRectF>
+
 #include "scribusapi.h"
 #include "sctextstruct.h"
 #include "glyphcluster.h"
@@ -36,6 +39,24 @@ struct TextLayoutColor
 	{
 		return !(*this == other);
 	}
+};
+
+/// Suneer: gradient text fill. \a name is a document gradient (ScribusDoc::docGradients);
+/// \a rect is the area the gradient spans, in the painter's x() / y() coordinates
+/// (the text line or all the frame's text).
+struct TextLayoutGradient
+{
+	QString name;
+	int type { 0 };        //!< 0 linear, 1 radial
+	double angle { 90.0 }; //!< linear direction in degrees, 90 = top to bottom
+	QRectF rect;
+
+	bool isNull() const { return name.isEmpty() || rect.isEmpty(); }
+	/// Start and end of the gradient axis for \a rect: linear, the two points where the
+	/// axis at \a angle leaves the rect; radial, the centre and a point on the far corner.
+	void axis(QPointF& start, QPointF& end) const;
+	bool operator==(const TextLayoutGradient& o) const { return name == o.name && type == o.type && angle == o.angle && rect == o.rect; }
+	bool operator!=(const TextLayoutGradient& o) const { return !(*this == o); }
 };
 
 /**
@@ -77,6 +98,18 @@ public:
 	virtual void setStrokeWidth(double w);
 	/// The current width for line strokes.
 	virtual double strokeWidth() const;
+
+	/// Sets the gradient that fills subsequent glyphs instead of the fill
+	/// color (null = solid). Painters that cannot draw it use fillColor().
+	virtual void setFillGradient(const TextLayoutGradient& g);
+	/// The current gradient fill, null when the fill is solid.
+	virtual const TextLayoutGradient& fillGradient() const;
+	/// The text area of the line being drawn and of the whole frame, in x() / y()
+	/// coordinates: what a per-line / per-frame gradient spans.
+	virtual void setGradientLineRect(const QRectF& r);
+	virtual const QRectF& gradientLineRect() const;
+	virtual void setGradientFrameRect(const QRectF& r);
+	virtual const QRectF& gradientFrameRect() const;
 
 	/// Sets whether the glyph outline grows outward (non-zero) instead of inward.
 	virtual void setOutlineOutward(int v);
@@ -161,6 +194,9 @@ private:
 		QTransform matrix;
 		double strokeWidth { 0.0 };
 		int outlineOutward { 0 };
+		TextLayoutGradient fillGradient;
+		QRectF gradientLineRect;
+		QRectF gradientFrameRect;
 		double x { 0.0 };
 		double y { 0.0 };
 		double scaleH { 1.0 };

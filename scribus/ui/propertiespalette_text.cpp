@@ -38,6 +38,7 @@ for which a new license (GPL+exception) is in place.
 #include "stylecombos.h"
 #include "undomanager.h"
 #include "widgets/section_container.h"
+#include "ui/suneertextgradient.h"
 
 //using namespace std;
 
@@ -97,6 +98,13 @@ PropertiesPalette_Text::PropertiesPalette_Text( QWidget* parent) : QWidget(paren
 	scFontFeatures->setWidget(fontfeaturesWidget);
 	scFontFeatures->restorePreferences();
 
+	// Suneer: gradient fill for the text + the frame's soft shadow
+	textGradientWidget = new SuneerTextGradientWidget(SuneerTextGradientWidget::ApplyToSelection, this);
+	scTextGradient = new SectionContainer(tr("Text Gradient && Shadow"), "SectionTPTextGradient", true, false);
+	scTextGradient->setCanSaveState(true);
+	scTextGradient->setWidget(textGradientWidget);
+	scTextGradient->restorePreferences();
+
 	pathTextWidgets = new PropertyWidget_PathText(this);
 	scPathText = new SectionContainer(tr("Text on Path"), "SectionTPTextOnPath", true, false);
 	scPathText->setCanSaveState(true);
@@ -109,6 +117,7 @@ PropertiesPalette_Text::PropertiesPalette_Text( QWidget* parent) : QWidget(paren
 	lyt->setSpacing(0);
 	lyt->addWidget(scStyles);
 	lyt->addWidget(scText);
+	lyt->addWidget(scTextGradient);
 	lyt->addWidget(scAlignment);
 	lyt->addWidget(scAdvanced);
 	lyt->addWidget(scDistance);
@@ -176,6 +185,7 @@ void PropertiesPalette_Text::setDoc(ScribusDoc *d)
 	styleWidgets->setDoc(m_doc);
 	orphanBox->setDoc(m_doc);
 	pathTextWidgets->setDoc(m_doc);
+	textGradientWidget->setDoc(m_doc);
 
 	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), this, SLOT(handleSelectionChanged()));
 	connect(m_doc             , SIGNAL(docChanged())      , this, SLOT(handleSelectionChanged()));
@@ -195,6 +205,7 @@ void PropertiesPalette_Text::unsetDoc()
 	m_item     = nullptr;
 
 	textWidgets->setDoc(nullptr);
+	textGradientWidget->setDoc(nullptr);
 	advancedWidgets->setDoc(nullptr);
 	alignmentWidgets->setDoc(nullptr);
 	fontfeaturesWidget->setDoc(nullptr);
@@ -297,6 +308,7 @@ void PropertiesPalette_Text::setCurrentItem(PageItem *item)
 
 	m_haveItem = false;
 	m_item = item;
+	textGradientWidget->showItem(item);
 
 	if ((m_item->isGroup()) && (!m_item->isSingleSel))
 	{
@@ -376,6 +388,7 @@ void PropertiesPalette_Text::updateCharStyle(const CharStyle& charStyle)
 	fontfeaturesWidget->updateCharStyle(charStyle);
 	hyphenationWidget->updateCharStyle(charStyle);
 	textWidgets->updateCharStyle(charStyle);
+	textGradientWidget->showStyle(charStyle);
 }
 
 void PropertiesPalette_Text::updateParagraphStyle(const ParagraphStyle& newCurrent)
@@ -389,6 +402,7 @@ void PropertiesPalette_Text::updateParagraphStyle(const ParagraphStyle& newCurre
 	parEffectWidgets->updateStyle(newCurrent);
 	hyphenationWidget->updateStyle(newCurrent);
 	textWidgets->updateStyle(newCurrent);
+	textGradientWidget->showStyle(newCurrent.charStyle());
 	styleWidgets->updateStyle(newCurrent);
 	alignmentWidgets->updateStyle(newCurrent);
 	distanceWidgets->updateStyle(newCurrent);

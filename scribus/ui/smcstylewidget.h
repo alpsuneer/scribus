@@ -36,6 +36,9 @@ protected:
 private:
 	//QMap<QString, QString> m_langMap;
 	ScribusDoc * m_Doc = nullptr;
+public:
+	class SuneerTextGradientWidget* textGradient { nullptr };   //!< Suneer: gradient text fill
+private:
 
 	void showSizeAndPosition(const QList<CharStyle*> &cstyles);
 	void showEffects(const QList<CharStyle*> &cstyles);
