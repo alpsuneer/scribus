@@ -1702,24 +1702,10 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 
 void SuneerNewsPanel::onObitRepack()
 {
-	if (!m_doc)
-		return;
-	UndoTransaction tx;
-	if (UndoManager::undoEnabled())
-		tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Re-pack obituary page"), QString(), Um::IMove);
-	int moved = 0;
-	const QStringList report = obitRepackPage(&moved);
-	if (tx)
-		tx.commit();
-	if (moved)
-	{
-		m_doc->changed();
-		m_doc->regionsChanged()->update(QRectF());
-		if (m_mw)
-			m_mw->emitUpdateRequest(0);
-	}
-	setStatus(report.isEmpty() ? tr("Re-pack: no obituary page open") : report.first());
-	setStatusDetails(report.join(QStringLiteral("\n")));
+	// suneer 2026-10-28: the button is Layout > Re-pack Page (fit + pack, ui/suneer_news_repack.cpp);
+	// obitRepackPage() below stays the last step of an obituary Place
+	if (m_doc)
+		repackPage(true);
 }
 
 void SuneerNewsPanel::onObitPinSelected()

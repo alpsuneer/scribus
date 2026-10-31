@@ -378,7 +378,8 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_GAPS_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE") || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_IMPORT_REPORT") || qEnvironmentVariableIsSet("SUNEER_UNUSED_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :
@@ -758,6 +759,9 @@ void ScribusMainWindow::initToolBars()
 	editToolBar = new EditToolBar(this);
 	UndoWidget* uWidget = new UndoWidget(editToolBar, "uWidget");
 	m_undoManager->registerGui(uWidget);
+	// suneer 2026-10-28: Layout > Re-pack Page on the Edit toolbar
+	editToolBar->addSeparator();
+	editToolBar->addAction(scrActions["suneerRepackPage"]);
 	modeToolBar = new ModeToolBar(this);
 	pdfToolBar = new PDFToolBar(this);
 	viewToolBar = new ViewToolBar(this);
@@ -1064,6 +1068,10 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerPageModules"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->openPageModules(); });
 	connect(scrActions["suneerPageModelGallery"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel) m_suneerNewsPanel->openPageModelGallery(); });
 	connect(scrActions["suneerRemoveEmptySlots"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->removeEmptySlots(true); });
+	scrActions["suneerRepackPage"]->setShortcutContext(Qt::ApplicationShortcut);
+	connect(scrActions["suneerRepackPage"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->repackPage(true); });
+	scrActions["suneerRepackAuto"]->setChecked(SuneerNewsPanel::repackAutoPref());
+	connect(scrActions["suneerRepackAuto"], &QAction::toggled, this, [](bool on) { SuneerNewsPanel::setRepackAutoPref(on); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int) { m_suneerControlBar->updateFromSelection(); });
 	connect(this, &ScribusMainWindow::UpdateRequest, m_suneerControlBar, [this](int flag) {
@@ -1864,6 +1872,9 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("suneerPageModules", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerPageModelGallery", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerRemoveEmptySlots", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("SEPARATOR", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerRepackPage", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerRepackAuto", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerAutoLayout", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerLayoutModels", "SuneerLayout");

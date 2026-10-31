@@ -955,6 +955,7 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 	{
 		addAction(m_ScMW->scrActions["suneerApplyLayoutModel"]);
 		addAction(m_ScMW->scrActions["suneerPageModules"]);
+		addAction(m_ScMW->scrActions["suneerRepackPage"]);
 		SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
 		QAction* cvAct = addAction(tr("Convert story groups to weld (page)"));
 		cvAct->setToolTip(tr("Old documents: every grouped story on this page becomes welded frames"));

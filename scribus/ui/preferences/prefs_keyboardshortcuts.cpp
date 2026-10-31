@@ -21,6 +21,7 @@ for which a new license (GPL+exception) is in place.
 #include <QPushButton>
 
 #include "actionmanager.h"
+#include <QSet>
 #include "api/api_application.h"
 #include "commonstrings.h"
 #include "iconmanager.h"
@@ -428,7 +429,7 @@ static QMap<QString, QString> userSets()
 
 // Lays a keyset file over keys; clearFirst gives the file the whole map, as
 // importKeySet() does for a complete set.
-static void readKeySetInto(const QString& fileName, QMap<QString, Keys>& keys, bool clearFirst)
+static void readKeySetInto(const QString& fileName, QMap<QString, Keys>& keys, bool clearFirst, bool newActionsKeepDefault = false)
 {
 	QFile f(fileName);
 	if (!f.open(QIODevice::ReadOnly))
@@ -438,8 +439,29 @@ static void readKeySetInto(const QString& fileName, QMap<QString, Keys>& keys, b
 		return;
 	if (clearFirst)
 	{
+		// suneer 2026-10-29: a saved user set lists every action it knew (an unbound one with shortcut="");
+		// an action it does not list is newer than the set (Layout > Re-pack Page) and keeps the key compiled
+		// into this build - unless the set gives that key to another action.
+		QSet<QString> listed, usedKeys;
+		if (newActionsKeepDefault)
+			for (QDomNode n = doc.documentElement().firstChild(); !n.isNull(); n = n.nextSibling())
+			{
+				const QDomElement e = n.toElement();
+				if (!e.hasAttribute("name"))
+					continue;
+				listed.insert(e.attribute("name"));
+				const QKeySequence k(e.attribute("shortcut"));
+				if (!k.isEmpty())
+					usedKeys.insert(k.toString(QKeySequence::PortableText));
+			}
+		const QMap<QString, QKeySequence>* defaults = ActionManager::defaultShortcuts();
 		for (auto it = keys.begin(); it != keys.end(); ++it)
-			it.value().keySequence = QKeySequence();
+		{
+			const QKeySequence def = defaults->value(it.key());
+			const bool keep = newActionsKeepDefault && !listed.contains(it.key()) && !def.isEmpty()
+			                  && !usedKeys.contains(def.toString(QKeySequence::PortableText));
+			it.value().keySequence = keep ? def : QKeySequence();
+		}
 	}
 	for (QDomNode n = doc.documentElement().firstChild(); !n.isNull(); n = n.nextSibling())
 	{
@@ -456,7 +478,7 @@ bool Prefs_KeyboardShortcuts::buildSetKeys(const QString& name, QMap<QString, Ke
 	QString file = userSets().value(name);
 	if (!file.isEmpty())
 	{
-		readKeySetInto(file, keys, true);
+		readKeySetInto(file, keys, true, true);
 		return true;
 	}
 	if (name == scribusDefaultSetName() || isShippedSetName(name))

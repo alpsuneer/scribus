@@ -2873,3 +2873,32 @@ Traps:
   `news.captionGap` (also the 0.2 mm of an older News placement - no jump to the model gap), (b) after an undo / redo a caption is
   refitted only when this attach moves or widens it; one that already sits in place untouched keeps its height. The two-step undo(2)
   case is still refitted (the attach moves the caption back there).
+
+## Re-pack Page + Re-pack Automatically (2026-10-29, NOT committed, NOT verified by the user)
+
+- `ui/suneer_news_repack.cpp`: `SuneerNewsPanel::repackPage(bool interactive)` (action `suneerRepackPage`, Ctrl+Alt+R, Layout menu,
+  Edit toolbar, page context menu, the News Browser "Re-pack page" button = `onObitRepack`), `repackCore(RepackScope)`.
+  `obitRepackPage()` (moves only) stays the last step of an obituary Place.
+- Units: obituary page (any `news.model obituary*` frame on it) = obituary modules; normal page = frames with `news.story` (never an
+  untagged frame). A unit = one story key + every frame welded to it (`SuneerWeld::cluster`); a locked / `news.manual` / `layout.fixed` /
+  placeholder frame pins the whole unit. Obit units must be on the model grid (`obitModel()`, `activeObitModelId()` spacing), else they stay.
+- Trap: `getBoundingRect()` includes the text-wrap offsets (WrapOff 5.67 pt = 2 mm around photo / caption): every obituary-news module
+  and the 2-column item measured 4 mm too wide -> "off the grid". Module rects are frame geometry (`geomRect`, bounding rect only when rotated).
+- Fit: only the text frame at the module's foot (nothing of the module below it; never shorter than a frame lying inside it);
+  `SuneerTextClean::fitHeight` with undo off, then one `sizeItem` + `checkChanges(true)`. Grouped (old) modules are moved, not fitted.
+- Pack (reading order top, left): obit = first free slot of its OWN column from the content top vs obstacles + settled. Column changes
+  (to a slot > 2.3 mm higher in another obit column) were built and tested first; the user decided 2026-10-29: own column only (8 of 32
+  obits changed column on the test page). No room in the own column -> pasteboard. Normal = under the lowest frame above in its own columns. A module never goes DOWN to widen a gap (the masthead gap on the normal test page
+  is < 4.8 mm: the top story went 2.1 mm down before this rule); only an overlap (text above grew) pushes it. Then up to 5 own-column passes
+  (a module that settled under one later parked / moved kept a 45 mm gap). No room -> `parkOnPasteboard`. Pre-existing overlaps are ignored.
+  Rules redrawn (`respaceRules`) only when the page already had `news.rule` frames.
+- Auto: `ScribusDoc::itemSelection_DeleteItem` -> `noteRepackDelete`, `CanvasMode_Edit::deactivate` -> `noteRepackTextEdit`; 1.2 s
+  single shot, waits while editing / dragging / undo; only the deleted / edited module's columns (x ranges), own columns only, fits only the
+  edited frame; only on the page in view; transaction "Auto re-pack" (empty = no step).
+- Shortcut trap: the user's own set (`shortcut-sets/dbi.xml`, applied as Default) cleared every key it does not list, so a NEW action never
+  got its compiled default (the key was '' at runtime). `readKeySetInto(..., newActionsKeepDefault)` (user sets only): an action the set does
+  not list keeps its default unless the set gives that key to another action (saved sets list unbound actions with shortcut="").
+- Test: `tests/suneer/repack_page.sh page.sla` (SUNEER_REPACK_SELFTEST, _SAVEAS, _SHOT, _AUTO=<story ids>): independent overlap audit,
+  undo / redo geometry. Harness /home/s1/tmp-repack (`surgery.py` del/add/cut/untag by story, `run_test.sh`, `sla_mods.py`).
+- Not exercised: obituary-left model, grouped legacy modules, rules redraw, the text-edit auto trigger (no IM / edit-mode run), Ctrl+Alt+R
+  and the toolbar button by hand (ScrAction keys do not fire on Xvfb; key checked as registered).

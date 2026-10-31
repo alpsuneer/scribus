@@ -1432,3 +1432,16 @@ scribus
 - മുടിയുടെ മുകളിൽ ചെറിയ ഇടം; തലയുടെ മുകൾ ഇനി മുറിയില്ല (ആവശ്യമെങ്കിൽ crop മുകളിലേക്ക് / അല്പം ചെറുതായി).
 - Low res photo-കളിലും മറ്റുള്ളവയുടെ അതേ മുഖ വലുപ്പം (orange "low res" flag മാത്രം).
 - മുഖം കിട്ടാത്ത photo: ചിത്രത്തിന്റെ മുകൾ ഭാഗം, flag "no face – check" (screen-ൽ മാത്രം).
+
+### 93. Re-pack Page — ഒറ്റ click-ൽ gap അടയ്ക്കൽ (Layout menu, Ctrl+Alt+R, Edit toolbar, page right-click, News Browser-ലെ Re-pack)
+- ആദ്യം ഓരോ module-ന്റെയും താഴത്തെ text frame അവസാന വരിയിലേക്ക് fit (text കൂടിയാൽ നീളും, കുറഞ്ഞാൽ ചുരുങ്ങും); photo, caption മാറില്ല.
+- Obituary page: obit-കൾ സ്വന്തം column-ൽ മാത്രം മുകളിലേക്ക് (ക്രമം മാറില്ല, column മാറില്ല). 2-column news column 9–10-ൽ
+  (left model: 1–2) മാത്രം; ഇല്ലെങ്കിൽ ആ ഭാഗം ഒഴിഞ്ഞു കിടക്കും.
+- Normal page: News Browser വെച്ച story-കൾ മാത്രം നീങ്ങും, സ്വന്തം column-ൽ നേരെ മുകളിലേക്ക് (gap 4.8 mm); width, column മാറില്ല.
+  Ad, കൈകൊണ്ട് ഉണ്ടാക്കിയ frame, lock / pin ചെയ്തത് നീങ്ങില്ല.
+- ഇടം ഇല്ലാതായ module pasteboard-ലേക്ക് (പേരുകൾ message-ൽ); ഒന്നും overlap ആകില്ല. ഒരു Undo step.
+- Layout > Re-pack Automatically (default OFF): obituary page-ൽ module delete ചെയ്താലോ text edit കഴിഞ്ഞാലോ ആ column ~1 s കഴിഞ്ഞ്
+  re-pack; സ്വന്തം undo step ("Auto re-pack") — ആദ്യ Ctrl+Z re-pack മാത്രം മാറ്റും.
+- പുതിയ actions-ന്റെ key: സ്വന്തം shortcut set (dbi) ഉപയോഗിക്കുമ്പോഴും set-ൽ ഇല്ലാത്ത പുതിയ action-ന് default key കിട്ടും
+  (ആ key set-ൽ മറ്റൊന്നിന് ഇല്ലെങ്കിൽ).
+

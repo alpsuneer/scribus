@@ -725,7 +725,7 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	// The Obituary-model buttons on a row of their own (the mark row is full).
 	QHBoxLayout* obitRow = new QHBoxLayout();
 	m_obitRepackBtn = new SuneerElideButton(tr("Re-pack page"), w);
-	m_obitRepackBtn->setToolTip(tr("Obituary model: move every obit module up in its column to close the gaps (2.3 mm between modules, order kept). Locked items, ads, masthead/folio, news modules and modules pinned with \"Pin position\" are never moved. Then the check: vertical gaps over 4 mm and empty areas over 30 x 30 mm are listed. Runs by itself after every Place."));
+	m_obitRepackBtn->setToolTip(tr("Layout > Re-pack Page (Ctrl+Alt+R): every module's text frame fitted to its last line, then the obit modules moved up in their own columns (order kept, no column change), 2-column news only in the news columns; what no longer fits goes to the pasteboard. Locked items, ads, masthead/folio and modules pinned with \"Pin position\" are never moved. One undo step."));
 	m_obitRepackBtn->setStyleSheet("padding:4px;");
 	connect(m_obitRepackBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onObitRepack);
 	obitRow->addWidget(m_obitRepackBtn, 1);
@@ -852,6 +852,23 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(2000, this, [this, unusedTest]() { runUnusedSelfTest(unusedTest); });
+		});
+		wait->start();
+	}
+	// SUNEER_REPACK_SELFTEST: Re-pack Page / Re-pack Automatically on the opened page (tests/suneer/repack_page.sh)
+	static bool repackTestStarted = false;
+	const QString repackTest = qEnvironmentVariable("SUNEER_REPACK_SELFTEST");
+	if (doc && !repackTest.isEmpty() && !repackTestStarted)
+	{
+		repackTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait, repackTest]() {
+			if (!m_doc || m_doc->isLoading() || !UndoManager::undoEnabled() || !m_mw || !m_mw->HaveDoc)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			QTimer::singleShot(2500, this, [this, repackTest]() { runRepackSelfTest(repackTest); });
 		});
 		wait->start();
 	}

@@ -112,6 +112,20 @@ public:
 	void placeTickedStoryInto(PageItem* placeholder);
 	//! Layout > Remove Empty Slots: every placeholder / ad outline left on the current page. Returns how many.
 	int removeEmptySlots(bool interactive);
+	/*! suneer 2026-10-28 Layout > Re-pack Page (Ctrl+Alt+R, Edit toolbar, page context menu; ui/suneer_news_repack.cpp):
+	    every module's text frame fitted to its last line, then the modules moved so no gap is wider than the
+	    model's module gap and nothing overlaps. Obituary page: obit modules in columns 1-8 in reading order to
+	    the highest free slot of their own column, 2-column news only in the news columns. Normal
+	    page: only News Browser stories, up in their own columns; ads, hand-made, locked and pinned frames stay.
+	    What no longer fits goes to the pasteboard. One undo step. Returns the one-line result. */
+	QString repackPage(bool interactive);
+	//! Layout > Re-pack Automatically (news/repackAuto, default off)
+	static bool repackAutoPref();
+	static void setRepackAutoPref(bool on);
+	//! the document deletes \a items: an obituary module among them -> its columns re-packed ~1 s later (own undo step)
+	void noteRepackDelete(const QList<PageItem*>& items);
+	//! text editing of \a item ended: an obituary module's text frame -> fitted and its columns re-packed ~1 s later
+	void noteRepackTextEdit(PageItem* item);
 	static bool isSlotPlaceholder(const PageItem* item);
 	QList<PageItem*> skeletonItems(int pageIdx) const;
 	//! The ads on a page now (mm, page relative).
@@ -620,6 +634,28 @@ private:
 	QStringList obitRepackPage(int* moved = nullptr, bool* changed = nullptr);
 	void onObitRepack();
 	void onObitPinSelected();
+	//! Re-pack Page: what to work on (the page, the columns an automatic run is limited to, the frames it fits)
+	struct RepackScope
+	{
+		int pageIndex { -1 };
+		bool autoRun { false };                     //!< Re-pack Automatically: own columns only, no column change
+		QList<QPair<double, double>> xRanges;       //!< automatic: the columns of the deleted / edited module (doc x)
+		QList<QPointer<PageItem>> fitOnly;          //!< automatic: only these text frames are fitted
+	};
+	struct RepackResult
+	{
+		int modules { 0 }, moved { 0 }, fitted { 0 }, notFitted { 0 }, overlapsAfter { 0 };
+		int gapsBefore { 0 }, gapsAfter { 0 };
+		double gapsBeforeMm { 0 }, gapsAfterMm { 0 };
+		QStringList parked, details;
+		bool obituary { false };
+	};
+	RepackResult repackCore(const RepackScope& scope);
+	void runAutoRepack();
+	QTimer* m_repackTimer { nullptr };
+	RepackScope m_repackPending;
+	bool m_repacking { false };
+	void runRepackSelfTest(const QString& outPath);
 	//! Settings key of the current page: its pageType, else its name.
 	QString layoutModelKey() const;
 	void fillLayoutModelCombo();

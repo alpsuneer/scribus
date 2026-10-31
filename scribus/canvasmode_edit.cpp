@@ -46,6 +46,7 @@
 #include "scribus.h"
 #include "scribusdoc.h"
 #include "scribusview.h"
+#include "ui/suneer_news_panel.h"
 #include "selection.h"
 #include "textframespellchecker.h"
 #include "ui/contextmenu.h"
@@ -501,6 +502,9 @@ void CanvasMode_Edit::deactivate(bool forGesture)
 			TextFrameSpellChecker::instance()->frameDeactivated(it->asTextFrame());
 	}
 	//>>TSC
+	// suneer 2026-10-28: Re-pack Automatically - the text of an obituary module was edited (off by default)
+	if (!forGesture && it && it->isTextFrame() && m_view->m_ScMW && m_view->m_ScMW->m_suneerNewsPanel)
+		m_view->m_ScMW->m_suneerNewsPanel->noteRepackTextEdit(it);
 	m_view->setRedrawMarkerShown(false);
 	if (!forGesture)
 	{

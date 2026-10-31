@@ -1205,6 +1205,11 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "suneerRemoveEmptySlots";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	name = "suneerRepackPage";
+	scrActions->insert(name, new ScrAction("distribute-vertical-equal", "distribute-vertical-equal", "", defaultKey(name), mainWindow));
+	name = "suneerRepackAuto";
+	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
+	(*scrActions)["suneerRepackAuto"]->setCheckable(true);
 	name = "extrasAutoflowToNewPages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "extrasFixOverflowFrames";
@@ -2137,6 +2142,11 @@ void ActionManager::languageChange()
 	(*scrActions)["suneerPageModelGallery"]->setStatusTip( tr("Whole-page layouts saved from old pages, in page groups; put one's skeleton on the current page"));
 	(*scrActions)["suneerRemoveEmptySlots"]->setTexts( tr("Remove Empty Slots"));
 	(*scrActions)["suneerRemoveEmptySlots"]->setStatusTip( tr("Delete every page model placeholder and ad outline left on the current page"));
+	(*scrActions)["suneerRepackPage"]->setTexts( tr("Re-pack Page"));
+	(*scrActions)["suneerRepackPage"]->setToolTip( tr("Re-pack page: text frames fitted to their last line, gaps closed, nothing overlapping (one undo step)"));
+	(*scrActions)["suneerRepackPage"]->setStatusTip( tr("Fit every story / obituary module to its text and close the gaps on the current page; ads and locked or pinned frames stay"));
+	(*scrActions)["suneerRepackAuto"]->setTexts( tr("Re-pack Automatically"));
+	(*scrActions)["suneerRepackAuto"]->setStatusTip( tr("Obituary pages: after a module is deleted or its text is edited, re-pack those columns (own undo step)"));
 	(*scrActions)["SRDuplicateNewsCheck"]->setToolTip( tr("Duplicate News Checker: find the same headline or the same story printed more than once"));
 	(*scrActions)["SRDuplicateNewsCheck"]->setStatusTip( tr("Find the same headline or the same story printed more than once"));
 	(*scrActions)["extrasAutoflowToNewPages"]->setTexts( tr("Autoflow to New Pages"));
@@ -2413,6 +2423,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsNewsPanel", QKeySequence());
 	defKeys.insert("toolsNewsPanelSettings", QKeySequence());
 	defKeys.insert("suneerApplyChain", QKeySequence());
+	defKeys.insert("suneerRepackPage", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R));
 	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
 	defKeys.insert("itemFitCaptionFrame", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_H));
 	defKeys.insert("suneerGetImage", QKeySequence(Qt::CTRL | Qt::Key_I));
@@ -2880,7 +2891,9 @@ void ActionManager::createDefaultMenus()
 		<< "suneerApplyLayoutModel"
 		<< "suneerPageModules"
 		<< "suneerPageModelGallery"
-		<< "suneerRemoveEmptySlots";
+		<< "suneerRemoveEmptySlots"
+		<< "suneerRepackPage"
+		<< "suneerRepackAuto";
 	//Windows
 	++itmenu;
 	itmenu->second

@@ -12375,6 +12375,8 @@ void ScribusDoc::itemSelection_DeleteItem(Selection* customSelection, bool force
 	// with the pref off it only hints once.
 	if (m_ScMW && m_ScMW->m_suneerNewsPanel)
 	{
+		// suneer 2026-10-28: Re-pack Automatically (off by default: returns at once)
+		m_ScMW->m_suneerNewsPanel->noteRepackDelete(itemSelection->items());
 		QList<PageItem*> noted;
 		for (int i = 0; i < selectedItemCount; ++i)
 		{
