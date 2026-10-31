@@ -163,6 +163,7 @@ if(HAVE_OSG)
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
 		ui/suneer_news_dup.cpp
+		ui/suneer_news_repeat.cpp
 		ui/suneer_news_models.cpp
 		ui/suneer_news_gaps.cpp
 		ui/suneer_news_repack.cpp
@@ -297,6 +298,7 @@ else()
 		ui/suneer_news_panel.cpp
 		ui/suneer_news_obit.cpp
 		ui/suneer_news_dup.cpp
+		ui/suneer_news_repeat.cpp
 		ui/suneer_news_models.cpp
 		ui/suneer_news_gaps.cpp
 		ui/suneer_news_repack.cpp

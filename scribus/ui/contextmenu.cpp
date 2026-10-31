@@ -1044,8 +1044,7 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 		QAction* cvAct = addAction(tr("Convert story groups to weld (page)"));
 		cvAct->setToolTip(tr("Old documents: every grouped story on this page becomes welded frames"));
 		connect(cvAct, &QAction::triggered, panel, [panel]() { panel->convertStoryGroupsToWeld(true); });
-		QAction* dupAct = addAction(tr("Check duplicates on page"));
-		connect(dupAct, &QAction::triggered, panel, [panel]() { panel->checkDuplicatesOnPage(); });
+		addAction(m_ScMW->scrActions["suneerCheckRepetition"]);
 		QAction* obAct = addAction(tr("Process obituary photos (page)"));
 		obAct->setToolTip(tr("Background removal, face crop, Obit BG colour and tone for this page's obituary photos not processed yet"));
 		connect(obAct, &QAction::triggered, panel, [panel]() { panel->processObitPhotos(false); });

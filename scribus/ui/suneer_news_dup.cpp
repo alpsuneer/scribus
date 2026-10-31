@@ -11,11 +11,11 @@ for which a new license (GPL+exception) is in place.
  *    the document (text: the Duplicate News Checker's engine, DupNews; photos: SuneerPhotoHash), or
  *    that the workflow says is used on another page; "Show: no DUP" hides the repeats;
  *  - placing: "This story / photo is already on the page (module X)" [Place anyway] [Skip] [Show];
- *  - "Check duplicates on page": every duplicate pair of the document (stories, photos, the same
- *    story placed twice), click to jump.
+ *  - "Check repetition on page" (suneer_news_repeat.cpp) reuses scanPairs for its stories and photos.
  * Text and photos are compared on a worker thread (QtConcurrent); the GUI thread only snapshots.
  */
 #include "suneer_news_panel.h"
+#include "suneer_news_dup_p.h"
 
 #include <QApplication>
 #include <QDialog>
@@ -50,30 +50,11 @@ for which a new license (GPL+exception) is in place.
 #include "suneerphotohash.h"
 #include "text/specialchars.h"
 
-// one story (or a lone photo) to compare: from the News Browser list or from the document
-struct SuneerDupItem
-{
-	QString sid;        // workflow story id (empty for a frame that is not a placed story)
-	QString title;
-	QString body;
-	QString photo;      // file whose hash stands for its photo (the original for an edited one)
-	QString module;     // the story's name in the document / the list headline
-	bool onPage { false };
-		int listIndex { -1 };   // index in m_newsData for list stories
-};
-
-struct SuneerDupPair
-{
-	int a { -1 };
-	int b { -1 };
-	QString kind;       // "story" (the same id twice), "news" (text), "photo"
-	int score { 0 };
-};
-
 namespace
 {
 	using DupItem = SuneerDupItem;
 	using DupPair = SuneerDupPair;
+	using SuneerDupScan::scanPairs;
 
 	// "(73)" / "73 വയസ്സ്" - the age an obituary states; two different ages are two different people
 	QSet<int> agesOf(const QString& text)
@@ -90,121 +71,125 @@ namespace
 		}
 		return ages;
 	}
-
-	// The worker: every duplicate pair of \a items. Thread-safe (no GUI, no document).
-	QList<DupPair> scanPairs(const QList<DupItem>& items, int threshold, int photoBits)
-	{
-		QList<DupPair> out;
-		QSet<QPair<int, int>> seen;
-		auto add = [&](int a, int b, const QString& kind, int score) {
-			if (a > b)
-				std::swap(a, b);
-			const QPair<int, int> key(a, b);
-			if (seen.contains(key))
-				return;
-			seen.insert(key);
-			out.append(DupPair { a, b, kind, score });
-		};
-		// 1. the same workflow story twice
-		QHash<QString, int> firstOfSid;
-		for (int i = 0; i < items.size(); ++i)
-		{
-			if (items[i].sid.isEmpty())
-				continue;
-			const auto it = firstOfSid.constFind(items[i].sid);
-			if (it != firstOfSid.constEnd())
-				add(*it, i, QStringLiteral("story"), 100);
-			else
-				firstOfSid.insert(items[i].sid, i);
-		}
-		// 2. the text: the Duplicate News Checker's engine (normalised Malayalam, 7-char shingles)
-		DupNews::Job job;
-		job.options.threshold = threshold;
-		job.options.includePasteboard = true;
-		job.options.includeCaptions = true;
-		DupNews::Source src;
-		src.label = QStringLiteral("news");
-		src.live = true;
-		job.sources.append(src);
-		for (const DupItem& d : items)
-		{
-			DupNews::Story s;
-			s.source = 0;
-			s.name = d.module;
-			DupNews::FrameRef f;
-			f.name = d.module;
-			f.page = 0;
-			s.frames.append(f);
-			QString title = d.title;
-			title.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(SpecialChars::PARSEP, QLatin1Char(' '));
-			s.text = title;
-			DupNews::Para head;
-			head.start = 0;
-			head.end = title.size();
-			head.styles << QStringLiteral("head");
-			s.paras.append(head);
-			if (!d.body.isEmpty())
-			{
-				s.text += SpecialChars::PARSEP;
-				DupNews::Para body;
-				body.start = s.text.size();
-				s.text += d.body;
-				body.end = s.text.size();
-				body.styles << QStringLiteral("body");
-				s.paras.append(body);
-			}
-			job.stories.append(s);
-		}
-		const DupNews::Result r = DupNews::run(job, nullptr);
-		for (const DupNews::Group& g : r.groups)
-		{
-			for (int x = 0; x < g.members.size(); ++x)
-				for (int y = x + 1; y < g.members.size(); ++y)
-				{
-					const int a = g.members[x].story, b = g.members[y].story;
-					if (a < 0 || b < 0 || a >= items.size() || b >= items.size())
-						continue;
-					// a headline alone (same name) is not the same obituary when both have a body
-					if (g.kind == DupNews::Kind::Headline && r.stories[a].bodyNorm.size() >= 60 && r.stories[b].bodyNorm.size() >= 60)
-						continue;
-					const QSet<int> agesA = agesOf(items[a].title + QLatin1Char(' ') + items[a].body);
-					const QSet<int> agesB = agesOf(items[b].title + QLatin1Char(' ') + items[b].body);
-					if (!agesA.isEmpty() && !agesB.isEmpty() && !agesA.intersects(agesB))
-						continue;                                  // two different ages: two different people
-					add(a, b, QStringLiteral("news"), qMin(g.members[x].score, g.members[y].score));
-				}
-		}
-		// 3. the photos
-		QVector<SuneerPhotoHash::Hash> hashes(items.size());
-		for (int i = 0; i < items.size(); ++i)
-			if (!items[i].photo.isEmpty())
-				hashes[i] = SuneerPhotoHash::ofFile(items[i].photo);
-		for (int i = 0; i < items.size(); ++i)
-			for (int j = i + 1; j < items.size(); ++j)
-			{
-				if (!hashes[i].ok || !hashes[j].ok)
-					continue;
-				const int d = SuneerPhotoHash::distance(hashes[i], hashes[j]);
-				if (d <= photoBits)
-				{
-					QSet<QPair<int, int>> dummy;
-					const QPair<int, int> key(i, j);
-					if (seen.contains(key))
-					{
-						// already a text / id pair: the photo is part of the same duplicate
-						continue;
-					}
-					add(i, j, QStringLiteral("photo"), SuneerPhotoHash::percent(d));
-				}
-			}
-		return out;
-	}
-
 	int dupThreshold()
 	{
-		QSettings s(QStringLiteral("Faircode"), QStringLiteral("ScribusNews"));
-		return qBound(50, s.value(QStringLiteral("dup/threshold"), 85).toInt(), 100);
+		return SuneerDupScan::threshold();
 	}
+}
+
+// The worker: every duplicate pair of \a items. Thread-safe (no GUI, no document).
+QList<SuneerDupPair> SuneerDupScan::scanPairs(const QList<SuneerDupItem>& items, int threshold, int photoBits)
+{
+	QList<SuneerDupPair> out;
+	QSet<QPair<int, int>> seen;
+	auto add = [&](int a, int b, const QString& kind, int score) {
+		if (a > b)
+			std::swap(a, b);
+		const QPair<int, int> key(a, b);
+		if (seen.contains(key))
+			return;
+		seen.insert(key);
+		out.append(SuneerDupPair { a, b, kind, score });
+	};
+	// 1. the same workflow story twice
+	QHash<QString, int> firstOfSid;
+	for (int i = 0; i < items.size(); ++i)
+	{
+		if (items[i].sid.isEmpty())
+			continue;
+		const auto it = firstOfSid.constFind(items[i].sid);
+		if (it != firstOfSid.constEnd())
+			add(*it, i, QStringLiteral("story"), 100);
+		else
+			firstOfSid.insert(items[i].sid, i);
+	}
+	// 2. the text: the Duplicate News Checker's engine (normalised Malayalam, 7-char shingles)
+	DupNews::Job job;
+	job.options.threshold = threshold;
+	job.options.includePasteboard = true;
+	job.options.includeCaptions = true;
+	DupNews::Source src;
+	src.label = QStringLiteral("news");
+	src.live = true;
+	job.sources.append(src);
+	for (const SuneerDupItem& d : items)
+	{
+		DupNews::Story s;
+		s.source = 0;
+		s.name = d.module;
+		DupNews::FrameRef f;
+		f.name = d.module;
+		f.page = 0;
+		s.frames.append(f);
+		QString title = d.title;
+		title.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(SpecialChars::PARSEP, QLatin1Char(' '));
+		s.text = title;
+		DupNews::Para head;
+		head.start = 0;
+		head.end = title.size();
+		head.styles << QStringLiteral("head");
+		s.paras.append(head);
+		if (!d.body.isEmpty())
+		{
+			s.text += SpecialChars::PARSEP;
+			DupNews::Para body;
+			body.start = s.text.size();
+			s.text += d.body;
+			body.end = s.text.size();
+			body.styles << QStringLiteral("body");
+			s.paras.append(body);
+		}
+		job.stories.append(s);
+	}
+	const DupNews::Result r = DupNews::run(job, nullptr);
+	for (const DupNews::Group& g : r.groups)
+	{
+		for (int x = 0; x < g.members.size(); ++x)
+			for (int y = x + 1; y < g.members.size(); ++y)
+			{
+				const int a = g.members[x].story, b = g.members[y].story;
+				if (a < 0 || b < 0 || a >= items.size() || b >= items.size())
+					continue;
+				// a headline alone (same name) is not the same obituary when both have a body
+				if (g.kind == DupNews::Kind::Headline && r.stories[a].bodyNorm.size() >= 60 && r.stories[b].bodyNorm.size() >= 60)
+					continue;
+				const QSet<int> agesA = agesOf(items[a].title + QLatin1Char(' ') + items[a].body);
+				const QSet<int> agesB = agesOf(items[b].title + QLatin1Char(' ') + items[b].body);
+				if (!agesA.isEmpty() && !agesB.isEmpty() && !agesA.intersects(agesB))
+					continue;                                  // two different ages: two different people
+				add(a, b, QStringLiteral("news"), qMin(g.members[x].score, g.members[y].score));
+			}
+	}
+	// 3. the photos
+	QVector<SuneerPhotoHash::Hash> hashes(items.size());
+	for (int i = 0; i < items.size(); ++i)
+		if (!items[i].photo.isEmpty())
+			hashes[i] = SuneerPhotoHash::ofFile(items[i].photo);
+	for (int i = 0; i < items.size(); ++i)
+		for (int j = i + 1; j < items.size(); ++j)
+		{
+			if (!hashes[i].ok || !hashes[j].ok)
+				continue;
+			int d = 64;
+			if (SuneerPhotoHash::samePhoto(hashes[i], hashes[j], photoBits, &d))
+			{
+				QSet<QPair<int, int>> dummy;
+				const QPair<int, int> key(i, j);
+				if (seen.contains(key))
+				{
+					// already a text / id pair: the photo is part of the same duplicate
+					continue;
+				}
+				add(i, j, QStringLiteral("photo"), SuneerPhotoHash::percent(d));
+			}
+		}
+	return out;
+}
+
+int SuneerDupScan::threshold()
+{
+	QSettings s(QStringLiteral("Faircode"), QStringLiteral("ScribusNews"));
+	return qBound(50, s.value(QStringLiteral("dup/threshold"), 85).toInt(), 100);
 }
 
 // The stories and photos of the document: News Browser stories by their news.story, every other
@@ -491,84 +476,6 @@ void SuneerNewsPanel::handleStoryDrop(PageItem* slot, int newsIndex)
 	});
 }
 
-// "Check duplicates on page": every pair in the document, in the background, then a list to jump from.
-void SuneerNewsPanel::checkDuplicatesOnPage()
-{
-	if (!m_doc)
-		return;
-	SuneerPhotoHash::loadCache(SuneerPhotoHash::cacheFileFor(m_doc));
-	auto items = std::make_shared<QList<DupItem>>();
-	auto frames = std::make_shared<QList<QList<PageItem*>>>();
-	dupCollectDocument(m_doc, *items, *frames);
-	setStatus(tr("Checking %n story(ies) / photo(s) for duplicates ...", "", items->size()));
-	const int threshold = dupThreshold(), bits = SuneerPhotoHash::maxDistance();
-	auto* w = new QFutureWatcher<QList<DupPair>>(this);
-	auto t = std::make_shared<QElapsedTimer>();
-	t->start();
-	QPointer<ScribusDoc> doc = m_doc;
-	connect(w, &QFutureWatcher<QList<DupPair>>::finished, this, [this, w, items, frames, doc, t]() {
-		w->deleteLater();
-		SuneerPhotoHash::saveCache(SuneerPhotoHash::cacheFileFor(doc));
-		if (!doc || doc != m_doc)
-			return;
-		const QList<DupPair> pairs = w->result();
-		const QString head = tr("%n duplicate pair(s) - %1 stories / photos checked in %2 ms", "", pairs.size()).arg(items->size()).arg(t->elapsed());
-		m_dupLog = head;
-		apiLog(QStringLiteral("check duplicates on page: ") + head);
-		setStatus(head);
-		auto* dlg = new QDialog(this);
-		dlg->setAttribute(Qt::WA_DeleteOnClose);
-		dlg->setWindowTitle(tr("Duplicates on the page"));
-		auto* lay = new QVBoxLayout(dlg);
-		lay->addWidget(new QLabel(head + (pairs.isEmpty() ? QString() : tr("\nClick a pair to select both and go there.")), dlg));
-		auto* tree = new QTreeWidget(dlg);
-		tree->setColumnCount(4);
-		tree->setHeaderLabels({ tr("Kind"), tr("First"), tr("Second"), tr("Score") });
-		tree->setRootIsDecorated(false);
-		QStringList testLines;
-		for (const DupPair& p : pairs)
-		{
-			const QString kind = p.kind == QLatin1String("story") ? tr("same story twice") : p.kind == QLatin1String("photo") ? tr("photo") : tr("news");
-			auto label = [&](int i) { return (*items)[i].title.isEmpty() ? (*items)[i].module : QStringLiteral("%1 (%2)").arg((*items)[i].title.left(40), (*items)[i].module); };
-			auto* row = new QTreeWidgetItem(tree, { kind, label(p.a), label(p.b), QStringLiteral("%1 %").arg(p.score) });
-			row->setData(0, Qt::UserRole, p.a);
-			row->setData(0, Qt::UserRole + 1, p.b);
-			testLines << QStringLiteral("%1 | %2 | %3 | %4").arg(kind, label(p.a), label(p.b)).arg(p.score);
-		}
-		m_dupPagePairs = testLines;
-		tree->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
-		lay->addWidget(tree);
-		auto* box = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
-		connect(box, &QDialogButtonBox::rejected, dlg, &QDialog::close);
-		lay->addWidget(box);
-		connect(tree, &QTreeWidget::itemClicked, this, [this, frames, doc](QTreeWidgetItem* row, int) {
-			if (!doc || doc != m_doc || !m_mw)
-				return;
-			auto alive = [this](PageItem* f) {
-				for (int i = 0; i < m_doc->Items->count(); ++i)
-					if (m_doc->Items->at(i) == f || (m_doc->Items->at(i)->isGroup() && m_doc->Items->at(i)->getAllChildren().contains(f)))
-						return true;
-				return false;
-			};
-			const QList<PageItem*> a = frames->value(row->data(0, Qt::UserRole).toInt());
-			const QList<PageItem*> b = frames->value(row->data(0, Qt::UserRole + 1).toInt());
-			if (a.isEmpty() || !alive(a.first()))
-			{
-				setStatus(tr("That frame is no longer in the document - check again"), true);
-				return;
-			}
-			m_mw->selectItemsFromOutlines(a.first());
-			for (PageItem* f : a + b)
-				if (alive(f))
-					m_doc->m_Selection->addItem(f);
-		});
-		dlg->resize(720, 380);
-		dlg->show();
-		m_dupDialog = dlg;
-	});
-	w->setFuture(QtConcurrent::run([items, threshold, bits]() { return scanPairs(*items, threshold, bits); }));
-}
-
 // SUNEER_DUP_SELFTEST=<report prefix> (tests/suneer/news_duplicates.sh, fixture mode): a real obituary
 // page with its photos, and a list of its 30 stories + a repeated obituary (new id, same text with
 // spaces / soft hyphens / ZWNJ changed, its photo resized + recompressed + cropped + renamed), a story
@@ -753,6 +660,24 @@ void SuneerNewsPanel::runDupSelfTest(const QString& report)
 		      !m_dupTestLog.join(' ').contains(QStringLiteral("warning:")) && framesOf("f-7") > 0);
 		m_dupTestAnswer.clear();
 		// 4. Check duplicates on page: the placed repeat and its original; nothing else
+		// Place Selected put dup-1 / dup-2 on the pasteboard (the page is full); the page check never
+		// looks there, so they go onto the page first, side by side over the right-hand columns
+		{
+			ScPage* pg = m_doc->Pages->at(0);
+			double x = pg->xOffset() + pg->width() - 260;
+			for (const char* sid : { "dup-1", "dup-2" })
+			{
+				for (int i = 0; i < m_doc->Items->count(); ++i)
+				{
+					PageItem* it = m_doc->Items->at(i);
+					if (attr(it, "news.serverId") != QLatin1String(sid) || it->OwnPage >= 0)
+						continue;
+					it->setXYPos(x, pg->yOffset() + (it->isImageFrame() ? 40 : 160));
+					it->setOwnerPage(0);
+				}
+				x += 125;
+			}
+		}
 		m_dupPagePairs.clear();
 		checkDuplicatesOnPage();
 		waitFor([this]() { return !m_dupPagePairs.isEmpty() || m_dupDialog; }, 60000, [=](bool) {

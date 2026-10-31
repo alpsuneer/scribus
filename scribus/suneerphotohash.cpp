@@ -6,6 +6,7 @@ for which a new license (GPL+exception) is in place.
 */
 #include "suneerphotohash.h"
 
+#include <QColorSpace>
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
@@ -20,6 +21,8 @@ for which a new license (GPL+exception) is in place.
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <cstring>
 
 #include "pageitem.h"
 #include "scribusdoc.h"
@@ -92,16 +95,60 @@ namespace
 				h |= (quint64(1) << i);
 		return h;
 	}
+
+	// 16x16 grey, mean removed, scaled to unit length, stored as int8 (x400: typical values ~25)
+	void thumb(const QImage& src, qint8* out)
+	{
+		const QImage g = src.convertToFormat(QImage::Format_Grayscale8).scaled(16, 16, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		double v[256];
+		double mean = 0;
+		for (int y = 0; y < 16; ++y)
+		{
+			const uchar* row = g.constScanLine(y);
+			for (int x = 0; x < 16; ++x)
+				mean += (v[y * 16 + x] = row[x]);
+		}
+		mean /= 256.0;
+		double norm = 0;
+		for (double& x : v)
+		{
+			x -= mean;
+			norm += x * x;
+		}
+		norm = std::sqrt(norm);
+		for (int i = 0; i < 256; ++i)
+			out[i] = norm > 0 ? qint8(qBound(-127.0, std::round(v[i] / norm * 400.0), 127.0)) : 0;
+	}
+
+	double correlation(const qint8* a, const qint8* b)
+	{
+		qint64 ab = 0, aa = 0, bb = 0;
+		for (int i = 0; i < 256; ++i)
+		{
+			ab += int(a[i]) * b[i];
+			aa += int(a[i]) * a[i];
+			bb += int(b[i]) * b[i];
+		}
+		return (aa > 0 && bb > 0) ? double(ab) / std::sqrt(double(aa) * double(bb)) : 0.0;
+	}
 }
 
 namespace SuneerPhotoHash
 {
 
-Hash ofImage(const QImage& img)
+Hash ofImage(const QImage& image)
 {
 	Hash h;
-	if (img.isNull() || img.width() < 8 || img.height() < 8)
+	if (image.isNull() || image.width() < 8 || image.height() < 8)
 		return h;
+	// A CMYK photo (common in print: CMYK JPEGs) carries a CMYK colour space, and Qt 6.8 crashes
+	// converting it to grey (QImage::scaled -> convertToFormat_helper, SIGSEGV; measured on a real
+	// page, 2026-10-31). The hash needs no colour management: drop it, then plain CMYK -> RGB.
+	QImage img = image;
+	if (img.colorSpace().isValid() && img.colorSpace().colorModel() != QColorSpace::ColorModel::Rgb)
+		img.setColorSpace(QColorSpace());
+	if (img.format() == QImage::Format_CMYK8888)
+		img = img.convertToFormat(QImage::Format_RGB32);
 	// a transparent cut-out (background removed) is judged on white, like the page shows it
 	QImage flat = img;
 	if (img.hasAlphaChannel())
@@ -121,13 +168,17 @@ Hash ofImage(const QImage& img)
 		}
 	}
 	h.h[0] = phash(flat);
+	thumb(flat, h.t[0]);
 	const double frac[3] = { 0.90, 0.85, 0.80 };
 	for (int k = 0; k < 3; ++k)
 	{
 		const int cw = int(flat.width() * frac[k]), ch = int(flat.height() * frac[k]);
-		h.h[k + 1] = phash(flat.copy((flat.width() - cw) / 2, (flat.height() - ch) / 2, cw, ch));
+		const QImage crop = flat.copy((flat.width() - cw) / 2, (flat.height() - ch) / 2, cw, ch);
+		h.h[k + 1] = phash(crop);
+		thumb(crop, h.t[k + 1]);
 	}
 	h.ok = true;
+	h.thumbs = true;
 	return h;
 }
 
@@ -140,7 +191,7 @@ Hash ofFile(const QString& path)
 	{
 		QMutexLocker lock(&cacheMutex());
 		const auto it = memCache().constFind(key);
-		if (it != memCache().constEnd())
+		if (it != memCache().constEnd() && it->thumbs)
 			return *it;
 	}
 	QImageReader reader(path);
@@ -167,6 +218,22 @@ int distance(const Hash& a, const Hash& b)
 	for (int k = 0; k < 4; ++k)
 		best = qMin(best, qMin(int(qPopulationCount(a.h[0] ^ b.h[k])), int(qPopulationCount(a.h[k] ^ b.h[0]))));
 	return best;
+}
+
+bool samePhoto(const Hash& a, const Hash& b, int maxBits, int* bits)
+{
+	const int d = distance(a, b);
+	if (bits)
+		*bits = d;
+	if (d > maxBits)
+		return false;
+	if (!a.thumbs || !b.thumbs)
+		return true;
+	// the thumbnails, aligned the same way as the hashes (one may be a crop of the other)
+	double best = 0;
+	for (int k = 0; k < 4; ++k)
+		best = qMax(best, qMax(correlation(a.t[0], b.t[k]), correlation(a.t[k], b.t[0])));
+	return best >= 0.95;
 }
 
 int maxDistance()
@@ -226,6 +293,12 @@ void loadCache(const QString& jsonPath)
 		for (int k = 0; k < 4; ++k)
 			h.h[k] = parts[k].toULongLong(nullptr, 16);
 		h.ok = true;
+		const QByteArray t = QByteArray::fromBase64(e[QStringLiteral("t")].toString().toLatin1());
+		if (t.size() == int(sizeof(h.t)))
+		{
+			memcpy(h.t, t.constData(), sizeof(h.t));
+			h.thumbs = true;
+		}
 		memCache().insert(it.key(), h);
 	}
 }
@@ -246,6 +319,8 @@ void saveCache(const QString& jsonPath)
 			QJsonObject e;
 			e[QStringLiteral("h")] = QStringLiteral("%1 %2 %3 %4").arg(it->h[0], 16, 16, QLatin1Char('0')).arg(it->h[1], 16, 16, QLatin1Char('0'))
 			                             .arg(it->h[2], 16, 16, QLatin1Char('0')).arg(it->h[3], 16, 16, QLatin1Char('0'));
+			if (it->thumbs)
+				e[QStringLiteral("t")] = QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(it->t), sizeof(it->t)).toBase64());
 			o.insert(it.key(), e);
 		}
 	}

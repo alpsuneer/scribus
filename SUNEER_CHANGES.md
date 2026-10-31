@@ -1611,3 +1611,16 @@ scribus
 - Photo hash (pHash) `<sla>_photos/hashes.json`-ൽ cache; BG removed / edit ചെയ്ത ഫോട്ടോ original-ന്റെ hash.
 - Settings → Layout: "Duplicate news at" (85 %), "Same photo within" (6 bits). Background-ൽ (154 stories ~0.5 s).
 - Test: `tests/suneer/news_duplicates.sh <obituary page.sla> <dir>`.
+
+### 108. Check Repetition on Page — ഒരേ വാർത്ത, ഒരേ ഫോട്ടോ, ആവർത്തിച്ച വാചകം / വാക്ക്
+- **Layout → Check Repetition on Page…**, Edit toolbar button, page right-click, News Browser-ലെ button, **Ctrl+Alt+D**.
+  ഈ page മാത്രം (panel-ൽ "Whole document" തിരഞ്ഞെടുക്കാം).
+- കണ്ടെത്തുന്നത്: ഒരേ story id രണ്ടുതവണ; മറ്റൊരു id-ൽ ഏകദേശം ഒരേ വാർത്ത (Malayalam normalise, മുഴുവൻ text-ഉം ≥ 85 %);
+  ഒരേ ഫോട്ടോ (resize / recompress / ചെറിയ crop / BG removed); ഒരു story-യിൽ paragraph / വാചകം ആവർത്തിച്ചത്;
+  രണ്ട് story-കളിൽ ഒരേ നീണ്ട വാചകം; "അന്തരിച്ചു അന്തരിച്ചു" പോലെ വാക്ക് രണ്ടുതവണ.
+- Entry click → രണ്ടും select, zoom, മഞ്ഞ mark (screen-ൽ മാത്രം, print / PDF-ൽ ഇല്ല). [Ignore] [Delete this one] — ഒരു Delete = ഒരു undo.
+- Pasteboard, hidden / non-printing layer, ചെറിയ icon / strip (< 14 mm) നോക്കില്ല.
+- തിരുത്തൽ: CMYK JPEG ഉള്ള page-ൽ photo hash Scribus crash ചെയ്തിരുന്നു (#107 DUP badge-ഉം) — ഇനി ഇല്ല.
+- തിരുത്തൽ: ഒരേ വാർത്ത രണ്ടുതവണ place ചെയ്ത് ഒന്ന് delete ചെയ്താൽ workflow-ൽ Unused ആയിരുന്നു — ഇനി മറ്റേത് ഉണ്ടെങ്കിൽ ഇല്ല.
+- ഫോട്ടോ: 6 bits-ന് ഉള്ളിൽ + thumbnail correlation ≥ 0.95 (രണ്ട് വ്യത്യസ്ത സ്ത്രീകളുടെ ഫോട്ടോ 6 bits ആയിരുന്നു).
+- Test: `tests/suneer/repeat_on_page.sh <page.sla> <dir>`; `SUNEER_REPEAT_MODE=scan` = false positive scan.

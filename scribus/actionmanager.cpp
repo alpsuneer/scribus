@@ -1207,6 +1207,8 @@ void ActionManager::initExtrasMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "suneerRepackPage";
 	scrActions->insert(name, new ScrAction("distribute-vertical-equal", "distribute-vertical-equal", "", defaultKey(name), mainWindow));
+	name = "suneerCheckRepetition";
+	scrActions->insert(name, new ScrAction("edit-find-replace", "edit-find-replace", "", defaultKey(name), mainWindow));
 	name = "suneerRepackAuto";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	(*scrActions)["suneerRepackAuto"]->setCheckable(true);
@@ -2143,6 +2145,9 @@ void ActionManager::languageChange()
 	(*scrActions)["suneerRemoveEmptySlots"]->setTexts( tr("Remove Empty Slots"));
 	(*scrActions)["suneerRemoveEmptySlots"]->setStatusTip( tr("Delete every page model placeholder and ad outline left on the current page"));
 	(*scrActions)["suneerRepackPage"]->setTexts( tr("Re-pack Page"));
+	(*scrActions)["suneerCheckRepetition"]->setTexts( tr("Check Repetition on Page..."));
+	(*scrActions)["suneerCheckRepetition"]->setToolTip( tr("Check repetition on page: the same news or photo twice, a paragraph, sentence or word repeated (nothing is changed)"));
+	(*scrActions)["suneerCheckRepetition"]->setStatusTip( tr("List the same story, the same photo and repeated text on the current page; click an entry to see both"));
 	(*scrActions)["suneerRepackPage"]->setToolTip( tr("Re-pack page: text frames fitted to their last line, gaps closed, nothing overlapping (one undo step)"));
 	(*scrActions)["suneerRepackPage"]->setStatusTip( tr("Fit every story / obituary module to its text and close the gaps on the current page; ads and locked or pinned frames stay"));
 	(*scrActions)["suneerRepackAuto"]->setTexts( tr("Re-pack Automatically"));
@@ -2425,6 +2430,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("toolsNewsPanelSettings", QKeySequence());
 	defKeys.insert("suneerApplyChain", QKeySequence());
 	defKeys.insert("suneerRepackPage", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_R));
+	defKeys.insert("suneerCheckRepetition", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
 	defKeys.insert("suneerAutoFitHeight", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_C));
 	defKeys.insert("itemFitCaptionFrame", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_H));
 	defKeys.insert("suneerGetImage", QKeySequence(Qt::CTRL | Qt::Key_I));
@@ -2894,6 +2900,7 @@ void ActionManager::createDefaultMenus()
 		<< "suneerPageModelGallery"
 		<< "suneerRemoveEmptySlots"
 		<< "suneerRepackPage"
+		<< "suneerCheckRepetition"
 		<< "suneerRepackAuto";
 	//Windows
 	++itmenu;

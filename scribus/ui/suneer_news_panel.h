@@ -24,6 +24,7 @@
 #include <QString>
 #include <QStringList>
 #include <QSet>
+#include <memory>
 #include <QPair>
 #include <QRectF>
 #include <QMap>
@@ -36,6 +37,7 @@ class QDateEdit;
 class QDialog;
 struct SuneerDupItem;
 struct SuneerDupPair;
+struct SuneerRepeatState;
 class QLabel;
 class QListWidget;
 class QListWidgetItem;
@@ -285,6 +287,14 @@ private:
 	QString m_dupLog;
 	QStringList m_dupPagePairs;                 // the last "Check duplicates on page" (self-test)
 	QPointer<QDialog> m_dupDialog;
+	std::shared_ptr<struct SuneerRepeatState> m_repeat;   // the repetition panel and its last check
+	QSet<QString> m_repeatIgnored;              // entries hidden with Ignore (until Scribus quits)
+	void startRepeatCheck();
+	void fillRepeatResults(const QString& where);
+	void showRepeat(int index);
+	void ignoreRepeat(int index);
+	void deleteRepeat(int index, int which);
+	void runRepeatSelfTest(const QString& report);
 	QString m_dupTestAnswer;                    // self-test: "place" / "skip" / "show"
 	QStringList m_dupTestLog;
 	void runDupSelfTest(const QString& report);
@@ -586,6 +596,9 @@ public:
 	void processObitPhotos(bool selectionOnly);
 	//! "Check duplicates on page": every duplicate pair of the document (stories, photos, a story placed twice), click to jump.
 	void checkDuplicatesOnPage();
+	//! "Check repetition on page": the same news / photo twice and repeated text on the current page
+	//! (or the whole document), in a panel to jump, ignore or delete from (suneer_news_repeat.cpp).
+	void checkRepetition(bool wholeDocument = false);
 	//! An obituary photo frame "Process obituary photos" takes (\a why: why not - edited by hand, already processed, ...).
 	bool obitPhotoNeedsProcessing(PageItem* item, QString* why = nullptr) const;
 	static bool markUnusedOnDeletePref();

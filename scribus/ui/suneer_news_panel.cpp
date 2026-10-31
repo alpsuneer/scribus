@@ -873,9 +873,9 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	});
 	vl->addWidget(m_obitWfBtn);
 	{
-		auto* dupBtn = new SuneerElideButton(tr("Check duplicates on page"), w);
+		auto* dupBtn = new SuneerElideButton(tr("Check repetition on page"), w);
 		dupBtn->setObjectName("checkDuplicatesBtn");
-		dupBtn->setToolTip(tr("Every story / photo of the document that repeats another one (the same story placed twice, a near copy of the text, the same photo even resized or cropped a little), with a score; click a pair to go there. Runs in the background."));
+		dupBtn->setToolTip(tr("The same story twice (or a near copy with another id), the same photo twice (even resized or cropped a little), a paragraph, sentence or word repeated - on this page, with a score; click an entry to see both. Ctrl+Alt+D. Runs in the background."));
 		dupBtn->setStyleSheet("padding:4px;");
 		connect(dupBtn, &QPushButton::clicked, this, &SuneerNewsPanel::checkDuplicatesOnPage);
 		vl->addWidget(dupBtn);
@@ -924,6 +924,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_REPEAT_SELFTEST"))
+		QTimer::singleShot(5000, this, [this]() { runRepeatSelfTest(qEnvironmentVariable("SUNEER_REPEAT_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_DUP_SELFTEST"))
 		QTimer::singleShot(5000, this, [this]() { runDupSelfTest(qEnvironmentVariable("SUNEER_DUP_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_OBITWF_SELFTEST"))
@@ -2562,9 +2564,10 @@ void SuneerNewsPanel::checkDeletedStories()
 		if (indexCount(it.key()) == 0)
 		{
 			// the index says gone: confirmed with one scan for THIS id only, so a frame made by a path
-			// without a hook (Item > Duplicate, a script) never leads to a wrong mark
+			// without a hook (Item > Duplicate, a script) never leads to a wrong mark; and the same
+			// workflow story placed twice (another news.story) is still on the page when one copy goes
 			indexResync(it.key());
-			if (indexCount(it.key()) == 0)
+			if (indexCount(it.key()) == 0 && !findStoryItemInDoc(it.value().serverId))
 				gone << it.value();
 		}
 		it = m_deleted.erase(it);

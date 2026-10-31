@@ -391,6 +391,7 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_TAKEOVER_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_OBITWF_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_DUP_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_REPEAT_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_IMGKEEP_SELFTEST");
 }
 
@@ -774,6 +775,7 @@ void ScribusMainWindow::initToolBars()
 	// suneer 2026-10-28: Layout > Re-pack Page on the Edit toolbar
 	editToolBar->addSeparator();
 	editToolBar->addAction(scrActions["suneerRepackPage"]);
+	editToolBar->addAction(scrActions["suneerCheckRepetition"]);
 	modeToolBar = new ModeToolBar(this);
 	pdfToolBar = new PDFToolBar(this);
 	viewToolBar = new ViewToolBar(this);
@@ -1082,6 +1084,8 @@ void ScribusMainWindow::initPalettes()
 	connect(scrActions["suneerRemoveEmptySlots"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->removeEmptySlots(true); });
 	scrActions["suneerRepackPage"]->setShortcutContext(Qt::ApplicationShortcut);
 	connect(scrActions["suneerRepackPage"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->repackPage(true); });
+	scrActions["suneerCheckRepetition"]->setShortcutContext(Qt::ApplicationShortcut);
+	connect(scrActions["suneerCheckRepetition"], &QAction::triggered, this, [this] { if (m_suneerNewsPanel && HaveDoc) m_suneerNewsPanel->checkRepetition(false); });
 	scrActions["suneerRepackAuto"]->setChecked(SuneerNewsPanel::repackAutoPref());
 	connect(scrActions["suneerRepackAuto"], &QAction::toggled, this, [](bool on) { SuneerNewsPanel::setRepackAutoPref(on); });
 	connect(scrActions["suneerAutoFitText"], &QAction::toggled, this, &ScribusMainWindow::suneerAutoFitTextToggled);
@@ -1886,6 +1890,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->addMenuItemString("suneerRemoveEmptySlots", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerRepackPage", "SuneerLayout");
+	scrMenuMgr->addMenuItemString("suneerCheckRepetition", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerRepackAuto", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("SEPARATOR", "SuneerLayout");
 	scrMenuMgr->addMenuItemString("suneerAutoLayout", "SuneerLayout");
