@@ -193,6 +193,7 @@ public:
 	void setPreviewMode(bool on) { m_viewMode.previewMode = on; }
 	bool isPreviewMode() const { return m_viewMode.previewMode || m_viewMode.viewAsPreview; }
 	bool isItemMoving() const { return m_viewMode.operItemMoving; }
+	bool isItemResizing() const { return m_viewMode.operItemResizing; }
 	bool usePreviewVisual() const { return m_viewMode.viewAsPreview && m_viewMode.previewVisual != 0; }
 	int previewVisual() const { return m_viewMode.previewVisual; }
 	void setPreviewVisual(int mode);
@@ -200,6 +201,7 @@ public:
 	void DrawMasterItems(ScPainter *painter, const ScPage *page, const ScLayer& layer, QRect clip);
 	//notesFramesPass determine if notes frames are drawn or not
 	void DrawPageItems(ScPainter *painter, const ScLayer& layer, QRect clip, bool notesFramesPass);
+	bool event(QEvent* e) override;
 	void paintEvent ( QPaintEvent * p ) override;
 	void focusInEvent(QFocusEvent* e) override;
 	void inputMethodEvent(QInputMethodEvent* event) override;

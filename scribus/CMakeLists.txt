@@ -155,6 +155,7 @@ if(HAVE_OSG)
 		ui/scshortcutregistry.cpp
 		ui/suneerlinkedimagesdialog.cpp
 		suneerimagelinks.cpp
+		suneerphotobadges.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		ui/suneergappopup.cpp
@@ -283,6 +284,7 @@ else()
 		ui/scshortcutregistry.cpp
 		ui/suneerlinkedimagesdialog.cpp
 		suneerimagelinks.cpp
+		suneerphotobadges.cpp
 		ui/faircodehelpviewer.cpp
 		ui/suneercontrolbar.cpp
 		ui/suneergappopup.cpp

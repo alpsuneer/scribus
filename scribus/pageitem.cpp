@@ -2213,35 +2213,8 @@ void PageItem::DrawObj_Decoration(ScPainter *p)
 			double ofy = m_height - ofwh*3;
 			p->drawSharpRect(ofx, ofy, ofwh, ofwh);
 		}
-		// Linked / missing image badge. Screen only: this function is never
-		// reached by the PDF, PostScript or print output, and drawAsPreview
-		// covers the preview mode and Export as Image.
-		if (isImageFrame() && !m_Doc->drawAsPreview && SuneerImageLinks::badgesShown())
-		{
-			const SuneerImageLinks::Status linkStatus = SuneerImageLinks::statusOf(this);
-			if (linkStatus == SuneerImageLinks::Linked || linkStatus == SuneerImageLinks::Missing)
-			{
-				// A fixed size in SCREEN pixels at any zoom (Preferences > Item
-				// Tools: 20 / 24 / 28 px high), so it is drawn through a 1/zoom
-				// scale. Inset 8 px from the top-left corner: the selection
-				// handles are 6 px squares centred on the corners and edge
-				// midpoints, so they reach 3 px into the frame and stay clear.
-				const double zoom = qMax(p->zoomFactor(), 0.01);
-				const double frameW = m_width * zoom;
-				const double frameH = m_height * zoom;
-				const int badgeH = SuneerImageLinks::badgePixels();
-				QImage badge = SuneerImageLinks::badgeImage(linkStatus, true);
-				// A frame too narrow for the word gets the square badge.
-				if (badge.width() + 16.0 > frameW)
-					badge = SuneerImageLinks::badgeImage(linkStatus, false);
-				const double inset = qBound(0.0, (qMin(frameW, frameH) - badgeH) / 2.0, 8.0);
-				p->save();
-				p->translate(inset / zoom, inset / zoom);
-				p->scale(1.0 / zoom, 1.0 / zoom);
-				p->drawImage(&badge);
-				p->restore();
-			}
-		}
+		// The LINK / MISSING badge is a canvas overlay now (SuneerPhotoBadges),
+		// so it never enters the page buffer, print, PDF or thumbnails.
 		if (no_fill && no_stroke && m_Doc->guidesPrefs().framesShown)
 		{
 			p->setPen(PrefsManager::instance().appPrefs.displayPrefs.frameNormColor, scpInv, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);

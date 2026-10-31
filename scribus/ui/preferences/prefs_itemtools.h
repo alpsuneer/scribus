@@ -43,6 +43,7 @@ class SCRIBUS_API Prefs_ItemTools : public Prefs_Pane, Ui::Prefs_ItemTools
 		bool showFontPreview { false };
 		class QCheckBox* m_alwaysEmbedImagesCheckBox { nullptr };
 		class QComboBox* m_linkBadgeSizeComboBox { nullptr };
+		class QComboBox* m_badgeSmallModeComboBox { nullptr };
 
 };
 

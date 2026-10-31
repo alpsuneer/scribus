@@ -183,6 +183,9 @@ ScribusView::ScribusView(QWidget* win, ScribusMainWindow* mw, ScribusDoc *doc) :
 	m_mousePointDoc = FPoint(0,0);
 	m_doc->regionsChanged()->connectObserver(this);
 	connect(this, SIGNAL(HaveSel()), m_doc, SLOT(selectionChanged()));
+	// Suneer: a selected photo shows its badges in full, wider than the photo itself,
+	// so the whole canvas repaints when the selection changes (the page buffer is kept).
+	connect(m_doc->m_Selection, SIGNAL(selectionChanged()), m_canvas, SLOT(update()));
 
 	clockLabel = new ClockWidget(this, m_doc);
 	clockLabel->setGeometry(m_vhRulerHW + 1, height() - m_vhRulerHW - 61, 60, 60);

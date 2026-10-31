@@ -20,6 +20,7 @@
 
 // #include <QDebug>
 #include <QLineF>
+#include <QHelpEvent>
 #include <QToolTip>
 #include <QWidget>
 
@@ -41,7 +42,7 @@
 #include "ui/hruler.h"
 #include "ui/vruler.h"
 #include "ui/suneerduplicatenewsdialog.h"
-#include "ui/suneer_obit_model.h"
+#include "suneerphotobadges.h"
 #include "util_math.h"
 #include "units.h"
 
@@ -858,6 +859,26 @@ struct SuneerProfScopeC
 	~SuneerProfScopeC() { if (on) { const qint64 ms = t.elapsed(); if (ms >= 1) fprintf(stderr, "MOVE-PROFILE %s %lld ms %s\n", what, (long long) ms, extra.constData()); } }
 };
 }
+// Suneer: the full details of a photo badge (LINK, low res, check BG, no face,
+// manual mask) on hover; the badge itself shrinks to a dot on small photos.
+bool Canvas::event(QEvent* e)
+{
+	if (e->type() == QEvent::ToolTip)
+	{
+		auto* he = static_cast<QHelpEvent*>(e);
+		const QString text = m_viewMode.m_MouseButtonPressed ? QString() : SuneerPhotoBadges::toolTipAt(this, m_doc, he->pos());
+		if (text.isEmpty())
+		{
+			QToolTip::hideText();
+			e->ignore();
+		}
+		else
+			QToolTip::showText(he->globalPos(), text, this);
+		return true;
+	}
+	return QWidget::event(e);
+}
+
 void Canvas::paintEvent ( QPaintEvent * p )
 {
 	SuneerProfScopeC suneerProf("paintEvent");
@@ -1003,7 +1024,7 @@ void Canvas::paintEvent ( QPaintEvent * p )
 	// buffer, so they never reach print, PDF, export or page thumbnails.
 	const qint64 dbgT1 = suneerDragDebug ? dbgT.elapsed() : 0;
 	SuneerDupHighlights::paint(&qp, this, m_doc);
-	suneerPaintObitFlags(&qp, this, m_doc);
+	SuneerPhotoBadges::paint(&qp, this, m_doc);
 	SuneerModulePanel::paintOverlay(&qp, this, m_doc);
 	const qint64 dbgT2 = suneerDragDebug ? dbgT.elapsed() : 0;
 	// does mode specific rendering, currently selection in legacymode and nodes in nodeedit

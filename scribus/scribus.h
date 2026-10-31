@@ -431,7 +431,7 @@ public slots:
 	void suneerCleanOrphanCaptions();
 	//! the worker: \a ask false deletes without asking (the caption self-test); returns how many were deleted
 	int suneerRemoveOrphanCaptions(bool ask);
-	//! View > Image Frames > Show Linked Image Badges
+	//! View > Image Frames > Show Photo Badges (LINK, low res, check BG, no face, M)
 	void suneerToggleImageLinkBadges();
 	//! Extras > Warn About Linked Images in This Document
 	void suneerToggleWarnLinkedImages();

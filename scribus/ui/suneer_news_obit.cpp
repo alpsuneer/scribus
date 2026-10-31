@@ -877,8 +877,8 @@ void SuneerNewsPanel::obitPlaceNow()
 			placedModules << PlacedModule{bestCol, y, finalH, text, photo, nullptr, title};
 
 			// No face found, a source too small for 300 ppi, or a kept
-			// background: the orange mark is a screen overlay painted by the
-			// canvas from the photo's attributes (suneerPaintObitFlags) -
+			// background: the red mark is a screen overlay painted by the
+			// canvas from the photo's attributes (SuneerPhotoBadges) -
 			// no extra frame, nothing in print or PDF.
 			if (photo && (photoStatus == QLatin1String("noface") || photoStatus == QLatin1String("lowres") || photoStatus == QLatin1String("bg")))
 			{
@@ -1384,7 +1384,7 @@ void SuneerNewsPanel::obitPlaceNow()
 	if (!repackReport.isEmpty())
 		line += QStringLiteral("\n") + repackReport.first();
 	if (noFace > 0)
-		line += QStringLiteral("\n") + tr("%n photo(s) to check (no face / low res) - see the orange flag", "", noFace);
+		line += QStringLiteral("\n") + tr("%n photo(s) to check (no face / low res) - see the red flag", "", noFace);
 	if (!missingStyles.isEmpty())
 		line += QStringLiteral("\n") + tr("Missing paragraph styles: %1").arg(missingStyles.join(", "));
 	// ONE short line; the long text and the lists go to Details / tooltip.
@@ -1870,7 +1870,7 @@ void SuneerNewsPanel::onObitReprocess()
 			f->adjustPictScale();
 			setAttr(f, "obit.photoStatus", r.status);
 			setAttr(f, "obit.out", r.out);
-			// The orange mark is an overlay from these attributes; an old
+			// The red mark is an overlay from these attributes; an old
 			// flag frame of the module (earlier builds) goes away.
 			const QString flagText = r.status == QLatin1String("lowres") ? tr("low res: %1").arg(r.message)
 			                       : r.status == QLatin1String("bg") ? tr("check BG: %1").arg(r.message)

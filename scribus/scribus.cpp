@@ -187,6 +187,7 @@ for which a new license (GPL+exception) is in place.
 #include "documentlock.h"
 #include "netpathguard.h"
 #include "suneerimagelinks.h"
+#include "suneerphotobadges.h"
 #include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
@@ -379,7 +380,7 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE") || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_IMPORT_REPORT") || qEnvironmentVariableIsSet("SUNEER_UNUSED_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_TABLETEXT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CAPTION_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_BADGE_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :
@@ -1106,7 +1107,7 @@ void ScribusMainWindow::initPalettes()
 		scrMenuMgr->setMenuEnabled("FileExportPDFPreset", enabled);
 	});
 	scrActions["fileExportAsPDFDefault"]->setEnabled(scrActions["fileExportAsPDF"]->isEnabled());
-	scrActions["viewShowImageLinkBadges"]->setChecked(SuneerImageLinks::badgesShown());
+	scrActions["viewShowPhotoBadges"]->setChecked(SuneerImageLinks::badgesShown());
 	connect(scrActions["suneerFocusFontCombo"], &QAction::triggered, this, [this]() { m_suneerControlBar->focusFontCombo(); });
 	connect(scrActions["suneerEnlargeImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerEnlargeImageSize);
 	connect(scrActions["suneerReduceImageSize"], &QAction::triggered, this, &ScribusMainWindow::suneerReduceImageSize);
@@ -1831,7 +1832,7 @@ void ScribusMainWindow::initMenuBar()
 	scrMenuMgr->createMenu("ViewImageFrames", tr("Image Frames"), "View");
 	scrMenuMgr->addMenuItemString("ViewImageFrames", "View");
 	scrMenuMgr->addMenuItemString("viewShowImages", "ViewImageFrames");
-	scrMenuMgr->addMenuItemString("viewShowImageLinkBadges", "ViewImageFrames");
+	scrMenuMgr->addMenuItemString("viewShowPhotoBadges", "ViewImageFrames");
 	scrMenuMgr->createMenu("ViewDocument", tr("Document"), "View");
 	scrMenuMgr->addMenuItemString("ViewDocument", "View");
 	scrMenuMgr->addMenuItemString("viewShowMargins", "ViewDocument");
@@ -5656,9 +5657,10 @@ void ScribusMainWindow::suneerEmbedSelfTest()
 
 void ScribusMainWindow::suneerToggleImageLinkBadges()
 {
-	SuneerImageLinks::setBadgesShown(scrActions["viewShowImageLinkBadges"]->isChecked());
+	SuneerImageLinks::setBadgesShown(scrActions["viewShowPhotoBadges"]->isChecked());
+	// the badges are a canvas overlay (SuneerPhotoBadges): no page redraw needed
 	if (HaveDoc && view)
-		view->DrawNew();
+		view->m_canvas->update();
 }
 
 void ScribusMainWindow::suneerToggleWarnLinkedImages()
@@ -9441,6 +9443,7 @@ void ScribusMainWindow::slotPrefsOrg()
 	struct ApplicationPrefs oldPrefs(m_prefsManager.appPrefs);
 	// Not part of ApplicationPrefs (prefs context "suneer_images").
 	const int oldLinkBadgeSize = SuneerImageLinks::badgeSize();
+	const int oldBadgeSmallMode = SuneerPhotoBadges::smallMode();
 	PreferencesDialog prefsDialog(this, oldPrefs);
 	int prefsResult = prefsDialog.exec();
 	if (prefsResult != QDialog::Accepted)
@@ -9555,10 +9558,10 @@ void ScribusMainWindow::slotPrefsOrg()
 				scw_v->zoom((scw_v->scale() / oldPrefs.displayPrefs.displayScale) * m_prefsManager.displayScale());
 				zoomSpinBox->setMaximum(doc->opToolPrefs().magMax);
 			}
-			// The badges are part of the canvas picture, so a new size
-			// needs a repaint to show.
-			if (shadowChanged || oldLinkBadgeSize != SuneerImageLinks::badgeSize())
+			if (shadowChanged)
 				scw->view()->DrawNew();
+			else if (oldLinkBadgeSize != SuneerImageLinks::badgeSize() || oldBadgeSmallMode != SuneerPhotoBadges::smallMode())
+				scw->view()->m_canvas->update();
 		}
 	}
 

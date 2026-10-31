@@ -2902,3 +2902,25 @@ Traps:
   undo / redo geometry. Harness /home/s1/tmp-repack (`surgery.py` del/add/cut/untag by story, `run_test.sh`, `sla_mods.py`).
 - Not exercised: obituary-left model, grouped legacy modules, rules redraw, the text-edit auto trigger (no IM / edit-mode run), Ctrl+Alt+R
   and the toolbar button by hand (ScrAction keys do not fire on Xvfb; key checked as registered).
+
+## Photo badges scale with the photo (2026-10-29, NOT committed, NOT verified by the user)
+- One canvas overlay, `scribus/suneerphotobadges.{h,cpp}` (`SuneerPhotoBadges::paint`, called from
+  `Canvas::paintEvent` where `suneerPaintObitFlags` was). It replaces two painters: the LINK / MISSING
+  badge in `PageItem::DrawObj_Post` (was in the page buffer at a fixed screen size) and the obit flag /
+  "M" painter in `ui/suneer_obit_model.cpp` (fixed 10 px font, as wide as the text). Both are gone.
+- Size: h = min(badgePixels() 20/24/28, 20 % of the photo's smaller side on screen); below 12 px,
+  a photo side < 40 px, or zoom < 35 % → dot (pref `suneer_images/badge_small_mode`: 0 dot, 1 nothing).
+  Labels step down: full checkInfo → "187 ppi" / "check BG" / "no face" → "!"; LINK → square.
+- Selected (not while moving/resizing): full labels at the configured size in a row 5 px ABOVE the
+  frame, so the face stays clear; `ScribusView` connects `m_Selection selectionChanged()` →
+  `m_canvas->update()` because those labels lie outside the frame's redraw region.
+- Tooltip: `Canvas::event(QEvent::ToolTip)` → `toolTipAt()` (topmost badged image frame). No
+  pixel/ppi line: `pixm` is the screen proxy (86 px for a 600 px file), so 72/imageXScale and
+  pixm.width() contradicted the "187 ppi" source figure.
+- Action renamed `viewShowImageLinkBadges` → `viewShowPhotoBadges` (Ctrl+Alt+B): the user's dbi.xml
+  listed the old name with an empty key, and only an action missing from the set keeps its default.
+  Same pref `show_link_badges`. Toggle = `m_canvas->update()`, no DrawNew.
+- Overlay over everything, so a badge of a photo under another frame now shows on top.
+- Test: `tests/suneer/photo_badges.sh page.sla prefix` (SUNEER_BADGE_SELFTEST, viewport grabs at
+  25/50/100/200 %, selected, nothing, off, key). Fixture /home/s1/tmp-badge/b.sla (tmp-obit band/b.sla
+  with lowres/bg/noface/manual/missing set by surgery).

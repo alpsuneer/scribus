@@ -808,7 +808,7 @@ void ActionManager::initViewMenuActions()
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "viewShowImages";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
-	name = "viewShowImageLinkBadges";
+	name = "viewShowPhotoBadges";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
 	name = "viewShowGrid";
 	scrActions->insert(name, new ScrAction("", defaultKey(name), mainWindow));
@@ -858,7 +858,7 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewShowFrames"]->setToggleAction(true);
 	(*scrActions)["viewShowLayerMarkers"]->setToggleAction(true);
 	(*scrActions)["viewShowImages"]->setToggleAction(true);
-	(*scrActions)["viewShowImageLinkBadges"]->setToggleAction(true);
+	(*scrActions)["viewShowPhotoBadges"]->setToggleAction(true);
 	(*scrActions)["viewShowGrid"]->setToggleAction(true);
 	(*scrActions)["viewShowGuides"]->setToggleAction(true);
 	(*scrActions)["viewShowColumnBorders"]->setToggleAction(true);
@@ -882,7 +882,7 @@ void ActionManager::initViewMenuActions()
 	(*scrActions)["viewShowFrames"]->setChecked(true);
 	(*scrActions)["viewShowLayerMarkers"]->setChecked(false);
 	(*scrActions)["viewShowImages"]->setChecked(true);
-	(*scrActions)["viewShowImageLinkBadges"]->setChecked(true);
+	(*scrActions)["viewShowPhotoBadges"]->setChecked(true);
 	(*scrActions)["viewShowGuides"]->setChecked(true);
 	(*scrActions)["viewShowColumnBorders"]->setChecked(false);
 	(*scrActions)["viewShowRulers"]->setChecked(true);
@@ -904,7 +904,7 @@ void ActionManager::initViewMenuActions()
 	connect( (*scrActions)["viewShowFrames"], SIGNAL(triggered()), mainWindow, SLOT(toggleFrames()) );
 	connect( (*scrActions)["viewShowLayerMarkers"], SIGNAL(triggered()), mainWindow, SLOT(toggleLayerMarkers()) );
 	connect( (*scrActions)["viewShowImages"], SIGNAL(triggered()), mainWindow, SLOT(toggleImageVisibility()) );
-	connect( (*scrActions)["viewShowImageLinkBadges"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleImageLinkBadges()) );
+	connect( (*scrActions)["viewShowPhotoBadges"], SIGNAL(triggered()), mainWindow, SLOT(suneerToggleImageLinkBadges()) );
 	connect( (*scrActions)["viewShowGrid"], SIGNAL(triggered()), mainWindow, SLOT(toggleGrid()) );
 	connect( (*scrActions)["viewShowGuides"], SIGNAL(triggered()), mainWindow, SLOT(toggleGuides()) );
 	connect( (*scrActions)["viewShowColumnBorders"], SIGNAL(triggered()), mainWindow, SLOT(toggleColumnBorders()) );
@@ -2017,7 +2017,7 @@ void ActionManager::languageChange()
 	(*scrActions)["viewShowFrames"]->setTexts( tr("Show &Frames"));
 	(*scrActions)["viewShowLayerMarkers"]->setTexts( tr("Show Layer Indicators"));
 	(*scrActions)["viewShowImages"]->setTexts( tr("Show &Images"));
-	(*scrActions)["viewShowImageLinkBadges"]->setTexts( tr("Show Linked Image Badges"));
+	(*scrActions)["viewShowPhotoBadges"]->setTexts( tr("Show Photo Badges"));
 	(*scrActions)["viewShowGrid"]->setTexts( tr("Show &Grid"));
 	(*scrActions)["viewShowGuides"]->setTexts( tr("Show G&uides"));
 	(*scrActions)["viewShowColumnBorders"]->setTexts( tr("Show Text Frame Columns"));
@@ -2414,6 +2414,7 @@ void ActionManager::createDefaultShortcuts()
 	defKeys.insert("viewFit100", QKeySequence(Qt::CTRL | Qt::Key_1));
 	defKeys.insert("viewPreviewMode", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
 	defKeys.insert("viewShowRulers", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+	defKeys.insert("viewShowPhotoBadges", QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_B));
 	defKeys.insert("viewShowContextMenu", Qt::Key_Menu); //Context menu key on Windows. Do we have one to use on Linux/OSX? Super_L ?
 
 	//Tool menu
@@ -2839,7 +2840,7 @@ void ActionManager::createDefaultMenus()
 		<< "viewShowFrames"
 		<< "viewShowLayerMarkers"
 		<< "viewShowImages"
-		<< "viewShowImageLinkBadges"
+		<< "viewShowPhotoBadges"
 		<< "viewShowGrid"
 		<< "viewShowGuides"
 		<< "viewShowColumnBorders"

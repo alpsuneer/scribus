@@ -18,6 +18,7 @@
 #include "pagestructs.h"
 #include "fpointarray.h"
 #include "suneerimagelinks.h"
+#include "suneerphotobadges.h"
 #include "ui/faircodehelpviewer.h"
 #include "undomanager.h"
 #include "undogui.h"
@@ -869,6 +870,22 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(2500, this, [this, repackTest]() { runRepackSelfTest(repackTest); });
+		});
+		wait->start();
+	}
+	// SUNEER_BADGE_SELFTEST: photo badges at 25 / 50 / 100 / 200 % (tests/suneer/photo_badges.sh)
+	static bool badgeTestStarted = false;
+	if (doc && qEnvironmentVariableIsSet("SUNEER_BADGE_SELFTEST") && !badgeTestStarted)
+	{
+		badgeTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait]() {
+			if (!m_doc || m_doc->isLoading() || !m_mw || !m_mw->HaveDoc || !m_mw->view)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			SuneerPhotoBadges::runSelfTestIfAsked(m_mw->view, m_doc);
 		});
 		wait->start();
 	}
@@ -6366,7 +6383,7 @@ void SuneerNewsPanel::onSettings()
 				best = k;
 		obitFillCmb->setCurrentIndex(best);
 	}
-	obitFillCmb->setToolTip(tr("Face crop in Haar frontal-face box terms (measured on the reference strip): the face box is this share of the frame width, centred, its top %1 %% of the frame width below the frame top - with a little room above the hair (tall hair: the crop moves up or zooms out a little, the top of the head is never cut), only neck and collar below the chin. Sources smaller than 300 ppi get the same crop and an orange \"low res\" flag.").arg(qRound(om.faceTop * 100)));
+	obitFillCmb->setToolTip(tr("Face crop in Haar frontal-face box terms (measured on the reference strip): the face box is this share of the frame width, centred, its top %1 %% of the frame width below the frame top - with a little room above the hair (tall hair: the crop moves up or zooms out a little, the top of the head is never cut), only neck and collar below the chin. Sources smaller than 300 ppi get the same crop and a red \"low res\" flag.").arg(qRound(om.faceTop * 100)));
 	flo->addRow(tr("Face fill:"), obitFillCmb);
 	QComboBox* obitShapeCmb = new QComboBox(obitTab);
 	obitShapeCmb->addItem(tr("Square (%1 x %1 mm)").arg(om.photoMm), "square");

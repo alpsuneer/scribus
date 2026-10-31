@@ -16,6 +16,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/preferences/prefs_itemtools.h"
 #include "units.h"
 #include "suneerimagelinks.h"
+#include "suneerphotobadges.h"
 #include "ui/scshortcutregistry.h"
 
 #include <QCheckBox>
@@ -37,20 +38,30 @@ Prefs_ItemTools::Prefs_ItemTools(QWidget* parent, ScribusDoc* /*doc*/)
 	m_alwaysEmbedImagesCheckBox->setObjectName("alwaysEmbedImagesCheckBox");
 	m_alwaysEmbedImagesCheckBox->setToolTip(tr("Store every newly placed image inside the document instead of only linking to the file. Applies to Get Image, double-click loading, drag and drop and the News Browser."));
 	ScShortcutRegistry::insertBelow(imageUseEmbeddedClippingPathCheckBox, m_alwaysEmbedImagesCheckBox);
-	// Size of the orange LINK / red MISSING badge on image frames.
+	// Largest size of the photo badges (LINK / MISSING, low res, check BG, no face); smaller photos get smaller badges.
 	QWidget* badgeRow = new QWidget(m_alwaysEmbedImagesCheckBox->parentWidget());
 	QHBoxLayout* badgeLayout = new QHBoxLayout(badgeRow);
 	badgeLayout->setContentsMargins(0, 0, 0, 0);
-	QLabel* badgeLabel = new QLabel(tr("Linked / missing image badge size:"), badgeRow);
+	QLabel* badgeLabel = new QLabel(tr("Photo badge size:"), badgeRow);
 	m_linkBadgeSizeComboBox = new QComboBox(badgeRow);
 	m_linkBadgeSizeComboBox->setObjectName("linkBadgeSizeComboBox");
 	m_linkBadgeSizeComboBox->addItem(tr("Small"));
 	m_linkBadgeSizeComboBox->addItem(tr("Medium"));
 	m_linkBadgeSizeComboBox->addItem(tr("Large"));
-	m_linkBadgeSizeComboBox->setToolTip(tr("Size on screen of the LINK (orange) and MISSING (red) badges drawn on image frames. The badges are never printed or exported."));
+	m_linkBadgeSizeComboBox->setToolTip(tr("Largest size on screen of the badges on image frames: LINK (orange), MISSING (red) and the obituary checks (red: low res, check BG, no face). On a smaller photo a badge is at most about a fifth of the photo, with a shorter label. The badges are never printed or exported."));
 	badgeLabel->setBuddy(m_linkBadgeSizeComboBox);
 	badgeLayout->addWidget(badgeLabel);
 	badgeLayout->addWidget(m_linkBadgeSizeComboBox);
+	QLabel* smallLabel = new QLabel(tr("Small photos:"), badgeRow);
+	m_badgeSmallModeComboBox = new QComboBox(badgeRow);
+	m_badgeSmallModeComboBox->setObjectName("badgeSmallModeComboBox");
+	m_badgeSmallModeComboBox->addItem(tr("Coloured dot"));
+	m_badgeSmallModeComboBox->addItem(tr("Nothing"));
+	m_badgeSmallModeComboBox->setToolTip(tr("A photo under about 40 pixels on screen, or any photo below 35 % zoom, has no room for a label: show a small dot in its corner (orange = linked, red = missing or to check) or nothing. Hover over the photo or select it for the full label."));
+	smallLabel->setBuddy(m_badgeSmallModeComboBox);
+	badgeLayout->addSpacing(12);
+	badgeLayout->addWidget(smallLabel);
+	badgeLayout->addWidget(m_badgeSmallModeComboBox);
 	badgeLayout->addStretch(1);
 	ScShortcutRegistry::insertBelow(m_alwaysEmbedImagesCheckBox, badgeRow);
 	scrollArea_2->viewport()->setAutoFillBackground(false);
@@ -185,6 +196,7 @@ void Prefs_ItemTools::restoreDefaults(struct ApplicationPrefs *prefsData)
 	imageUseEmbeddedClippingPathCheckBox->setChecked(prefsData->itemToolPrefs.imageUseEmbeddedPath);
 	m_alwaysEmbedImagesCheckBox->setChecked(SuneerImageLinks::alwaysEmbed());
 	m_linkBadgeSizeComboBox->setCurrentIndex(SuneerImageLinks::badgeSize());
+	m_badgeSmallModeComboBox->setCurrentIndex(SuneerPhotoBadges::smallMode());
 	switch (prefsData->itemToolPrefs.imageLowResType)
 	{
 		case 0:
@@ -314,6 +326,7 @@ void Prefs_ItemTools::saveGuiToPrefs(struct ApplicationPrefs *prefsData) const
 	prefsData->itemToolPrefs.imageUseEmbeddedPath = imageUseEmbeddedClippingPathCheckBox->isChecked();
 	SuneerImageLinks::setAlwaysEmbed(m_alwaysEmbedImagesCheckBox->isChecked());
 	SuneerImageLinks::setBadgeSize(m_linkBadgeSizeComboBox->currentIndex());
+	SuneerPhotoBadges::setSmallMode(m_badgeSmallModeComboBox->currentIndex());
 	int haRes = 0;
 	if (onscreenResolutionFullRadioButton->isChecked())
 		haRes = 0;

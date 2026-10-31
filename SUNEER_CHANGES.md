@@ -1445,3 +1445,13 @@ scribus
 - പുതിയ actions-ന്റെ key: സ്വന്തം shortcut set (dbi) ഉപയോഗിക്കുമ്പോഴും set-ൽ ഇല്ലാത്ത പുതിയ action-ന് default key കിട്ടും
   (ആ key set-ൽ മറ്റൊന്നിന് ഇല്ലെങ്കിൽ).
 
+### 94. Photo badges zoom-നൊപ്പം ചെറുതാകും (LINK, low res, check BG, no face, M)
+- Badge-ന്റെ വലുപ്പം photo-യുടെ screen വലുപ്പത്തിനൊപ്പം: Preferences-ലെ size-ഉം photo-യുടെ ഏകദേശം 1/5-ഉം — ഇതിൽ ചെറുത്.
+  ഇടം കുറയുമ്പോൾ ചെറിയ label: "low res: 187 ppi (548×548 px)" → "187 ppi" → "!".
+- Photo screen-ൽ ~40 px-ൽ താഴെയോ zoom 35 %-ൽ താഴെയോ ആണെങ്കിൽ മൂലയിൽ ഒരു ചെറിയ dot മാത്രം (orange = linked,
+  red = missing / check), അല്ലെങ്കിൽ ഒന്നുമില്ല — Preferences > Item Tools > "Small photos".
+- Photo select ചെയ്താൽ full label photo-യുടെ മുകളിൽ (മുഖം മറയില്ല); mouse വെച്ചാൽ tooltip-ൽ മുഴുവൻ വിവരം.
+- View > Image Frames > Show Photo Badges (Ctrl+Alt+B): എല്ലാ badge-ഉം ഒറ്റയടിക്ക് മറയ്ക്കാം / കാണിക്കാം; setting ഓർക്കും.
+- LINK badge ചെറുതും പാതി സുതാര്യവും. Obituary check flag ഇനി ചുവപ്പ് (LINK-ന്റെ orange-ൽ നിന്ന് വേർതിരിക്കാൻ).
+- Badge-കൾ screen-ൽ മാത്രം: print, PDF, export, thumbnail-ൽ ഒരിക്കലും ഇല്ല.
+

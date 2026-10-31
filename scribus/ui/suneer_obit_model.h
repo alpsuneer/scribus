@@ -25,9 +25,8 @@ class QPainter;
 class Canvas;
 class ScribusDoc;
 
-//! The orange "low res / no face / bg?" marks of obit photos: a cheap screen
-//! overlay painted by the canvas (never a frame, never in print or PDF).
-void suneerPaintObitFlags(QPainter* painter, const Canvas* canvas, ScribusDoc* doc);
+// The "low res / no face / check BG" marks of obit photos are painted by
+// SuneerPhotoBadges (suneerphotobadges.h) from the photo's attributes.
 
 struct SuneerObitModel
 {
