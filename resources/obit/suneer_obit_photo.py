@@ -15,7 +15,10 @@ Reads one job file (JSON) and writes, for every item, a square JPEG with
      rule with faceH / headTop.) The face is the best-scored candidate of
      both cascades (face_candidates). Without a face: the upper part of the
      picture, centred, status "noface"; source too small for 300 ppi: the
-     same crop, status "lowres" (ppi in the message).
+     same crop, status "lowres" (ppi in the message). Without OpenCV face
+     data (no cv2.data and no haarcascades folder, see cascade_dir) every
+     photo gets the no-face crop, the message says why, and the result is
+     not cached.
   Background removal is checked: when the cut-out still fills the top
   corners of the crop, the next model is tried (model, then the others of
   bgModels); when every model fails the status is "bg". The alpha edge is
@@ -82,7 +85,31 @@ def cached(item, job, src_sha):
         return None
     if meta.get("srcSha1") != src_sha or meta.get("params") != params_of(job):
         return None
+    if meta.get("faceData") is False:   # made without face data: try again once it is installed
+        return None
     return meta
+
+
+# Haar cascade folders after cv2.data: the pip wheel (opencv-python-headless)
+# has cv2.data; Debian's python3-opencv has no cv2.data and keeps the XML
+# files in the separate opencv-data package.
+CASCADE_DIRS = ("/usr/share/opencv4/haarcascades", "/usr/share/opencv/haarcascades",
+                "/usr/local/share/opencv4/haarcascades")
+CASCADE_MISSING = "OpenCV face data (haarcascades) not found - install opencv-python-headless or opencv-data"
+
+
+def cascade_dir():
+    """The folder holding haarcascade_frontalface_default.xml, or None:
+    $SUNEER_HAARCASCADES, cv2.data.haarcascades, then CASCADE_DIRS."""
+    import cv2
+    dirs = [os.environ.get("SUNEER_HAARCASCADES", "")]
+    data = getattr(cv2, "data", None)
+    dirs.append(getattr(data, "haarcascades", "") if data is not None else "")
+    dirs.extend(CASCADE_DIRS)
+    for d in dirs:
+        if d and os.path.isfile(os.path.join(d, "haarcascade_frontalface_default.xml")):
+            return d
+    return None
 
 
 def _iou(a, b):
@@ -108,6 +135,11 @@ def face_candidates(bgr):
     under its head)."""
     import numpy as np
     import cv2
+    cdir = cascade_dir()
+    if cdir is None:
+        # No face data: no candidates, so the photo still gets the no-face
+        # crop (status "noface"); process() reports why.
+        return []
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
     h, w = gray.shape[:2]
@@ -119,7 +151,7 @@ def face_candidates(bgr):
     cands = []
     for name, neighbours in (("haarcascade_frontalface_default.xml", 5),
                              ("haarcascade_frontalface_alt2.xml", 3)):
-        cc = cv2.CascadeClassifier(cv2.data.haarcascades + name)
+        cc = cv2.CascadeClassifier(os.path.join(cdir, name))
         if cc.empty():
             continue
         faces = cc.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=neighbours,
@@ -128,7 +160,7 @@ def face_candidates(bgr):
             cands.append({"box": (float(x), float(y), float(fw), float(fh)), "cascade": name[len("haarcascade_frontalface_"):-4]})
     if not cands:
         return []
-    eye_ccs = [cv2.CascadeClassifier(cv2.data.haarcascades + n)
+    eye_ccs = [cv2.CascadeClassifier(os.path.join(cdir, n))
                for n in ("haarcascade_eye_tree_eyeglasses.xml", "haarcascade_eye.xml")]
     colour = cv2.resize(bgr, (gray.shape[1], gray.shape[0])) if scale != 1.0 else bgr
     ycc = cv2.cvtColor(colour, cv2.COLOR_BGR2YCrCb)
@@ -505,6 +537,9 @@ def main():
         try:
             from PIL import Image, ImageOps
             import numpy as np
+            if cascade_dir() is None:
+                sys.stdout.write(json.dumps({"face": None, "error": CASCADE_MISSING}) + "\n")
+                return 1
             img = ImageOps.exif_transpose(Image.open(sys.argv[2])).convert("RGB")
             face = detect_face(np.asarray(img)[:, :, ::-1].copy())
             sys.stdout.write(json.dumps({"face": list(face) if face else None, "w": img.width, "h": img.height}) + "\n")
@@ -520,6 +555,7 @@ def main():
     items = job.get("items", [])
     n = len(items)
     session = None
+    face_data = None    # cascade folder found? Checked once, on the first picture to process
     for i, item in enumerate(items, 1):
         item_id, src, out = item.get("id", "?"), item.get("src", ""), item.get("out", "")
         try:
@@ -534,6 +570,10 @@ def main():
             if session is None:
                 from rembg import new_session
                 session = new_session(job.get("model", "u2net_human_seg"))
+            if face_data is None:
+                face_data = cascade_dir() is not None
+                if not face_data:
+                    sys.stderr.write(CASCADE_MISSING + "\n")
             t0 = time.time()
             status, face, info = process(item, job, session, i, n)
             with open(out + ".json", "w", encoding="utf-8") as f:
@@ -544,9 +584,11 @@ def main():
                            "faceCentrePct": info.get("faceCentrePct"), "bgModel": info.get("bgModel"),
                            "bgOpacityPct": info.get("bgOpacityPct"), "bgOk": info.get("bgOk"),
                            "crop": info.get("crop"), "eyePct": info.get("eyePct"), "headroom": info.get("headroom"),
-                           "faces": info.get("faces"),
+                           "faces": info.get("faces"), "faceData": face_data,
                            "seconds": round(time.time() - t0, 2)}, f)
             msg = "%d ppi (%dx%d px)" % (info.get("ppi", 0), info.get("srcW", 0), info.get("srcH", 0))
+            if not face_data:
+                msg += "; " + CASCADE_MISSING
             if info.get("askMsg"):
                 msg += "; " + info.get("askMsg")
             elif not info.get("bgOk", True):

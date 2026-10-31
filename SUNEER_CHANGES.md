@@ -1467,3 +1467,13 @@ scribus
   PostScript / print-ലും gradient.
 - അതേ panel-ൽ frame-ന്റെ soft shadow (X, Y, blur, colour, opacity). Blur ഉള്ളതുകൊണ്ട് PDF-ൽ image; PostScript print-ൽ ഇല്ല.
 
+### 96. Obituary photo — OpenCV face data ഇല്ലാത്ത PC-യിലും photo വെക്കും
+- Debian-ന്റെ `python3-opencv`-ൽ `cv2.data` ഇല്ല. മുമ്പ് ഓരോ photo-യും `AttributeError: module 'cv2' has no attribute 'data'`
+  ആയി fail ചെയ്ത് page-ൽ വന്നില്ല (office PC chn-dtp30, 28-ൽ 28).
+- ഇപ്പോൾ face data (haarcascades) `cv2.data`-ൽ ഇല്ലെങ്കിൽ `/usr/share/opencv4/haarcascades` (`opencv-data` package),
+  `/usr/share/opencv/haarcascades`, `/usr/local/share/opencv4/haarcascades`, `$SUNEER_HAARCASCADES` എന്നിവ നോക്കും.
+- എവിടെയും ഇല്ലെങ്കിൽ: photo BG remove ചെയ്ത്, മുഖമില്ലാത്ത photo പോലെ മുകൾ ഭാഗം crop ചെയ്ത് വെക്കും, ചുവന്ന "no face – check" flag.
+  കാരണം message-ൽ: "OpenCV face data (haarcascades) not found …". ഈ ഫലം cache ചെയ്യില്ല — face data install ചെയ്ത ശേഷം
+  അടുത്ത placement-ൽ ശരിയായ face crop വരും.
+- Edit photo-യിലെ face guide: അതേ വ്യക്തമായ message.
+
