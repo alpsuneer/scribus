@@ -82,6 +82,7 @@
 #include <QSaveFile>
 #include <QTemporaryFile>
 #include <QTime>
+#include <QSysInfo>
 #include <QDesktopServices>
 #include <QClipboard>
 #include <QPlainTextEdit>
@@ -466,6 +467,12 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_pageLockLabel->setWordWrap(true);
 	m_pageLockLabel->hide();
 	vl->addWidget(m_pageLockLabel);
+	// Another user's page: take its lock (the workflow's Locked Pages right, or a lock that went stale)
+	m_takeOverBtn = new QPushButton(tr("Take over page"), w);
+	m_takeOverBtn->setObjectName("takeOverPageBtn");
+	m_takeOverBtn->hide();
+	connect(m_takeOverBtn, &QPushButton::clicked, this, &SuneerNewsPanel::onTakeOverPage);
+	vl->addWidget(m_takeOverBtn);
 	m_lockKeepAlive = new QTimer(this);
 	m_lockKeepAlive->setInterval(qEnvironmentVariableIsSet("SUNEER_PAGELOCK_KEEPALIVE_MS") ? qEnvironmentVariableIntValue("SUNEER_PAGELOCK_KEEPALIVE_MS") : 60000);
 	connect(m_lockKeepAlive, &QTimer::timeout, this, &SuneerNewsPanel::keepPageLockAlive);
@@ -870,6 +877,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_TAKEOVER_SELFTEST"))
+		QTimer::singleShot(4000, this, [this]() { runTakeOverSelfTest(qEnvironmentVariable("SUNEER_TAKEOVER_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runSyncSelfTest(qEnvironmentVariable("SUNEER_WFSYNC_SELFTEST")); });
 	loadPendingMarks();                        // marks a closed Scribus could not send
@@ -1789,8 +1798,16 @@ void SuneerNewsPanel::onStatusDetails()
 	QFont f = txt->font();
 	f.setPointSizeF(f.pointSizeF() - 1);
 	txt->setFont(f);
-	txt->setPlainText(m_statusLog.join(QStringLiteral("\n")));
-	txt->moveCursor(QTextCursor::End);
+	QString lockNow;
+	{
+		const QString id = m_pageCombo ? m_pageCombo->currentData().toString() : QString();
+		const QString date = m_dateEdit ? m_dateEdit->date().toString("yyyy-MM-dd") : QString();
+		const auto it = m_pageLocks.constFind(id);
+		if (!id.isEmpty() && m_pageLocksKnown && m_pageLocksDate == date && it != m_pageLocks.constEnd() && it->userId != m_userId)
+			lockNow = pageLockDetails(id, date) + QStringLiteral("\n\n----- log -----\n");
+	}
+	txt->setPlainText(lockNow + m_statusLog.join(QStringLiteral("\n")));
+	txt->moveCursor(lockNow.isEmpty() ? QTextCursor::End : QTextCursor::Start);   // another user's page: its lock first
 	lay->addWidget(txt);
 	QHBoxLayout* row = new QHBoxLayout();
 	QPushButton* copyBtn = new QPushButton(tr("Copy all"), &dlg);
@@ -3178,6 +3195,15 @@ void SuneerNewsPanel::parseUser(const QJsonObject& user)
 		m_userName = name;
 	if (!user["id"].toString().isEmpty())
 		m_userId = user["id"].toString();
+	// user.permissions {name: granted} (login reply and /users/me)
+	if (user["permissions"].isObject())
+	{
+		m_permissions.clear();
+		const QJsonObject perms = user["permissions"].toObject();
+		for (auto it = perms.constBegin(); it != perms.constEnd(); ++it)
+			if (it.value().toBool())
+				m_permissions.insert(it.key());
+	}
 	// The server's IP table (Admin > IP access): clientIp is what it saw,
 	// code is the approval code, ipAllowed the table's verdict. The API does
 	// not enforce it (its checkIP middleware is disabled); only the web app
@@ -3838,6 +3864,10 @@ void SuneerNewsPanel::refreshPageLocks(std::function<void(bool, const QString&)>
 				info.userName = tr("another user");
 			info.since = QDateTime::fromString(st["lockedAt"].toString(), Qt::ISODateWithMs);
 			info.completed = st["isCompleted"].toBool();
+			// a workflow with the lock heartbeat (spec 2026-10-30) also says when the holder was last seen, and where
+			if (!st["lastSeenAt"].toString().isEmpty())
+				info.lastSeen = QDateTime::fromString(st["lastSeenAt"].toString(), Qt::ISODateWithMs);
+			info.client = st["lockClient"].toString();
 			m_pageLocks.insert(pg["id"].toString(), info);
 		}
 		m_pageLocksDate = date;
@@ -3881,6 +3911,8 @@ void SuneerNewsPanel::showPageLockLine()
 	}
 	const QString name = pageNameAt(idx);
 	QString text, style;
+	if (m_takeOverBtn)
+		m_takeOverBtn->hide();
 	if (m_heldPageId == id && m_heldDate == date)
 	{
 		text = tr("%1 is opened by you (the workflow shows it locked for others)").arg(name);
@@ -3897,9 +3929,21 @@ void SuneerNewsPanel::showPageLockLine()
 		else
 		{
 			text = tr("\U0001F512 %1 is opened by %2 (since %3)").arg(name, info.userName, formatLockSince(info.since));
+			if (!info.client.isEmpty())
+				text += tr(" on %1").arg(info.client);
+			if (lockIsStale(info))
+				text += tr(" - no sign of life for %n min", "", int(info.lastSeen.secsTo(QDateTime::currentDateTimeUtc()) / 60));
 			if (m_lockOverride.contains(id + QLatin1Char('|') + date))
-				text += tr(" - you continued anyway; it is not locked for you");
+				text += tr(" - you continued anyway: used / unused not synced");
 			style = "color:#B00020; font-weight:bold;";
+			QString why;
+			const bool can = canTakeOver(info, &why);
+			if (m_takeOverBtn)
+			{
+				m_takeOverBtn->setText(lockIsStale(info) ? tr("Take over page (stale lock)") : tr("Take over page"));
+				m_takeOverBtn->setToolTip(can ? tr("%1 loses the lock of %2; it becomes yours, and used / unused of the page is synced").arg(info.userName, name) : why);
+				m_takeOverBtn->setVisible(can);
+			}
 		}
 	}
 	else
@@ -4167,6 +4211,7 @@ void SuneerNewsPanel::takePageLock(const QString& pageId, const QString& pageNam
 		m_heldDocBound = (m_doc != nullptr);
 		apiLog(QStringLiteral("page lock: %1 %2 locked for you%3").arg(pageName, date, wasMine ? QStringLiteral(" (it already was - e.g. in the browser; not released by Scribus)") : QString()));
 		m_lockKeepAlive->start();
+		sendLockHeartbeat();
 		showPageLockLine();
 	});
 }
@@ -4226,6 +4271,7 @@ void SuneerNewsPanel::keepPageLockAlive()
 		releasePageLock(false, QStringLiteral("document closed"));
 		return;
 	}
+	sendLockHeartbeat();
 	const QString id = m_heldPageId, name = m_heldPageName, date = m_heldDate;
 	if (m_pageCombo->currentData().toString() != id || m_dateEdit->date().toString("yyyy-MM-dd") != date)
 		return;
@@ -4716,6 +4762,8 @@ void SuneerNewsPanel::onEditionChanged(int index)
 	m_pageCombo->clear();
 	if (m_pageLockLabel)
 		m_pageLockLabel->hide();
+	if (m_takeOverBtn)
+		m_takeOverBtn->hide();
 	m_pages = QJsonArray();
 	if (index < 0)
 		return;
@@ -8735,6 +8783,182 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 }
 
 // ---------------------------------------------------------------------------
+// Take over another user's page lock
+// ---------------------------------------------------------------------------
+// The workflow keeps only who holds a page and since when (LayoutPageStatus.lockedById /
+// lockedAt): no PC, no session, no heartbeat. Its PATCH /news/layout/pages/lock refuses another
+// user's page; PATCH /news/layout/pages/:id/toggle-lock {isLocked:true} sets the caller as the
+// holder whoever held it - the web shows that only on its Locked Pages screen, to users with the
+// lockedPages.view right, so Scribus offers it to them only. A workflow with the heartbeat of the
+// spec of 2026-10-30 also sends lastSeenAt / lockClient: a lock unseen for 3 minutes is then
+// offered to everyone.
+
+bool SuneerNewsPanel::lockIsStale(const PageLockInfo& info)
+{
+	return info.lastSeen.isValid() && info.lastSeen.secsTo(QDateTime::currentDateTimeUtc()) > 180;
+}
+
+bool SuneerNewsPanel::canTakeOver(const PageLockInfo& info, QString* why) const
+{
+	auto say = [why](const QString& s) { if (why) *why = s; };
+	if (m_accessToken.isEmpty())
+	{
+		say(tr("log in first"));
+		return false;
+	}
+	if (info.userId.isEmpty() || info.userId == m_userId)
+	{
+		say(tr("the page is yours already"));
+		return false;
+	}
+	if (lockIsStale(info))
+		return true;
+	if (m_permissions.contains(QStringLiteral("lockedPages.view")))
+		return true;
+	say(tr("taking over needs the workflow's Locked Pages right (lockedPages.view) - ask %1 or an admin to unlock it").arg(info.userName));
+	return false;
+}
+
+QString SuneerNewsPanel::pageLockDetails(const QString& pageId, const QString& date) const
+{
+	const int idx = m_pageCombo->findData(pageId);
+	const QString name = idx >= 0 ? pageNameAt(idx) : pageId;
+	const auto it = m_pageLocks.constFind(pageId);
+	if (!m_pageLocksKnown || m_pageLocksDate != date || it == m_pageLocks.constEnd())
+		return tr("Page lock - %1, %2: not locked (as last read)").arg(name, date);
+	const PageLockInfo& info = *it;
+	const QDateTime now = QDateTime::currentDateTimeUtc();
+	QStringList l;
+	l << tr("Page lock - %1, %2").arg(name, date);
+	l << tr("  Owner: %1%2").arg(info.userName, info.userId == m_userId ? tr(" (you)") : QString());
+	l << tr("  Since: %1").arg(info.since.isValid() ? info.since.toLocalTime().toString("yyyy-MM-dd HH:mm") : tr("unknown"));
+	l << tr("  PC: %1").arg(info.client.isEmpty() ? tr("not recorded by the workflow") : info.client);
+	if (info.lastSeen.isValid())
+		l << tr("  Last heartbeat: %1 (%2 min ago)%3").arg(info.lastSeen.toLocalTime().toString("HH:mm:ss"))
+		        .arg(info.lastSeen.secsTo(now) / 60).arg(lockIsStale(info) ? tr(" - stale (none for 3 min)") : QString());
+	else
+		l << tr("  Last heartbeat: not recorded by the workflow (it has no lock heartbeat)");
+	if (info.userId != m_userId)
+	{
+		QString gw;
+		const bool blocked = markGate(pageId, &gw) == MarkGate::Blocked;
+		l << tr("  You: %1%2").arg(m_userName.isEmpty() ? tr("not logged in") : m_userName,
+		        m_lockOverride.contains(pageId + QLatin1Char('|') + date) ? tr(" - continued anyway (the page is not locked for you)") : QString());
+		l << tr("  Used / unused sync: %1").arg(blocked ? tr("skipped - %1").arg(gw) : tr("not blocked"));
+		QString why;
+		l << tr("  Take over: %1").arg(canTakeOver(info, &why)
+		        ? (lockIsStale(info) ? tr("available (the lock is stale)") : tr("available (you have the Locked Pages right)"))
+		        : tr("not available - %1").arg(why));
+	}
+	return l.join('\n');
+}
+
+void SuneerNewsPanel::onTakeOverPage()
+{
+	const int idx = m_pageCombo->currentIndex();
+	const QString id = m_pageCombo->currentData().toString();
+	const QString date = m_dateEdit->date().toString("yyyy-MM-dd");
+	const QString name = pageNameAt(idx);
+	const auto it = m_pageLocks.constFind(id);
+	if (id.isEmpty() || it == m_pageLocks.constEnd())
+		return;
+	const PageLockInfo info = *it;
+	QString why;
+	if (!canTakeOver(info, &why))
+	{
+		setStatus(tr("Cannot take over %1: %2").arg(name, why), true);
+		return;
+	}
+	QString answer = m_pageLockTakeTestAnswer;
+	if (answer.isEmpty())
+	{
+		QMessageBox box(QMessageBox::Warning, tr("Take over page"),
+		                tr("Take over %1 for %2?\n\n%3 will lose the lock (opened since %4%5).%6\n\n"
+		                   "If %3 is still working on this page, one of you overwrites the other's work.")
+		                    .arg(name, date, info.userName, formatLockSince(info.since),
+		                         info.client.isEmpty() ? QString() : tr(" on %1").arg(info.client),
+		                         lockIsStale(info) ? QStringLiteral("\n") + tr("No sign of life from that lock for %n min.", "", int(info.lastSeen.secsTo(QDateTime::currentDateTimeUtc()) / 60)) : QString()),
+		                QMessageBox::NoButton, this);
+		QPushButton* take = box.addButton(tr("Take over"), QMessageBox::DestructiveRole);
+		QPushButton* cancel = box.addButton(QMessageBox::Cancel);
+		box.setDefaultButton(cancel);
+		box.exec();
+		answer = box.clickedButton() == take ? QStringLiteral("take") : QStringLiteral("cancel");
+	}
+	if (answer != QLatin1String("take"))
+		return;
+	m_takeOverBtn->setEnabled(false);
+	QJsonObject body;
+	body["publishDate"] = date;
+	body["isLocked"] = true;
+	const QString from = info.userName;
+	lockCall("PATCH", QUrl(apiUrl(QStringLiteral("/news/layout/pages/%1/toggle-lock").arg(id))), QJsonDocument(body).toJson(QJsonDocument::Compact),
+	         [this, id, name, date, from](QNetworkReply* reply) {
+		m_takeOverBtn->setEnabled(true);
+		const int http = httpStatus(reply);
+		const QJsonObject st = QJsonDocument::fromJson(reply->readAll()).object()["data"].toObject();
+		const bool ok = reply->error() == QNetworkReply::NoError && http == 200 && st["lockedById"].toString() == m_userId;
+		syncLog(QStringLiteral("page lock: take over of %1 %2 from %3 -> %4").arg(name, date, from,
+		        ok ? QStringLiteral("HTTP 200, yours now") : QStringLiteral("HTTP %1 %2").arg(http).arg(describeError(reply))));
+		if (!ok)
+		{
+			setStatus(tr("Take over of %1 failed: %2").arg(name, http == 200 ? tr("the workflow did not give it to you") : describeError(reply)), true);
+			refreshPageLocks();
+			return;
+		}
+		// the page held so far is let go; this one is held like a page locked by choosing it
+		if (!m_heldPageId.isEmpty() && (m_heldPageId != id || m_heldDate != date))
+			releasePageLock(false, QStringLiteral("took over another page"));
+		m_heldPageId = id;
+		m_heldPageName = name;
+		m_heldDate = date;
+		m_heldWasMineBefore = false;
+		m_heldDoc = m_doc;
+		m_heldDocBound = (m_doc != nullptr);
+		m_lockOverride.remove(id + QLatin1Char('|') + date);
+		m_lockGateKey = id + QLatin1Char('|') + date;
+		m_lockKeepAlive->start();
+		sendLockHeartbeat();
+		setStatus(tr("%1 is yours now (taken over from %2) - syncing used / unused").arg(name, from));
+		m_syncTestLog << QStringLiteral("took over %1 from %2").arg(name, from);
+		refreshPageLocks([this, id, date](bool, const QString&) {
+			// the normal sync at once: stories on the page -> USED, the rest asked
+			if (m_fetchPageId == id && m_fetchDate == date)
+			{
+				retryAutoMarks();
+				reconcilePage(tr("Take over"));
+			}
+			else
+				onFetchNews();
+		});
+	});
+}
+
+// While a page is held (every keep-alive and right after it is taken): tell the workflow this
+// session is alive and on which PC (spec 2026-10-30). A workflow without the route answers 404
+// once; it is not asked again in this session.
+void SuneerNewsPanel::sendLockHeartbeat()
+{
+	if (m_heartbeatUnsupported || m_heldPageId.isEmpty() || m_accessToken.isEmpty() || !qEnvironmentVariableIsEmpty("SCRIBUS_NEWS_FIXTURE"))
+		return;
+	QJsonObject body;
+	body["publishDate"] = m_heldDate;
+	body["client"] = QSysInfo::machineHostName();
+	const QString page = m_heldPageName;
+	lockCall("PATCH", QUrl(apiUrl(QStringLiteral("/news/layout/pages/%1/heartbeat").arg(m_heldPageId))), QJsonDocument(body).toJson(QJsonDocument::Compact),
+	         [this, page](QNetworkReply* reply) {
+		const int http = httpStatus(reply);
+		if (http == 404)
+		{
+			m_heartbeatUnsupported = true;
+			syncLog(QStringLiteral("page lock: the workflow has no lock heartbeat route (HTTP 404) - not sent again this session"));
+		}
+		else if (http != 200)
+			syncLog(QStringLiteral("page lock: heartbeat for %1 -> HTTP %2").arg(page).arg(http));
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Page sync: the stories in the document <-> used / unused of its workflow page
 // ---------------------------------------------------------------------------
 // The workflow keeps "which story is on which page" in news_pages (dtpStatus per story + page, no
@@ -9064,7 +9288,9 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 	QString why;
 	if (markGate(pageId, &why) == MarkGate::Blocked)
 	{
-		setStatus(tr("Sync with the workflow skipped: %1").arg(why), true);
+		setStatus(tr("Sync with the workflow skipped: %1").arg(why)
+		          + (m_takeOverBtn && !m_takeOverBtn->isHidden() ? tr(" - 'Take over page' makes it yours") : QString()), true);
+		setStatusDetails(pageLockDetails(pageId, m_fetchDate));
 		syncLog(QStringLiteral("sync (%1) of %2 skipped: %3").arg(trigger, pageName, why));
 		m_syncTestLog << QStringLiteral("blocked: ") + why;
 		return;
@@ -9570,6 +9796,286 @@ void SuneerNewsPanel::noteDocClosing(ScribusDoc* doc)
 	savePendingMarks();
 	syncLog(QStringLiteral("closing %1: %2 ms, %3 mark(s) unanswered, %4 kept for later (pending-marks.json)")
 	        .arg(QFileInfo(doc->documentFileName()).fileName()).arg(t.elapsed()).arg(m_marksInFlight).arg(m_autoRetry.size()));
+}
+
+// SUNEER_TAKEOVER_SELFTEST=<report prefix>: Take over page end to end against the mock workflow of
+// tests/suneer/news_page_takeover.sh. This Scribus is user A (Locked Pages right); user B acts through
+// the API with its own token. Page 2 held by B -> Continue anyway -> the sync is skipped -> Details ->
+// Take over -> the sync runs. Without the right: no button. Same account elsewhere: nothing asked.
+// Then the workflow learns the heartbeat (mock switch): A's heartbeat reaches it; B's stale lock is
+// offered to A even without the right, B's fresh one is not.
+void SuneerNewsPanel::runTakeOverSelfTest(const QString& report)
+{
+	struct Ctx
+	{
+		QStringList lines;
+		int fails = 0;
+		QList<std::function<void(std::function<void()>)>> steps;
+		int step = 0;
+		QString date;
+		std::function<void(const QString&, const QString&)> measure;   // the lock line on screen
+	};
+	auto c = std::make_shared<Ctx>();
+	c->date = qEnvironmentVariable("SUNEER_WFSYNC_DATE", "2026-11-02");
+	auto check = [c](const QString& what, bool ok) {
+		c->lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		c->fails += ok ? 0 : 1;
+	};
+	auto note = [c](const QString& l) { c->lines << QStringLiteral("  ") + l; };
+	auto waitFor = [this](std::function<bool()> cond, int ms, std::function<void(bool)> done) {
+		auto* t = new QTimer(this);
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		t->setInterval(100);
+		connect(t, &QTimer::timeout, this, [t, el, cond, ms, done]() {
+			const bool ok = cond();
+			if (!ok && el->elapsed() < ms)
+				return;
+			t->stop();
+			t->deleteLater();
+			done(ok);
+		});
+		t->start();
+	};
+	// test-only and user B calls (token AT-B), straight to the mock
+	auto call = [this](const QByteArray& verb, const QString& path, const QJsonObject& body, const QByteArray& token, std::function<void(int, QJsonObject)> done) {
+		QNetworkRequest req(QUrl(apiUrl(path)));
+		req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+		req.setRawHeader("Authorization", "Bearer " + token);
+		QNetworkReply* r = m_nam->sendCustomRequest(req, verb, verb == "GET" ? QByteArray() : QJsonDocument(body).toJson());
+		connect(r, &QNetworkReply::finished, this, [r, done]() {
+			r->deleteLater();
+			done(httpStatus(r), QJsonDocument::fromJson(r->readAll()).object());
+		});
+	};
+	auto lockAs = [call, c](const QByteArray& token, const QString& page, std::function<void(int)> done) {
+		QJsonObject b;
+		b["publishDate"] = c->date;
+		b["isLocked"] = true;
+		call("PATCH", QStringLiteral("/news/layout/pages/%1/toggle-lock").arg(page), b, token, [done](int http, QJsonObject) { done(http); });
+	};
+	auto state = [call](std::function<void(QJsonObject)> done) {
+		call("GET", QStringLiteral("/mock/news"), {}, "AT-A", [call, done](int, QJsonObject news) {
+			call("GET", QStringLiteral("/mock/state"), {}, "AT-A", [news, done](int, QJsonObject locks) {
+				QJsonObject o;
+				o["news"] = news["data"].toObject()["news"];
+				for (const QJsonValue& v : locks["data"].toArray())
+					o[v.toObject()["pageId"].toString()] = v.toObject();
+				done(o);
+			});
+		});
+	};
+	// choose a page; another user's -> the lock question answered "continue"
+	auto choose = [this, waitFor](const QString& page, std::function<void(bool)> done) {
+		m_pageLockTestAnswer = QStringLiteral("continue");
+		m_pageCombo->setCurrentIndex(m_pageCombo->findData(page));
+		waitFor([this]() { return m_lockGateKey == currentPageKey(); }, 8000, done);
+	};
+	// the panel really on screen (the Styles docker's News tab, switched on and in front): the lock
+	// line must get every wrapped line. (An off-screen grab of the panel cut it - not the real layout.)
+	c->measure = [this, check, note](const QString& what, const QString& shot) {
+		m_mw->suneerSetNewsBrowserTabVisible(true);   // the test profile has the tab switched off
+		for (QWidget* x = m_pageLockLabel; x && x->parentWidget(); x = x->parentWidget())
+			if (auto* tw = qobject_cast<QTabWidget*>(x->parentWidget()->parentWidget()); tw && tw->indexOf(x) >= 0)
+				tw->setCurrentWidget(x);
+		for (int i = 0; i < 20; ++i)
+			QCoreApplication::processEvents();
+		const int lw = m_pageLockLabel->width(), lh = m_pageLockLabel->height(), need = m_pageLockLabel->heightForWidth(lw);
+		const int line = m_pageLockLabel->fontMetrics().lineSpacing();
+		note(QStringLiteral("%1 lock line on screen %2: width %3, height %4, needs %5 (~%6 lines)")
+		     .arg(what).arg(m_pageLockLabel->isVisible()).arg(lw).arg(lh).arg(need).arg(qMax(1, need / qMax(1, line))));
+		check(QStringLiteral("%1 lock line not cut on screen: height %2 >= %3 needed, at most one line (%4) of blank").arg(what).arg(lh).arg(need).arg(line),
+		      m_pageLockLabel->isVisible() && lw > 40 && lh >= need && lh <= need + line);
+		m_mw->grab().save(qEnvironmentVariable("SUNEER_TAKEOVER_SELFTEST") + QStringLiteral("-window-%1.png").arg(shot));
+	};
+	auto run = std::make_shared<std::function<void()>>();
+	*run = [this, c, run, report]() {
+		if (c->step >= c->steps.size())
+		{
+			c->lines << (c->fails ? QStringLiteral("FAILED: %1").arg(c->fails) : QStringLiteral("ALL PASS"));
+			QFile f(report + "-report.txt");
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(c->lines.join('\n').toUtf8() + "\n");
+			f.close();
+			fprintf(stderr, "TAKEOVER-SELFTEST done\n");
+			QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+			return;
+		}
+		auto s = c->steps[c->step++];
+		s([run]() { QTimer::singleShot(100, *run); });
+	};
+	for (UndoGui* g : m_mw->findChildren<UndoGui*>())
+		UndoManager::instance()->removeGui(g);
+
+	// 0. B opens Page 2 (and Page 4); A logs in, KNR, the test date
+	c->steps << [this, c, check, waitFor, lockAs](std::function<void()> next) {
+		lockAs("AT-B", "p-knr-2", [this, c, check, waitFor, lockAs, next](int h2) {
+			lockAs("AT-B", "p-knr-4", [this, c, check, waitFor, next, h2](int h4) {
+				for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+					if (auto* sw = qobject_cast<QStackedWidget*>(w->parentWidget()))
+						sw->setCurrentWidget(w);
+				m_dateEdit->blockSignals(true);
+				m_dateEdit->setDate(QDate::fromString(c->date, "yyyy-MM-dd"));
+				m_dateEdit->blockSignals(false);
+				QNetworkReply* r = startLoginRequest(QStringLiteral("a@test.local"), QStringLiteral("S3cret-right"));
+				connect(r, &QNetworkReply::finished, this, [this, r, check, waitFor, next, h2, h4]() {
+					QString e;
+					const bool ok = finishLogin(r, QStringLiteral("a@test.local"), false, 0, e);
+					r->deleteLater();
+					check(QStringLiteral("B locked Page 2 and 4 (HTTP %1/%2); login as A, rights: %3").arg(h2).arg(h4).arg(QStringList(m_permissions.values()).join(',')),
+					      ok && h2 == 200 && h4 == 200 && m_permissions.contains("lockedPages.view"));
+					setLocked(false);
+					onFetchStatic();
+					const int k = m_editionCombo->findData("KNR");
+					if (k >= 0)
+						m_editionCombo->setCurrentIndex(k);
+					waitFor([this]() { return m_pageCombo->count() >= 8; }, 8000, [next](bool) { next(); });
+				});
+			});
+		});
+	};
+	// 1. Page 2 (B's): Continue anyway -> download, the sync skipped, the button there, Details
+	c->steps << [this, c, check, note, waitFor, choose](std::function<void()> next) {
+		choose("p-knr-2", [this, c, check, note, waitFor, next](bool) {
+			m_syncTestLog.clear();
+			m_syncTestAnswer = QStringLiteral("unused,link");
+			onOpenPageFromWorkflow();
+			waitFor([this]() { for (const QString& l : m_syncTestLog) if (l.startsWith("blocked:")) return true; return false; }, 20000,
+			        [this, c, check, note, next](bool skipped) {
+				const QString line = m_pageLockLabel->text();
+				note(QStringLiteral("lock line: ") + line);
+				note(QStringLiteral("status: ") + statusText());
+				// the panel really on screen (the Styles docker's News tab): the lock line gets every wrapped line
+				c->measure(QStringLiteral("Page 2"), QStringLiteral("locked"));
+				check(QStringLiteral("Continue anyway on B's Page 2: page opened, sync skipped, \"%1\" shown").arg(m_takeOverBtn->text()),
+				      skipped && m_mw->doc && line.contains("otheruser") && !m_takeOverBtn->isHidden() && statusText().contains("skipped"));
+				const QString d = pageLockDetails("p-knr-2", c->date);
+				note(d);
+				check(QStringLiteral("Details: owner, since, PC + heartbeat \"not recorded\", sync skipped and why, take over available"),
+				      d.contains("Owner: otheruser") && d.contains("Since: ") && d.contains("PC: not recorded") && d.contains("Last heartbeat: not recorded")
+				      && d.contains("Used / unused sync: skipped") && d.contains("only they change") && d.contains("Take over: available"));
+				// the Details dialog itself (status line button)
+				QTimer::singleShot(600, this, [this]() {
+					for (QWidget* w : QApplication::topLevelWidgets())
+						if (auto* dlg = qobject_cast<QDialog*>(w); dlg && dlg->isVisible() && dlg->windowTitle().contains("details"))
+						{
+							dlg->grab().save(qEnvironmentVariable("SUNEER_TAKEOVER_SELFTEST") + "-details.png");
+							dlg->accept();
+						}
+				});
+				onStatusDetails();
+				next();
+			});
+		});
+	};
+	// 2. Take over -> the lock is A's on the server, the sync runs at once (n-1 USED, n-3 UNUSED, n-4 linked USED)
+	c->steps << [this, c, check, note, waitFor, state, call](std::function<void()> next) {
+		m_pageLockTakeTestAnswer = QStringLiteral("take");
+		m_syncTestLog.clear();
+		m_takeOverBtn->click();
+		waitFor([this]() { for (const QString& l : m_syncTestLog) if (l.startsWith("answer: mark unused")) return true; return false; }, 15000,
+		        [this, c, check, note, state, call, next](bool synced) {
+			for (const QString& l : m_syncTestLog)
+				note(l);
+			QTimer::singleShot(1500, this, [this, c, check, note, state, call, next, synced]() {
+				state([this, c, check, note, call, next, synced](QJsonObject s) {
+					const QJsonObject n = s["news"].toObject();
+					auto st = [&n](const char* id) { return n[id].toObject()["p-knr-2"].toString(); };
+					check(QStringLiteral("server: Page 2 locked by %1; panel holds it (%2); button gone").arg(s["p-knr-2"].toObject()["lockedById"].toString(), m_heldPageId),
+					      s["p-knr-2"].toObject()["lockedById"].toString() == "u-A" && m_heldPageId == "p-knr-2" && m_takeOverBtn->isHidden());
+					check(QStringLiteral("sync ran right after: n-1=%1 n-2=%2 n-3=%3 n-4=%4").arg(st("n-1"), st("n-2"), st("n-3"), st("n-4")),
+					      synced && st("n-1") == "USED" && st("n-2") == "USED" && st("n-3") == "UNUSED" && st("n-4") == "USED");
+					note(QStringLiteral("lock line: ") + m_pageLockLabel->text());
+					if (m_mw->doc && m_mw->doc->isModified())
+						m_mw->slotFileSave();               // the headline link changed it: the quit asks nothing
+					QJsonObject b;
+					b["pageIds"] = QJsonArray { QStringLiteral("p-knr-2") };
+					b["publishDate"] = c->date;
+					call("PATCH", QStringLiteral("/news/layout/pages/lock"), b, "AT-B", [check, next](int http, QJsonObject) {
+						check(QStringLiteral("B lost it: B's lock request now refused (HTTP %1)").arg(http), http == 400);
+						next();
+					});
+				});
+			});
+		});
+	};
+	// 3. the workflow takes A's Locked Pages right: B's Page 4 shows no button, Details says why
+	c->steps << [this, c, check, note, choose, call](std::function<void()> next) {
+		QJsonObject perm;
+		perm["user"] = QStringLiteral("u-A");
+		perm["perm"] = QStringLiteral("lockedPages.view");
+		perm["on"] = false;
+		call("POST", QStringLiteral("/mock/perm"), perm, "AT-A", [this, c, check, note, choose, next](int, QJsonObject) {
+		fetchCurrentUser();                         // /users/me: the rights as the workflow has them now
+		choose("p-knr-4", [this, c, check, note, next](bool) {
+			const QString d = pageLockDetails("p-knr-4", c->date);
+			note(d.section('\n', -1));
+			check(QStringLiteral("no Locked Pages right (rights now: %1): no button on B's Page 4; Details: take over not available (the right)")
+			      .arg(QStringList(m_permissions.values()).join(',')),
+			      !m_permissions.contains("lockedPages.view") && m_takeOverBtn->isHidden() && d.contains("Take over: not available") && d.contains("lockedPages.view"));
+			next();
+		});
+		});
+	};
+	// 4. the same account elsewhere (A's own lock on Page 5): nothing asked, no button, sync allowed
+	c->steps << [this, check, lockAs, choose](std::function<void()> next) {
+		lockAs("AT-A", "p-knr-5", [this, check, choose, next](int h) {
+			m_pageLockTestAnswer = QStringLiteral("choose");      // a question would go back - visible below
+			m_pageCombo->setCurrentIndex(m_pageCombo->findData("p-knr-5"));
+			QTimer::singleShot(2500, this, [this, check, next, h]() {
+				check(QStringLiteral("own account's lock on Page 5 (HTTP %1): taken as yours, no button, sync allowed (%2)").arg(h).arg(m_pageLockLabel->text()),
+				      m_pageCombo->currentData().toString() == "p-knr-5" && m_takeOverBtn->isHidden() && markGate("p-knr-5") == MarkGate::Allowed);
+				next();
+			});
+		});
+	};
+	// 5. the workflow learns the heartbeat: A's goes out; B's stale Page 6 -> offered without the right; B's fresh Page 7 -> not
+	c->steps << [this, c, check, note, call, lockAs, choose, waitFor, state](std::function<void()> next) {
+		QJsonObject on;
+		on["on"] = true;
+		call("POST", QStringLiteral("/mock/heartbeat"), on, "AT-A", [this, c, check, note, call, lockAs, choose, waitFor, state, next](int, QJsonObject) {
+			m_heartbeatUnsupported = false;
+			sendLockHeartbeat();
+			QTimer::singleShot(1000, this, [this, c, check, note, call, lockAs, choose, waitFor, state, next]() {
+				state([this, c, check, note, call, lockAs, choose, waitFor, next](QJsonObject s) {
+					const QJsonObject p5 = s["p-knr-5"].toObject();
+					check(QStringLiteral("heartbeat route: A's Page 5 lastSeenAt %1, client \"%2\"").arg(p5["lastSeenAt"].toString(), p5["lockClient"].toString()),
+					      !p5["lastSeenAt"].toString().isEmpty() && p5["lockClient"].toString() == QSysInfo::machineHostName());
+					lockAs("AT-B", "p-knr-6", [this, c, check, note, call, lockAs, choose, waitFor, next](int) {
+						lockAs("AT-B", "p-knr-7", [this, c, check, note, call, choose, waitFor, next](int) {
+							QJsonObject st;
+							st["pageId"] = QStringLiteral("p-knr-6");
+							st["date"] = c->date;
+							st["minutes"] = 5;
+							st["client"] = QStringLiteral("CHN-DTP-B");
+							call("POST", QStringLiteral("/mock/stale"), st, "AT-A", [this, c, check, note, choose, waitFor, next](int, QJsonObject) {
+								choose("p-knr-7", [this, c, check, note, choose, waitFor, next](bool) {
+									const bool freshHidden = m_takeOverBtn->isHidden();
+									choose("p-knr-6", [this, c, check, note, waitFor, next, freshHidden](bool) {
+										const QString d = pageLockDetails("p-knr-6", c->date);
+										note(QStringLiteral("lock line: ") + m_pageLockLabel->text());
+										c->measure(QStringLiteral("Page 6 (stale, the longest)"), QStringLiteral("stale"));
+										note(d);
+										check(QStringLiteral("no right: B's fresh Page 7 no button; B's stale Page 6 \"%1\"; Details: PC CHN-DTP-B, heartbeat 5 min ago - stale")
+										      .arg(m_takeOverBtn->text()),
+										      freshHidden && !m_takeOverBtn->isHidden() && m_takeOverBtn->text().contains("stale")
+										      && d.contains("PC: CHN-DTP-B") && d.contains("5 min ago") && d.contains("stale"));
+										m_pageLockTakeTestAnswer = QStringLiteral("take");
+										m_takeOverBtn->click();
+										waitFor([this]() { return m_heldPageId == QLatin1String("p-knr-6"); }, 8000, [check, next](bool ok) {
+											check(QStringLiteral("stale Page 6 taken over without the right"), ok);
+											next();
+										});
+									});
+								});
+							});
+						});
+					});
+				});
+			});
+		});
+	};
+	(*run)();
 }
 
 // SUNEER_WFSYNC_SELFTEST=<report prefix>, SUNEER_WFSYNC_PHASE=1|2: the page sync end to end against

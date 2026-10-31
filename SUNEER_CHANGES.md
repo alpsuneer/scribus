@@ -1537,3 +1537,14 @@ scribus
 - Fix: USED-ന് `fromStatus` അയച്ചിരുന്നു; workflow അത് 400 കൊണ്ട് നിരസിക്കും (undo-ക്ക് ശേഷമുള്ള USED പരാജയപ്പെട്ടിരുന്നു).
 - Test: `tests/suneer/news_page_sync.sh <dir>` (mock workflow, രണ്ട് ഘട്ടം).
 
+### 102. News Browser — മറ്റൊരാൾ തുറന്ന page "Take over page"
+- മറ്റൊരാൾ lock ചെയ്ത page-ൽ (Continue anyway കഴിഞ്ഞ്) Page box-ന്റെ താഴെ **Take over page** button.
+  ചോദിക്കും ("<ആൾ> will lose the lock"), പിന്നെ lock നിങ്ങളുടേതാകും, Used / Unused sync ഉടനെ നടക്കും.
+- Workflow-ന്റെ **Locked Pages right** (`lockedPages.view`) ഉള്ളവർക്ക് മാത്രം (web-ലെ Locked Pages പോലെ).
+- ഒരേ account (മറ്റൊരു PC): ഇപ്പോഴും "നിങ്ങളുടേത്" — ചോദ്യമില്ല, sync തടയില്ല.
+- **Details…**: owner, since, PC, last heartbeat, sync skip-ന്റെ കാരണം, take over പറ്റുമോ.
+  Workflow ഇപ്പോൾ PC / heartbeat സൂക്ഷിക്കുന്നില്ല → "not recorded by the workflow".
+- Workflow-ൽ heartbeat വന്നാൽ (spec 2026-10-30): Scribus ഓരോ മിനിറ്റിലും heartbeat അയയ്ക്കും;
+  3 മിനിറ്റ് heartbeat ഇല്ലാത്ത lock "stale" — right ഇല്ലാത്തവർക്കും take over.
+- Test: `tests/suneer/news_page_takeover.sh <dir>` (mock).
+

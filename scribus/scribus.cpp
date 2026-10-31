@@ -385,6 +385,7 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_TAKEOVER_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST");
 }
 

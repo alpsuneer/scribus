@@ -21,6 +21,12 @@ usage: news_page_lock_mock.py <port>
   GET /news-layout-settings (toWireRow, page-local pt) for Page 2;
   test-only: GET /mock/news (statuses + every PATCH), POST /mock/fail-patch {"on"} -> PATCH 503,
              POST /mock/set {"news", "page", "status"} (another PC changed a status).
+  Take over (tests/suneer/news_page_takeover.sh): A has the lockedPages.view right, B has none
+  (user.permissions, userAuth.service.ts); toggle-lock as in the workflow (no owner check).
+  The lock heartbeat of the spec of 2026-10-30 is NOT in the workflow: off by default (route 404,
+  no lastSeenAt / lockClient); test-only POST /mock/heartbeat {"on"} switches it on,
+  POST /mock/stale {"pageId", "date", "minutes", "client"} ages a lock's lastSeenAt,
+  POST /mock/perm {"user", "perm", "on"} grants / takes a right.
 """
 import os
 import json
@@ -34,9 +40,10 @@ from urllib.parse import urlparse, parse_qs
 PORT = int(sys.argv[1])
 USERS = {
     "AT-A": {"id": "u-A", "username": "suneer", "firstName": "Suneer", "lastName": "Test", "email": "a@test.local",
-             "groups": [("eg-A-knr", "ed-knr"), ("eg-A-tvm", "ed-tvm")]},
+             "groups": [("eg-A-knr", "ed-knr"), ("eg-A-tvm", "ed-tvm")],
+             "permissions": {"layout.view": True, "lockedPages.view": True, "slaTemplates.view": True}},
     "AT-B": {"id": "u-B", "username": "otheruser", "firstName": "Other", "lastName": "User", "email": "b@test.local",
-             "groups": [("eg-B-knr", "ed-knr")]},
+             "groups": [("eg-B-knr", "ed-knr")], "permissions": {"layout.view": True}},
 }
 EDITIONS = {"ed-knr": ("KNR", "Kannur", 8), "ed-tvm": ("TVM", "Thiruvananthapuram", 3)}
 PAGES = {ed: [{"id": "p-%s-%d" % (sn.lower(), i), "name": "Page %d" % i, "displayOrder": i}
@@ -46,6 +53,7 @@ PAGE_EDITION = {p["id"]: ed for ed, ps in PAGES.items() for p in ps}
 STATUS = {}
 LOCK = threading.Lock()
 HANG = {"on": False}
+HEARTBEAT = {"on": False}
 FIX = os.environ.get("WFOPEN_FIXTURES", "")
 # pageId -> (day's slaTemplateId, templateChosen, page's last-used template)
 CONTEXT = {"p-knr-1": ("tpl-p1", True, "tpl-p1"), "p-knr-3": ("tpl-obit", True, "tpl-obit"),
@@ -96,7 +104,7 @@ def now():
 
 def user_json(u):
     return {"id": u["id"], "username": u["username"], "firstName": u["firstName"], "lastName": u["lastName"],
-            "email": u["email"],
+            "email": u["email"], "permissions": u.get("permissions", {}),
             "editionGroups": [{"id": gid, "editionId": ed,
                                "edition": {"id": ed, "name": EDITIONS[ed][1], "shortName": EDITIONS[ed][0]}}
                               for gid, ed in u["groups"]]}
@@ -110,6 +118,7 @@ def status_json(page_id, date):
     return {"id": "st-%s-%s" % (page_id, date), "pageId": page_id, "publishDate": date + "T00:00:00.000Z",
             "lockedAt": s["lockedAt"], "lockedById": s["lockedById"], "isCompleted": False,
             "lockedBy": {"id": locker["id"], "username": locker["username"]} if locker else None,
+            **({"lastSeenAt": s.get("lastSeenAt"), "lockClient": s.get("lockClient")} if HEARTBEAT["on"] else {}),
             "page": {"id": page_id, "name": next(p["name"] for p in PAGES[PAGE_EDITION[page_id]] if p["id"] == page_id)}}
 
 
@@ -177,6 +186,34 @@ class Handler(BaseHTTPRequestHandler):
         u = self.user()
         if u is None:
             return self.bad(401, "Unauthorized")
+        if method == "POST" and path == "/mock/perm":
+            b = self.body()
+            usr = next(x for x in USERS.values() if x["id"] == b["user"])
+            usr.setdefault("permissions", {})[b["perm"]] = bool(b.get("on"))
+            return self.ok(usr["permissions"])
+        if method == "POST" and path == "/mock/heartbeat":
+            HEARTBEAT["on"] = bool(self.body().get("on"))
+            return self.ok({"heartbeat": HEARTBEAT["on"]})
+        if method == "POST" and path == "/mock/stale":
+            b = self.body()
+            from datetime import timedelta
+            with LOCK:
+                st = STATUS[(b["pageId"], b["date"])]
+                st["lastSeenAt"] = (datetime.now(timezone.utc) - timedelta(minutes=b["minutes"])).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                st["lockClient"] = b.get("client")
+            return self.ok({})
+        if method == "PATCH" and path.startswith("/news/layout/pages/") and path.endswith("/heartbeat"):
+            if not HEARTBEAT["on"]:
+                return self.bad(404, "Route not found")
+            pid = path[len("/news/layout/pages/"):-len("/heartbeat")]
+            b = self.body()
+            date = (b.get("publishDate") or "")[:10]
+            with LOCK:
+                st = STATUS.get((pid, date))
+                if not st or st["lockedById"] != u["id"]:
+                    return self.bad(403, "Not the lock holder")
+                st["lastSeenAt"], st["lockClient"] = now(), b.get("client")
+                return self.ok(status_json(pid, date))
         if method == "POST" and path == "/mock/set":
             b = self.body()
             with LOCK:
@@ -310,7 +347,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.bad(400, "Page not found!")
             with LOCK:
                 locked = bool(b.get("isLocked"))
-                STATUS[(pid, date)] = {"lockedAt": now() if locked else None, "lockedById": u["id"] if locked else None}
+                STATUS[(pid, date)] = {"lockedAt": now() if locked else None, "lockedById": u["id"] if locked else None,
+                                       "lastSeenAt": now() if locked else None, "lockClient": None}
                 return self.ok(status_json(pid, date))
         if method == "GET" and path.startswith("/news/") and path.count("/") == 2 and path[6:] in NEWS:
             with LOCK:

@@ -212,6 +212,9 @@ private:
 		QString userName;
 		QDateTime since;
 		bool completed {false};
+		// Not in the workflow yet (spec of 2026-10-30): its last heartbeat and the PC. Empty until it sends them.
+		QDateTime lastSeen;
+		QString client;
 	};
 	QHash<QString, PageLockInfo> m_pageLocks;   // page id -> lock on m_pageLocksDate (no entry = free)
 	QString m_pageLocksDate;
@@ -231,6 +234,19 @@ private:
 	class QTimer* m_lockKeepAlive {nullptr};
 	class QTimer* m_lockDateDebounce {nullptr};
 	QLabel* m_pageLockLabel {nullptr};          // the line under the Page box
+	QPushButton* m_takeOverBtn {nullptr};       // under that line: another user's page -> take its lock
+	QSet<QString> m_permissions;                // the login's permissions (user.permissions, granted ones)
+	bool m_heartbeatUnsupported {false};        // the workflow has no lock heartbeat route (404): not tried again
+	QString m_pageLockTakeTestAnswer;           // self-test: "take" / "cancel" for the take-over question
+	//! A lock with a heartbeat older than 3 min (only when the workflow sends lastSeenAt).
+	static bool lockIsStale(const PageLockInfo& info);
+	//! May this user take \a info's page over? (another user's lock + the Locked Pages right, or a stale lock)
+	bool canTakeOver(const PageLockInfo& info, QString* why = nullptr) const;
+	void onTakeOverPage();
+	//! Owner, PC, since, last heartbeat, why the sync is skipped, take over or not - for Details.
+	QString pageLockDetails(const QString& pageId, const QString& date) const;
+	void sendLockHeartbeat();
+	void runTakeOverSelfTest(const QString& report);
 	QString pageNameAt(int index) const;
 	QString currentPageKey() const;             // "pageId|date" of the Page box and date
 	static QString formatLockSince(const QDateTime& since);
