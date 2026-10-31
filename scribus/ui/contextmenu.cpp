@@ -412,6 +412,26 @@ void ContextMenu::createMenuItems_Selection()
 			addSeparator();
 		}
 		// A story placed by the News Browser: re-arrange its photos in place.
+		if (m_ScMW->m_suneerNewsPanel)
+		{
+			// suneer: obituary photos among the selection that were never processed (pages from the workflow)
+			SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
+			int need = 0;
+			for (int i = 0; i < selectedItemCount; ++i)
+			{
+				PageItem* it = m_Sel.itemAt(i);
+				QList<PageItem*> parts { it };
+				if (it && it->isGroup())
+					parts << it->getAllChildren();
+				for (PageItem* p : parts)
+					need += panel->obitPhotoNeedsProcessing(p) ? 1 : 0;
+			}
+			if (need > 0)
+			{
+				QAction* obAct = addAction(tr("Process obituary photos (%1 selected)").arg(need));
+				connect(obAct, &QAction::triggered, panel, [panel]() { panel->processObitPhotos(true); });
+			}
+		}
 		if (selectedItemCount == 1 && SuneerNewsPanel::isNewsStory(currItem) && m_ScMW->m_suneerNewsPanel)
 		{
 			SuneerNewsPanel* panel = m_ScMW->m_suneerNewsPanel;
@@ -960,6 +980,9 @@ void ContextMenu::createMenuItems_NoSelection(double mx, double my)
 		QAction* cvAct = addAction(tr("Convert story groups to weld (page)"));
 		cvAct->setToolTip(tr("Old documents: every grouped story on this page becomes welded frames"));
 		connect(cvAct, &QAction::triggered, panel, [panel]() { panel->convertStoryGroupsToWeld(true); });
+		QAction* obAct = addAction(tr("Process obituary photos (page)"));
+		obAct->setToolTip(tr("Background removal, face crop, Obit BG colour and tone for this page's obituary photos not processed yet"));
+		connect(obAct, &QAction::triggered, panel, [panel]() { panel->processObitPhotos(false); });
 	}
 	if (addRelayoutMenu())
 		addSeparator();

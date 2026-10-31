@@ -555,6 +555,7 @@ def main():
     items = job.get("items", [])
     n = len(items)
     session = None
+    session_tried = False
     face_data = None    # cascade folder found? Checked once, on the first picture to process
     for i, item in enumerate(items, 1):
         item_id, src, out = item.get("id", "?"), item.get("src", ""), item.get("out", "")
@@ -567,9 +568,16 @@ def main():
             if meta is not None:
                 log(i, n, item_id, "cached", out, "%s|%s ppi (%sx%s px)" % (meta.get("status", "ok"), meta.get("ppi", "?"), meta.get("srcW", "?"), meta.get("srcH", "?")))
                 continue
-            if session is None:
-                from rembg import new_session
-                session = new_session(job.get("model", "u2net_human_seg"))
+            if session is None and not session_tried:
+                # the first model once for the batch; when it is missing, process() tries the
+                # other models of the job for each picture (a missing first model used to fail
+                # every picture without trying them)
+                session_tried = True
+                try:
+                    from rembg import new_session
+                    session = new_session(job.get("model", "u2net_human_seg"))
+                except Exception as e:
+                    sys.stderr.write("rembg model %s: %s - trying the other models\n" % (job.get("model", "u2net_human_seg"), e))
             if face_data is None:
                 face_data = cascade_dir() is not None
                 if not face_data:

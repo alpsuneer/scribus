@@ -51,6 +51,20 @@
 #include "undomanager.h"
 #include "undostate.h"
 #include "undotransaction.h"
+#include "ui/contextmenu.h"
+#include "undogui.h"
+#include <QStackedWidget>
+#include <QDateEdit>
+#include <QJsonDocument>
+#include <QNetworkReply>
+#include <QTimer>
+#include <QElapsedTimer>
+#include "pagestructs.h"
+#include <QSettings>
+#include <QMessageBox>
+#include <QFileInfo>
+#include <QPushButton>
+#include <QApplication>
 
 #include <QComboBox>
 #include <QUrl>
@@ -1765,10 +1779,45 @@ QString SuneerNewsPanel::obitRuninStyle(const SuneerObitModel& model)
 	return name;
 }
 
+namespace {
+//! One frame's state around a batch: what undo / redo put back besides the picture (the
+//! picture itself is the frame's own GET_IMAGE undo state in the same transaction).
+struct ObitWfSnap
+{
+	PageItem* item {nullptr};
+	QString oldFill, newFill;
+	ObjAttrVector oldAttrs, newAttrs;
+	bool scaleType {true}, aspect {true};
+	double xoff {0}, yoff {0}, xs {1}, ys {1};
+};
+
+bool itemAlive(ScribusDoc* doc, PageItem* f)
+{
+	if (!doc || !f)
+		return false;
+	for (int i = 0; i < doc->Items->count(); ++i)
+	{
+		PageItem* it = doc->Items->at(i);
+		if (it == f || (it->isGroup() && it->getAllChildren().contains(f)))
+			return true;
+	}
+	return false;
+}
+
+QString obitFrameName(PageItem* f)
+{
+	const QString file = QFileInfo(f->Pfile).fileName();
+	return file.isEmpty() ? f->itemName() : file;
+}
+} // namespace
+
 // "Re-process photos": the current photo settings applied again to the
 // selected placed obit photos (or every obit photo of the document when
-// nothing is selected), without touching the text. The processed file is
-// rewritten and reloaded into the same frame; one undo step.
+// nothing is selected), without touching the text. The result goes to a NEW
+// file (<name>_r<N>.png): the previous one stays, so the one undo step puts
+// the previous picture back (rewriting the same file left undo nothing to
+// restore - the old pixels were gone, and the picture was reloaded without
+// an undo state at all).
 void SuneerNewsPanel::onObitReprocess()
 {
 	if (!m_doc)
@@ -1820,10 +1869,19 @@ void SuneerNewsPanel::onObitReprocess()
 		SuneerObitPhotoWorker::Item it;
 		it.id = QString::number(items.size());
 		it.src = attr(f, "obit.src");
-		it.out = attr(f, "obit.out");
 		it.protect = attr(f, SuneerPhotoEdit::AttrProtect);   // Edit photo's protect / exclude areas survive a re-process
-		if (it.out.isEmpty() || it.out.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive))
-			it.out = obitImageDir() + '/' + (it.out.isEmpty() ? QFileInfo(it.src).completeBaseName() : QFileInfo(it.out).completeBaseName()) + QStringLiteral(".png");
+		{
+			// a new version next to the current result: <base>_r1.png, _r2.png ... (the current one is what undo brings back)
+			const QString cur = attr(f, "obit.out");
+			QString base = cur.isEmpty() ? QFileInfo(it.src).completeBaseName() : QFileInfo(cur).completeBaseName();
+			static const QRegularExpression ver(QStringLiteral("_r\\d+$"));
+			base.remove(ver);
+			const QString dir = obitImageDir();
+			int n = 1;
+			while (QFileInfo::exists(dir + '/' + base + QStringLiteral("_r%1.png").arg(n)))
+				++n;
+			it.out = dir + '/' + base + QStringLiteral("_r%1.png").arg(n);
+		}
 		if (!QFileInfo::exists(it.src))
 		{
 			apiLog(QStringLiteral("re-process: source missing %1").arg(it.src));
@@ -1859,14 +1917,19 @@ void SuneerNewsPanel::onObitReprocess()
 		if (UndoManager::undoEnabled())
 			tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Re-process obituary photos"), QString(), Um::IImageFrame);
 		int done = 0, flagged = 0;
+		QList<ObitWfSnap> snaps;
 		for (const SuneerObitPhotoWorker::Result& r : m_obitWorker->results())
 		{
 			PageItem* f = byId.value(r.id);
 			if (!f || r.status == QLatin1String("fail") || !QFileInfo::exists(r.out))
 				continue;
+			ObitWfSnap snap;
+			snap.item = f;
+			snap.oldFill = f->fillColor();
+			snap.oldAttrs = *f->getObjectAttributes();
+			m_doc->loadPict(r.out, f, false, true);   // reload=false: the picture's own undo state (GET_IMAGE)
 			f->setFillColor(fillName);
 			f->setImageScalingMode(false, true);
-			m_doc->loadPict(r.out, f, true, true);
 			f->adjustPictScale();
 			setAttr(f, "obit.photoStatus", r.status);
 			setAttr(f, "obit.out", r.out);
@@ -1890,9 +1953,26 @@ void SuneerNewsPanel::onObitReprocess()
 				}
 				m_doc->m_Selection->clear();
 			}
+			snap.newFill = f->fillColor();
+			snap.newAttrs = *f->getObjectAttributes();
+			snap.scaleType = f->ScaleType;
+			snap.aspect = f->AspectRatio;
+			snap.xoff = f->imageXOffset();
+			snap.yoff = f->imageYOffset();
+			snap.xs = f->imageXScale();
+			snap.ys = f->imageYScale();
+			snaps << snap;
 			++done;
 			if (r.status != QLatin1String("ok"))
 				++flagged;
+		}
+		if (!snaps.isEmpty() && UndoManager::undoEnabled())
+		{
+			// fill, attributes and the fit: undone / redone with the pictures (restoreObitWfPhotos)
+			auto* st = new ScItemState<QList<ObitWfSnap>>(tr("Obituary photo settings"), QString(), Um::IImageFrame);
+			st->set("SUNEER_OBIT_WFPHOTOS");
+			st->setItem(snaps);
+			UndoManager::instance()->action(this, st);
 		}
 		if (tx)
 			tx.commit();
@@ -1908,6 +1988,817 @@ void SuneerNewsPanel::onObitReprocess()
 		setStatus(line);
 		apiLog(QStringLiteral("re-process: %1").arg(line));
 	});
+}
+
+
+// ---------------------------------------------------------------------------
+// "Process obituary photos": pages opened from the workflow
+// ---------------------------------------------------------------------------
+// The workflow's .sla export ships an obituary page's headshots as they were uploaded (its zip:
+// images/<n>_obit_<file>, cropped by the desk at most) - no background removal, no Obit BG tone.
+// This runs them through the same pipeline as a News Browser placement (SuneerObitPhotoWorker:
+// background removal, face crop / centre, Obit BG colour, tone match) in the background. The
+// original goes to <sla>_photos/original, the result to <sla>_photos/edited/obit, the frame keeps
+// its size, welds and caption and is relinked; one undo step for the whole batch. A photo edited
+// by hand or already processed is never touched.
+
+
+bool SuneerNewsPanel::obitPhotoNeedsProcessing(PageItem* item, QString* why) const
+{
+	auto no = [why](const QString& s) { if (why) *why = s; return false; };
+	if (!item || !item->isImageFrame())
+		return no(tr("not a photo frame"));
+	const QString file = item->Pfile;
+	bool obit = QFileInfo(file).fileName().contains(QLatin1String("_obit_")) || !attr(item, "obit.src").isEmpty();
+	for (PageItem* p = item->Parent; !obit && p; p = p->Parent)
+		obit = attr(p, "news.model").startsWith(QLatin1String("obituary"));
+	if (!obit)
+		return no(tr("not an obituary photo"));
+	if (file.isEmpty())
+		return no(tr("no picture in the frame"));
+	const QString bgMode = attr(item, SuneerPhotoEdit::AttrBgMode);
+	if (SuneerPhotoEdit::isManual(item) || attr(item, SuneerPhotoEdit::AttrManual) == QLatin1String("1")
+	    || bgMode == QLatin1String("manual") || bgMode == QLatin1String("none"))
+		return no(tr("edited by hand (Edit photo)"));
+	const QString out = attr(item, "obit.out");
+	if (!out.isEmpty() && QFileInfo(out).absoluteFilePath() == QFileInfo(file).absoluteFilePath())
+		return no(tr("already processed"));
+	if (QFileInfo(file).absoluteFilePath().contains(QLatin1String("_photos/edited/")))
+		return no(tr("already processed (an edited file)"));
+	if (why)
+		why->clear();
+	return true;
+}
+
+void SuneerNewsPanel::processObitPhotos(bool selectionOnly)
+{
+	auto refuse = [this](const QString& msg) {
+		setStatus(msg, true);
+		m_obitWfLastReport = msg;
+		m_obitWfTestLog << QStringLiteral("refused: ") + msg;
+		syncLog(QStringLiteral("obit photos: ") + msg);
+	};
+	if (!m_doc)
+		return;
+	if (m_obitWfRunning || (m_obitWorker && m_obitWorker->running()))
+	{
+		refuse(tr("Obituary photos are being processed already - wait or press Cancel"));
+		return;
+	}
+	if (!m_doc->hasName)
+	{
+		refuse(tr("Process obituary photos: save the document first (the photos go next to it, in <name>_photos)"));
+		return;
+	}
+	// only the holder of the page lock changes a workflow page
+	const SyncPage sp = docSyncPage(m_doc);
+	if (!sp.pageId.isEmpty())
+	{
+		QString why;
+		const MarkGate gate = markGate(sp.pageId, &why);
+		if (gate == MarkGate::Blocked)
+		{
+			refuse(tr("Process obituary photos: not done - %1").arg(why));
+			return;
+		}
+		if (gate == MarkGate::Deferred)
+		{
+			refuse(tr("Process obituary photos: take the page lock first (choose %1 in the News Browser) - %2")
+			       .arg(sp.pageName.isEmpty() ? sp.pageId : sp.pageName, why));
+			return;
+		}
+	}
+	QList<PageItem*> frames;
+	auto collect = [&frames](PageItem* it) {
+		if (!it)
+			return;
+		if (it->isGroup())
+		{
+			for (PageItem* c : it->getAllChildren())
+				if (c && c->isImageFrame() && !frames.contains(c))
+					frames << c;
+		}
+		else if (it->isImageFrame() && !frames.contains(it))
+			frames << it;
+	};
+	if (selectionOnly)
+		for (int i = 0; i < m_doc->m_Selection->count(); ++i)
+			collect(m_doc->m_Selection->itemAt(i));
+	else
+		for (int i = 0; i < m_doc->Items->count(); ++i)
+			collect(m_doc->Items->at(i));
+	m_obitWfSkipped.clear();
+	m_obitWfFailed.clear();
+	m_obitWfFrames.clear();
+	m_obitWfOrig.clear();
+	m_obitWfUrl.clear();
+	QList<PageItem*> todo;
+	for (PageItem* f : std::as_const(frames))
+	{
+		QString why;
+		if (obitPhotoNeedsProcessing(f, &why))
+			todo << f;
+		else if (why != tr("not an obituary photo") && why != tr("not a photo frame"))
+			m_obitWfSkipped << QStringLiteral("%1: %2").arg(obitFrameName(f), why);
+	}
+	if (todo.isEmpty())
+	{
+		const QString msg = m_obitWfSkipped.isEmpty()
+		    ? (selectionOnly ? tr("Process obituary photos: no obituary photo in the selection") : tr("Process obituary photos: no obituary photo on this page"))
+		    : tr("Process obituary photos: nothing to do - %n skipped", "", m_obitWfSkipped.size());
+		setStatus(msg);
+		if (!m_obitWfSkipped.isEmpty())
+			setStatusDetails(tr("Skipped:") + QStringLiteral("\n• ") + m_obitWfSkipped.join(QStringLiteral("\n• ")));
+		m_obitWfLastReport = msg;
+		m_obitWfTestLog << QStringLiteral("report: ") + msg;
+		return;
+	}
+	// The originals: the frame's file (the workflow's zip picture, or a cache / temp copy) copied into
+	// <sla>_photos/original; a missing file is fetched again from the workflow when the frame or its
+	// story knows the URL.
+	auto storyUrl = [this](PageItem* f) {
+		QString url = attr(f, SuneerPhotoStore::AttrFileUrl);
+		if (!url.isEmpty())
+			return url;
+		QList<PageItem*> near { f };
+		near << f->itemsWeldedTo();
+		for (PageItem* p : near)
+		{
+			const QString sid = attr(p, "news.serverId");
+			if (sid.isEmpty())
+				continue;
+			for (const QJsonValue& v : std::as_const(m_newsData))
+				if (newsServerId(v.toObject()) == sid && !mediaList(v.toObject()).isEmpty())
+					return mediaList(v.toObject())[0].toObject()["media"].toObject()["fileUrl"].toString();
+		}
+		return QString();
+	};
+	const SuneerObitModel model = obitModel();
+	QString fillName;
+	const QColor bg = obitBackgroundColor(model, &fillName);
+	const QString outDir = obitImageDir();
+	QList<SuneerObitPhotoWorker::Item> items;
+	int n = 0;
+	for (PageItem* f : std::as_const(todo))
+	{
+		statusProgress(tr("Originals"), ++n, todo.size());
+		const QString src = f->Pfile;
+		const QString key = QStringLiteral("wf_") + QFileInfo(src).completeBaseName();
+		QString local, why, url;
+		if (QFileInfo(src).isFile() && QFileInfo(src).size() > 0)
+			local = src;
+		else
+		{
+			url = storyUrl(f);
+			if (url.isEmpty())
+			{
+				m_obitWfFailed << QStringLiteral("%1: %2").arg(obitFrameName(f), tr("original not found (%1) and no workflow link to fetch it").arg(QDir::toNativeSeparators(src)));
+				continue;
+			}
+			local = downloadImage(url, &why);
+			if (local.isEmpty())
+			{
+				m_obitWfFailed << QStringLiteral("%1: %2").arg(obitFrameName(f), tr("download from the workflow failed: %1").arg(why));
+				continue;
+			}
+		}
+		QString iwhy;
+		const QString orig = SuneerPhotoStore::importOriginal(m_doc, local, key, 0, &iwhy);
+		if (!iwhy.isEmpty())
+			apiLog(QStringLiteral("photo store: %1").arg(iwhy));
+		SuneerObitPhotoWorker::Item it;
+		it.id = QString::number(items.size());
+		it.src = orig;
+		it.out = outDir + QLatin1Char('/') + SuneerPhotoStore::safeName(key, 0, QStringLiteral("png"));
+		it.protect = attr(f, SuneerPhotoEdit::AttrProtect);
+		m_obitWfFrames.insert(it.id, f);
+		m_obitWfOrig.insert(it.id, orig);
+		if (!url.isEmpty())
+			m_obitWfUrl.insert(it.id, url);
+		items << it;
+	}
+	statusProgressDone();
+	if (items.isEmpty())
+	{
+		finishObitWfBatch(false, true, QString());
+		return;
+	}
+	if (!m_obitWorker)
+		m_obitWorker = new SuneerObitPhotoWorker(this);
+	QString why;
+	if (!m_obitWorker->start(items, model, bg, outDir, &why))
+	{
+		// no script / no python: every photo keeps its original, with the reason
+		for (const SuneerObitPhotoWorker::Item& it : std::as_const(items))
+			m_obitWfFailed << QStringLiteral("%1: %2").arg(obitFrameName(m_obitWfFrames.value(it.id)), tr("photo processing not available: %1").arg(why));
+		m_obitWfFrames.clear();
+		finishObitWfBatch(false, false, why);
+		return;
+	}
+	m_obitWfRunning = true;
+	m_obitWfDoc = m_doc;
+	if (m_obitWfBtn)
+		m_obitWfBtn->setEnabled(false);
+	if (m_obitCancelBtn)
+		m_obitCancelBtn->show();
+	syncLog(QStringLiteral("obit photos: %1 to process, %2 skipped, %3 failed before processing (%4)").arg(items.size()).arg(m_obitWfSkipped.size()).arg(m_obitWfFailed.size()).arg(outDir));
+	m_obitWfTestLog << QStringLiteral("started: %1").arg(items.size());
+	statusProgress(tr("Obituary photos"), 0, items.size());
+	m_obitWorker->disconnect(this);
+	connect(m_obitWorker, &SuneerObitPhotoWorker::progress, this, [this](int done, int total, const QString&, const QString&, const QString&) {
+		statusProgress(tr("Obituary photos"), done, total);
+		m_obitWfTestLog << QStringLiteral("progress %1/%2").arg(done).arg(total);
+	});
+	connect(m_obitWorker, &SuneerObitPhotoWorker::finished, this, [this](bool ok, const QString& error) {
+		finishObitWfBatch(false, ok, error);
+	});
+}
+
+// The batch is over (done, failed, or Cancel): what the worker delivered is linked into the frames
+// in one undo step; everything else keeps its original picture and is listed with the reason.
+void SuneerNewsPanel::finishObitWfBatch(bool cancelled, bool ok, const QString& error)
+{
+	m_obitWfRunning = false;
+	if (m_obitWfBtn)
+		m_obitWfBtn->setEnabled(true);
+	if (m_obitCancelBtn)
+		m_obitCancelBtn->hide();
+	statusProgressDone();
+	ScribusDoc* doc = m_obitWfDoc ? m_obitWfDoc.data() : m_doc.data();
+	const QList<SuneerObitPhotoWorker::Result> results = (m_obitWorker && !m_obitWfFrames.isEmpty()) ? m_obitWorker->results() : QList<SuneerObitPhotoWorker::Result>();
+	QSet<QString> answered;
+	int processed = 0, toCheck = 0;
+	QStringList checks;
+	const bool sameDoc = doc && doc == m_doc;
+	if (!m_obitWfFrames.isEmpty() && !sameDoc)
+	{
+		// another document in front (or this one closed): nothing is linked into a page the user is not looking at
+		for (auto it = m_obitWfFrames.constBegin(); it != m_obitWfFrames.constEnd(); ++it)
+			m_obitWfFailed << tr("photo %1: the document was closed or switched while processing - run it again (finished files are reused)").arg(it.key());
+		m_obitWfFrames.clear();
+	}
+	if (!m_obitWfFrames.isEmpty())
+	{
+		const SuneerObitModel model = obitModel();
+		QString fillName;
+		obitBackgroundColor(model, &fillName);
+		UndoTransaction tx;
+		if (UndoManager::undoEnabled())
+			tx = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup, tr("Process obituary photos"), QString(), Um::IImageFrame);
+		QList<ObitWfSnap> snaps;
+		for (const SuneerObitPhotoWorker::Result& r : results)
+		{
+			PageItem* f = m_obitWfFrames.value(r.id);
+			if (!f || answered.contains(r.id))
+				continue;
+			answered.insert(r.id);
+			if (!itemAlive(doc, f))
+			{
+				m_obitWfFailed << tr("photo %1: its frame was deleted while processing").arg(r.id);
+				continue;
+			}
+			const QString name = obitFrameName(f);
+			if (r.status == QLatin1String("fail") || !QFileInfo::exists(r.out))
+			{
+				m_obitWfFailed << QStringLiteral("%1: %2").arg(name, tr("photo processing failed, the original is kept: %1").arg(r.message.isEmpty() ? r.status : r.message));
+				continue;
+			}
+			ObitWfSnap s;
+			s.item = f;
+			s.oldFill = f->fillColor();
+			s.oldAttrs = *f->getObjectAttributes();
+			doc->loadPict(r.out, f, false, true);          // reload=false: the picture's own undo state (GET_IMAGE)
+			f->setFillColor(fillName);                      // the Obit BG colour behind it, like a placed obit photo
+			f->setImageScalingMode(false, true);            // the frame keeps its size; the picture fits it
+			f->adjustPictScale();
+			setAttr(f, "obit.src", m_obitWfOrig.value(r.id));
+			setAttr(f, "obit.out", r.out);
+			setAttr(f, "obit.photoStatus", r.status);
+			const QString flag = r.status == QLatin1String("lowres") ? tr("low res: %1").arg(r.message)
+			                   : r.status == QLatin1String("bg") ? tr("check BG: %1").arg(r.message)
+			                   : r.status == QLatin1String("noface") ? (r.message.contains(QLatin1String("bg?")) ? tr("no face – check; bg?") : tr("no face – check")) : QString();
+			setAttr(f, "obit.checkInfo", flag);
+			setAttr(f, SuneerPhotoStore::AttrOriginal, m_obitWfOrig.value(r.id));
+			if (m_obitWfUrl.contains(r.id))
+				setAttr(f, SuneerPhotoStore::AttrFileUrl, m_obitWfUrl.value(r.id));
+			if (attr(f, "news.role").isEmpty())
+				setAttr(f, "news.role", "photo");
+			s.newFill = f->fillColor();
+			s.newAttrs = *f->getObjectAttributes();
+			s.scaleType = f->ScaleType;
+			s.aspect = f->AspectRatio;
+			s.xoff = f->imageXOffset();
+			s.yoff = f->imageYOffset();
+			s.xs = f->imageXScale();
+			s.ys = f->imageYScale();
+			snaps << s;
+			++processed;
+			if (!flag.isEmpty())
+			{
+				++toCheck;
+				checks << QStringLiteral("%1: %2").arg(name, flag);
+			}
+		}
+		if (!snaps.isEmpty() && UndoManager::undoEnabled())
+		{
+			auto* st = new ScItemState<QList<ObitWfSnap>>(tr("Obituary photo settings"), QString(), Um::IImageFrame);
+			st->set("SUNEER_OBIT_WFPHOTOS");
+			st->setItem(snaps);
+			UndoManager::instance()->action(this, st);
+		}
+		if (tx)
+			tx.commit();
+		for (auto it = m_obitWfFrames.constBegin(); it != m_obitWfFrames.constEnd(); ++it)
+			if (!answered.contains(it.key()))
+				m_obitWfFailed << QStringLiteral("%1: %2").arg(itemAlive(doc, it.value()) ? obitFrameName(it.value()) : it.key(),
+				                  cancelled ? tr("cancelled, the original is kept") : ok ? tr("no result, the original is kept") : tr("photo worker failed (%1), the original is kept").arg(error));
+		doc->changed();
+		doc->regionsChanged()->update(QRectF());
+		if (m_mw)
+			m_mw->emitUpdateRequest(0);
+	}
+	m_obitWfFrames.clear();
+	QString line = tr("Obituary photos: %1 processed, %2 failed, %3 skipped").arg(processed).arg(m_obitWfFailed.size()).arg(m_obitWfSkipped.size());
+	if (toCheck)
+		line += tr(" - %n to check (no face / low resolution / background)", "", toCheck);
+	if (cancelled)
+		line += tr(" - cancelled");
+	QStringList details;
+	if (!checks.isEmpty())
+		details << tr("To check:") + QStringLiteral("\n• ") + checks.join(QStringLiteral("\n• "));
+	if (!m_obitWfFailed.isEmpty())
+		details << tr("Failed (original kept):") + QStringLiteral("\n• ") + m_obitWfFailed.join(QStringLiteral("\n• "));
+	if (!m_obitWfSkipped.isEmpty())
+		details << tr("Skipped:") + QStringLiteral("\n• ") + m_obitWfSkipped.join(QStringLiteral("\n• "));
+	setStatus(line + (details.isEmpty() ? QString() : tr(" - Details")), !m_obitWfFailed.isEmpty());
+	if (!details.isEmpty())
+		setStatusDetails(line + QStringLiteral("\n") + details.join(QStringLiteral("\n")));
+	if (m_mw)
+		m_mw->setStatusBarInfoText(line);
+	m_obitWfLastReport = line + (details.isEmpty() ? QString() : QStringLiteral("\n") + details.join(QStringLiteral("\n")));
+	m_obitWfTestLog << QStringLiteral("report: ") + m_obitWfLastReport;
+	syncLog(QStringLiteral("obit photos: ") + m_obitWfLastReport.simplified());
+}
+
+bool SuneerNewsPanel::restoreObitWfPhotos(UndoState* state, bool isUndo)
+{
+	auto* st = dynamic_cast<ScItemState<QList<ObitWfSnap>>*>(state);
+	if (!st || !st->contains("SUNEER_OBIT_WFPHOTOS"))
+		return false;
+	for (const ObitWfSnap& s : st->getItem())
+	{
+		PageItem* f = s.item;
+		if (!f)
+			continue;
+		if (isUndo)
+		{
+			// the picture and its scale come back with the frame's own GET_IMAGE undo, after this
+			f->setFillColor(s.oldFill);
+			ObjAttrVector a = s.oldAttrs;
+			f->setObjectAttributes(&a);
+		}
+		else
+		{
+			// GET_IMAGE redo reloaded the processed picture before this; its fit is not part of that state
+			f->setFillColor(s.newFill);
+			ObjAttrVector a = s.newAttrs;
+			f->setObjectAttributes(&a);
+			f->setImageScalingMode(s.scaleType, s.aspect);
+			f->setImageXYOffset(s.xoff, s.yoff);
+			f->setImageXYScale(s.xs, s.ys);
+		}
+		f->update();
+	}
+	if (m_doc)
+	{
+		m_doc->changed();
+		m_doc->regionsChanged()->update(QRectF());
+	}
+	return true;
+}
+
+// After an obituary page is opened from the workflow: its unprocessed obituary photos -> asked once
+// per page (Settings > Obituary > "Process automatically ...", on by default).
+void SuneerNewsPanel::maybeAutoProcessObitPhotos()
+{
+	if (!m_doc)
+		return;
+	QSettings s("Faircode", "ScribusNews");
+	if (!s.value("obit/autoProcessWorkflow", true).toBool())
+		return;
+	const SyncPage sp = docSyncPage(m_doc);
+	if (!sp.workflow)
+		return;
+	const QString key = sp.pageId + QLatin1Char('|') + sp.date;
+	QStringList asked = s.value("obit/askedPages").toStringList();
+	if (asked.contains(key))
+	{
+		m_obitWfTestLog << QStringLiteral("auto: asked before for this page");
+		return;
+	}
+	int need = 0;
+	for (int i = 0; i < m_doc->Items->count(); ++i)
+	{
+		PageItem* it = m_doc->Items->at(i);
+		QList<PageItem*> parts { it };
+		if (it->isGroup())
+			parts << it->getAllChildren();
+		for (PageItem* p : parts)
+			need += obitPhotoNeedsProcessing(p) ? 1 : 0;
+	}
+	if (need == 0)
+		return;
+	QString why;
+	if (markGate(sp.pageId, &why) != MarkGate::Allowed)
+	{
+		setStatus(tr("%n obituary photo(s) need background removal - not offered: %1", "", need).arg(why), true);
+		m_obitWfTestLog << QStringLiteral("auto: not offered - ") + why;
+		return;
+	}
+	QString answer = m_obitWfTestAnswer;
+	const QString text = (need == 1 ? tr("1 photo needs background removal - process now?") : tr("%1 photos need background removal - process now?").arg(need))
+	                     + QStringLiteral("\n\n") + tr("%1 (%2, %3): background removal, face crop, Obit BG colour and tone, as when obituaries are placed from the News Browser. "
+	                                                    "It runs in the background; the originals are kept in %4_photos/original.")
+	                         .arg(sp.pageName, sp.edition, sp.date, QFileInfo(m_doc->documentFileName()).completeBaseName());
+	m_obitWfTestLog << QStringLiteral("auto question: ") + text.section('\n', 0, 0);
+	if (answer.isEmpty())
+	{
+		QMessageBox box(QMessageBox::Question, tr("Obituary photos"), text, QMessageBox::NoButton, this);
+		QPushButton* go = box.addButton(tr("Process now"), QMessageBox::AcceptRole);
+		box.addButton(tr("Not now"), QMessageBox::RejectRole);
+		box.setDefaultButton(go);
+		box.exec();
+		answer = box.clickedButton() == go ? QStringLiteral("process") : QStringLiteral("later");
+	}
+	asked << key;
+	while (asked.size() > 1000)
+		asked.removeFirst();
+	s.setValue("obit/askedPages", asked);
+	s.sync();                                       // asked once per page - also when Scribus does not close cleanly
+	syncLog(QStringLiteral("obit photos: %1 %2 %3 - %4 need processing, answer %5").arg(sp.pageName, sp.edition, sp.date).arg(need).arg(answer));
+	if (answer == QLatin1String("process"))
+		processObitPhotos(false);
+	else
+		setStatus(tr("Obituary photos not processed - News Browser > \"Process obituary photos\" (or right-click on the page) does it later"));
+}
+
+
+// SUNEER_OBITWF_SELFTEST=<report prefix>, SUNEER_OBITWF_PHASE=1|2: "Process obituary photos" end to end
+// against the mock workflow of tests/suneer/news_obit_wf_photos.sh (KNR Page 3 = an obituary page
+// whose zip holds 3 real headshots, a picture without a face, a broken JPEG and one news photo).
+// Phase 1: Open page from workflow -> asked -> processed in the background; frames, caption, files;
+// undo / redo; a second run (skips); Cancel while running (UI stays responsive); selected only;
+// another user's lock; the right-click entries. Phase 2 (models that do not exist): the same page
+// again -> not asked again; every photo keeps its original, with the reason.
+void SuneerNewsPanel::runObitWfSelfTest(const QString& report)
+{
+	struct Ctx
+	{
+		QStringList lines;
+		int fails = 0;
+		QList<std::function<void(std::function<void()>)>> steps;
+		int step = 0;
+		QString date, path;
+	};
+	auto c = std::make_shared<Ctx>();
+	const int phase = qEnvironmentVariableIntValue("SUNEER_OBITWF_PHASE");
+	c->date = qEnvironmentVariable("SUNEER_WFSYNC_DATE", "2026-11-02");
+	c->path = pagesFolder() + QStringLiteral("/KNR/") + c->date + QStringLiteral("/Page_3.sla");
+	auto check = [c](const QString& what, bool ok) {
+		c->lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		c->fails += ok ? 0 : 1;
+	};
+	auto note = [c](const QString& l) { c->lines << QStringLiteral("  ") + l; };
+	auto waitFor = [this](std::function<bool()> cond, int ms, std::function<void(bool)> done) {
+		auto* t = new QTimer(this);
+		auto el = std::make_shared<QElapsedTimer>();
+		el->start();
+		t->setInterval(100);
+		connect(t, &QTimer::timeout, this, [t, el, cond, ms, done]() {
+			const bool ok = cond();
+			if (!ok && el->elapsed() < ms)
+				return;
+			t->stop();
+			t->deleteLater();
+			done(ok);
+		});
+		t->start();
+	};
+	auto logHas = [this](const QString& s) {
+		for (const QString& l : m_obitWfTestLog)
+			if (l.contains(s))
+				return true;
+		return false;
+	};
+	// the obituary photo frames of the page by their file's name in the zip ("0_obit_face1.jpg" ...)
+	auto frameOf = [this](const QString& zipName) -> PageItem* {
+		if (!m_doc)
+			return nullptr;
+		for (int i = 0; i < m_doc->Items->count(); ++i)
+		{
+			PageItem* it = m_doc->Items->at(i);
+			if (it->isImageFrame() && (QFileInfo(it->Pfile).fileName() == zipName || attr(it, "obit.src").contains(QFileInfo(zipName).completeBaseName())))
+				return it;
+		}
+		return nullptr;
+	};
+	const QStringList faces { "0_obit_face1.jpg", "1_obit_face2.jpg", "2_obit_face3.jpg" };
+	const QString noFace = QStringLiteral("3_obit_noface.jpg"), broken = QStringLiteral("4_obit_broken.jpg"), news = QStringLiteral("5_news.jpg");
+	auto run = std::make_shared<std::function<void()>>();
+	*run = [this, c, run, report]() {
+		if (c->step >= c->steps.size())
+		{
+			c->lines << (c->fails ? QStringLiteral("FAILED: %1").arg(c->fails) : QStringLiteral("ALL PASS"));
+			QFile f(report + "-report.txt");
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(c->lines.join('\n').toUtf8() + "\n");
+			f.close();
+			fprintf(stderr, "OBITWF-SELFTEST done\n");
+			QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+			return;
+		}
+		auto s = c->steps[c->step++];
+		s([run]() { QTimer::singleShot(100, *run); });
+	};
+	for (UndoGui* g : m_mw->findChildren<UndoGui*>())
+		UndoManager::instance()->removeGui(g);
+
+	// 0. log in as A, KNR, the test date, Page 3 (its lock)
+	c->steps << [this, c, check, waitFor](std::function<void()> next) {
+		for (QWidget* w = m_stack; w && w->parentWidget(); w = w->parentWidget())
+			if (auto* sw = qobject_cast<QStackedWidget*>(w->parentWidget()))
+				sw->setCurrentWidget(w);
+		m_dateEdit->blockSignals(true);
+		m_dateEdit->setDate(QDate::fromString(c->date, "yyyy-MM-dd"));
+		m_dateEdit->blockSignals(false);
+		QNetworkReply* r = startLoginRequest(QStringLiteral("a@test.local"), QStringLiteral("S3cret-right"));
+		connect(r, &QNetworkReply::finished, this, [this, r, check, waitFor, next]() {
+			QString e;
+			const bool ok = finishLogin(r, QStringLiteral("a@test.local"), false, 0, e);
+			r->deleteLater();
+			check(QStringLiteral("login as A"), ok);
+			setLocked(false);
+			onFetchStatic();
+			const int k = m_editionCombo->findData("KNR");
+			if (k >= 0)
+				m_editionCombo->setCurrentIndex(k);
+			waitFor([this]() { return m_pageCombo->count() >= 8; }, 8000, [this, waitFor, next](bool) {
+				m_pageCombo->setCurrentIndex(m_pageCombo->findData("p-knr-3"));
+				waitFor([this]() { return m_lockGateKey == currentPageKey(); }, 8000, [next](bool) { next(); });
+			});
+		});
+	};
+
+	if (phase != 2)
+	{
+		// 1. Open page from workflow -> "5 photos need background removal - process now?" -> processed
+		c->steps << [this, c, check, note, waitFor, logHas, frameOf, faces, noFace, broken, news](std::function<void()> next) {
+			m_obitWfTestAnswer = QStringLiteral("process");
+			m_obitWfTestLog.clear();
+			onOpenPageFromWorkflow();
+			waitFor([logHas]() { return logHas(QStringLiteral("report: ")); }, 180000,
+			        [this, c, check, note, frameOf, faces, noFace, broken, news, next](bool done) {
+				for (const QString& l : m_obitWfTestLog)
+					if (!l.startsWith(QLatin1String("progress")))
+						note(l);
+				check(QStringLiteral("opened from the workflow (%1); asked \"5 photos need background removal - process now?\"").arg(m_mw->doc ? m_mw->doc->documentFileName() : QString()),
+				      done && m_mw->doc && m_mw->doc->documentFileName() == c->path
+				      && m_obitWfTestLog.join('\n').contains(QStringLiteral("auto question: 5 photos need background removal - process now?")));
+				check(QStringLiteral("report: 4 processed (3 faces + the no-face picture, flagged), 1 failed (broken file), 0 skipped"),
+				      m_obitWfLastReport.startsWith(QStringLiteral("Obituary photos: 4 processed, 1 failed, 0 skipped")) && m_obitWfLastReport.contains(QStringLiteral("to check")));
+				const QString photos = SuneerPhotoStore::folder(m_doc);
+				bool filesOk = true, sizeOk = true;
+				QStringList seen;
+				for (const QString& z : faces + QStringList { noFace })
+				{
+					PageItem* f = frameOf(z);
+					const QString key = QStringLiteral("wf_") + QFileInfo(z).completeBaseName();
+					const bool orig = QFileInfo::exists(photos + QStringLiteral("/original/") + key + QStringLiteral("_0.jpg"));
+					const bool linked = f && f->Pfile == photos + QStringLiteral("/edited/obit/") + key + QStringLiteral("_0.png") && QFileInfo::exists(f->Pfile);
+					filesOk = filesOk && orig && linked && attr(f, "obit.out") == f->Pfile;
+					sizeOk = sizeOk && f && qAbs(f->width() - 120) < 0.01 && qAbs(f->height() - 140) < 0.01;
+					seen << QStringLiteral("%1 -> %2 [%3] %4x%5").arg(z, f ? QFileInfo(f->Pfile).fileName() : QStringLiteral("?"), f ? attr(f, "obit.photoStatus") : QString())
+					        .arg(f ? f->width() : 0).arg(f ? f->height() : 0);
+				}
+				note(seen.join(QStringLiteral("; ")));
+				check(QStringLiteral("originals in %1/original, results in edited/obit, frames relinked; frames still 120x140").arg(QFileInfo(photos).fileName()), filesOk && sizeOk);
+				PageItem* nf = frameOf(noFace);
+				check(QStringLiteral("no-face picture: processed and flagged \"%1\"").arg(nf ? attr(nf, "obit.checkInfo") : QString()),
+				      nf && attr(nf, "obit.photoStatus") == QLatin1String("noface") && attr(nf, "obit.checkInfo").contains(QStringLiteral("no face")));
+				PageItem* br = frameOf(broken);
+				PageItem* nw = frameOf(news);
+				check(QStringLiteral("broken file: original kept (%1); news photo untouched (%2); reason listed").arg(br ? QFileInfo(br->Pfile).fileName() : QString(), nw ? QFileInfo(nw->Pfile).fileName() : QString()),
+				      br && br->Pfile.endsWith(QStringLiteral("Page_3_images/") + broken) && nw && nw->Pfile.endsWith(QStringLiteral("Page_3_images/") + news)
+				      && m_obitWfLastReport.contains(broken + QStringLiteral(": photo processing failed, the original is kept")));
+				PageItem* f1 = frameOf(faces[0]);
+				PageItem* cap = nullptr;
+				for (int i = 0; i < m_doc->Items->count(); ++i)
+					if (m_doc->Items->at(i)->itemName().startsWith(QLatin1String("caption_")))
+						cap = m_doc->Items->at(i);
+				check(QStringLiteral("caption kept: same place and size (%1,%2 %3x%4), still welded to its photo").arg(cap ? cap->xPos() - m_doc->Pages->at(0)->xOffset() : -1).arg(cap ? cap->yPos() - m_doc->Pages->at(0)->yOffset() : -1).arg(cap ? cap->width() : 0).arg(cap ? cap->height() : 0),
+				      cap && f1 && qAbs(cap->xPos() - m_doc->Pages->at(0)->xOffset() - 40) < 0.01 && qAbs(cap->yPos() - m_doc->Pages->at(0)->yOffset() - 200) < 0.01
+				      && qAbs(cap->width() - 120) < 0.01 && f1->itemsWeldedTo().contains(cap));
+				m_mw->grab().save(qEnvironmentVariable("SUNEER_OBITWF_SELFTEST") + "-processed.png");
+				next();
+			});
+		};
+		// 2. one undo step for the batch: undo -> every original back; redo -> processed again
+		c->steps << [this, check, note, frameOf, faces, noFace](std::function<void()> next) {
+			const QString after = frameOf(faces[1]) ? frameOf(faces[1])->Pfile : QString();
+			UndoManager::instance()->undo(1);
+			QCoreApplication::processEvents();
+			bool back = true;
+			for (const QString& z : faces + QStringList { noFace })
+			{
+				PageItem* f = frameOf(z);
+				back = back && f && f->Pfile.endsWith(QStringLiteral("Page_3_images/") + z) && attr(f, "obit.out").isEmpty() && obitPhotoNeedsProcessing(f);
+			}
+			UndoManager::instance()->redo(1);
+			QCoreApplication::processEvents();
+			PageItem* f = frameOf(faces[1]);
+			const bool again = f && f->Pfile == after && attr(f, "obit.out") == after && !obitPhotoNeedsProcessing(f)
+			                   && qAbs(f->width() - 120) < 0.01 && f->imageXScale() > 0;
+			note(QStringLiteral("after redo: %1, scale %2").arg(f ? QFileInfo(f->Pfile).fileName() : QString()).arg(f ? f->imageXScale() : 0));
+			check(QStringLiteral("one undo step: undo brings all 4 originals back (candidates again), redo the processed pictures"), back && again);
+			next();
+		};
+		// 3. again on the page: processed ones and one edited by hand are skipped; the broken one fails again
+		c->steps << [this, check, note, waitFor, logHas, frameOf, faces](std::function<void()> next) {
+			setAttr(frameOf(faces[2]), SuneerPhotoEdit::AttrManual, "1");
+			m_obitWfTestLog.clear();
+			m_doc->m_Selection->clear();
+			processObitPhotos(false);
+			waitFor([logHas]() { return logHas(QStringLiteral("report: ")); }, 60000, [this, check, note, next](bool) {
+				note(m_obitWfLastReport.section('\n', 0, 0));
+				check(QStringLiteral("second run: 0 processed, 1 failed (broken again), 4 skipped (3 already processed, 1 edited by hand)"),
+				      m_obitWfLastReport.startsWith(QStringLiteral("Obituary photos: 0 processed, 1 failed, 4 skipped")) && m_obitWfLastReport.contains(QStringLiteral("edited by hand"))
+				      && m_obitWfLastReport.contains(QStringLiteral("already processed")));
+				next();
+			});
+		};
+		// 4. Cancel while it runs (results removed so the worker really works); the UI keeps answering
+		c->steps << [this, check, note, waitFor, logHas, frameOf, faces, noFace](std::function<void()> next) {
+			setAttr(frameOf(faces[2]), SuneerPhotoEdit::AttrManual, QString());
+			UndoManager::instance()->undo(1);                       // the originals again
+			QCoreApplication::processEvents();
+			for (const QFileInfo& fi : QDir(SuneerPhotoStore::folder(m_doc) + QStringLiteral("/edited/obit")).entryInfoList(QDir::Files))
+				QFile::remove(fi.absoluteFilePath());
+			m_obitWfTestLog.clear();
+			auto maxGap = std::make_shared<qint64>(0);
+			auto beat = new QTimer(this);
+			auto last = std::make_shared<QElapsedTimer>();
+			last->start();
+			beat->setInterval(50);
+			connect(beat, &QTimer::timeout, this, [last, maxGap]() { *maxGap = qMax(*maxGap, last->restart()); });
+			beat->start();
+			processObitPhotos(false);
+			const bool cancelShown = m_obitCancelBtn && !m_obitCancelBtn->isHidden();
+			waitFor([logHas]() { return logHas(QStringLiteral("progress 1/")); }, 60000, [this, check, note, waitFor, logHas, beat, maxGap, cancelShown, next](bool) {
+				m_obitCancelBtn->click();
+				waitFor([logHas]() { return logHas(QStringLiteral("report: ")); }, 10000, [this, check, note, beat, maxGap, cancelShown, next](bool) {
+					beat->stop();
+					beat->deleteLater();
+					note(m_obitWfLastReport.section('\n', 0, 0));
+					const int processed = m_obitWfLastReport.section(QStringLiteral("Obituary photos: "), 1).section(' ', 0, 0).toInt();
+					check(QStringLiteral("Cancel shown while running (%1) and works: %2 processed, the rest \"cancelled, the original is kept\"; longest UI pause %3 ms")
+					      .arg(cancelShown).arg(processed).arg(*maxGap),
+					      cancelShown && m_obitWfLastReport.contains(QStringLiteral("cancelled")) && processed >= 1 && processed < 5
+					      && m_obitWfLastReport.contains(QStringLiteral("cancelled, the original is kept")) && *maxGap < 600 && m_obitCancelBtn->isHidden());
+					next();
+				});
+			});
+		};
+		// 5. only the selected photo
+		c->steps << [this, check, note, waitFor, logHas, frameOf, faces, noFace](std::function<void()> next) {
+			PageItem* pick = nullptr;
+			for (const QString& z : faces + QStringList { noFace })
+				if (!pick && frameOf(z) && obitPhotoNeedsProcessing(frameOf(z)))
+					pick = frameOf(z);
+			m_doc->m_Selection->clear();
+			if (pick)
+				m_doc->m_Selection->addItem(pick);
+			// the right-click entries, as the canvas builds them
+			QStringList selMenu, pageMenu;
+			{
+				ContextMenu cm(*m_doc->m_Selection, m_mw, m_doc);
+				for (QAction* a : cm.actions())
+					selMenu << a->text();
+			}
+			{
+				Selection empty(this, false);
+				ContextMenu cm(m_mw, m_doc, m_doc->Pages->at(0)->xOffset() + 10, m_doc->Pages->at(0)->yOffset() + 10);
+				for (QAction* a : cm.actions())
+					pageMenu << a->text();
+			}
+			check(QStringLiteral("right-click: \"Process obituary photos (1 selected)\" on the photo, \"Process obituary photos (page)\" on the page"),
+			      selMenu.contains(QStringLiteral("Process obituary photos (1 selected)")) && pageMenu.contains(QStringLiteral("Process obituary photos (page)")));
+			m_obitWfTestLog.clear();
+			processObitPhotos(true);
+			waitFor([logHas]() { return logHas(QStringLiteral("report: ")); }, 60000, [this, check, note, pick, next](bool) {
+				note(m_obitWfLastReport.section('\n', 0, 0));
+				check(QStringLiteral("selected only: \"%1\"").arg(m_obitWfLastReport.section('\n', 0, 0)),
+				      pick && m_obitWfLastReport.startsWith(QStringLiteral("Obituary photos: 1 processed, 0 failed, 0 skipped")) && !obitPhotoNeedsProcessing(pick));
+				m_doc->m_Selection->clear();
+				m_doc->setSuneerLinkedImagesNoAsk(true);            // Save's "linked images" question (the broken file is missing)
+				m_mw->slotFileSave();                               // the quit asks nothing
+				next();
+			});
+		};
+		// 5b. Re-process photos (the existing button) on one processed photo: a new file, and its one undo step
+		//     brings the previous picture back (it used to rewrite the same file and record no picture undo)
+		c->steps << [this, check, note, waitFor, frameOf, faces](std::function<void()> next) {
+			PageItem* f = frameOf(faces[0]);
+			const QString before = f ? f->Pfile : QString();
+			m_doc->m_Selection->clear();
+			if (f)
+				m_doc->m_Selection->addItem(f);
+			setStatus(QString());
+			onObitReprocess();
+			waitFor([this]() { return statusText().contains(QStringLiteral("Re-processed")); }, 60000, [this, check, note, f, before, next](bool ran) {
+				const QString after = f ? f->Pfile : QString();
+				note(QStringLiteral("re-process: %1 -> %2 (%3)").arg(QFileInfo(before).fileName(), QFileInfo(after).fileName(), statusText()));
+				const bool newFile = ran && after != before && after.endsWith(QStringLiteral("_r1.png")) && QFileInfo::exists(before) && attr(f, "obit.out") == after;
+				UndoManager::instance()->undo(1);
+				QCoreApplication::processEvents();
+				const bool undone = f->Pfile == before && attr(f, "obit.out") == before;
+				UndoManager::instance()->redo(1);
+				QCoreApplication::processEvents();
+				const bool redone = f->Pfile == after && attr(f, "obit.out") == after && qAbs(f->width() - 120) < 0.01;
+				check(QStringLiteral("Re-process photos: new file %1 (old kept %2); undo -> %3 (%4); redo -> %5 (%6)")
+				      .arg(QFileInfo(after).fileName()).arg(QFileInfo::exists(before)).arg(QFileInfo(before).fileName()).arg(undone).arg(QFileInfo(after).fileName()).arg(redone),
+				      newFile && undone && redone);
+				m_doc->m_Selection->clear();
+				m_doc->setSuneerLinkedImagesNoAsk(true);
+				m_mw->slotFileSave();
+				next();
+			});
+		};
+		// 6. another user holds the page: refused, nothing changes
+		c->steps << [this, c, check, note](std::function<void()> next) {
+			QNetworkRequest req(QUrl(apiUrl(QStringLiteral("/news/layout/pages/p-knr-3/toggle-lock"))));
+			req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+			req.setRawHeader("Authorization", "Bearer AT-B");
+			QJsonObject b;
+			b["publishDate"] = c->date;
+			b["isLocked"] = true;
+			QNetworkReply* r = m_nam->sendCustomRequest(req, "PATCH", QJsonDocument(b).toJson());
+			connect(r, &QNetworkReply::finished, this, [this, r, check, note, next]() {
+				r->deleteLater();
+				refreshPageLocks([this, check, note, next](bool, const QString&) {
+					m_heldPageId.clear();                          // what the keep-alive does when the page is someone else's
+					m_heldDate.clear();
+					m_obitWfTestLog.clear();
+					processObitPhotos(false);
+					note(m_obitWfLastReport);
+					check(QStringLiteral("page held by user B: refused (\"%1\")").arg(m_obitWfLastReport),
+					      m_obitWfLastReport.contains(QStringLiteral("not done")) && m_obitWfLastReport.contains(QStringLiteral("otheruser")) && !m_obitWfRunning);
+					// B lets the page go again (phase 2 opens it)
+					QNetworkRequest req2(QUrl(apiUrl(QStringLiteral("/news/layout/pages/p-knr-3/toggle-lock"))));
+					req2.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+					req2.setRawHeader("Authorization", "Bearer AT-B");
+					QJsonObject b2;
+					b2["publishDate"] = m_dateEdit->date().toString("yyyy-MM-dd");
+					b2["isLocked"] = false;
+					QNetworkReply* r2 = m_nam->sendCustomRequest(req2, "PATCH", QJsonDocument(b2).toJson());
+					connect(r2, &QNetworkReply::finished, this, [r2, next]() { r2->deleteLater(); next(); });
+				});
+			});
+		};
+	}
+	else
+	{
+		// 1. models that do not exist: the page again (Replace) -> not asked again; every photo keeps its original
+		c->steps << [this, check, note, waitFor, logHas, frameOf, faces, noFace, broken](std::function<void()> next) {
+			m_wfTestAnswer = QStringLiteral("replace");
+			m_obitWfTestAnswer = QStringLiteral("process");
+			m_obitWfTestLog.clear();
+			onOpenPageFromWorkflow();
+			waitFor([this]() { return !m_wfBusy && m_mw->doc && !m_wfTestLog.isEmpty(); }, 20000, [this, check, note, waitFor, logHas, frameOf, faces, noFace, broken, next](bool) {
+				QTimer::singleShot(3000, this, [this, check, note, waitFor, logHas, frameOf, faces, noFace, broken, next]() {
+					check(QStringLiteral("same page and date again: not asked again (%1)").arg(m_obitWfTestLog.join(QStringLiteral(" | "))),
+					      logHas(QStringLiteral("auto: asked before for this page")) && !logHas(QStringLiteral("auto question")));
+					m_obitWfTestLog.clear();
+					processObitPhotos(false);
+					waitFor([logHas]() { return logHas(QStringLiteral("report: ")); }, 120000, [this, check, note, frameOf, faces, noFace, broken, next](bool) {
+						note(m_obitWfLastReport);
+						bool kept = true;
+						for (const QString& z : faces + QStringList { noFace, broken })
+							kept = kept && frameOf(z) && frameOf(z)->Pfile.endsWith(QStringLiteral("Page_3_images/") + z);
+						check(QStringLiteral("models missing: 0 processed, 5 failed, originals kept, the reason (background removal failed / the model) listed"),
+						      m_obitWfLastReport.startsWith(QStringLiteral("Obituary photos: 0 processed, 5 failed")) && kept
+						      && m_obitWfLastReport.contains(QStringLiteral("background removal failed")) && m_obitWfLastReport.contains(QStringLiteral("no-such-model")));
+						if (m_mw->doc && m_mw->doc->isModified())
+						{
+							m_mw->doc->setSuneerLinkedImagesNoAsk(true);
+							m_mw->slotFileSave();
+						}
+						next();
+					});
+				});
+			});
+		};
+	}
+	(*run)();
 }
 
 

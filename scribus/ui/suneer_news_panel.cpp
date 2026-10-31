@@ -520,6 +520,19 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	m_statusBar->setStyleSheet("QProgressBar { font-size:10px; } ");
 	m_statusBar->setVisible(false);
 	vl->addWidget(m_statusBar);
+	// Cancel of a long background job (Process obituary photos); shown only while it runs
+	m_obitCancelBtn = new QPushButton(tr("Cancel"), w);
+	m_obitCancelBtn->setObjectName("obitWfCancelBtn");
+	m_obitCancelBtn->setToolTip(tr("Stop processing the obituary photos: the ones finished so far are used, the rest keep their original picture"));
+	m_obitCancelBtn->hide();
+	connect(m_obitCancelBtn, &QPushButton::clicked, this, [this]() {
+		if (!m_obitWfRunning)
+			return;
+		if (m_obitWorker)
+			m_obitWorker->cancel();
+		finishObitWfBatch(true, false, tr("cancelled"));
+	});
+	vl->addWidget(m_obitCancelBtn);
 	QHBoxLayout* statusRow = new QHBoxLayout();
 	statusRow->setSpacing(4);
 	m_statusLabel = new QLabel("", w);
@@ -833,6 +846,14 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 	connect(bgColorBtn, &QPushButton::clicked, this, [this]() { if (m_doc) SuneerPhotoEdit::openBackgroundDialog(m_doc, this); });
 	photoRow2->addWidget(bgColorBtn, 1);
 	vl->addLayout(photoRow2);
+	m_obitWfBtn = new SuneerElideButton(tr("Process obituary photos"), w);
+	m_obitWfBtn->setObjectName("obitWfProcessBtn");
+	m_obitWfBtn->setToolTip(tr("Obituary photos of a page opened from the workflow (or any obituary photo not processed yet): background removal, face crop, Obit BG colour and tone - the SELECTED photos, or the whole page when nothing is selected. Runs in the background; photos edited by hand or already processed are skipped. One undo step."));
+	m_obitWfBtn->setStyleSheet("padding:4px;");
+	connect(m_obitWfBtn, &QPushButton::clicked, this, [this]() {
+		processObitPhotos(m_doc && m_doc->m_Selection->count() > 0);
+	});
+	vl->addWidget(m_obitWfBtn);
 	vl->addLayout(btnRow);
 	// Re-layout: the stories already on the current page, arranged by another layout model (one undo step)
 	QHBoxLayout* layoutRow = new QHBoxLayout();
@@ -877,6 +898,8 @@ SuneerNewsPanel::SuneerNewsPanel(ScribusMainWindow* parent)
 		QTimer::singleShot(4000, this, [this]() { runPageLockSelfTest(qEnvironmentVariable("SUNEER_PAGELOCK_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFOPEN_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runWorkflowOpenSelfTest(qEnvironmentVariable("SUNEER_WFOPEN_SELFTEST")); });
+	if (qEnvironmentVariableIsSet("SUNEER_OBITWF_SELFTEST"))
+		QTimer::singleShot(4000, this, [this]() { runObitWfSelfTest(qEnvironmentVariable("SUNEER_OBITWF_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_TAKEOVER_SELFTEST"))
 		QTimer::singleShot(4000, this, [this]() { runTakeOverSelfTest(qEnvironmentVariable("SUNEER_TAKEOVER_SELFTEST")); });
 	if (qEnvironmentVariableIsSet("SUNEER_WFSYNC_SELFTEST"))
@@ -2171,6 +2194,8 @@ void SuneerNewsPanel::markStories(const QList<QJsonObject>& rows, const QString&
 
 void SuneerNewsPanel::restore(UndoState* state, bool isUndo)
 {
+	if (restoreObitWfPhotos(state, isUndo))
+		return;
 	auto* ss = dynamic_cast<SimpleState*>(state);
 	if (ss)
 		apiLog(QStringLiteral("undo/redo state %1 %2 story ..%3").arg(isUndo ? "undo" : "redo", ss->contains("SUNEER_NEWS_PLACE") ? "PLACE" : ss->contains("SUNEER_NEWS_DTP") ? "DTP" : "other", ss->get("SERVER_ID").right(6)));
@@ -8051,6 +8076,10 @@ void SuneerNewsPanel::onSettings()
 	obitBgPolicyCmb->setCurrentIndex(qMax(0, obitBgPolicyCmb->findData(om.bgPolicy)));
 	obitBgPolicyCmb->setToolTip(tr("Auto: AI removes every background. Ask: when the AI keeps less than 25% of the crop or cuts through the face, the photo is placed unremoved and flagged \"check BG\". Manual: no AI; photos are placed as they are and marked Manual for Edit photo."));
 	flo->addRow(tr("Background removal:"), obitBgPolicyCmb);
+	QCheckBox* obitAutoWfChk = new QCheckBox(tr("Process automatically when opening an obituary page from the workflow (asks once per page)"), obitTab);
+	obitAutoWfChk->setChecked(s.value("obit/autoProcessWorkflow", true).toBool());
+	obitAutoWfChk->setToolTip(tr("After \"Open page from workflow\": when its obituary photos have no background removal yet, ask \"N photos need background removal - process now?\" (once per page and date)"));
+	flo->addRow(obitAutoWfChk);
 	QLabel* obitNote = new QLabel(tr("Changes apply to the next Place and to \"Re-process photos\". Model file: %1").arg(SuneerObitModel::filePath()), obitTab);
 	obitNote->setWordWrap(true);
 	obitNote->setStyleSheet("color:#666; font-size:11px;");
@@ -8123,6 +8152,7 @@ void SuneerNewsPanel::onSettings()
 
 	if (dlg.exec() != QDialog::Accepted)
 		return;
+	s.setValue("obit/autoProcessWorkflow", obitAutoWfChk->isChecked());
 
 	QString host = hostEdit->text().trimmed();
 	while (host.endsWith('/'))
@@ -8675,7 +8705,8 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			if (openWorkflowPage(path, ids))
 			{
 				setStatus(tr("Opened the existing %1").arg(QFileInfo(path).fileName()));
-				QTimer::singleShot(0, this, [this]() { onFetchNews(); });   // the list, then the used / unused sync
+				// the list, then the used / unused sync; then the obituary photos question
+				QTimer::singleShot(0, this, [this]() { onFetchNews(); maybeAutoProcessObitPhotos(); });
 			}
 			else
 				setStatus(tr("Could not open %1").arg(path), true);
@@ -8776,8 +8807,9 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			finish(tr("Opened %1 (%2, %3) from the workflow%4").arg(pageName, edition, date,
 			       images ? tr(", %n picture(s)", nullptr, images) : QString()), false);
 			setStatusDetails(tr("Saved as %1").arg(QDir::toNativeSeparators(path)));
-			// the page's news list, then the sync: frames linked to their stories, used / unused checked
-			QTimer::singleShot(0, this, [this]() { onFetchNews(); });
+			// the page's news list, then the sync: frames linked to their stories, used / unused checked;
+			// then an obituary page's unprocessed photos (asked once per page)
+			QTimer::singleShot(0, this, [this]() { onFetchNews(); maybeAutoProcessObitPhotos(); });
 		});
 	});
 }

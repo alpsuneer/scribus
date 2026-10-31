@@ -1548,3 +1548,19 @@ scribus
   3 മിനിറ്റ് heartbeat ഇല്ലാത്ത lock "stale" — right ഇല്ലാത്തവർക്കും take over.
 - Test: `tests/suneer/news_page_takeover.sh <dir>` (mock).
 
+### 103. Workflow-ൽ നിന്ന് തുറന്ന obituary page-ലെ ഫോട്ടോകൾ — "Process obituary photos"
+- Workflow download-ലെ obituary ഫോട്ടോകൾക്ക് background removal ഇല്ല. ഇപ്പോൾ News Browser placement-ന്റെ
+  അതേ pipeline (BG removal, face crop/centre, Obit BG colour, tone) ചെയ്യാം:
+  - News Browser-ൽ **Process obituary photos** button (select ചെയ്തവ, ഒന്നും select ചെയ്തില്ലെങ്കിൽ page മുഴുവൻ).
+  - Right-click: page-ൽ "Process obituary photos (page)", ഫോട്ടോയിൽ "Process obituary photos (N selected)".
+  - Workflow-ൽ നിന്ന് obituary page തുറക്കുമ്പോൾ: "12 photos need background removal – process now?"
+    (page + date-ന് ഒരിക്കൽ മാത്രം ചോദിക്കും; Settings → Obituary-ൽ off ആക്കാം, default ON).
+- Background-ൽ ഓടും (progress bar, **Cancel**, Scribus ഉപയോഗിക്കാം). Original `<sla>_photos/original`-ൽ,
+  ഫലം `<sla>_photos/edited/obit`-ൽ. Frame-ന്റെ വലുപ്പം, caption, weld മാറില്ല. Batch മുഴുവൻ ഒരു undo.
+- Edit photo കൊണ്ട് കൈകൊണ്ട് മാറ്റിയവ, നേരത്തെ process ചെയ്തവ ഒഴിവാക്കും. Model / face data ഇല്ലെങ്കിൽ original
+  നിലനിർത്തി കാരണം പറയും. Page lock ഉള്ള ആൾ മാത്രം. Processed / failed / skipped എണ്ണവും കാരണവും Details-ൽ.
+- Fix: **Re-process photos**-ന്റെ undo പഴയ ഫോട്ടോ തിരികെ കൊണ്ടുവന്നിരുന്നില്ല. ഇപ്പോൾ പുതിയ file (`_r1.png`…)
+  എഴുതും, undo പഴയത് തിരികെ കൊണ്ടുവരും.
+- Fix: ആദ്യ rembg model ഇല്ലെങ്കിൽ എല്ലാ ഫോട്ടോയും fail ആയിരുന്നു, മറ്റ് models നോക്കാതെ. ഇപ്പോൾ അടുത്ത model നോക്കും.
+- Test: `tests/suneer/news_obit_wf_photos.sh <dir>` (mock).
+

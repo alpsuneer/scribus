@@ -247,6 +247,22 @@ private:
 	QString pageLockDetails(const QString& pageId, const QString& date) const;
 	void sendLockHeartbeat();
 	void runTakeOverSelfTest(const QString& report);
+	// ---- Process obituary photos (pages opened from the workflow) ----
+	void maybeAutoProcessObitPhotos();
+	void finishObitWfBatch(bool cancelled, bool ok, const QString& error);
+	bool restoreObitWfPhotos(UndoState* state, bool isUndo);
+	QPointer<ScribusDoc> m_obitWfDoc;           // the document of the running batch
+	QHash<QString, PageItem*> m_obitWfFrames;   // worker item id -> frame
+	QHash<QString, QString> m_obitWfOrig;       // id -> the original in <sla>_photos/original
+	QHash<QString, QString> m_obitWfUrl;        // id -> workflow URL (when it was downloaded)
+	QStringList m_obitWfSkipped, m_obitWfFailed;   // "frame: reason"
+	bool m_obitWfRunning {false};
+	QPushButton* m_obitCancelBtn {nullptr};
+	QPushButton* m_obitWfBtn {nullptr};
+	QString m_obitWfTestAnswer;                 // self-test: "process" / "later" for the auto question
+	QStringList m_obitWfTestLog;
+	QString m_obitWfLastReport;
+	void runObitWfSelfTest(const QString& report);
 	QString pageNameAt(int index) const;
 	QString currentPageKey() const;             // "pageId|date" of the Page box and date
 	static QString formatLockSince(const QDateTime& since);
@@ -540,6 +556,11 @@ public:
 	void noteDocOpened(ScribusDoc* doc);
 	//! A document is about to close: pending deletes checked, marks pushed (at most 3 s), the rest kept on disk.
 	void noteDocClosing(ScribusDoc* doc);
+	//! "Process obituary photos": the page's obituary photos not processed yet (or the selected ones) through the
+	//! obituary pipeline (background, face crop, Obit BG colour, tone) in the background; one undo step.
+	void processObitPhotos(bool selectionOnly);
+	//! An obituary photo frame "Process obituary photos" takes (\a why: why not - edited by hand, already processed, ...).
+	bool obitPhotoNeedsProcessing(PageItem* item, QString* why = nullptr) const;
 	static bool markUnusedOnDeletePref();
 private slots:
 	void checkDeletedStories();
