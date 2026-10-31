@@ -198,70 +198,18 @@ bool SuneerBoxFit::fitFrame(PageItem_TextFrame* tf, double inset)
 	// The space above the letters is the top inset: the first line starts at its real glyph height.
 	tf->setFirstLineOffset(FLOPRealGlyphHeight);
 
-	const double oldH = tf->height();
-	// Laid out in a frame tall enough for every line: where the ink of the last line ends.
-	{
-		UndoBlocker block;
-		frameFits(tf, oldH + 20000.0, inset);
-	}
-	const QRectF ink = inkRect(tf);
-	if (qEnvironmentVariableIsSet("SUNEER_BOXFIT_DEBUG"))
-	{
-		fprintf(stderr, "BOXFIT %s lines %u ink %.2f..%.2f (pt) len %d\n", qPrintable(tf->itemName()), tf->textLayout.lines(), ink.top(), ink.bottom(), tf->itemText.length());
-		for (uint i = 0; i < tf->textLayout.lines(); ++i)
-		{
-			const LineBox* l = tf->textLayout.line(i);
-			const QRectF t = l->textRect();
-			fprintf(stderr, "  line %u y %.2f asc %.2f desc %.2f ink %.2f..%.2f chars %d-%d\n", i, l->y(), l->ascent(), l->descent(), t.top(), t.bottom(), l->firstChar(), l->lastChar());
-		}
-	}
-	if (ink.isEmpty())
-	{
-		UndoBlocker block;
-		frameFits(tf, oldH, tf->textToFrameDistBottom());
-		return false;
-	}
-	double height = ink.bottom() + inset;
-	double bottomDist = inset;
-	{
-		UndoBlocker block;
-		if (!frameFits(tf, height, bottomDist))
-		{
-			// The font's descent hangs below the ink: lower the bottom text distance by that much,
-			// so the last line still fits and the visible space stays the inset.
-			double lo = 0.0, hi = inset;
-			if (frameFits(tf, height, 0.0))
-			{
-				for (int i = 0; i < 14; ++i)
-				{
-					const double mid = (lo + hi) / 2.0;
-					if (frameFits(tf, height, mid))
-						lo = mid;
-					else
-						hi = mid;
-				}
-				bottomDist = lo;
-			}
-			else
-			{
-				// Even with no distance the line needs more room (a very deep descent): grow.
-				bottomDist = 0.0;
-				for (int i = 0; i < 400 && !frameFits(tf, height, 0.0); ++i)
-					height += 0.25;
-			}
-		}
-		// back to the original values, so the undo records old -> new below
-		tf->setHeight(oldH);
-		tf->updateClip();
-	}
-	tf->setTextToFrameDistBottom(bottomDist);
-	tf->setHeight(height);
-	tf->updateClip();
+	// The bottom: the one ink fit (PageItem_TextFrame::suneerFitToInk) - the space under the last
+	// letters equals the space above the first ones (2026-10-31: was "ink bottom + inset", which left the
+	// two unequal when the first line did not sit exactly at the inset, e.g. English 18 pt: 2.31 / 1.93 mm).
+	// The bottom distance starts at the inset and is lowered only as much as the font's descent needs.
+	tf->setTextToFrameDistBottom(inset);
+	PageItem_TextFrame::SuneerFitOptions o;
+	const bool fitted = tf->suneerFitToInk(o);
 	tf->checkChanges(true);
 	tf->invalidateLayout();
 	tf->layout();
 	tf->update();
-	return true;
+	return fitted;
 }
 
 QRectF SuneerBoxFit::storyContentRect(const QList<PageItem*>& members)

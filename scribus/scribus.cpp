@@ -392,7 +392,7 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_OBITWF_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_DUP_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_REPEAT_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_IMGKEEP_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_FITGAP_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_IMGKEEP_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :
@@ -7104,6 +7104,12 @@ void ScribusMainWindow::doEditPaste(bool forcePlainText, bool pasteInOriginalPos
 		else
 			currItem = selItem->asTextFrame();
 		assert(currItem != nullptr);
+		// suneer 2026-10-31: text pasted at the end of the story often ends in empty paragraphs (copied
+		// from a web page, a mail, another frame); they go again with the paste, in its undo step - each
+		// was one more empty line under the text and every fit kept it.
+		UndoTransaction suneerPasteTrans;
+		if (UndoManager::undoEnabled())
+			suneerPasteTrans = m_undoManager->beginTransaction(currItem->getUName(), currItem->getUPixmap(), Um::Paste, QString(), Um::IPaste);
 		if (currItem->HasSel)
 		{
 			//removing marks and notes from selected text
@@ -7111,6 +7117,9 @@ void ScribusMainWindow::doEditPaste(bool forcePlainText, bool pasteInOriginalPos
 //				return;
 			currItem->deleteSelectedTextFromFrame();
 		}
+		bool suneerPasteAtEnd = true;
+		for (int i = currItem->itemText.cursorPosition(); i < currItem->itemText.length() && suneerPasteAtEnd; ++i)
+			suneerPasteAtEnd = currItem->itemText.text(i) == SpecialChars::PARSEP || SuneerTextClean::isBlank(currItem->itemText.text(i));
 		if (ScMimeData::clipboardHasScribusText())
 		{
 			StoryText story(doc);
@@ -7282,6 +7291,10 @@ void ScribusMainWindow::doEditPaste(bool forcePlainText, bool pasteInOriginalPos
 			scclipproc.setContent(clipContent, ScClipboardProcessor::ContentType::Text);
 			scclipproc.process();
 		}
+		if (suneerPasteAtEnd)
+			SuneerTextClean::trimTrailingBlankParas(currItem, true);
+		if (suneerPasteTrans)
+			suneerPasteTrans.commit();
 		if (doc->appMode == modeEditTable)
 			selItem->asTable()->update();
 		else
@@ -11387,7 +11400,11 @@ void ScribusMainWindow::suneerFitCaptionFrames()
 			++skipped;
 			continue;
 		}
-		if (tf->suneerFitCaptionHeight(true))
+		// asked for: blank paragraphs at the end go too (the automatic caption refits never trim text)
+		PageItem_TextFrame::SuneerFitOptions o;
+		o.requireInk = true;
+		o.updateWelds = false;
+		if (tf->suneerFitToInk(o))
 			++fitted;
 		else
 			++skipped;

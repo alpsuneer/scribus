@@ -14,6 +14,7 @@
 #include "sccolor.h"
 #include "scupdatekeystore.h"
 #include "suneerboxfit.h"
+#include "suneerfitgap.h"
 #include "suneerimageresample.h"
 #include "selection.h"
 #include "scribusview.h"
@@ -1032,9 +1033,10 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 		});
 		wait->start();
 	}
-	// SUNEER_BOXFIT_SELFTEST: Frame Border box fitted to the text (tests/suneer/box_fit.sh)
+	// SUNEER_BOXFIT_SELFTEST: Frame Border box fitted to the text (tests/suneer/box_fit.sh);
+	// SUNEER_FITGAP_SELFTEST: every fit-to-text path, space above / below the ink (tests/suneer/fit_gap.sh)
 	static bool boxFitTestStarted = false;
-	if (doc && qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") && !boxFitTestStarted)
+	if (doc && (qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_FITGAP_SELFTEST")) && !boxFitTestStarted)
 	{
 		boxFitTestStarted = true;
 		auto* wait = new QTimer(this);
@@ -1045,6 +1047,7 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(1500, this, [this]() { if (m_doc && m_mw) SuneerBoxFit::runSelfTestIfAsked(m_mw->view, m_doc); });
+			QTimer::singleShot(1500, this, [this]() { if (m_doc && m_mw) SuneerFitGap::runSelfTestIfAsked(m_mw->view, m_doc); });
 		});
 		wait->start();
 	}

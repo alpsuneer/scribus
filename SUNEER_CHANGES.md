@@ -1624,3 +1624,14 @@ scribus
 - തിരുത്തൽ: ഒരേ വാർത്ത രണ്ടുതവണ place ചെയ്ത് ഒന്ന് delete ചെയ്താൽ workflow-ൽ Unused ആയിരുന്നു — ഇനി മറ്റേത് ഉണ്ടെങ്കിൽ ഇല്ല.
 - ഫോട്ടോ: 6 bits-ന് ഉള്ളിൽ + thumbnail correlation ≥ 0.95 (രണ്ട് വ്യത്യസ്ത സ്ത്രീകളുടെ ഫോട്ടോ 6 bits ആയിരുന്നു).
 - Test: `tests/suneer/repeat_on_page.sh <page.sla> <dir>`; `SUNEER_REPEAT_MODE=scan` = false positive scan.
+
+### 109. Frame text-ന് fit ചെയ്യുമ്പോൾ — മുകളിലും താഴെയും ഒരേ ഇടം
+- എല്ലാ fit-ഉം ഒരേ രീതിയിൽ: Item → Adjust Frame Height to Text (താഴത്തെ handle double-click ഉൾപ്പെടെ), toolbar Fit,
+  Styled Paste-ന് ശേഷമുള്ള auto-fit, News Browser placement, Layout Models / obituary modules / Re-pack, Frame Border
+  "Fit box to text", Fit Caption Frame.
+- താഴെ ഇടം = അവസാന വരിയിലെ അക്ഷരങ്ങളുടെ യഥാർത്ഥ അടിഭാഗം മുതൽ; മുകളിലെ ഇടം (top inset + first line offset) പോലെ തന്നെ.
+  Malayalam / English, 8–18 pt, Fixed / Auto: വ്യത്യാസം 0.02–0.14 mm. Overflow ഇല്ല (0.1 pt അധികം).
+- Fit ചെയ്യുമ്പോൾ story-യുടെ അവസാനത്തെ ശൂന്യ paragraphs നീക്കും. Text frame-ന്റെ അവസാനത്തിൽ paste ചെയ്യുമ്പോഴും (ഒരേ undo).
+- Bottom text distance: ആവശ്യമെങ്കിൽ മാത്രം കുറയ്ക്കും (font descent-ന് വേണ്ടത്ര).
+- തിരുത്തൽ: toolbar Fit bottom distance രണ്ടുതവണ + 2 pt ചേർത്തിരുന്നു; menu Adjust Height ചെറിയ frame-ൽ overflow വിട്ടിരുന്നു.
+- Test: `tests/suneer/fit_gap.sh <dir>` (FITGAP_TEXT=clean: ശൂന്യ paragraph ഇല്ലാതെ).

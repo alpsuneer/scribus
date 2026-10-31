@@ -202,6 +202,24 @@ public:
 	//! fit the height to the text; \a ignoreTextWraps: the height the text needs on its own (no other frame's wrap)
 	bool suneerFitCaptionHeight(bool withUndo = true, bool ignoreTextWraps = false);
 
+	//! The one "fit the frame to its text" (suneer 2026-10-31): menu Adjust Frame Height to Text, toolbar
+	//! Fit, auto-fit after paste, placement, Layout Models / obituary modules, Re-pack, Frame Border,
+	//! captions. Height = deepest ink of any line + the space above the first line's ink, so the space
+	//! under the text equals the space above it. The bottom text distance is lowered only as much as the
+	//! last line's font descent needs to fit; never an overflow (0.1 pt to spare, checked).
+	struct SuneerFitOptions
+	{
+		bool withUndo { true };
+		bool ignoreTextWraps { false };   //!< the text alone: other frames' wraps take no part
+		bool trimTrailing { true };       //!< blank paragraphs at the end of the story go first
+		bool requireInk { false };        //!< no visible glyph: leave the frame (captions); else font metrics
+		bool updateWelds { true };        //!< false: the final updateClip() makes no weld pass (captions)
+		double minH { 1.0 };
+		double maxH { 20000.0 };
+	};
+	//! false: not fitted (linked frame, empty, or no ink with requireInk); \a overflow: still overflowing at maxH
+	bool suneerFitToInk(const SuneerFitOptions& o, bool* overflow = nullptr);
+
 	/**
 	 * @brief Fit the story inside this frame by adjusting typography alone.
 	 *

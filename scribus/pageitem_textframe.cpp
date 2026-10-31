@@ -22,6 +22,7 @@ for which a new license (GPL+exception) is in place.
  ***************************************************************************/
 
 #include "pageitem_textframe.h"
+#include "suneertextclean.h"
 
 #include <QDebug>
 #include <QList>
@@ -6651,37 +6652,13 @@ void PageItem_TextFrame::setMaxY(double y)
 
 void PageItem_TextFrame::setTextFrameHeight()
 {
-	if (textLayout.lines() <= 0)
-		return;
-
 	if (m_nextBox != nullptr) // Vertical alignment is not used inside a text chain
 		return;
-
-	textLayout.box()->moveTo(textLayout.box()->x(), 0);
-	double newHeight = textLayout.box()->naturalHeight();
-	newHeight += m_textDistanceMargins.bottom();
-
-	UndoTransaction undoTransaction;
-	if (UndoManager::undoEnabled())
-	{
-		QString unitSuffix = unitGetStrFromIndex(m_Doc->unitIndex());
-		int unitPrecision  = unitGetPrecisionFromIndex(m_Doc->unitIndex());
-		double unitRatio   = m_Doc->unitRatio();
-		QString owString  = QString::number(oldWidth * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString ohString  = QString::number(oldHeight * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nwString  = QString::number(m_width * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nhString  = QString::number(m_height * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString tooltip   = QString(Um::ResizeFromTo).arg(owString, ohString, nwString, nhString);
-		undoTransaction = undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize, tooltip, Um::IResize);
-	}
-
-	setHeight(newHeight);
-	updateClip();
-
-	if (undoTransaction)
-		undoTransaction.commit();
-
-	invalid = true;
+	// suneer 2026-10-31: was the layout box's natural height (font descent of the last line) + the bottom
+	// distance, measured in the frame's CURRENT height - a frame too short stayed short and overflowing
+	// (18 pt, fixed spacing: +8.8 mm and overflow). Now the one ink fit, see suneerFitToInk().
+	SuneerFitOptions o;
+	suneerFitToInk(o);
 	m_Doc->changed();
 	m_Doc->regionsChanged()->update(QRect());
 	m_Doc->changedPagePreview();
@@ -6691,52 +6668,12 @@ void PageItem_TextFrame::autoFitFrameHeight()
 {
 	if (!itemText.isNotEmpty()) return;
 	if (m_nextBox != nullptr) return;
-
-	UndoTransaction undoTransaction;
-	if (UndoManager::undoEnabled())
-	{
-		QString unitSuffix = unitGetStrFromIndex(m_Doc->unitIndex());
-		int unitPrecision  = unitGetPrecisionFromIndex(m_Doc->unitIndex());
-		double unitRatio   = m_Doc->unitRatio();
-		QString owString = QString::number(oldWidth  * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString ohString = QString::number(oldHeight * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nwString = QString::number(m_width   * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString nhString = QString::number(m_height  * unitRatio, 'f', unitPrecision) + " " + unitSuffix;
-		QString tooltip  = QString(Um::ResizeFromTo).arg(owString, ohString, nwString, nhString);
-		undoTransaction  = undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize, tooltip, Um::IResize);
-	}
-
-	// Binary search with original columns
-	double low  = 1.0;
-	double high = 20000.0;
-
-	while (low < high)
-	{
-		double mid = (low + high) / 2.0;
-		setHeight(mid);
-		updateClip();
-		invalid = true;
-		layout();
-		if (frameOverflows())
-			low = mid + 0.5;
-		else
-			high = mid;
-	}
-
-	// high = minimum height where no overflow
-	// Add top + bottom margins
-	// +2pt slack so the last line's descent clears the bottom clip edge; at the exact
-	// minimal-fit height endOfLine() under-measures the last line, which makes a centered
-	// last line fall back to justify (flush-left). See indentLine()/endOfLine().
-	double newH = high + m_textDistanceMargins.bottom() + 2.0;
-	setHeight(newH);
-	updateClip();
-	invalid = true;
-	layout();
-
-	if (undoTransaction)
-		undoTransaction.commit();
-
+	// suneer 2026-10-31: was the smallest height without overflow (bottom distance already in it) + the
+	// bottom distance AGAIN + 2 pt: 1.4-2.0 mm more under the text than above it on every frame, 4.5-9.6 mm
+	// with the empty paragraphs pasted text ends in. Now the one ink fit, see suneerFitToInk(); its layout
+	// check replaces the 2 pt kept for a centred last line.
+	SuneerFitOptions o;
+	suneerFitToInk(o);
 	m_Doc->changed();
 	m_Doc->regionsChanged()->update(QRect());
 	m_Doc->changedPagePreview();
@@ -6806,6 +6743,13 @@ PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() cons
 	const LineBox* last = textLayout.line(lineCount - 1);
 	if (!first || !last)
 		return m;
+	// the line whose font box reaches lowest (several columns: not always the last line)
+	for (uint i = 0; i + 1 < lineCount; ++i)
+	{
+		const LineBox* l = textLayout.line(i);
+		if (l && l->y() + l->ascent() - l->descent() > last->y() + last->ascent() - last->descent())
+			last = l;
+	}
 	m.firstBaseline = first->y() + first->ascent();
 	m.lastBaseline = last->y() + last->ascent();
 	m.firstFontAscent = first->ascent();
@@ -6813,7 +6757,17 @@ PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() cons
 
 	double ft = 0, fb = 0, lt = 0, lb = 0;
 	const bool firstOk = lineInk(first, ft, fb);
-	const bool lastOk = lineInk(last, lt, lb);
+	bool lastOk = lineInk(last, lt, lb);
+	// the deepest ink of any line (a line with a deep sign can reach below a later one)
+	for (uint i = 0; i < lineCount; ++i)
+	{
+		double t = 0, b = 0;
+		if (lineInk(textLayout.line(i), t, b))
+		{
+			lb = lastOk ? qMax(lb, b) : b;
+			lastOk = true;
+		}
+	}
 	if (firstOk && lastOk)
 	{
 		m.fromInk = true;
@@ -6834,19 +6788,40 @@ PageItem_TextFrame::SuneerInkMetrics PageItem_TextFrame::suneerInkMetrics() cons
 
 bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWraps)
 {
-	if (m_nextBox != nullptr || m_backBox != nullptr)
+	// a caption may be refitted while it is typed: its text is never trimmed, and with nothing inked
+	// it keeps its height; no weld pass from inside the fit (2026-10-26 stalls)
+	SuneerFitOptions o;
+	o.withUndo = withUndo;
+	o.ignoreTextWraps = ignoreTextWraps;
+	o.trimTrailing = false;
+	o.requireInk = true;
+	o.updateWelds = false;
+	return suneerFitToInk(o);
+}
+
+bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflow)
+{
+	if (overflow)
+		*overflow = false;
+	if (m_nextBox != nullptr || m_backBox != nullptr || itemText.length() == 0)
 		return false;
 	// the text alone: the frames above this one do not push its lines (calcAvailableRegion), until the end of the fit
-	QScopedValueRollback<bool> ownTextOnly(s_suneerIgnoreTextWraps, s_suneerIgnoreTextWraps || ignoreTextWraps);
+	QScopedValueRollback<bool> ownTextOnly(s_suneerIgnoreTextWraps, s_suneerIgnoreTextWraps || o.ignoreTextWraps);
 	QElapsedTimer fitTime;
 	fitTime.start();
 
 	UndoTransaction undoTransaction;
-	if (withUndo && UndoManager::undoEnabled())
+	if (o.withUndo && UndoManager::undoEnabled())
 		undoTransaction = undoManager->beginTransaction(Um::Selection, Um::ITextFrame, Um::Resize, QString(), Um::IResize);
+
+	// 0. blank paragraphs at the end (pasted text): each was one more line of space under the text
+	int trimmed = 0;
+	if (o.trimTrailing)
+		trimmed = SuneerTextClean::trimTrailingBlankParas(this, o.withUndo);
 
 	const double oldH = m_height;
 	const double oldBottomDist = m_textDistanceMargins.bottom();
+	const double minH = qMax(1.0, o.minH), maxH = qMax(minH, o.maxH);
 
 	// suneer 2026-10-26: the search below sets the height ~16 times. Every setHeight() used to run
 	// checkChanges() (an undo action each, the Action History list growing, the accessibility bridge
@@ -6861,88 +6836,140 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 		invalid = true;
 		layout();
 	};
+	auto fitsAt = [&](double h, double bottomDist) {
+		m_textDistanceMargins.setBottom(bottomDist);
+		trialHeight(h);
+		return !frameOverflows();
+	};
+	auto restore = [&]() {
+		m_textDistanceMargins.setBottom(oldBottomDist);
+		trialHeight(oldH);
+		UndoManager::instance()->setUndoEnabled(true);
+	};
 
-	// 1. Lay the whole story out with room to spare, so every line exists
-	//    and the last one is not the one being clipped.
-	double low = 1.0, high = 20000.0;
-	while (low < high)
+	// 1. Lay the whole story out with room to spare, so every line exists and the last one is not the
+	//    one being clipped. Overflowing even at maxH: maxH (the caller decides).
+	if (!fitsAt(maxH, oldBottomDist))
 	{
-		double mid = (low + high) / 2.0;
-		trialHeight(mid);
-		if (frameOverflows())
-			low = mid + 0.5;
-		else
-			high = mid;
+		m_textDistanceMargins.setBottom(oldBottomDist);
+		UndoManager::instance()->setUndoEnabled(true);
+		if (overflow)
+			*overflow = true;
+		setHeight(maxH);
+		updateClip(o.updateWelds);
+		invalid = true;
+		layout();
+		if (undoTransaction)
+			undoTransaction.commit();
+		return true;
 	}
-	trialHeight(high + m_textDistanceMargins.top() + 20.0);
+	double low = 1.0, high = maxH;
+	while (high - low > 0.5)
+	{
+		const double mid = (low + high) / 2.0;
+		if (fitsAt(mid, oldBottomDist))
+			high = mid;
+		else
+			low = mid;
+	}
+	const double roomy = qMin(maxH, high + m_textDistanceMargins.top() + 20.0);
+	fitsAt(roomy, oldBottomDist);
+	const QVector<qint64> wanted = SuneerTextClean::layoutSignature(this);
 
 	// 2. Measure the ink.
 	SuneerInkMetrics m = suneerInkMetrics();
+	double newH;
 	if (!m.valid || !m.fromInk)
 	{
-		// Nothing inked (empty, or only a placeholder space): there is no
-		// text to balance, so the frame is left exactly as it was.
-		trialHeight(oldH);
-		UndoManager::instance()->setUndoEnabled(true);
-		if (undoTransaction)
-			undoTransaction.cancel();
-		return false;
+		if (o.requireInk)
+		{
+			// Nothing inked (empty, or only a placeholder space): there is no text to balance, so the
+			// frame is left exactly as it was.
+			restore();
+			if (undoTransaction)
+				undoTransaction.cancel();
+			return false;
+		}
+		newH = high;                              // no ink to balance: the smallest height without overflow
 	}
-
-	// 3. Bottom gap = top gap. The bottom text distance no longer takes
-	//    part: the gap is set by the frame edge itself.
-	const double topGap = m.firstInkTop;
-	double newH = m.lastInkBottom + topGap;
-	// The layout still needs the last line's font descent inside the frame
-	// or it reports an overflow; on a font whose descent exceeds the inked
-	// descent plus the gap this wins, by the least amount.
-	const double layoutMin = m.lastBaseline + m.lastFontDescent + 0.25;
-	const bool clampedByFont = layoutMin > newH;
-	if (clampedByFont)
-		newH = layoutMin;
-
-	// through the setter when recorded: Undo gives the caption its bottom distance back (it stayed 0)
-	m_textDistanceMargins.setBottom(0.0);
-	trialHeight(newH);
-	int guard = 0;
-	while (frameOverflows() && guard++ < 20)
-	{
-		newH += 0.25;
-		trialHeight(newH);
-	}
-	// the one recorded change: back to the old geometry, then the setters with undo on again
-	m_height = oldH;
-	m_textDistanceMargins.setBottom(oldBottomDist);
-	UndoManager::instance()->setUndoEnabled(true);
-	if (withUndo)
-		setTextToFrameDistBottom(0.0);
 	else
-		m_textDistanceMargins.setBottom(0.0);
+		newH = m.lastInkBottom + m.firstInkTop;   // 3. bottom gap = top gap
+	newH = qBound(minH, newH, maxH);
+
+	// 4. The layout wants the last line's font descent (plus the bottom distance) inside the frame: the
+	//    bottom distance gives way first, only as much as needed; with none left the frame grows.
+	double bottomDist = oldBottomDist;
+	bool clampedByFont = false;
+	if (!fitsAt(newH, bottomDist))
+	{
+		if (fitsAt(newH, 0.0))
+		{
+			double lo = 0.0, hi = bottomDist;
+			for (int i = 0; i < 14; ++i)
+			{
+				const double mid = (lo + hi) / 2.0;
+				if (fitsAt(newH, mid))
+					lo = mid;
+				else
+					hi = mid;
+			}
+			bottomDist = lo;
+		}
+		else
+		{
+			bottomDist = 0.0;
+			clampedByFont = true;
+			for (int i = 0; i < 800 && newH < maxH && !fitsAt(newH, 0.0); ++i)
+				newH = qMin(maxH, newH + 0.25);
+		}
+	}
+	// 5. Every line as with room to spare (at the exact height a centred last line fell back to
+	//    justified), then 0.1 pt to spare so a later layout never finds an overflow.
+	fitsAt(newH, bottomDist);
+	for (int i = 0; i < 8 && newH < maxH && SuneerTextClean::layoutSignature(this) != wanted; ++i)
+	{
+		newH = qMin(maxH, newH + 0.25);
+		fitsAt(newH, bottomDist);
+	}
+	newH = qMin(maxH, newH + 0.1);
+	for (int i = 0; i < 20 && !fitsAt(newH, bottomDist); ++i)
+		newH = qMin(maxH, newH + 0.25);
+	if (overflow)
+		*overflow = frameOverflows();
+
+	// the one recorded change: back to the old geometry, then the setters with undo on again
+	restore();
+	if (qAbs(bottomDist - oldBottomDist) > 0.001)
+	{
+		if (o.withUndo)
+			setTextToFrameDistBottom(bottomDist);
+		else
+			m_textDistanceMargins.setBottom(bottomDist);
+	}
 	setHeight(newH);
-	updateClip(false);
+	updateClip(o.updateWelds);
 	invalid = true;
 	layout();
 
-	if (!qEnvironmentVariableIsEmpty("SUNEER_CAPTION_DEBUG"))
+	if (!qEnvironmentVariableIsEmpty("SUNEER_CAPTION_DEBUG") || !qEnvironmentVariableIsEmpty("SUNEER_FIT_DEBUG"))
 	{
 		const double PT2MM = 25.4 / 72.0;
 		const SuneerInkMetrics f = suneerInkMetrics();
-		qDebug().noquote() << QString("[CAPTIONFIT] %1 lines=%2 ink=%3 | oldH=%4mm newH=%5mm | distTop=%6mm distBottom(old)=%7mm | firstAsc=%8mm lastDesc=%9mm | topGap=%10mm bottomGap=%11mm | firstBaseline=%12mm lastBaseline=%13mm | clampedByFont=%14 overflow=%15")
+		qDebug().noquote() << QString("[FITINK] %1 lines=%2 ink=%3 | oldH=%4mm newH=%5mm | distTop=%6mm distBottom %7 -> %8mm | topGap=%9mm bottomGap=%10mm | clampedByFont=%11 overflow=%12 trimmed=%13")
 			.arg(itemName()).arg(f.lines).arg(f.fromInk)
 			.arg(oldH * PT2MM, 0, 'f', 2).arg(m_height * PT2MM, 0, 'f', 2)
-			.arg(m_textDistanceMargins.top() * PT2MM, 0, 'f', 2).arg(oldBottomDist * PT2MM, 0, 'f', 2)
-			.arg(f.firstFontAscent * PT2MM, 0, 'f', 2).arg(f.lastFontDescent * PT2MM, 0, 'f', 2)
+			.arg(m_textDistanceMargins.top() * PT2MM, 0, 'f', 2).arg(oldBottomDist * PT2MM, 0, 'f', 2).arg(bottomDist * PT2MM, 0, 'f', 2)
 			.arg(f.firstInkTop * PT2MM, 0, 'f', 2).arg((m_height - f.lastInkBottom) * PT2MM, 0, 'f', 2)
-			.arg(f.firstBaseline * PT2MM, 0, 'f', 2).arg(f.lastBaseline * PT2MM, 0, 'f', 2)
-			.arg(clampedByFont).arg(frameOverflows()) + (ignoreTextWraps ? QStringLiteral(" | own text only (no wraps)") : QString())
+			.arg(clampedByFont).arg(frameOverflows()).arg(trimmed)
+			+ (o.ignoreTextWraps ? QStringLiteral(" | own text only (no wraps)") : QString())
 			+ QStringLiteral(" | %1 ms").arg(fitTime.elapsed());
 	}
 
-	// Already fitted: say nothing. No undo step, no "document modified", no
-	// repaint - this runs for every caption whenever one might have changed.
+	// Already fitted: say nothing. No undo step, no "document modified", no repaint - captions come
+	// here whenever one might have changed.
 	const bool heightChanged = qAbs(m_height - oldH) > 0.01;
-	const bool distChanged = qAbs(oldBottomDist) > 0.01;
-	if (!heightChanged && !distChanged)
+	const bool distChanged = qAbs(bottomDist - oldBottomDist) > 0.001;
+	if (!heightChanged && !distChanged && trimmed == 0)
 	{
 		if (undoTransaction)
 			undoTransaction.cancel();
@@ -6951,11 +6978,14 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 	if (undoTransaction)
 		undoTransaction.commit();
 	// Repaint this frame only (its old and new box), not the whole canvas.
-	QRectF dirty = getVisualBoundingRect();
-	dirty.setHeight(qMax(dirty.height(), oldH + 2.0));
-	update();
-	m_Doc->regionsChanged()->update(dirty.adjusted(-2, -2, 2, 2));
-	m_Doc->changed();
+	if (o.withUndo)
+	{
+		QRectF dirty = getVisualBoundingRect();
+		dirty.setHeight(qMax(dirty.height(), oldH + 2.0));
+		update();
+		m_Doc->regionsChanged()->update(dirty.adjusted(-2, -2, 2, 2));
+		m_Doc->changed();
+	}
 	return true;
 }
 

@@ -441,6 +441,55 @@ StoryReport cleanStory(PageItem* item, bool withUndo)
 	return r;
 }
 
+int trimTrailingBlankParas(PageItem* item, bool withUndo)
+{
+	if (!item || !item->isTextFrame() || item->itemText.length() == 0)
+		return 0;
+	StoryText& st = item->itemText;
+	const int len = st.length();
+	int lastText = len - 1;
+	while (lastText >= 0 && (st.text(lastText) == SpecialChars::PARSEP || isBlank(st.text(lastText), lastText > 0 ? st.text(lastText - 1) : QChar())))
+		--lastText;
+	if (lastText < 0)
+		return 0;                                   // only blanks: nothing to keep a style for, left alone
+	// only when a paragraph mark follows the last text: spaces at the end of the last line take no room
+	bool parMark = false;
+	for (int i = lastText + 1; i < len && !parMark; ++i)
+		parMark = st.text(i) == SpecialChars::PARSEP;
+	if (!parMark)
+		return 0;
+	const int from = lastText + 1, count = len - from;
+	const ParagraphStyle keep = st.paragraphStyle(lastText);
+	PageItem_TextFrame* tf = item->asTextFrame();
+	const bool undo = withUndo && UndoManager::undoEnabled() && item->doc() && item->doc()->scMW();
+	if (undo)
+	{
+		st.deselectAll();
+		st.select(from, count);
+		tf->HasSel = true;
+		tf->deleteSelectedTextFromFrame();
+		st.deselectAll();
+		tf->HasSel = false;
+	}
+	else
+		st.removeChars(from, count);
+	if (st.length() > 0 && !st.paragraphStyle(st.length() - 1).equiv(keep))
+	{
+		if (undo)
+		{
+			auto* is = new ScOldNewState<ParagraphStyle>(Um::SetStyle);
+			is->set("SET_PARASTYLE");
+			is->set("POS", st.length() - 1);
+			is->setStates(st.paragraphStyle(st.length() - 1), keep);
+			UndoManager::instance()->action(item, is);
+		}
+		st.setStyle(st.length() - 1, keep);
+	}
+	st.setCursorPosition(qMin(st.cursorPosition(), st.length()));
+	item->invalidateLayout();
+	return count;
+}
+
 void dropTrailingParSep(StoryText& story)
 {
 	const int len = story.length();
@@ -451,8 +500,6 @@ void dropTrailingParSep(StoryText& story)
 	if (story.length() > 0)
 		story.setStyle(story.length() - 1, ps);
 }
-
-namespace {
 
 //! Every line of the frame and every glyph run in it: where it starts and how wide it is.
 QVector<qint64> layoutSignature(PageItem_TextFrame* t)
@@ -473,8 +520,6 @@ QVector<qint64> layoutSignature(PageItem_TextFrame* t)
 	return s;
 }
 
-} // namespace
-
 double fitHeight(PageItem_TextFrame* t, double minH, double maxH, bool* overflow)
 {
 	if (overflow)
@@ -483,61 +528,15 @@ double fitHeight(PageItem_TextFrame* t, double minH, double maxH, bool* overflow
 		return 0.0;
 	if (t->nextInChain() || t->prevInChain())
 		return t->height();
-	auto layoutAt = [t](double h) {
-		t->setHeight(h);
-		t->updateClip();
-		t->invalidateLayout();
-		t->layout();
-	};
-	minH = qMax(1.0, minH);
-	maxH = qMax(minH, maxH);
-	if (t->itemText.length() == 0)
-	{
-		layoutAt(minH);
-		return minH;
-	}
-	layoutAt(maxH);
-	if (t->frameOverflows())
-	{
-		if (overflow)
-			*overflow = true;
-		return maxH;
-	}
-	double lo = minH, hi = maxH;
-	layoutAt(lo);
-	if (!t->frameOverflows())
-		hi = lo;
-	else
-	{
-		while (hi - lo > 0.05)
-		{
-			const double mid = (lo + hi) / 2.0;
-			layoutAt(mid);
-			if (t->frameOverflows())
-				lo = mid;
-			else
-				hi = mid;
-		}
-	}
-	// the smallest height without overflow; raised until the layout no longer depends on it
-	double h = hi;
-	bool stable = false;
-	for (int step = 0; step <= 8 && h <= maxH; ++step, h += 0.25)
-	{
-		layoutAt(qMin(maxH, h + 2.0));
-		const QVector<qint64> loose = layoutSignature(t);
-		layoutAt(h);
-		if (!t->frameOverflows() && layoutSignature(t) == loose)
-		{
-			stable = true;
-			break;
-		}
-	}
-	if (!stable)
-		h = qMin(maxH, hi + 2.0);
-	h = qMin(maxH, h);
-	layoutAt(h);
-	return h;
+	// suneer 2026-10-31: the one fit (PageItem_TextFrame::suneerFitToInk) - the space under the last
+	// line's ink equals the space above the first line's ink, blank paragraphs at the end dropped.
+	// Placement, Layout Models / Gallery, obituary modules and Re-pack all come here.
+	PageItem_TextFrame::SuneerFitOptions o;
+	o.withUndo = false;
+	o.minH = qMax(1.0, minH);
+	o.maxH = qMax(o.minH, maxH);
+	t->suneerFitToInk(o, overflow);
+	return t->height();
 }
 
 double trimHeight(PageItem_TextFrame* t, bool* overflow)

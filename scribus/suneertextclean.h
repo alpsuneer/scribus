@@ -84,6 +84,15 @@ namespace SuneerTextClean
 	//! and returns it. Overflow at maxH: maxH, *overflow = true. Linked frames are not touched.
 	SCRIBUS_API double fitHeight(PageItem_TextFrame* t, double minH, double maxH, bool* overflow = nullptr);
 
+	//! Blank paragraphs at the END of the story only (text pasted from elsewhere ends in them): the last
+	//! paragraph with text keeps its style; nothing inside or at the start is touched. Returns the
+	//! characters removed. With \a withUndo each deletion is an undo action (call inside a transaction).
+	SCRIBUS_API int trimTrailingBlankParas(PageItem* item, bool withUndo);
+
+	//! Every line of the frame and every glyph run in it (start, width), and the overflow flag: two
+	//! layouts are the same when this is.
+	SCRIBUS_API QVector<qint64> layoutSignature(PageItem_TextFrame* t);
+
 	//! Only the blank space under the lowest line goes: the smallest height at which every line
 	//! stays exactly where it is now. A multi-column frame is NOT re-balanced (its text keeps its
 	//! columns and its place beside a wrapped photo); a single-column frame ends at its last line.
