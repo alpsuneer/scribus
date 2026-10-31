@@ -3009,3 +3009,24 @@ Traps:
 - Test: tests/suneer/news_page_lock.sh <dir> <doc.sla> [scribus] with fixtures/news_page_lock_mock.py (port of
   the workflow service, users A/B, /mock/hang). Trap: QDockWidget::widget() is null for this panel (its page
   lives in the Styles dock's tabs) — find it from m_stack's parents.
+
+## Frame Border box even on all sides + "Fit box to text" (2026-10-30, NOT committed, NOT verified by the user)
+- suneerboxfit.{h,cpp}; the popup's Apply (SuneerControlBar::onTextFrameBox) calls SuneerBoxFit::apply. Popup:
+  "Inner space" (was Text inset), "Fit box to text" (default on), "Linked / welded / grouped: Whole story | Each frame".
+  SuneerControlBar::applyBorderToItem is now static public (sides, stroke, corners, four insets; no fit).
+- One frame: cleanStory (same clean-up as Clean empty lines), insets = inner space, FirstLineOffset =
+  FLOPRealGlyphHeight (space above the letters = inset), height = ink bottom of the lines (LineBox::textRect,
+  glyph bboxes) + inset; the BOTTOM text distance is lowered (binary search) by what the font's descent hangs
+  below the ink, so the last line still fits. Attr SuneerBoxFit = inset (pt). Linked frames are not fitted.
+- Trap: trial layouts must call updateClip() after setHeight — the lines follow PoLine, not m_height; without it
+  a frame that had been shorter lost its new lines and the fit "grew" for ever.
+- Story (welded cluster ∪ chain ∪ top-level group leaves, >1 frame): a separate Polygon/Rectangle item
+  (SuneerStoryBox = uuid, SuneerStoryBoxInset, SuneerStoryBoxFit; members SuneerStoryBoxMember = uuid) around
+  the ink / frame rects + inset, below the lowest member, TextFlowDisabled; welded to the story's text frame or
+  added to its group (addToGroup does NOT insert into groupItemList; then resizeGroupToContents, or the group clips
+  the box). Placed with moveBy + setWidthHeight + checkChanges(true) — doc->moveItem would drag the welded story.
+  No frame is resized. No sides chosen in whole-story mode → the box is deleted.
+- CanvasMode_Edit::deactivate → SuneerBoxFit::noteTextEdit → singleShot(0): fit again as its own undo step
+  "Fit box to text" (cancelled when nothing changed). Preview (popup) does not fit.
+- Test: tests/suneer/box_fit.sh <dir> [scribus] (fixture fixtures/box_fit_make.py, SUNEER_BOXFIT_SELFTEST /
+  _SAVEAS / _DEBUG) — PDF 600 dpi, ink to the box's inner edge per side.

@@ -383,7 +383,8 @@ static bool suneerUnattendedTest()
 	       || qEnvironmentVariableIsSet("SUNEER_REPACK_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_BADGE_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_TEXTGRAD_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_LOGIN_SELFTEST")
-	       || qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST");
+	       || qEnvironmentVariableIsSet("SUNEER_PAGELOCK_SELFTEST")
+	       || qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST");
 }
 
 ScribusMainWindow::ScribusMainWindow() :

@@ -40,6 +40,8 @@ struct SuneerBorderSettings
 {
 	bool top {true}, bottom {true}, left {true}, right {true};
 	double inset {0.0};
+	bool fit {true};          //!< "Fit box to text": height from the visible text, re-fitted after editing
+	bool wholeStory {true};   //!< welded / grouped / linked frames: one box around the whole story
 	double cornerTL {0.0}, cornerTR {0.0}, cornerBL {0.0}, cornerBR {0.0};
 };
 
@@ -66,6 +68,8 @@ class SuneerControlBar : public QToolBar
 {
 	Q_OBJECT
 public:
+	//! One frame's sides, stroke, corners and four equal insets (no fit; SuneerBoxFit::apply fits).
+	static void applyBorderToItem(PageItem* item, const SuneerBorderSettings& s, ScribusDoc* doc);
 	explicit SuneerControlBar(ScribusMainWindow* parent);
 	void setDocument(ScribusDoc* doc);
 
@@ -162,7 +166,6 @@ private slots:
 	// Frame Border live preview: no undo entries, no modified mark; Apply
 	// restores the original first so one undo step records original -> final.
 	SuneerBorderSettings borderSettingsFromUi() const;
-	void applyBorderToItem(PageItem* item, const SuneerBorderSettings& s, ScribusDoc* doc);
 	void snapshotBorderState();
 	void restoreBorderState();
 	void previewBorder();
@@ -441,6 +444,8 @@ public:
 	QCheckBox*      m_borderLeftChk        {nullptr};
 	QCheckBox*      m_borderRightChk       {nullptr};
 	QDoubleSpinBox* m_borderInsetSpin      {nullptr};
+	QCheckBox*      m_borderFitChk         {nullptr};
+	QComboBox*      m_borderStoryCombo     {nullptr};
 	QDoubleSpinBox* m_borderRadiusSpin     {nullptr};
 	QCheckBox*      m_borderCornerTLChk    {nullptr};
 	QCheckBox*      m_borderCornerTRChk    {nullptr};

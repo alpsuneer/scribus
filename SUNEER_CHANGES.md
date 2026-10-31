@@ -1499,3 +1499,13 @@ scribus
 - ഓരോ മിനിറ്റിലും check: admin unlock ചെയ്താൽ വീണ്ടും lock; മറ്റൊരാൾ എടുത്താൽ കാണിക്കും.
 - Server ഉത്തരം തന്നില്ലെങ്കിൽ 5 സെക്കൻഡിൽ "Lock status … unknown" — Scribus ഒരിക്കലും നിൽക്കില്ല.
 
+### 99. Box (Frame Border) — നാല് വശത്തും ഒരേ ഇടം, text-ന് അനുസരിച്ച് ഉയരം
+- മുകളിലെ toolbar-ലെ border popup: "Inner space" (default 2 mm), "Fit box to text" (default on),
+  "Linked / welded / grouped: Whole story / Each frame".
+- ഒരു frame: നാല് വശത്തും ഒരേ inner space; മുകളിൽ അക്ഷരങ്ങൾക്ക് മുകളിൽ ആ ഇടം; അവസാനത്തെ ഒഴിഞ്ഞ വരികൾ നീക്കും;
+  ഉയരം അവസാന വരിയിലെ അക്ഷരങ്ങളുടെ താഴെ + inner space. താഴെ ഇനി 2 വരി ഇടം വരില്ല.
+- Welded / grouped / linked story: story മുഴുവൻ ഒരു box (frames-ന്റെ വലുപ്പം മാറില്ല, മറ്റൊന്നും നീങ്ങില്ല);
+  story നീക്കുമ്പോൾ box-ഉം നീങ്ങും.
+- Text edit ചെയ്ത് edit mode-ൽ നിന്ന് പുറത്തുവരുമ്പോൾ box വീണ്ടും fit ആകും — ഒരു Undo step.
+- Justify ചെയ്ത text വലത് border-ൽ തൊടില്ല (അളവ്: 2.06 mm).
+

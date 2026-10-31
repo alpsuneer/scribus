@@ -12,6 +12,7 @@
 #include "scribusdoc.h"
 #include "sccolor.h"
 #include "scupdatekeystore.h"
+#include "suneerboxfit.h"
 #include "selection.h"
 #include "scribusview.h"
 #include "pageitem_group.h"
@@ -934,6 +935,22 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(2500, this, [this, repackTest]() { runRepackSelfTest(repackTest); });
+		});
+		wait->start();
+	}
+	// SUNEER_BOXFIT_SELFTEST: Frame Border box fitted to the text (tests/suneer/box_fit.sh)
+	static bool boxFitTestStarted = false;
+	if (doc && qEnvironmentVariableIsSet("SUNEER_BOXFIT_SELFTEST") && !boxFitTestStarted)
+	{
+		boxFitTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait]() {
+			if (!m_doc || m_doc->isLoading() || !m_mw || !m_mw->HaveDoc || !m_mw->view)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			QTimer::singleShot(1500, this, [this]() { if (m_doc && m_mw) SuneerBoxFit::runSelfTestIfAsked(m_mw->view, m_doc); });
 		});
 		wait->start();
 	}

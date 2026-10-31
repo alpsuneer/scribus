@@ -47,6 +47,7 @@
 #include "scribusdoc.h"
 #include "scribusview.h"
 #include "ui/suneer_news_panel.h"
+#include "suneerboxfit.h"
 #include "selection.h"
 #include "textframespellchecker.h"
 #include "ui/contextmenu.h"
@@ -505,6 +506,9 @@ void CanvasMode_Edit::deactivate(bool forGesture)
 	// suneer 2026-10-28: Re-pack Automatically - the text of an obituary module was edited (off by default)
 	if (!forGesture && it && it->isTextFrame() && m_view->m_ScMW && m_view->m_ScMW->m_suneerNewsPanel)
 		m_view->m_ScMW->m_suneerNewsPanel->noteRepackTextEdit(it);
+	// suneer 2026-10-30: a boxed frame / story box with "Fit box to text" follows the edited text (one undo step)
+	if (!forGesture && it && it->isTextFrame())
+		SuneerBoxFit::noteTextEdit(it);
 	m_view->setRedrawMarkerShown(false);
 	if (!forGesture)
 	{

@@ -1,4 +1,5 @@
 #include "suneercontrolbar.h"
+#include "suneerboxfit.h"
 #include "fontcombo.h"
 #include "suneerweld.h"
 #include "stylecombos.h"
@@ -866,11 +867,26 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 		bl->addWidget(m_borderRightChk);
 		{
 			QHBoxLayout* il = new QHBoxLayout();
-			il->addWidget(new QLabel(tr("Text inset:"), bw));
+			il->addWidget(new QLabel(tr("Inner space:"), bw));
 			m_borderInsetSpin = makeSpinBox(0, 50, 2, 0.5, " mm");
 			m_borderInsetSpin->setValue(2.0);
+			m_borderInsetSpin->setToolTip(tr("The same space between the box and the text on all four sides"));
 			il->addWidget(m_borderInsetSpin);
 			bl->addLayout(il);
+			m_borderFitChk = new QCheckBox(tr("Fit box to text"), bw);
+			m_borderFitChk->setChecked(true);
+			m_borderFitChk->setToolTip(tr("The height follows the visible text: the space under the last line equals the space above the first.\n"
+			                              "Empty lines at the end are removed. Fitted again after you edit the text."));
+			bl->addWidget(m_borderFitChk);
+			QHBoxLayout* sl = new QHBoxLayout();
+			sl->addWidget(new QLabel(tr("Linked / welded / grouped:"), bw));
+			m_borderStoryCombo = new QComboBox(bw);
+			m_borderStoryCombo->addItem(tr("Whole story"), true);
+			m_borderStoryCombo->addItem(tr("Each frame"), false);
+			m_borderStoryCombo->setToolTip(tr("Whole story: one box around all frames of the story (no frame is resized).\n"
+			                                  "Each frame: a box on every frame."));
+			sl->addWidget(m_borderStoryCombo);
+			bl->addLayout(sl);
 		}
 		{
 			// Rounded corners, only where two chosen sides meet.
@@ -932,7 +948,14 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 					m_borderLeftChk->setChecked(item->LeftLine);
 					m_borderRightChk->setChecked(item->RightLine);
 					m_borderInsetSpin->setValue(item->textToFrameDistLeft() / 2.8346);
+					// boxed before without "Fit box to text": shown off (new boxes: on)
+					if (m_borderFitChk)
+						m_borderFitChk->setChecked(!SuneerWeld::attr(item, QStringLiteral("SuneerBoxFit")).isEmpty());
 				}
+				else if (m_borderFitChk)
+					m_borderFitChk->setChecked(true);
+				if (m_borderStoryCombo && !SuneerWeld::attr(item, QStringLiteral("SuneerStoryBoxMember")).isEmpty())
+					m_borderStoryCombo->setCurrentIndex(0);
 				const bool individual = item->hasIndividualCornerRadii();
 				const double tl = individual ? item->cornerRadiusTL() : item->cornerRadius();
 				const double tr = individual ? item->cornerRadiusTR() : item->cornerRadius();
@@ -6115,6 +6138,8 @@ SuneerBorderSettings SuneerControlBar::borderSettingsFromUi() const
 	const double MM2PT = 2.8346;
 	SuneerBorderSettings s;
 	s.inset  = (m_borderInsetSpin ? m_borderInsetSpin->value() : 2.0) * MM2PT;
+	s.fit    = !m_borderFitChk || m_borderFitChk->isChecked();
+	s.wholeStory = !m_borderStoryCombo || m_borderStoryCombo->currentData().toBool();
 	s.top    = !m_borderTopChk    || m_borderTopChk->isChecked();
 	s.bottom = !m_borderBottomChk || m_borderBottomChk->isChecked();
 	s.left   = !m_borderLeftChk   || m_borderLeftChk->isChecked();
@@ -6355,12 +6380,14 @@ void SuneerControlBar::onTextFrameBox()
 		borderTransaction = UndoManager::instance()->beginTransaction(Um::Selection, Um::IGroup,
 		                                                             tr("Frame border"), QString(), Um::IBorder);
 
+	// One frame: its own box (+ fit). Several frames of one story (welded, grouped, linked) with
+	// "Whole story": one box around all of them (suneerboxfit.cpp).
+	QList<PageItem*> items;
 	for (int i = 0; i < sel()->count(); ++i)
-	{
-		PageItem* item = sel()->itemAt(i);
-		if (!item || !item->isTextFrame()) continue;
-		applyBorderToItem(item, s, doc);
-	}
+		if (PageItem* item = sel()->itemAt(i))
+			if (item->isTextFrame() || item->isGroup())
+				items << item;
+	SuneerBoxFit::apply(doc, items, s);
 	if (borderTransaction)
 		borderTransaction.commit();
 	doc->regionsChanged()->update(QRect());

@@ -247,6 +247,7 @@ if(HAVE_OSG)
 		suneerlayoutmodel.cpp
 		suneerlayoutengine.cpp
 		suneerpagemodel.cpp
+		suneerboxfit.cpp
 		suneertextclean.cpp
 		suneerweld.cpp
 		suneerwatchdog.cpp
@@ -377,6 +378,7 @@ else()
 		suneerlayoutmodel.cpp
 		suneerlayoutengine.cpp
 		suneerpagemodel.cpp
+		suneerboxfit.cpp
 		suneertextclean.cpp
 		suneerweld.cpp
 		suneerwatchdog.cpp
