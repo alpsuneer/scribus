@@ -14,6 +14,7 @@
 #include "sccolor.h"
 #include "scupdatekeystore.h"
 #include "suneerboxfit.h"
+#include "suneerimageresample.h"
 #include "selection.h"
 #include "scribusview.h"
 #include "pageitem_group.h"
@@ -1015,6 +1016,22 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			QTimer::singleShot(1500, this, [this]() { if (m_doc && m_mw) SuneerBoxFit::runSelfTestIfAsked(m_mw->view, m_doc); });
+		});
+		wait->start();
+	}
+	// SUNEER_IMGKEEP_SELFTEST: an edited photo stays edited through resize / resample (tests/suneer/image_keep_edit.sh)
+	static bool imgKeepTestStarted = false;
+	if (doc && qEnvironmentVariableIsSet("SUNEER_IMGKEEP_SELFTEST") && !imgKeepTestStarted)
+	{
+		imgKeepTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait]() {
+			if (!m_doc || m_doc->isLoading() || !m_mw || !m_mw->HaveDoc || !m_mw->view)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			QTimer::singleShot(1500, this, [this]() { if (m_doc && m_mw) SuneerImageResample::runKeepEditSelfTestIfAsked(m_mw, m_doc); });
 		});
 		wait->start();
 	}

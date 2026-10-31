@@ -28,6 +28,8 @@ class ScribusDoc;
  the page looks exactly as before (scale and offset recalculated), the
  feather effect is rescaled, the wrap contour is kept, and it is one undo step.
  */
+class ScribusMainWindow;
+
 namespace SuneerImageResample
 {
 	struct SCRIBUS_API Info
@@ -102,6 +104,8 @@ namespace SuneerImageResample
 	//! After an image import: when the preference is on and the picture is
 	//! far above 400 dpi on the page, offer to fit it to the frame.
 	SCRIBUS_API void offerDownsampleAfterImport(ScribusDoc* doc, PageItem* item, QWidget* parent);
+	//! tests/suneer/image_keep_edit.sh: an edited / processed photo stays so through resize and resample (SUNEER_IMGKEEP_SELFTEST).
+	SCRIBUS_API void runKeepEditSelfTestIfAsked(ScribusMainWindow* mw, ScribusDoc* doc);
 }
 
 #endif

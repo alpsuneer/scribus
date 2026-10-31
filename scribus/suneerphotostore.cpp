@@ -245,7 +245,7 @@ QStringList pathAttributes()
 	return { QStringLiteral("news.original"), QStringLiteral("obit.src"), QStringLiteral("obit.out"),
 	         QStringLiteral("SuneerImgOriginal"), QStringLiteral("suneer.photoEditCut"), QStringLiteral("suneer.photoEditBrush"),
 	         QStringLiteral("suneer.photoEditOutput"), QStringLiteral("SuneerBgSource"), QStringLiteral("SuneerBgCut"),
-	         QStringLiteral("suneer.embeddedFrom") };
+	         QStringLiteral("suneer.embeddedFrom"), QStringLiteral("SuneerResampleOf"), QStringLiteral("SuneerResampleOut") };
 }
 
 void rewritePaths(PageItem* item, const QString& from, const QString& to)

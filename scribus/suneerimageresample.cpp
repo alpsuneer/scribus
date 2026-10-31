@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "suneerimageresample.h"
+#include <algorithm>
 #include "suneerphotostore.h"
 
 #include <QCoreApplication>
@@ -28,6 +29,15 @@ for which a new license (GPL+exception) is in place.
 #include "scribusdoc.h"
 #include "undomanager.h"
 #include "util.h"
+#include "commonstrings.h"
+#include "scpage.h"
+#include "scribus.h"
+#include "scraction.h"
+#include "selection.h"
+#include "undogui.h"
+#include "suneerphotoedit.h"
+#include "suneerimagelinks.h"
+#include "ui/resizeimagedialog.h"
 #include <QRegularExpression>
 #include <QVariant>
 
@@ -182,14 +192,45 @@ SuneerImageResample::Info SuneerImageResample::probeFile(const QString& path)
 	return info;
 }
 
+// The file a resample of the frame's CURRENT picture starts from: the current file itself, or the
+// file the current one was resampled from (the same picture with more pixels, so repeated resizes do
+// not pile up quality loss). Never an earlier picture of the frame: "SuneerImgOriginal" is the file
+// Edit photo opens (the photo before the edit) - resampling from it brought the original back over
+// an Edit photo > Apply / a processed obituary photo after the first resize (the background removal
+// was lost). The original is used only when the user asks for it (Edit photo, Reset to original).
 QString SuneerImageResample::originalPathOf(const PageItem* item)
 {
 	if (!item)
 		return QString();
-	const QList<ObjectAttribute> list = item->getObjectAttributes(QStringLiteral("SuneerImgOriginal"));
-	if (!list.isEmpty() && QFileInfo::exists(list.first().value))
-		return list.first().value;
-	return item->Pfile;
+	auto attr = [item](const char* name) {
+		const QList<ObjectAttribute> l = item->getObjectAttributes(QString::fromLatin1(name));
+		return l.isEmpty() ? QString() : l.first().value;
+	};
+	auto same = [](const QString& a, const QString& b) {
+		return !a.isEmpty() && !b.isEmpty() && QFileInfo(a).absoluteFilePath() == QFileInfo(b).absoluteFilePath();
+	};
+	const QString cur = item->Pfile;
+	// 1. the current file was written by resample() from this one (recorded since 2026-10-30)
+	const QString from = attr("SuneerResampleOf");
+	if (same(attr("SuneerResampleOut"), cur) && QFileInfo(from).isFile())
+		return from;
+	// 2. an older document: the current file is a resample copy "<base>_WxH_Ndpi[-N].<ext>" of one of
+	//    the frame's own files - its edit / processed result first, the remembered original last
+	static const QRegularExpression tag(QStringLiteral("_\\d+x\\d+_\\d+dpi(-\\d+)?$"));
+	const QFileInfo ci(cur);
+	QString base = ci.completeBaseName();
+	if (base.contains(tag))
+	{
+		base.remove(tag);
+		const QString wanted = base + QLatin1Char('.') + ci.suffix();
+		for (const char* name : { "suneer.photoEditOutput", "obit.out", "SuneerImgOriginal", "news.original", "obit.src" })
+		{
+			const QString cand = attr(name);
+			if (!cand.isEmpty() && QFileInfo(cand).fileName().compare(wanted, Qt::CaseInsensitive) == 0 && QFileInfo(cand).isFile())
+				return cand;
+		}
+	}
+	return cur;
 }
 
 double SuneerImageResample::effectiveDpi(const PageItem* item, double* dpiY)
@@ -399,7 +440,12 @@ QString SuneerImageResample::resample(ScribusDoc* doc, PageItem* item, int newW,
 	const double oldOffX = item->imageXOffset(), oldOffY = item->imageYOffset();
 	if (wasInline)
 		item->isTempFile = false;   // keep the old temp file: undo points back at it
-	if (item->getObjectAttributes(QStringLiteral("SuneerImgOriginal")).isEmpty() && !wasInline)
+	// The file Edit photo opens: remembered for a plain photo only - an edited / processed one has its
+	// original recorded by its tool already (and its current file is not an original)
+	const bool editedFrame = !item->getObjectAttributes(QStringLiteral("suneer.photoEditOutput")).isEmpty()
+	                         || !item->getObjectAttributes(QStringLiteral("obit.out")).isEmpty()
+	                         || !item->getObjectAttributes(QStringLiteral("SuneerBgSource")).isEmpty();
+	if (item->getObjectAttributes(QStringLiteral("SuneerImgOriginal")).isEmpty() && !wasInline && !editedFrame)
 	{
 		ObjAttrVector attrs = *item->getObjectAttributes();
 		ObjectAttribute a;
@@ -419,6 +465,26 @@ QString SuneerImageResample::resample(ScribusDoc* doc, PageItem* item, int newW,
 	{
 		item->isInlineImage = true;
 		item->isTempFile = true;
+	}
+	{
+		// this chain: the next resample of this picture starts again from srcPath (see originalPathOf)
+		ObjAttrVector attrs = *item->getObjectAttributes();
+		auto put = [&attrs](const QString& name, const QString& value) {
+			for (ObjectAttribute& a : attrs)
+				if (a.name == name)
+				{
+					a.value = value;
+					return;
+				}
+			ObjectAttribute a;
+			a.name = name;
+			a.type = QStringLiteral("string");
+			a.value = value;
+			attrs.append(a);
+		};
+		put(QStringLiteral("SuneerResampleOf"), QFileInfo(srcPath).absoluteFilePath());
+		put(QStringLiteral("SuneerResampleOut"), QFileInfo(item->Pfile).absoluteFilePath());
+		item->setObjectAttributes(&attrs);
 	}
 	item->setImageXYScale(oldScaleX * rx, oldScaleY * ry);
 	item->setImageXYOffset(oldOffX / rx, oldOffY / ry);
@@ -474,4 +540,261 @@ void SuneerImageResample::offerDownsampleAfterImport(ScribusDoc* doc, PageItem* 
 	const QString err = fitToFrame(doc, item, target, opt, &summary);
 	if (!err.isEmpty())
 		QMessageBox::warning(parent, QObject::tr("Image Size"), err);
+}
+
+// ---------------------------------------------------------------------------
+// Self-test (tests/suneer/image_keep_edit.sh): an edited photo stays edited
+// ---------------------------------------------------------------------------
+// SUNEER_IMGKEEP_SELFTEST=<report prefix>, SUNEER_IMGKEEP_DIR=<fixtures>, SUNEER_IMGKEEP_PHASE=1|2.
+// Fixtures: photo.jpg and obit_orig.jpg (green background, red subject), obit_out.png (the obituary
+// pipeline's result: grey Obit BG). NEWS = Edit photo > Apply (background blue); OBIT = resampled once
+// as it was (green), then processed (grey). Every step looks at the PIXELS the frame has loaded
+// (a background corner): blue / grey = the edit, green = the original came back (the bug).
+// Phase 1: resize + auto-resample (the handle path), W/H without resample, the image size toolbar's
+// resample, enlarge again, Adjust Frame to Image, embedded, save. Phase 2: the saved file reopened.
+namespace {
+QString cornerKind(const PageItem* f)
+{
+	if (!f || !f->imageIsAvailable)
+		return QStringLiteral("none");
+	const QImage& im = f->pixm.qImage();
+	if (im.isNull())
+		return QStringLiteral("none");
+	const QColor c = im.pixelColor(qMin(4, im.width() - 1), qMin(4, im.height() - 1));
+	if (c.green() > 150 && c.red() < 110 && c.blue() < 110)
+		return QStringLiteral("GREEN(original)");
+	if (c.blue() > 150 && c.red() < 110 && c.green() < 110)
+		return QStringLiteral("blue(edited)");
+	if (qAbs(c.red() - 190) < 25 && qAbs(c.green() - 196) < 25 && qAbs(c.blue() - 200) < 25)
+		return QStringLiteral("grey(processed)");
+	return QStringLiteral("rgb(%1,%2,%3)").arg(c.red()).arg(c.green()).arg(c.blue());
+}
+
+QString attrOfItem(const PageItem* f, const QString& name)
+{
+	const QList<ObjectAttribute> l = f->getObjectAttributes(name);
+	return l.isEmpty() ? QString() : l.first().value;
+}
+
+void setAttrOfItem(PageItem* f, const QString& name, const QString& value)
+{
+	ObjAttrVector attrs = *f->getObjectAttributes();
+	for (ObjectAttribute& a : attrs)
+		if (a.name == name)
+		{
+			a.value = value;
+			f->setObjectAttributes(&attrs);
+			return;
+		}
+	ObjectAttribute a;
+	a.name = name;
+	a.type = QStringLiteral("string");
+	a.value = value;
+	attrs.append(a);
+	f->setObjectAttributes(&attrs);
+}
+} // namespace
+
+void SuneerImageResample::runKeepEditSelfTestIfAsked(ScribusMainWindow* mw, ScribusDoc* doc)
+{
+	const QString prefix = qEnvironmentVariable("SUNEER_IMGKEEP_SELFTEST");
+	if (prefix.isEmpty() || !doc || !mw)
+		return;
+	const QString fix = qEnvironmentVariable("SUNEER_IMGKEEP_DIR");
+	const int phase = qEnvironmentVariableIntValue("SUNEER_IMGKEEP_PHASE");
+	QStringList lines;
+	int fails = 0;
+	auto check = [&](const QString& what, bool ok) {
+		lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what;
+		fails += ok ? 0 : 1;
+	};
+	auto note = [&](const QString& l) { lines << QStringLiteral("  ") + l; };
+	QSettings cfg(QStringLiteral("Scribus"), QStringLiteral("SuneerImageTools"));
+	auto autoDpi = [&cfg](bool on) {
+		cfg.setValue(QStringLiteral("autoDpiEnabled"), on);
+		cfg.setValue(QStringLiteral("autoDpiTarget"), 300);
+		cfg.sync();
+	};
+	auto select = [doc](PageItem* f) {
+		doc->m_Selection->clear();
+		doc->m_Selection->addItem(f);
+	};
+	auto frame = [doc](const QString& name) -> PageItem* {
+		for (int i = 0; i < doc->Items->count(); ++i)
+			if (doc->Items->at(i)->itemName() == name)
+				return doc->Items->at(i);
+		return nullptr;
+	};
+	for (UndoGui* g : mw->findChildren<UndoGui*>())
+		UndoManager::instance()->removeGui(g);
+	const double px = doc->Pages->at(0)->xOffset(), py = doc->Pages->at(0)->yOffset();
+	const QString want[2] = { QStringLiteral("blue(edited)"), QStringLiteral("grey(processed)") };
+	const QString names[2] = { QStringLiteral("NEWS"), QStringLiteral("OBIT") };
+
+	if (phase != 2)
+	{
+		// NEWS: a photo, Edit photo > Apply with the background removed (here: green -> blue)
+		const int ia = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + 40, py + 60, 200, 150, 1, CommonStrings::None, CommonStrings::None);
+		PageItem* a = doc->Items->at(ia);
+		a->setItemName(names[0]);
+		doc->loadPict(fix + QStringLiteral("/photo.jpg"), a, false, true);
+		a->setImageScalingMode(false, true);
+		a->adjustPictScale();
+		QImage src(fix + QStringLiteral("/photo.jpg"));
+		QImage edited = src.convertToFormat(QImage::Format_ARGB32);
+		for (int y = 0; y < edited.height(); ++y)
+		{
+			QRgb* row = reinterpret_cast<QRgb*>(edited.scanLine(y));
+			for (int x = 0; x < edited.width(); ++x)
+				if (qGreen(row[x]) > 150 && qRed(row[x]) < 110)
+					row[x] = qRgb(20, 40, 230);
+		}
+		SuneerPhotoEdit::Settings s;
+		s.removeBg = true;
+		s.bgMode = QStringLiteral("auto");
+		QString err;
+		const bool applied = SuneerPhotoEdit::apply(doc, a, edited, QImage(), QImage(), s, fix + QStringLiteral("/photo.jpg"), &err, QImage(), true);
+		note(QStringLiteral("NEWS after Edit photo > Apply: %1, SuneerImgOriginal=%2").arg(QFileInfo(a->Pfile).fileName(), QFileInfo(attrOfItem(a, "SuneerImgOriginal")).fileName()));
+		check(QStringLiteral("NEWS: Edit photo applied (%1) and shows the edit (%2)").arg(err.isEmpty() ? QStringLiteral("ok") : err, cornerKind(a)),
+		      applied && cornerKind(a) == want[0]);
+
+		// OBIT: placed and resampled once as it was (green), then processed by the obituary pipeline (grey)
+		const int ib = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + 300, py + 60, 120, 140, 1, CommonStrings::None, CommonStrings::None);
+		PageItem* b = doc->Items->at(ib);
+		b->setItemName(names[1]);
+		doc->loadPict(fix + QStringLiteral("/obit_orig.jpg"), b, false, true);
+		b->setImageScalingMode(false, true);
+		b->adjustPictScale();
+		select(b);
+		Options o0;
+		o0.allowEnlarge = false;
+		o0.targetDpi = 300;
+		QString sum0;
+		const QString e0 = resample(doc, b, 500, 625, o0, &sum0);
+		note(QStringLiteral("OBIT resampled before processing: %1 %2 -> SuneerImgOriginal=%3").arg(e0, sum0, QFileInfo(attrOfItem(b, "SuneerImgOriginal")).fileName()));
+		doc->loadPict(fix + QStringLiteral("/obit_out.png"), b, false, true);
+		b->setImageScalingMode(false, true);
+		b->adjustPictScale();
+		setAttrOfItem(b, QStringLiteral("obit.src"), fix + QStringLiteral("/obit_orig.jpg"));
+		setAttrOfItem(b, QStringLiteral("obit.out"), fix + QStringLiteral("/obit_out.png"));
+		setAttrOfItem(b, QStringLiteral("news.original"), fix + QStringLiteral("/obit_orig.jpg"));
+		check(QStringLiteral("OBIT shows the processed picture (%1)").arg(cornerKind(b)), cornerKind(b) == want[1]);
+
+		for (int k = 0; k < 2; ++k)
+		{
+			PageItem* f = frame(names[k]);
+			const QString n = names[k];
+			const double w0 = f->width(), h0 = f->height();
+			// 1. the handle path: frame smaller, then what the resize gesture does on release (auto-resample on)
+			autoDpi(true);
+			select(f);
+			doc->sizeItem(w0 * 0.5, h0 * 0.5, f, false, true, false);
+			ResizeImageDialog::maybeAutoResample(doc);
+			check(QStringLiteral("%1 resized by handle (auto-resample ON): %2 - %3").arg(n, cornerKind(f), QFileInfo(f->Pfile).fileName()), cornerKind(f) == want[k]);
+			// 2. W/H in the properties (no resample)
+			autoDpi(false);
+			doc->sizeItem(w0 * 1.3, h0 * 1.3, f, false, true, false);
+			f->adjustPictScale();
+			check(QStringLiteral("%1 W/H changed (auto-resample OFF): %2").arg(n, cornerKind(f)), cornerKind(f) == want[k]);
+			// 3. the image size toolbar (W/H / dpi -> a new file): its resample
+			Options o;
+			o.allowEnlarge = true;
+			o.targetDpi = 150;
+			QString sum;
+			const Info cur = probe(f);
+			const QString e = resample(doc, f, qMax(1, cur.width / 2), qMax(1, cur.height / 2), o, &sum);
+			check(QStringLiteral("%1 image size toolbar resample (%2): %3").arg(n, e.isEmpty() ? sum : e, cornerKind(f)), cornerKind(f) == want[k]);
+			// 4. bigger again with auto-resample on: more pixels from the edit's own file, never the original
+			autoDpi(true);
+			select(f);
+			doc->sizeItem(w0, h0, f, false, true, false);
+			ResizeImageDialog::maybeAutoResample(doc);
+			check(QStringLiteral("%1 enlarged again (auto-resample ON): %2 - %3").arg(n, cornerKind(f), QFileInfo(f->Pfile).fileName()), cornerKind(f) == want[k]);
+			autoDpi(false);
+			// 5. Item > Adjust Frame to Image
+			select(f);
+			if (mw->scrActions.contains("itemAdjustFrameToImage"))
+				mw->scrActions["itemAdjustFrameToImage"]->trigger();
+			check(QStringLiteral("%1 Adjust Frame to Image: %2").arg(n, cornerKind(f)), cornerKind(f) == want[k]);
+		}
+		// Edit photo still opens on the ORIGINAL (with its mask / settings)
+		PageItem* a2 = frame(names[0]);
+		check(QStringLiteral("NEWS: Edit photo still opens the original (%1), its settings kept (%2)")
+		      .arg(QFileInfo(SuneerPhotoEdit::sourcePathOf(a2)).fileName()).arg(!attrOfItem(a2, QString::fromLatin1(SuneerPhotoEdit::AttrSettings)).isEmpty()),
+		      QFileInfo(SuneerPhotoEdit::sourcePathOf(a2)).fileName() == QLatin1String("photo.jpg") && !attrOfItem(a2, QString::fromLatin1(SuneerPhotoEdit::AttrSettings)).isEmpty());
+		// 6. embedded: the edited picture embedded, then resized + auto-resampled
+		const bool emb = SuneerImageLinks::embedItem(doc, a2);
+		autoDpi(true);
+		select(a2);
+		doc->sizeItem(a2->width() * 0.6, a2->height() * 0.6, a2, false, true, false);
+		ResizeImageDialog::maybeAutoResample(doc);
+		autoDpi(false);
+		check(QStringLiteral("NEWS embedded (%1), resized + auto-resampled: %2, still embedded %3").arg(emb).arg(cornerKind(a2)).arg(a2->isInlineImage),
+		      emb && cornerKind(a2) == want[0] && a2->isInlineImage);
+		// a PLAIN photo (no edit): resampled twice, both times from its own original (no quality pile-up);
+		// Edit photo can still open that original
+		{
+			const int ip = doc->itemAdd(PageItem::ImageFrame, PageItem::Unspecified, px + 40, py + 400, 200, 150, 1, CommonStrings::None, CommonStrings::None);
+			PageItem* p = doc->Items->at(ip);
+			p->setItemName(QStringLiteral("PLAIN"));
+			doc->loadPict(fix + QStringLiteral("/photo.jpg"), p, false, true);
+			p->setImageScalingMode(false, true);
+			p->adjustPictScale();
+			Options o;
+			o.targetDpi = 300;
+			QString s1, s2;
+			resample(doc, p, 800, 600, o, &s1);
+			const QString first = p->Pfile;
+			resample(doc, p, 400, 300, o, &s2);
+			check(QStringLiteral("PLAIN photo resampled twice: both from photo.jpg (2nd from %1), Edit photo opens %2")
+			      .arg(QFileInfo(attrOfItem(p, "SuneerResampleOf")).fileName(), QFileInfo(SuneerPhotoEdit::sourcePathOf(p)).fileName()),
+			      QFileInfo(attrOfItem(p, "SuneerResampleOf")).fileName() == QLatin1String("photo.jpg") && first != p->Pfile
+			      && QFileInfo(SuneerPhotoEdit::sourcePathOf(p)).fileName() == QLatin1String("photo.jpg") && cornerKind(p) == QLatin1String("GREEN(original)"));
+		}
+		// an OLDER document (no chain record): the processed file is found by the resample copy's name,
+		// never the remembered original (OBIT: SuneerImgOriginal = obit_orig.jpg)
+		{
+			PageItem* b = frame(names[1]);
+			ObjAttrVector attrs = *b->getObjectAttributes();
+			attrs.erase(std::remove_if(attrs.begin(), attrs.end(), [](const ObjectAttribute& a) { return a.name.startsWith(QLatin1String("SuneerResample")); }), attrs.end());
+			b->setObjectAttributes(&attrs);
+			check(QStringLiteral("older document: OBIT %1 resamples from %2 (its original %3 is not used)")
+			      .arg(QFileInfo(b->Pfile).fileName(), QFileInfo(originalPathOf(b)).fileName(), QFileInfo(attrOfItem(b, "SuneerImgOriginal")).fileName()),
+			      QFileInfo(originalPathOf(b)).fileName() == QLatin1String("obit_out.png"));
+		}
+		mw->grab().save(prefix + QStringLiteral("-phase1.png"));
+		doc->setSuneerLinkedImagesNoAsk(true);
+		const bool saved = mw->slotFileSave();
+		check(QStringLiteral("saved (%1)").arg(doc->documentFileName()), saved);
+	}
+	else
+	{
+		// the saved file reopened: what it shows, and a resize again
+		for (int k = 0; k < 2; ++k)
+		{
+			PageItem* f = frame(names[k]);
+			check(QStringLiteral("reopened: %1 shows %2 (%3, embedded %4)").arg(names[k], cornerKind(f), f ? QFileInfo(f->Pfile).fileName() : QString()).arg(f && f->isInlineImage),
+			      f && cornerKind(f) == want[k]);
+			if (!f)
+				continue;
+			autoDpi(true);
+			select(f);
+			doc->sizeItem(f->width() * 0.7, f->height() * 0.7, f, false, true, false);
+			ResizeImageDialog::maybeAutoResample(doc);
+			autoDpi(false);
+			check(QStringLiteral("reopened: %1 resized + auto-resampled: %2").arg(names[k], cornerKind(f)), cornerKind(f) == want[k]);
+		}
+		PageItem* a = frame(names[0]);
+		check(QStringLiteral("reopened: NEWS Edit photo source is still the original (%1)").arg(a ? QFileInfo(SuneerPhotoEdit::sourcePathOf(a)).fileName() : QString()),
+		      a && QFileInfo(SuneerPhotoEdit::sourcePathOf(a)).fileName() == QLatin1String("photo.jpg"));
+		mw->grab().save(prefix + QStringLiteral("-phase2.png"));
+		doc->setModified(false);
+	}
+	lines << (fails ? QStringLiteral("FAILED: %1").arg(fails) : QStringLiteral("ALL PASS"));
+	QFile out(prefix + QStringLiteral("-report.txt"));
+	if (out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+		out.write(lines.join('\n').toUtf8() + "\n");
+	out.close();
+	fprintf(stderr, "IMGKEEP-SELFTEST done\n");
+	QTimer::singleShot(300, mw, [mw]() { mw->close(); });
 }

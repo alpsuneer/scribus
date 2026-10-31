@@ -1575,3 +1575,12 @@ scribus
 - Workflow page തുറന്നശേഷമുള്ള auto save ഇനി "embed?" ചോദിക്കില്ല; ചോദ്യം sync കഴിഞ്ഞ് വരും.
 - Face crop: ചെറിയ, ഉറപ്പില്ലാത്ത (eyes ഇല്ല, ഒരു cascade മാത്രം) box face ആയി എടുക്കില്ല (ഒരു കണ്ണിലേക്ക് zoom ചെയ്തിരുന്നു).
 
+### 105. Edit photo / obituary photo: frame resize ചെയ്താൽ original തിരികെ വന്നിരുന്നു — തിരുത്തി
+- Edit photo → Apply (BG removed), അല്ലെങ്കിൽ obituary pipeline ചെയ്ത ഫോട്ടോ: frame resize (handle + auto-resample),
+  image size toolbar W/H/dpi, Resize Image, Optimize images — എല്ലാം ഇപ്പോൾ **ഇപ്പോഴത്തെ ഫോട്ടോ** (edit-ന്റെ ഫലം) resample ചെയ്യും.
+  മുമ്പ് `SuneerImgOriginal` (edit-ന് മുമ്പുള്ള original) എടുത്തിരുന്നു → BG removal പോയിരുന്നു (save ചെയ്താൽ സ്ഥിരമായി).
+- Original ഉപയോഗിക്കുന്നത് നിങ്ങൾ പറയുമ്പോൾ മാത്രം (Edit photo, Reset to original). Edit photo ഇപ്പോഴും original + settings തുറക്കും.
+- ഒരേ ചിത്രം വീണ്ടും വീണ്ടും resize ചെയ്താൽ quality കുറയാതിരിക്കാൻ: resample എപ്പോഴും ആ ചിത്രത്തിന്റെ full-size file-ൽ നിന്ന്
+  (`SuneerResampleOf/Out`; പഴയ documents-ൽ resample file-ന്റെ പേരിൽ നിന്ന്).
+- Test: `tests/suneer/image_keep_edit.sh <dir>` (pixel നോക്കി; embedded, save/reopen ഉൾപ്പെടെ).
+
