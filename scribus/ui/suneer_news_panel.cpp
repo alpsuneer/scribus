@@ -8706,7 +8706,7 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			{
 				setStatus(tr("Opened the existing %1").arg(QFileInfo(path).fileName()));
 				// the list, then the used / unused sync; then the obituary photos question
-				QTimer::singleShot(0, this, [this]() { onFetchNews(); maybeAutoProcessObitPhotos(); });
+				QTimer::singleShot(0, this, [this]() { onFetchNews(); });   // the sync asks about the obituary photos when it is done
 			}
 			else
 				setStatus(tr("Could not open %1").arg(path), true);
@@ -8808,8 +8808,8 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			       images ? tr(", %n picture(s)", nullptr, images) : QString()), false);
 			setStatusDetails(tr("Saved as %1").arg(QDir::toNativeSeparators(path)));
 			// the page's news list, then the sync: frames linked to their stories, used / unused checked;
-			// then an obituary page's unprocessed photos (asked once per page)
-			QTimer::singleShot(0, this, [this]() { onFetchNews(); maybeAutoProcessObitPhotos(); });
+			// at its end an obituary page's unprocessed photos are offered (once per page)
+			QTimer::singleShot(0, this, [this]() { onFetchNews(); });
 		});
 	});
 }
@@ -9356,9 +9356,17 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 				if (n > 0)
 				{
 					doc->changed();
-					// a page just downloaded and untouched: the ids go into its file at once
+					// a page just downloaded and untouched: the ids go into its file at once - without the
+					// "embed the linked images?" question of Save (its default embedded every photo of a
+					// workflow page, which then were no longer files Process obituary photos could find)
 					if (!wasModified && doc->hasName && m_mw && m_mw->doc == doc)
+					{
+						const bool noAsk = doc->suneerLinkedImagesNoAsk();
+						doc->setSuneerLinkedImagesNoAsk(true);
 						m_mw->slotFileSave();
+						if (doc)
+							doc->setSuneerLinkedImagesNoAsk(noAsk);
+					}
 				}
 			}
 			else
@@ -9473,6 +9481,9 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 		notAssigned.clear();
 	if (!stale.isEmpty() || !candidates.isEmpty() || !noId.isEmpty() || !notAssigned.isEmpty())
 		showSyncDialog(pageId, pageName, stale, candidates, noId, notAssigned);
+	// a workflow page with the list and the links in place: its unprocessed obituary photos (asked once per page)
+	if (sp.workflow)
+		QTimer::singleShot(0, this, [this]() { maybeAutoProcessObitPhotos(); });
 }
 
 // Save / close: the stories in the document go USED (when the list is the document's page); no questions.

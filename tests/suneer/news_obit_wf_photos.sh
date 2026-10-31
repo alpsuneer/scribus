@@ -66,10 +66,12 @@ for ph in (1, 2):
 ex = open(W + "/out/exit.txt").read()
 check("both phases exited normally (%s)" % ex.strip().replace("\n", "; "), ex.count("exit 0") == 2)
 files = open(W + "/out/files-after-p1.txt").read().split()
+# Page_3_photos (the page) and Page_3_saved_photos (the "never saved" step saved it under that name);
+# the Cancel step removed the results made before it, on purpose
 orig = [f for f in files if "/Page_3_photos/original/" in f]
-edit = [f for f in files if "/Page_3_photos/edited/obit/" in f and f.endswith(".png")]
-print("  phase 1 files: %d originals, %d processed" % (len(orig), len(edit)))
-check("phase 1: originals in Page_3_photos/original (%d), results in edited/obit (%d)" % (len(orig), len(edit)), len(orig) >= 4 and len(edit) >= 4)
+edit = [f for f in files if "_photos/edited/obit/" in f and f.endswith(".png") and not f.endswith(".cut.png")]
+print("  phase 1 files: %d originals, %d processed: %s" % (len(orig), len(edit), ", ".join(sorted(e.split("/")[-1] for e in edit))))
+check("phase 1: originals in Page_3_photos/original (%d), processed results kept after the Cancel step (%d)" % (len(orig), len(edit)), len(orig) >= 4 and len(edit) >= 2)
 secrets = ("AT-A", "AT-B", "RT-AT", "S3cret", "Bearer")
 logs = glob.glob(W + "/home/scribus-crashlogs/*.log") + glob.glob(W + "/home/.cache/scribus/news/*.log")
 log = "".join(open(l, encoding="utf-8", errors="replace").read() for l in logs)

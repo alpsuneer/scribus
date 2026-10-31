@@ -250,6 +250,10 @@ private:
 	// ---- Process obituary photos (pages opened from the workflow) ----
 	void maybeAutoProcessObitPhotos();
 	void finishObitWfBatch(bool cancelled, bool ok, const QString& error);
+	//! A "Process obituary photos" that ends before the worker: the reason shown (status, Details, a box) and logged.
+	void obitWfNothing(const QString& msg, const QString& details = QString());
+	void showObitWfResult(const QString& text, bool problem);
+	QString m_obitWfSaveTo;                     // self-test: where an unsaved page is saved
 	bool restoreObitWfPhotos(UndoState* state, bool isUndo);
 	QPointer<ScribusDoc> m_obitWfDoc;           // the document of the running batch
 	QHash<QString, PageItem*> m_obitWfFrames;   // worker item id -> frame

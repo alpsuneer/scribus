@@ -63,8 +63,9 @@ def sha1_file(path):
 
 # Bumped when the crop rule changes, so cached results made by an older
 # rule are processed again. 2: scored face choice, hair headroom, low-res
-# photos keep the normal face size, no-face crops top-anchored.
-CROP_RULE = 2
+# photos keep the normal face size, no-face crops top-anchored. 3: a small
+# box with no cascade agreement and no eyes is not a face.
+CROP_RULE = 3
 
 
 def params_of(job):
@@ -196,6 +197,12 @@ def face_candidates(bgr):
         c["box"] = tuple(v / scale for v in c["box"])
         c["skin"] = round(c["skin"], 2)
         c["score"] = round(c["score"], 2)
+    # A small box with nothing for it - one cascade only, no eyes - is a feature of a face that
+    # fills the picture (a desk-cropped headshot), not the face: it zoomed the crop onto one eye
+    # (KNR obituary 2026-10-17, a 600x600 headshot: a 94 px box). Such a box is not a face; with
+    # none left the photo takes the no-face crop (the whole picture, centred, flagged).
+    short = float(min(bgr.shape[:2]))
+    cands = [c for c in cands if c["agree"] or c["eyes"] or c["box"][2] >= 0.2 * short]
     return cands
 
 

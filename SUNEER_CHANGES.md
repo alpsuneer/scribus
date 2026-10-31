@@ -1564,3 +1564,14 @@ scribus
 - Fix: ആദ്യ rembg model ഇല്ലെങ്കിൽ എല്ലാ ഫോട്ടോയും fail ആയിരുന്നു, മറ്റ് models നോക്കാതെ. ഇപ്പോൾ അടുത്ത model നോക്കും.
 - Test: `tests/suneer/news_obit_wf_photos.sh <dir>` (mock).
 
+### 104. "Process obituary photos" ഒന്നും ചെയ്യാതിരുന്നത് — തിരുത്തി
+- കാരണം: page തുറന്ന ഉടനെയുള്ള save-ൽ "Embed all and continue" (default) എല്ലാ ഫോട്ടോയും embed ചെയ്തു;
+  ഫയൽ പേര് നോക്കിയുള്ള തിരിച്ചറിയൽ പിന്നെ ഒന്നും കണ്ടില്ല; ആ വഴി ഒരു സന്ദേശവും log-ഉം ഇല്ലാതെ നിന്നു.
+- ഇപ്പോൾ: obituary ഫോട്ടോ = workflow headshot (`_obit_`, embed ചെയ്താലും) അല്ലെങ്കിൽ story obituary ആണെങ്കിൽ
+  (placement-ന്റെ അതേ obituary/news തീരുമാനം). News story-യുടെ ഫോട്ടോ തൊടില്ല.
+- Embed ചെയ്ത ഫോട്ടോ: original പുറത്തെടുത്ത് process ചെയ്ത് link ചെയ്യും; undo വീണ്ടും embed ആക്കും.
+- Save ചെയ്യാത്ത page: എവിടെ save ചെയ്യണം എന്ന് ചോദിക്കും (pages folder default).
+- എപ്പോഴും ഫലം കാണിക്കും (box + status + Details) — "0 processed – കാരണം". ഓരോ frame-ന്റെയും തീരുമാനം log-ൽ.
+- Workflow page തുറന്നശേഷമുള്ള auto save ഇനി "embed?" ചോദിക്കില്ല; ചോദ്യം sync കഴിഞ്ഞ് വരും.
+- Face crop: ചെറിയ, ഉറപ്പില്ലാത്ത (eyes ഇല്ല, ഒരു cascade മാത്രം) box face ആയി എടുക്കില്ല (ഒരു കണ്ണിലേക്ക് zoom ചെയ്തിരുന്നു).
+
