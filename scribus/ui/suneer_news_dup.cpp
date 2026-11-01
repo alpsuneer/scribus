@@ -7,9 +7,9 @@ for which a new license (GPL+exception) is in place.
 /*
  * Suneer News Browser: duplicate news and duplicate photos.
  *
- *  - the list: a "DUP" badge on a story that repeats another story of the list or one already in
- *    the document (text: the Duplicate News Checker's engine, DupNews; photos: SuneerPhotoHash), or
- *    that the workflow says is used on another page; "Show: no DUP" hides the repeats;
+ *  - the list: a "DUP" badge on a story placed more than once, or that repeats a DIFFERENT story of
+ *    the list or the document (text: the Duplicate News Checker's engine, DupNews; photos:
+ *    SuneerPhotoHash). Placed once = USD only. "Show: no DUP" hides the repeats;
  *  - placing: "This story / photo is already on the page (module X)" [Place anyway] [Skip] [Show];
  *  - "Check repetition on page" (suneer_news_repeat.cpp) reuses scanPairs for its stories and photos.
  * Text and photos are compared on a worker thread (QtConcurrent); the GUI thread only snapshots.
@@ -70,6 +70,10 @@ namespace
 				ages.insert(age);
 		}
 		return ages;
+	}
+	bool isOwnFrame(const SuneerDupItem& story, const SuneerDupItem& other)
+	{
+		return story.usedHere && !story.onPage && other.onPage && other.sid.isEmpty();
 	}
 	int dupThreshold()
 	{
@@ -157,6 +161,15 @@ QList<SuneerDupPair> SuneerDupScan::scanPairs(const QList<SuneerDupItem>& items,
 				const QSet<int> agesB = agesOf(items[b].title + QLatin1Char(' ') + items[b].body);
 				if (!agesA.isEmpty() && !agesB.isEmpty() && !agesA.intersects(agesB))
 					continue;                                  // two different ages: two different people
+				// A story is not a duplicate of itself. A page from the workflow has no ids on its frames until
+				// the sync links them, so a USED story meets its own text as an id-less frame: that is a
+				// placement of the story (twice = placed twice), not another story.
+				if (isOwnFrame(items[a], items[b]) || isOwnFrame(items[b], items[a]))
+				{
+					if (g.kind != DupNews::Kind::Headline)
+						add(a, b, QStringLiteral("story"), 100);
+					continue;
+				}
 				add(a, b, QStringLiteral("news"), qMin(g.members[x].score, g.members[y].score));
 			}
 	}
@@ -168,12 +181,11 @@ QList<SuneerDupPair> SuneerDupScan::scanPairs(const QList<SuneerDupItem>& items,
 	for (int i = 0; i < items.size(); ++i)
 		for (int j = i + 1; j < items.size(); ++j)
 		{
-			if (!hashes[i].ok || !hashes[j].ok)
+			if (!hashes[i].ok || !hashes[j].ok || isOwnFrame(items[i], items[j]) || isOwnFrame(items[j], items[i]))
 				continue;
 			int d = 64;
 			if (SuneerPhotoHash::samePhoto(hashes[i], hashes[j], photoBits, &d))
 			{
-				QSet<QPair<int, int>> dummy;
 				const QPair<int, int> key(i, j);
 				if (seen.contains(key))
 				{
@@ -201,6 +213,7 @@ void SuneerNewsPanel::dupCollectDocument(ScribusDoc* doc, QList<SuneerDupItem>& 
 	// items may already hold the list's stories: frames[k] belongs to items[base + k]
 	const int base = items.size();
 	QHash<QString, int> byStory;
+	QSet<int> headSeen;
 	QList<PageItem*> all;
 	for (int i = 0; i < doc->Items->count(); ++i)
 	{
@@ -222,7 +235,9 @@ void SuneerNewsPanel::dupCollectDocument(ScribusDoc* doc, QList<SuneerDupItem>& 
 		if (!story.isEmpty())
 		{
 			int idx = byStory.value(story, -1);
-			if (idx < 0)
+			const bool head = it->isTextFrame() && attr(it, "news.role") == QLatin1String("text") && it->prevInChain() == nullptr;
+			// Item > Duplicate keeps news.story: a second story text is a second placement, its own item
+			if (idx < 0 || (head && headSeen.contains(idx)))
 			{
 				idx = items.size();
 				byStory.insert(story, idx);
@@ -233,6 +248,8 @@ void SuneerNewsPanel::dupCollectDocument(ScribusDoc* doc, QList<SuneerDupItem>& 
 				items.append(d);
 				frames.append(QList<PageItem*>());
 			}
+			if (head)
+				headSeen.insert(idx);
 			frames[idx - base] << it;
 			const QString role = attr(it, "news.role");
 			if (it->isTextFrame() && (role == QLatin1String("text") || items[idx].title.isEmpty()) && role != QLatin1String("caption"))
@@ -270,6 +287,7 @@ SuneerDupItem SuneerNewsPanel::dupListItem(const QJsonObject& n, int index, std:
 	d.body = contentToParagraphs(n["content"].toString()).join(SpecialChars::PARSEP);
 	d.module = d.title.left(40);
 	d.listIndex = index;
+	d.usedHere = newsDtpStatus(n) == QLatin1String("USED");
 	const QJsonArray media = mediaList(n);
 	if (!media.isEmpty())
 	{
@@ -311,28 +329,41 @@ void SuneerNewsPanel::applyDuplicateBadges(const QList<SuneerDupItem>& items, in
 	// list index -> lines of "why", and whether the row is a repeat (hidden by "Show: no DUP")
 	QHash<int, QStringList> why;
 	QHash<int, bool> repeat;
-	auto line = [](const DupPair& p, const DupItem& other, bool onPage) {
-		const QString what = p.kind == QLatin1String("photo") ? QObject::tr("Same photo as") : QObject::tr("Same as");
-		return QStringLiteral("%1%2: %3 (%4 %)").arg(what, onPage ? QObject::tr(" on the page") : QString(), other.title.left(50)).arg(p.score);
+	QHash<int, int> placements;                             // list index -> times the story itself is in the document
+	auto line = [](const DupPair& p, const DupItem& other) {
+		const QString name = (other.title.isEmpty() ? other.module : other.title).left(50);
+		if (p.kind == QLatin1String("photo"))
+			return QObject::tr("Same photo as: %1").arg(name);
+		return QObject::tr("Same text as: %1 (%2 %)").arg(name).arg(p.score);
 	};
 	for (const DupPair& p : pairs)
 	{
 		const bool aList = p.a < listCount, bList = p.b < listCount;
 		if (aList && bList)
 		{
-			why[p.a] << line(p, items[p.b], false);
-			why[p.b] << line(p, items[p.a], false);
+			why[p.a] << line(p, items[p.b]);
+			why[p.b] << line(p, items[p.a]);
 			repeat[p.b] = true;                             // the later one is the repeat
 		}
 		else if (aList || bList)
 		{
 			const int l = aList ? p.a : p.b, o = aList ? p.b : p.a;
 			if (p.kind == QLatin1String("story"))
-				continue;                                   // the story itself, placed: its own USD status says it
-			why[l] << line(p, items[o], true);
+			{
+				placements[l] += 1;                         // the story itself: once is normal (USD)
+				continue;
+			}
+			why[l] << line(p, items[o]);
 			repeat[l] = true;
 		}
 	}
+	for (auto it = placements.constBegin(); it != placements.constEnd(); ++it)
+		if (it.value() > 1)
+		{
+			why[it.key()] << QObject::tr("Placed %1× on page").arg(it.value());
+			repeat[it.key()] = true;
+		}
+	QHash<int, QString> notes;                              // said in the tooltip, not a DUP
 	// the workflow: used on another page (its own record)
 	for (int i = 0; i < m_newsData.size(); ++i)
 	{
@@ -347,8 +378,7 @@ void SuneerNewsPanel::applyDuplicateBadges(const QList<SuneerDupItem>& items, in
 			if (!pid.isEmpty() && pid != m_fetchPageId && p["dtpStatus"].toString().toUpper() == QLatin1String("USED"))
 			{
 				const QString name = p["page"].toObject()["name"].toString();
-				why[i] << tr("Already used on %1 (workflow)").arg(name.isEmpty() ? pid.right(6) : name);
-				repeat[i] = true;
+				notes[i] = tr("Also used on %1 (workflow)").arg(name.isEmpty() ? pid.right(6) : name);
 				break;
 			}
 		}
@@ -362,6 +392,7 @@ void SuneerNewsPanel::applyDuplicateBadges(const QList<SuneerDupItem>& items, in
 		lines.removeDuplicates();
 		row->setData(Qt::UserRole + 8, lines.mid(0, 4).join(QLatin1Char('\n')));
 		row->setData(Qt::UserRole + 9, repeat.value(idx, false));
+		row->setData(Qt::UserRole + 10, notes.value(idx));
 		badged += lines.isEmpty() ? 0 : 1;
 	}
 	m_dupLog = QStringLiteral("duplicates: %1 stories in the list, %2 in the document, %3 pairs, %4 badged, %5 ms")
@@ -552,6 +583,13 @@ void SuneerNewsPanel::runDupSelfTest(const QString& report)
 		for (const QString& l : std::as_const(shown))
 			note(QStringLiteral("DUP ") + l);
 		const QSet<QString> missed = expect - badged, extra = badged - expect;
+		if (!qEnvironmentVariableIsEmpty("SUNEER_DUP_COUNT_ONLY"))
+		{
+			check(QStringLiteral("DUP badges: %1, expected %2 (missed: %3; extra: %4)").arg(badged.size()).arg(expect.size())
+			      .arg(QStringList(missed.values()).join(','), QStringList(extra.values()).join(',')), missed.isEmpty() && extra.isEmpty());
+			finish();
+			return;
+		}
 		check(QStringLiteral("list scan done in the background (longest UI pause %1 ms, %2 stories)").arg(*maxGap).arg(m_newsData.size()), done && *maxGap < 400);
 		check(QStringLiteral("DUP badges: all %1 expected found (missed: %2)").arg(expect.size()).arg(QStringList(missed.values()).join(',')), missed.isEmpty());
 		check(QStringLiteral("no false DUP among the other %1 stories (extra: %2)").arg(m_newsData.size() - expect.size()).arg(QStringList(extra.values()).join(',')), extra.isEmpty());

@@ -6396,6 +6396,9 @@ void SuneerNewsPanel::refreshPlacedMarks()
 		const QString dup = row->data(Qt::UserRole + 8).toString();
 		if (!dup.isEmpty())
 			row->setToolTip(tr("DUP - possibly a duplicate:") + QLatin1Char('\n') + dup + QStringLiteral("\n\n") + row->toolTip());
+		const QString alsoUsed = row->data(Qt::UserRole + 10).toString();
+		if (!alsoUsed.isEmpty())
+			row->setToolTip(alsoUsed + QLatin1Char('\n') + row->toolTip());
 	}
 	applyListFilter();
 }
@@ -9470,6 +9473,7 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 				if (n > 0 || tagged > 0)
 				{
 					doc->changed();
+					startDuplicateScan();          // the list was compared before the frames had their ids
 					// a page just downloaded and untouched: the ids go into its file at once - without the
 					// "embed the linked images?" question of Save (its default embedded every photo of a
 					// workflow page, which then were no longer files Process obituary photos could find)

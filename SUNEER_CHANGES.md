@@ -1697,3 +1697,9 @@ scribus
 - **Restore point:** Update install ചെയ്യുന്നതിന് മുമ്പ് (a) settings backup `~/.config/Scribus/backup/<date>_<version>/` (Scribus/*.conf, prefs*.xml, scribus*.rc, shortcut-sets/, gradient presets, office-defaults receipt; അവസാന 3), (b) ഇപ്പോഴത്തെ version-ന്റെ .deb `/var/cache/scribus-updates/`-ൽ (install step root ആയി copy ചെയ്യും; cache-ൽ ഇല്ലെങ്കിൽ server-ൽ നിന്ന് `scribus_<v>_amd64.deb` + `.sig` download, Ed25519 verify; അവസാന 3).
 - **Help → Check for Updates… → [Go back to previous version…]:** saved versions list (version, date, package cache-ൽ / server-ൽ നിന്ന്, settings ഉണ്ടോ) → confirm → അതേ pkexec install step → Scribus close ചെയ്ത ശേഷം settings തിരികെ copy (shell waiter) → Scribus വീണ്ടും start. തിരിച്ചുപോയ version `<prefs>/update-rollback.json`-ൽ; Check for Updates അത് note ആയി കാണിക്കും — Update അമർത്തിയാൽ മാത്രം വീണ്ടും install (automatic check ഇല്ല).
 - Tests: `tests/suneer/office_defaults.sh` (A/B/C/D), `sudo tests/suneer/update_rollback.sh <dir> <N.deb> <N+1.deb>` (ഈ laptop-ൽ മാത്രം; packages ശരിക്കും install ആകും).
+
+### 117. DUP badge: സ്വന്തം placement duplicate അല്ല
+- Workflow page തുറന്ന ഉടനെ frames-ന് id ഇല്ലായിരുന്നു; list അപ്പോൾ compare ചെയ്തതുകൊണ്ട് ഓരോ USED story-യും സ്വന്തം text-നെ "മറ്റൊരു story" ആയി കണ്ടു (31 DUP). Link കഴിഞ്ഞാലും badge മാറിയിരുന്നില്ല.
+- ഇപ്പോൾ DUP: ഒരേ story രണ്ടോ അതിലധികമോ തവണ placed ("Placed 2× on page"), അല്ലെങ്കിൽ വേറെ id ഉള്ള story-യുടെ text ("Same text as: <headline> (93 %)") / photo ("Same photo as: <headline>"). ഒരിക്കൽ placed = USD മാത്രം. Link കഴിഞ്ഞ് scan വീണ്ടും ഓടും.
+- "Used on another page (workflow)" ഇനി DUP അല്ല; tooltip-ൽ "Also used on …" note മാത്രം. "Show: no DUP" ഇത് മറയ്ക്കില്ല.
+- Test: `NEWS_DUP_PLAIN=1 [NEWS_DUP_UNLINK=1 | NEWS_DUP_TWICE=1] tests/suneer/news_duplicates.sh <page.sla> <dir>`.

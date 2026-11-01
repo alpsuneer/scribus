@@ -10,6 +10,10 @@
 #          the ages differ), and the same with a few words changed (must match each other)
 #   f-1 .. f-120  filler stories from the page's words (speed, false positives)
 # usage: tests/suneer/news_duplicates.sh <page.sla> <work dir> [scribus]
+# Modes (env), list = the page's own stories only, all USED, nothing planted; only the DUP count is checked:
+#   NEWS_DUP_PLAIN=1             frames linked: no DUP
+#   NEWS_DUP_PLAIN=1 NEWS_DUP_UNLINK=1   news.* removed from the frames (a page before the sync): no DUP
+#   NEWS_DUP_PLAIN=1 NEWS_DUP_TWICE=1    one story's text frame copied, same id: DUP on that story only
 set -u
 SLA=${1:?page.sla}; W=${2:?work dir}; SCRIBUS=${3:-/usr/local/bin/scribus}
 mkdir -p "$W/out" "$W/home" "$W/run" "$W/page" "$W/fix"; W="$(cd "$W" && pwd)"; chmod 700 "$W/run"
@@ -57,6 +61,23 @@ def news(sid, title, body, ph=None, used=True):
         n["newsMedia"] = [{"media": {"fileUrl": ph}}]
     return n
 data = [news(k, t, b, photo.get(k)) for k, (t, b) in stories.items()]
+if os.environ.get("NEWS_DUP_PLAIN"):
+    twice = ""
+    if os.environ.get("NEWS_DUP_TWICE"):
+        for m in re.finditer(r'<PageObject\b[^>]*>.*?</PageObject>', s, re.S):
+            a = attrs(m.group(0))
+            if a.get("news.role") == "text" and a.get("news.serverId"):
+                twice = a["news.serverId"]
+                s = s[:m.end()] + "\n" + m.group(0) + s[m.end():]
+                break
+    if os.environ.get("NEWS_DUP_UNLINK"):
+        s = re.sub(r'<ItemAttribute Name="news\.[^>]*/>\s*', '', s)
+    open(sla, "w", encoding="utf-8").write(s)
+    json.dump({"data": data}, open(fix + "/fixture.json", "w"), ensure_ascii=False)
+    print("ORIG=")
+    print("EXPECT=%s" % twice)
+    print("INFO=%d page stories, plain list %d" % (len(stories), len(data)))
+    sys.exit(0)
 withPhoto = [k for k in stories if k in photo and os.path.isfile(photo[k]) and len("".join(stories[k][1])) > 120]
 X, Y = withPhoto[0], withPhoto[1]
 aged = [k for k in stories if k not in (X, Y) and re.search(r"\((\d{1,3})\)", " ".join(stories[k][1])) and len("".join(stories[k][1])) > 150]
@@ -103,6 +124,7 @@ sleep 1
 rm -f "$W/page/.$base.sla.lock"
 HOME="$W/home" XDG_CONFIG_HOME="$W/home/.config" XDG_CACHE_HOME="$W/home/.cache" XDG_RUNTIME_DIR="$W/run" DISPLAY=:93 QT_IM_MODULE= \
 SCRIBUS_NEWS_FIXTURE="$W/fix/fixture.json" SUNEER_DUP_SELFTEST="$W/out/d" SUNEER_DUP_EXPECT="$EXPECT" SUNEER_DUP_ORIG="$ORIG" \
-	timeout 600 "$SCRIBUS" "$W/page/$base.sla" > "$W/out/scribus.log" 2>&1
+SUNEER_DUP_COUNT_ONLY="${NEWS_DUP_PLAIN:-}" timeout "${NEWS_DUP_TIMEOUT:-600}" "$SCRIBUS" "$W/page/$base.sla" > "$W/out/scribus.log" 2>&1
 echo "scribus exit $?" | tee "$W/out/exit.txt"
 cat "$W/out/d-report.txt" 2>/dev/null || echo "FAIL no report"
+grep -ah "duplicates:" "$W"/home/.cache/scribus*/news/api.log 2>/dev/null | tail -2

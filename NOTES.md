@@ -3103,3 +3103,13 @@ self-tests; a .localM test deb has the office manifest version the tree carries 
 root-owned files -> release.sh as s1 fails on the manifest). Self-test env: SUNEER_UPDATE_SELFTEST_ACTION=
 later|update|goback, SUNEER_UPDATE_AUTOYES, SUNEER_ROLLBACK_SELFTEST=<version>. Test: tests/suneer/update_rollback.sh
 (root, real installs, local http.server + latest.json signed with the laptop key).
+
+## DUP false positives on workflow pages (2026-11-01, uncommitted)
+startDuplicateScan runs at the end of Fetch News, before reconcilePage's linkWorkflowFrames: frames had no ids, so
+items = 68 lone frames and each USED story paired with its own text ("news"). api.log's "duplicates:" line shows it:
+68 items + 31 badged = unlinked; 39-46 items + 0 badged = linked. Fix: SuneerDupItem.usedHere + isOwnFrame in scanPairs
+(own id-less text = "story" pair, own photo dropped, Headline groups dropped so head + body frames are not "2x"),
+rescan after linking, dupCollectDocument starts a new item for a second head text of the same news.story (Item >
+Duplicate keeps it). Badges: story pairs per list row counted, >1 = "Placed n× on page". A workflow "used on another
+page" is a tooltip note (UserRole + 10), no badge. tests/suneer/news_duplicates.sh PLAIN/UNLINK/TWICE modes.
+Pre-existing, also on the old binary: that test's "Place anyway -> placed (0 frames)" and the follow-on page check.

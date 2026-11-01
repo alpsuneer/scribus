@@ -25,6 +25,7 @@ struct SuneerDupItem
 	QString photo;      // file whose hash stands for its photo (the original for an edited one)
 	QString module;     // the story's name in the document / the list headline
 	bool onPage { false };
+	bool usedHere { false };  // list story the workflow has as USED on this page: an id-less frame with its text is its own placement
 	int listIndex { -1 };   // index in m_newsData for list stories
 };
 
@@ -32,7 +33,7 @@ struct SuneerDupPair
 {
 	int a { -1 };
 	int b { -1 };
-	QString kind;       // "story" (the same id twice), "news" (text), "photo"
+	QString kind;       // "story" (one story placed again), "news" (another story, text), "photo" (another story)
 	int score { 0 };
 };
 
