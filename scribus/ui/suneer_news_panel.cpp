@@ -1094,7 +1094,7 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 	}
 	// SUNEER_TEXTCOLOUR_SELFTEST: the Text colour popup (presets, direction, stops, undo; tests/suneer/text_colour_ui.sh)
 	static bool textColourTestStarted = false;
-	if (doc && qEnvironmentVariableIsSet("SUNEER_TEXTCOLOUR_SELFTEST") && !textColourTestStarted)
+	if (doc && (qEnvironmentVariableIsSet("SUNEER_TEXTCOLOUR_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_TEXTCOLOUR_SCOPETEST")) && !textColourTestStarted)
 	{
 		textColourTestStarted = true;
 		auto* wait = new QTimer(this);
@@ -1108,6 +1108,7 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			if (!w)
 				w = m_mw->findChild<SuneerTextColourWidget*>();
 			SuneerTextColourWidget::runSelfTestIfAsked(m_mw->view, m_doc, w);
+			SuneerTextColourWidget::runScopeTestIfAsked(m_mw->view, m_doc, w);
 		});
 		wait->start();
 	}

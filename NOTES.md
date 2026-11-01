@@ -3113,3 +3113,12 @@ rescan after linking, dupCollectDocument starts a new item for a second head tex
 Duplicate keeps it). Badges: story pairs per list row counted, >1 = "Placed n× on page". A workflow "used on another
 page" is a tooltip note (UserRole + 10), no badge. tests/suneer/news_duplicates.sh PLAIN/UNLINK/TWICE modes.
 Pre-existing, also on the old binary: that test's "Place anyway -> placed (0 frames)" and the follow-on page check.
+
+## Text colour popup follows the selection (2026-11-01, uncommitted)
+The old single "Apply to" mixed target and gradient mapping, its default (Each line) forced the whole story, and the
+Solid page had no row. Now Target (Selection / Paragraph / Whole, refreshTarget by targetSignature, resetTarget on popup
+open) is separate from Scope (mapping). apply(): editedTextItem() (modeEdit frame, or the single cell in modeEditTable)
+gets its selection lent to the core (select range, itemSelection_ApplyCharStyle, restore selection + cursor) - no appMode
+trick there, so a cell stays a cell. Clicking a target applies nothing. A whole gradient spans the union of all lines with
+a gradient in the frame (suneerFrameTextRect), so two separate "whole" gradients in one frame share that rect; a per-line
+gradient on a word spans its whole line. Test: tests/suneer/text_colour_scope.sh (SUNEER_TEXTCOLOUR_SCOPETEST).

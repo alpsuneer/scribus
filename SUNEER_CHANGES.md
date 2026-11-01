@@ -1703,3 +1703,8 @@ scribus
 - ഇപ്പോൾ DUP: ഒരേ story രണ്ടോ അതിലധികമോ തവണ placed ("Placed 2× on page"), അല്ലെങ്കിൽ വേറെ id ഉള്ള story-യുടെ text ("Same text as: <headline> (93 %)") / photo ("Same photo as: <headline>"). ഒരിക്കൽ placed = USD മാത്രം. Link കഴിഞ്ഞ് scan വീണ്ടും ഓടും.
 - "Used on another page (workflow)" ഇനി DUP അല്ല; tooltip-ൽ "Also used on …" note മാത്രം. "Show: no DUP" ഇത് മറയ്ക്കില്ല.
 - Test: `NEWS_DUP_PLAIN=1 [NEWS_DUP_UNLINK=1 | NEWS_DUP_TWICE=1] tests/suneer/news_duplicates.sh <page.sla> <dir>`.
+
+### 118. Text colour popup selection പിന്തുടരും
+- "Apply to" ഇനി രണ്ട് പേജിലും (Solid, Gradient): **Selected text / This paragraph / Whole text**. Default selection-ന് അനുസരിച്ച്: selection → Selected text; cursor മാത്രം → This paragraph; frames / cells → Whole text. Popup തുറക്കുമ്പോഴും selection മാറുമ്പോഴും default-ലേക്ക് തിരിച്ചുപോകും. താഴെ ഒരു വരി എന്ത് മാറും എന്ന് പറയും.
+- Gradient പരക്കുന്ന രീതി വേറെ: **Gradient: Whole / Each line**.
+- Test: `tests/suneer/text_colour_scope.sh <dir>`.

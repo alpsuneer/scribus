@@ -53,6 +53,7 @@ to this file only.
 #include "scribusview.h"
 #include "selection.h"
 #include "styles/charstyle.h"
+#include "suneertable.h"
 #include "ui/colorlistbox.h"
 #include "ui/scrspinbox.h"
 #include "undogui.h"
@@ -818,6 +819,32 @@ void SuneerTextColourWidget::buildUi()
 	m_preview = new SuneerTextPreview(this);
 	top->addWidget(m_preview);
 
+	// Apply to: which text changes, on the Solid and the Gradient page alike
+	{
+		auto* targetRow = new QHBoxLayout();
+		targetRow->setSpacing(0);
+		targetRow->addWidget(new QLabel(tr("Apply to:"), this));
+		auto* targetGroup = new QButtonGroup(this);
+		targetGroup->setExclusive(true);
+		const QStringList names { tr("Selected text"), tr("This paragraph"), tr("Whole text") };
+		const QStringList tips { tr("Only the selected characters"), tr("The paragraph the cursor is in"), tr("All the text of the frame") };
+		for (int i = 0; i < 3; ++i)
+		{
+			QToolButton* b = flatButton(names[i], this, true);
+			b->setToolTip(tips[i]);
+			b->setMinimumHeight(24);
+			b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+			targetGroup->addButton(b, i);
+			targetRow->addWidget(b);
+			m_targetButtons << b;
+			connect(b, &QToolButton::clicked, this, [this, i]() { targetClicked(i); });
+		}
+		top->addLayout(targetRow);
+		m_targetNote = new QLabel(this);
+		m_targetNote->setWordWrap(true);
+		top->addWidget(m_targetNote);
+	}
+
 	m_pages = new QStackedWidget(this);
 	top->addWidget(m_pages);
 
@@ -944,16 +971,15 @@ void SuneerTextColourWidget::buildUi()
 		dirRow->addStretch(1);
 		l->addLayout(dirRow);
 
-		// 6. apply to
+		// 6. how the gradient spreads over that text
 		auto* scopeRow = new QHBoxLayout();
 		scopeRow->setSpacing(0);
-		scopeRow->addWidget(new QLabel(tr("Apply to:"), page));
+		scopeRow->addWidget(new QLabel(tr("Gradient:"), page));
 		auto* scopeGroup = new QButtonGroup(this);
 		scopeGroup->setExclusive(true);
-		const QStringList scopeNames { tr("Whole text"), tr("Each line"), tr("Selected words") };
-		const QStringList scopeTips { tr("One gradient across all the text of the frame"), tr("Every line gets the whole gradient (the headline look)"),
-		                              tr("Only the selected text, in edit mode; each line gets the whole gradient") };
-		for (int i = 0; i < 3; ++i)
+		const QStringList scopeNames { tr("Whole"), tr("Each line") };
+		const QStringList scopeTips { tr("One gradient across all the lines it is applied to"), tr("Every line gets the whole gradient (the headline look)") };
+		for (int i = 0; i < 2; ++i)
 		{
 			QToolButton* b = flatButton(scopeNames[i], page, true);
 			b->setToolTip(scopeTips[i]);
@@ -1157,8 +1183,7 @@ void SuneerTextColourWidget::showStyle(const CharStyle& style)
 	m_angle = fmod(style.fillGradientAngle() + 360.0, 360.0);
 	m_solidColour = style.fillColor();
 	m_solidShade = style.fillShade();
-	if (m_scope != SelectedWords)
-		m_scope = (style.fillGradientMapping() == 1) ? WholeText : EachLine;
+	m_scope = (style.fillGradientMapping() == 1) ? WholeText : EachLine;
 	if (m_gradient && m_doc && !m_doc->docGradients.contains(m_gradName))
 		SuneerGradientPresets::ensureGradient(m_doc, m_gradName);
 	if (m_gradient && m_doc && m_doc->docGradients.contains(m_gradName))
@@ -1188,6 +1213,7 @@ void SuneerTextColourWidget::showStyle(const CharStyle& style)
 	syncButtonsFromState();
 	updateStopEditor();
 	updatePreview();
+	refreshTarget(false);
 	m_updating = false;
 }
 
@@ -1198,15 +1224,17 @@ void SuneerTextColourWidget::showItem(PageItem* item)
 	QString text;
 	if (item)
 	{
-		if (m_doc && m_doc->appMode == modeEdit && item->itemText.hasSelection())
-			text = item->itemText.text(item->itemText.startOfSelection(), item->itemText.endOfSelection() - item->itemText.startOfSelection());
+		refreshTarget(false);
+		int start = 0, length = 0;
+		PageItem* edited = editedTextItem();
+		if (edited && m_target != TargetWhole && targetRange(start, length) && length > 0)
+			text = edited->itemText.text(start, length);
 		else
 			text = item->itemText.plainText().section(QChar(0x2029), 0, 0).section(QChar('\n'), 0, 0);
 		text.replace(QChar(0x2028), QChar(' ')).replace(QChar(0x2029), QChar(' '));
 	}
 	m_preview->setText(text);
-	if (!selectionScopePossible() && m_scope == SelectedWords)
-		m_scope = EachLine;
+	refreshTarget(false);
 	updateScopeButtons();
 	m_shadow->setEnabled(item != nullptr);
 	if (item)
@@ -1232,18 +1260,147 @@ bool SuneerTextColourWidget::isGradient() const
 	return m_gradient && !m_gradName.isEmpty();
 }
 
-bool SuneerTextColourWidget::selectionScopePossible() const
+Selection* SuneerTextColourWidget::targetSelection() const
 {
-	return m_doc && m_item && (m_doc->appMode == modeEdit) && m_item->itemText.hasSelection();
+	if (!m_doc)
+		return nullptr;
+	Selection* sel = m_selection ? m_selection() : nullptr;
+	return sel ? sel : m_doc->m_Selection;
 }
 
 bool SuneerTextColourWidget::canApply() const
 {
-	if (!m_doc)
-		return false;
-	Selection* sel = m_selection ? m_selection() : nullptr;
-	Selection* target = sel ? sel : m_doc->m_Selection;
+	Selection* target = targetSelection();
 	return target && !target->isEmpty();
+}
+
+PageItem* SuneerTextColourWidget::editedTextItem() const
+{
+	Selection* target = targetSelection();
+	if (!target || target->count() != 1 || !target->itemAt(0))
+		return nullptr;
+	PageItem* it = target->itemAt(0);
+	if (m_doc->appMode == modeEdit)
+		return it->isTextFrame() ? it : nullptr;
+	if (m_doc->appMode == modeEditTable && it->isTable() && !it->asTable()->hasSelection())
+	{
+		const QList<PageItem_TextFrame*> cells = SuneerTable::cellFrames(it->asTable(), true);
+		return cells.size() == 1 ? cells.first() : nullptr;
+	}
+	return nullptr;
+}
+
+SuneerTextColourWidget::Target SuneerTextColourWidget::defaultTarget() const
+{
+	PageItem* edited = editedTextItem();
+	if (!edited)
+		return TargetWhole;
+	return edited->itemText.hasSelection() ? TargetSelection : TargetParagraph;
+}
+
+QString SuneerTextColourWidget::targetSignature() const
+{
+	Selection* target = targetSelection();
+	if (!target || !m_doc)
+		return QString();
+	QString sig = QString::number(m_doc->appMode);
+	if (PageItem* edited = editedTextItem())
+	{
+		const StoryText& t = edited->itemText;
+		sig += QStringLiteral("|%1").arg(quintptr(edited));
+		sig += t.hasSelection() ? QStringLiteral("|s%1-%2").arg(t.startOfSelection()).arg(t.endOfSelection())
+		                        : QStringLiteral("|p%1").arg(t.nrOfParagraph(qBound(0, t.cursorPosition(), t.length())));
+		return sig;
+	}
+	for (int i = 0; i < target->count(); ++i)
+		sig += QStringLiteral("|%1").arg(quintptr(target->itemAt(i)));
+	return sig;
+}
+
+void SuneerTextColourWidget::refreshTarget(bool force)
+{
+	const QString sig = targetSignature();
+	if (force || sig != m_targetSignature)
+	{
+		m_targetSignature = sig;
+		m_target = defaultTarget();
+	}
+	updateTargetButtons();
+}
+
+void SuneerTextColourWidget::resetTarget()
+{
+	Selection* target = targetSelection();
+	refreshTarget(true);
+	showItem(target && !target->isEmpty() ? target->itemAt(0) : nullptr);
+}
+
+bool SuneerTextColourWidget::targetRange(int& start, int& length) const
+{
+	PageItem* edited = editedTextItem();
+	if (!edited)
+		return false;
+	const StoryText& t = edited->itemText;
+	const bool selection = t.hasSelection();
+	if (m_target == TargetWhole)
+	{
+		start = 0;
+		length = t.length();
+	}
+	else if (m_target == TargetSelection)
+	{
+		if (!selection)
+			return false;
+		start = t.startOfSelection();
+		length = t.endOfSelection() - start;
+	}
+	else
+	{
+		const int from = selection ? t.startOfSelection() : qBound(0, t.cursorPosition(), t.length());
+		const int to = selection ? t.endOfSelection() - 1 : from;
+		start = t.startOfParagraph(t.nrOfParagraph(from));
+		length = t.endOfParagraph(t.nrOfParagraph(to)) - start;
+	}
+	return true;
+}
+
+void SuneerTextColourWidget::updateTargetButtons()
+{
+	if (m_targetButtons.size() != 3)
+		return;
+	PageItem* edited = editedTextItem();
+	const bool hasText = edited && edited->itemText.hasSelection();
+	for (int i = 0; i < 3; ++i)
+	{
+		const bool blocked = m_targetButtons[i]->blockSignals(true);
+		m_targetButtons[i]->setChecked(i == m_target);
+		m_targetButtons[i]->blockSignals(blocked);
+	}
+	m_targetButtons[TargetSelection]->setEnabled(hasText);
+	m_targetButtons[TargetParagraph]->setEnabled(edited != nullptr);
+	Selection* target = targetSelection();
+	const int frames = target ? target->count() : 0;
+	QString note;
+	if (m_target == TargetSelection)
+		note = tr("Only the selected text changes.");
+	else if (m_target == TargetParagraph)
+		note = hasText ? tr("The whole paragraph(s) of the selection change.") : tr("Nothing is selected: only the paragraph with the cursor changes.");
+	else if (edited)
+		note = tr("All the text of this frame changes.");
+	else if (m_doc && m_doc->appMode == modeEditTable)
+		note = tr("All the text of the selected cells changes.");
+	else
+		note = tr("All the text of the %n selected frame(s) changes.", "", frames);
+	m_targetNote->setText(note);
+}
+
+void SuneerTextColourWidget::targetClicked(int target)
+{
+	if (m_updating)
+		return;
+	// choosing only: the next colour goes there (the colour shown now is not forced on all that text)
+	m_target = static_cast<Target>(target);
+	updateTargetButtons();
 }
 
 QList<PageItem*> SuneerTextColourWidget::targetItems() const
@@ -1303,7 +1460,6 @@ void SuneerTextColourWidget::updateScopeButtons()
 		m_scopeButtons[i]->setChecked(i == m_scope);
 		m_scopeButtons[i]->blockSignals(blocked);
 	}
-	m_scopeButtons[SelectedWords]->setEnabled(selectionScopePossible());
 }
 
 QColor SuneerTextColourWidget::stopDisplayColour(const QString& name, int shade, double opacity) const
@@ -1772,16 +1928,18 @@ void SuneerTextColourWidget::ownGradient()
 		shared = true;   // a preset's document copy stays as the preset
 	else
 	{
+		PageItem* edited = editedTextItem();
+		int from = 0, length = 0;
+		const bool part = edited && targetRange(from, length) && length < edited->itemText.length();
 		QList<PageItem*> except = targetItems();
-		if (m_scope == SelectedWords && selectionScopePossible())
+		if (part)
 			except.clear();   // the rest of this frame counts as "elsewhere"
 		shared = gradientUsedElsewhere(m_gradName, except);
-		if (m_scope == SelectedWords && selectionScopePossible() && m_item)
+		if (part)
 		{
 			// other characters of this very frame?
-			const int s = m_item->itemText.startOfSelection(), e = m_item->itemText.endOfSelection();
-			for (int k = 0; k < m_item->itemText.length() && !shared; ++k)
-				if ((k < s || k >= e) && m_item->itemText.charStyle(k).fillGradient() == m_gradName)
+			for (int k = 0; k < edited->itemText.length() && !shared; ++k)
+				if ((k < from || k >= from + length) && edited->itemText.charStyle(k).fillGradient() == m_gradName)
 					shared = true;
 		}
 	}
@@ -1819,6 +1977,12 @@ void SuneerTextColourWidget::apply(const QString& undoName)
 		        qPrintable(undoName), m_updating ? 1 : 0, (void*) m_doc.data(), canApply() ? 1 : 0, m_gradient ? 1 : 0, qPrintable(m_gradName), m_type, m_angle, m_scope);
 	if (m_updating || !m_doc || !canApply())
 		return;
+	// the selection decides: a changed one puts Apply to back on what it means, never on something wider
+	refreshTarget(false);
+	PageItem* edited = editedTextItem();
+	int from = 0, length = 0;
+	if (edited && (!targetRange(from, length) || length <= 0))
+		return;
 	CharStyle cs;
 	if (m_gradient && !m_gradName.isEmpty())
 	{
@@ -1841,14 +2005,31 @@ void SuneerTextColourWidget::apply(const QString& undoName)
 	UndoTransaction tx;
 	if (!undoName.isEmpty() && UndoManager::undoEnabled())
 		tx = UndoManager::instance()->beginTransaction(Um::SelectionGroup, Um::IGroup, undoName, QString(), Um::IFont);
-	// Whole text / Each line in edit mode: the whole story, not the cursor
-	const int oldMode = m_doc->appMode;
-	const bool wholeStory = (m_scope != SelectedWords || !selectionScopePossible()) && oldMode == modeEdit;
-	if (wholeStory)
-		m_doc->appMode = modeNormal;
-	m_doc->itemSelection_ApplyCharStyle(cs, sel, QString());
-	if (wholeStory)
+	if (edited)
+	{
+		// the core applies to the text selection: lend it the target range, then give the user's back
+		StoryText& story = edited->itemText;
+		const bool hadSelection = story.hasSelection();
+		const int oldStart = hadSelection ? story.startOfSelection() : 0;
+		const int oldLength = hadSelection ? story.endOfSelection() - oldStart : 0;
+		const int oldCursor = story.cursorPosition();
+		story.deselectAll();
+		story.select(from, length);
+		m_doc->itemSelection_ApplyCharStyle(cs, sel, QString());
+		story.deselectAll();
+		if (hadSelection)
+			story.select(oldStart, oldLength);
+		story.setCursorPosition(oldCursor);
+	}
+	else
+	{
+		// frames or cells: all their text. Several frames in edit mode take the frame path.
+		const int oldMode = m_doc->appMode;
+		if (oldMode == modeEdit)
+			m_doc->appMode = modeNormal;
+		m_doc->itemSelection_ApplyCharStyle(cs, sel, QString());
 		m_doc->appMode = oldMode;
+	}
 	if (tx)
 		tx.commit();
 	m_doc->changed();
@@ -1907,6 +2088,7 @@ SuneerTextColourPopup::SuneerTextColourPopup(SuneerTextColourWidget* widget, QWi
 
 void SuneerTextColourPopup::showBelow(QWidget* anchor)
 {
+	m_widget->resetTarget();
 	adjustSize();
 	QPoint pos = anchor ? anchor->mapToGlobal(QPoint(0, anchor->height() + 2)) : QCursor::pos();
 	if (QScreen* scr = anchor ? anchor->screen() : qApp->primaryScreen())
@@ -1923,6 +2105,263 @@ void SuneerTextColourPopup::showBelow(QWidget* anchor)
 }
 
 // ───────────────────────────── self-test ─────────────────────────────
+
+void SuneerTextColourWidget::runScopeTestIfAsked(ScribusView* view, ScribusDoc* doc, SuneerTextColourWidget* widget)
+{
+	static bool started = false;
+	const QString prefix = qEnvironmentVariable("SUNEER_TEXTCOLOUR_SCOPETEST");
+	if (started || prefix.isEmpty() || !view || !doc || !widget)
+		return;
+	started = true;
+	QTimer::singleShot(2500, widget, [view, doc, widget, prefix]() {
+		QFile rf(prefix + QStringLiteral("-report.txt"));
+		if (!rf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+			return;
+		QTextStream ts(&rf);
+		int failed = 0;
+		auto line = [&](const QString& l) { ts << l << '\n'; ts.flush(); };
+		auto check = [&](const QString& what, bool ok) { line(QStringLiteral("%1 %2").arg(ok ? "PASS" : "FAIL", what)); if (!ok) ++failed; };
+		if (ScribusMainWindow* mw = doc->scMW())
+			for (UndoGui* g : mw->findChildren<UndoGui*>())
+				UndoManager::instance()->removeGui(g);
+		auto frame = [&](const QString& name) -> PageItem* {
+			for (PageItem* it : doc->DocItems)
+				if (it && it->itemName() == name)
+					return it;
+			return nullptr;
+		};
+		PageItem* story = frame(QStringLiteral("Story"));
+		PageItem* m1 = frame(QStringLiteral("Multi1"));
+		PageItem* m2 = frame(QStringLiteral("Multi2"));
+		PageItem* tableItem = frame(QStringLiteral("Cells"));
+		check(QStringLiteral("test frames found"), story && m1 && m2 && tableItem && tableItem->isTable());
+		if (!(story && m1 && m2 && tableItem && tableItem->isTable()))
+		{
+			rf.close();
+			QTimer::singleShot(200, qApp, []() { QApplication::exit(2); });
+			return;
+		}
+		const QString solid = QStringLiteral("Red");
+		if (!doc->PageColors.contains(solid))
+			doc->PageColors.insert(solid, ScColor(0, 255, 255, 0));
+		const QString black = story->itemText.charStyle(0).fillColor();
+		widget->setDoc(doc);
+		auto pump = [&]() { for (int i = 0; i < 8; ++i) QApplication::processEvents(); };
+		const int headEnd = story->itemText.endOfParagraph(0);
+		const int bodyStart = story->itemText.startOfParagraph(1);
+		const int len = story->itemText.length();
+		int ml = 0;
+		for (const QChar c : story->itemText.text(0, headEnd))
+			ml += (c.unicode() >= 0x0D00 && c.unicode() <= 0x0D7F) ? 1 : 0;
+		line(QStringLiteral("  Story: headline %1 chars (%2 Malayalam codepoints), body %3 chars").arg(headEnd).arg(ml).arg(len - bodyStart));
+		auto allChars = [&](PageItem* it, int from, int to, const std::function<bool(const CharStyle&)>& f) {
+			for (int i = from; i < to; ++i)
+				if (it->itemText.text(i) != SpecialChars::PARSEP && !f(it->itemText.charStyle(i)))
+					return false;
+			return true;
+		};
+		auto isSolid = [&](const CharStyle& c) { return c.fillColor() == solid && c.fillGradient().isEmpty(); };
+		auto isPlain = [&](const CharStyle& c) { return c.fillColor() == black && c.fillGradient().isEmpty(); };
+		auto isGrad = [&](const CharStyle& c) { return !c.fillGradient().isEmpty(); };
+		auto head = [&](const std::function<bool(const CharStyle&)>& f) { return allChars(story, 0, headEnd, f); };
+		auto body = [&](const std::function<bool(const CharStyle&)>& f) { return allChars(story, bodyStart, len, f); };
+		auto setScope = [&]() { widget->resetTarget(); pump(); };
+		auto enter = [&](PageItem* it) {
+			view->requestMode(modeNormal);
+			doc->m_Selection->clear();
+			doc->m_Selection->addItem(it);
+			view->requestMode(modeEdit);
+			pump();
+			it->itemText.deselectAll();
+		};
+		auto selectText = [&](int from, int count) {
+			story->itemText.deselectAll();
+			story->itemText.select(from, count);
+			story->itemText.setCursorPosition(from + count);
+			widget->showStyle(story->itemText.charStyle(from));
+			setScope();
+		};
+		auto cursorAt = [&](int pos) {
+			story->itemText.deselectAll();
+			story->itemText.setCursorPosition(pos);
+			widget->showStyle(story->itemText.charStyle(pos));
+			setScope();
+		};
+		auto pickSolid = [&]() {
+			widget->m_solidBtn->click();
+			pump();
+			widget->m_solidList->setCurrentColor(solid);
+			widget->solidColourPicked();
+			pump();
+		};
+		auto preset = [&](const QString& name) {
+			for (QToolButton* b : widget->m_presetButtons)
+				if (b->property("presetName").toString() == name)
+					b->click();
+			pump();
+		};
+		auto undo = [&](int n = 1) { UndoManager::instance()->undo(n); pump(); };
+		auto shot = [&](const QString& name) {
+			story->itemText.deselectAll();
+			view->requestMode(modeNormal);
+			doc->m_Selection->clear();
+			doc->changed();
+			doc->regionsChanged()->update(QRectF());
+			view->zoom(qRound(story->xPos() + 250.0), qRound(story->yPos() + 200.0), 1.0, false);
+			view->DrawNew();
+			pump();
+			const QString png = prefix + QStringLiteral("-") + name + QStringLiteral(".png");
+			line(QStringLiteral("  picture %1: %2").arg(png, view->viewport()->grab().save(png) ? "saved" : "FAILED"));
+		};
+		auto panel = [&](const QString& name) {
+			const QString png = prefix + QStringLiteral("-popup-") + name + QStringLiteral(".png");
+			widget->grab().save(png);
+			line(QStringLiteral("  popup %1 | %2").arg(png, widget->m_targetNote->text()));
+		};
+		const auto target = [&]() { return int(widget->m_target); };
+
+		// 1. a selection, solid: the headline only; one undo step gives everything back
+		enter(story);
+		selectText(0, headEnd);
+		check(QStringLiteral("headline selected: Apply to = Selected text"), target() == TargetSelection && widget->m_targetButtons[TargetSelection]->isEnabled());
+		panel(QStringLiteral("selected"));
+		pickSolid();
+		check(QStringLiteral("solid: headline coloured, body untouched"), head(isSolid) && body(isPlain));
+		check(QStringLiteral("selection kept after the change"), story->itemText.hasSelection() && story->itemText.startOfSelection() == 0 && story->itemText.endOfSelection() == headEnd);
+		shot(QStringLiteral("1-head-solid"));
+		enter(story);
+		undo();
+		check(QStringLiteral("one undo step: headline back"), head(isPlain) && body(isPlain));
+
+		// 2. gradient on the headline: each line, then whole; each change one undo step
+		selectText(0, headEnd);
+		widget->m_scope = EachLine;
+		preset(QStringLiteral("Red headline"));
+		widget->m_scopeButtons[EachLine]->click();
+		pump();
+		check(QStringLiteral("gradient each line: headline only (mapping %1)").arg(story->itemText.charStyle(0).fillGradientMapping()),
+		      head(isGrad) && body(isPlain) && story->itemText.charStyle(0).fillGradientMapping() == 0);
+		shot(QStringLiteral("2-head-gradient-line"));
+		enter(story);
+		selectText(0, headEnd);
+		widget->m_scopeButtons[WholeText]->click();
+		pump();
+		check(QStringLiteral("gradient whole: headline only (mapping %1)").arg(story->itemText.charStyle(0).fillGradientMapping()),
+		      head(isGrad) && body(isPlain) && story->itemText.charStyle(0).fillGradientMapping() == 1);
+		shot(QStringLiteral("3-head-gradient-whole"));
+		enter(story);
+
+		// 3. then the body only: the headline keeps its gradient
+		selectText(bodyStart, len - bodyStart);
+		pickSolid();
+		check(QStringLiteral("body solid: headline keeps its gradient"), head(isGrad) && body(isSolid));
+		shot(QStringLiteral("4-body-solid"));
+		enter(story);
+		selectText(bodyStart, len - bodyStart);
+		preset(QStringLiteral("Fire"));
+		check(QStringLiteral("body gradient: its own, headline's unchanged (%1 / %2)").arg(story->itemText.charStyle(0).fillGradient(), story->itemText.charStyle(bodyStart).fillGradient()),
+		      story->itemText.charStyle(0).fillGradient() == QLatin1String("Red headline") && story->itemText.charStyle(bodyStart).fillGradient() == QLatin1String("Fire"));
+		shot(QStringLiteral("5-body-gradient"));
+		enter(story);
+		undo(4 + 1);   // Fire, body solid, whole, gradient each line + its re-click
+		line(QStringLiteral("  undone to: head gradient '%1' body gradient '%2'").arg(story->itemText.charStyle(0).fillGradient(), story->itemText.charStyle(bodyStart).fillGradient()));
+		while (!head(isPlain) && UndoManager::instance()->hasUndoActions())
+			undo();
+		check(QStringLiteral("undo: back to plain"), head(isPlain) && body(isPlain));
+
+		// 4. a cursor, nothing selected: this paragraph only, cursor and "no selection" kept
+		const int cursor = bodyStart + 5;
+		cursorAt(cursor);
+		check(QStringLiteral("cursor in the body: Apply to = This paragraph, Selected text off"),
+		      target() == TargetParagraph && !widget->m_targetButtons[TargetSelection]->isEnabled());
+		panel(QStringLiteral("cursor"));
+		pickSolid();
+		check(QStringLiteral("cursor: only that paragraph (headline untouched)"), head(isPlain) && body(isSolid));
+		check(QStringLiteral("cursor stays, nothing selected"), !story->itemText.hasSelection() && story->itemText.cursorPosition() == cursor);
+		undo();
+		cursorAt(2);
+		preset(QStringLiteral("Fire"));
+		check(QStringLiteral("cursor, gradient: only the headline"), head(isGrad) && body(isPlain));
+		undo();
+		check(QStringLiteral("gradient: exactly one undo step (cursor)"), head(isPlain) && body(isPlain));
+		selectText(0, headEnd);
+		preset(QStringLiteral("Red headline"));
+		undo();
+		check(QStringLiteral("gradient: exactly one undo step (selection)"), head(isPlain) && body(isPlain));
+
+		// 5. Whole text only when chosen, and for that selection only
+		selectText(0, headEnd);
+		widget->m_targetButtons[TargetWhole]->click();
+		pump();
+		check(QStringLiteral("choosing Whole text changes nothing yet"), head(isPlain) && body(isPlain));
+		pickSolid();
+		check(QStringLiteral("Whole text chosen: headline and body"), head(isSolid) && body(isSolid));
+		check(QStringLiteral("the user's selection still there"), story->itemText.hasSelection() && story->itemText.endOfSelection() == headEnd);
+		undo();
+		check(QStringLiteral("undo of Whole text: one step"), head(isPlain) && body(isPlain));
+		setScope();
+		check(QStringLiteral("popup opened again: back on Selected text"), target() == TargetSelection);
+		// 6. the selection goes while the panel says Selected text: narrower or nothing, never the whole text
+		story->itemText.deselectAll();
+		story->itemText.setCursorPosition(2);
+		pickSolid();
+		check(QStringLiteral("selection gone: Apply to follows (%1), body untouched").arg(target()), target() == TargetParagraph && body(isPlain));
+		undo();
+
+		// 7. frames (not editing): all their text
+		view->requestMode(modeNormal);
+		pump();
+		doc->m_Selection->clear();
+		doc->m_Selection->addItem(m1);
+		doc->m_Selection->addItem(m2);
+		widget->showStyle(m1->itemText.charStyle(0));
+		setScope();
+		check(QStringLiteral("two frames: Apply to = Whole text, the others off"), target() == TargetWhole && !widget->m_targetButtons[TargetSelection]->isEnabled() && !widget->m_targetButtons[TargetParagraph]->isEnabled());
+		panel(QStringLiteral("frames"));
+		pickSolid();
+		check(QStringLiteral("two frames solid: all the text of both, Story untouched"), allChars(m1, 0, m1->itemText.length(), isSolid) && allChars(m2, 0, m2->itemText.length(), isSolid) && head(isPlain));
+		undo();
+		check(QStringLiteral("two frames: one undo step"), allChars(m1, 0, m1->itemText.length(), isPlain) && allChars(m2, 0, m2->itemText.length(), isPlain));
+		preset(QStringLiteral("Fire"));
+		check(QStringLiteral("two frames gradient: both"), allChars(m1, 0, m1->itemText.length(), isGrad) && allChars(m2, 0, m2->itemText.length(), isGrad));
+		undo();
+		check(QStringLiteral("two frames gradient: exactly one undo step"), allChars(m1, 0, m1->itemText.length(), isPlain) && allChars(m2, 0, m2->itemText.length(), isPlain));
+		preset(QStringLiteral("Fire"));
+		doc->m_Selection->clear();
+		shot(QStringLiteral("6-frames-gradient"));
+
+		// 8. table cells
+		PageItem_Table* table = tableItem->asTable();
+		auto cell = [&](int r, int c) { return static_cast<PageItem*>(table->cellAt(r, c).textFrame()); };
+		auto cellIs = [&](int r, int c, const std::function<bool(const CharStyle&)>& f) { PageItem* x = cell(r, c); return x->itemText.length() > 0 && allChars(x, 0, x->itemText.length(), f); };
+		doc->m_Selection->clear();
+		doc->m_Selection->addItem(tableItem);
+		view->requestMode(modeEditTable);
+		pump();
+		table->selectCells(0, 0, 0, 1);
+		widget->showStyle(cell(0, 0)->itemText.charStyle(0));
+		setScope();
+		check(QStringLiteral("cells selected: Apply to = Whole text (%1)").arg(table->hasSelection()), table->hasSelection() && target() == TargetWhole);
+		panel(QStringLiteral("cells"));
+		pickSolid();
+		check(QStringLiteral("cells solid: the two selected cells, not the row below"), cellIs(0, 0, isSolid) && cellIs(0, 1, isSolid) && cellIs(1, 0, isPlain) && cellIs(1, 1, isPlain));
+		undo();
+		check(QStringLiteral("cells: one undo step"), cellIs(0, 0, isPlain) && cellIs(0, 1, isPlain));
+		preset(QStringLiteral("Fire"));
+		check(QStringLiteral("cells gradient: the two selected cells only"), cellIs(0, 0, isGrad) && cellIs(0, 1, isGrad) && cellIs(1, 0, isPlain));
+		undo();
+		check(QStringLiteral("cells gradient: exactly one undo step"), cellIs(0, 0, isPlain) && cellIs(0, 1, isPlain));
+		preset(QStringLiteral("Fire"));
+		table->clearSelection();
+		view->requestMode(modeNormal);
+		pump();
+		doc->m_Selection->clear();
+		shot(QStringLiteral("7-cells-gradient"));
+		line(failed == 0 ? QStringLiteral("ALL PASS") : QStringLiteral("FAILED: %1").arg(failed));
+		rf.close();
+		QTimer::singleShot(200, qApp, [failed]() { QApplication::exit(failed ? 1 : 0); });
+	});
+}
 
 void SuneerTextColourWidget::runSelfTestIfAsked(ScribusView* view, ScribusDoc* doc, SuneerTextColourWidget* widget)
 {

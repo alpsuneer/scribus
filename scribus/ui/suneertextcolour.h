@@ -176,8 +176,11 @@ private:
 /*! The "Text colour" panel (Adobe Express style): Solid | Gradient, preset
     thumbnails, live preview, colour bar with 2–4 stops, direction arrows,
     Apply to, More… (angle, shade, opacity, soft shadow). Every change applies
-    at once to the text selection, the whole frame(s) or the selected table
-    cells - one undo step each. Shown in the toolbar text-colour popup and in
+    at once - one undo step each - to what "Apply to" says, which follows the
+    selection: selected characters (edit mode, a selection), this paragraph
+    (edit mode, only a cursor), all the text of the selected frames / table
+    cells. It never widens by itself: "Whole text" while editing is the user's
+    choice and lasts until the selection changes or the popup is opened again. Shown in the toolbar text-colour popup and in
     Properties > Text. The gradient engine (character style FillGradient*,
     document gradients) is unchanged. */
 class SCRIBUS_API SuneerTextColourWidget : public QWidget
@@ -193,6 +196,8 @@ public:
 	void showStyle(const CharStyle& style);
 	//! The item whose text and soft shadow are shown.
 	void showItem(PageItem* item);
+	//! The popup opens: "Apply to" goes back to what the current selection means.
+	void resetTarget();
 
 	bool isGradient() const;
 	QString gradientName() const { return m_gradName; }
@@ -202,6 +207,9 @@ public:
 	    (preset click, direction button, Apply to), checks undo, grabs the popup
 	    <prefix>-popup.png and the canvas <prefix>-canvas.png, writes <prefix>-report.txt. */
 	static void runSelfTestIfAsked(class ScribusView* view, ScribusDoc* doc, SuneerTextColourWidget* widget);
+	/*! SUNEER_TEXTCOLOUR_SCOPETEST=<prefix>: frames Story (headline + body), Multi1, Multi2 and table Cells:
+	    what each selection colours, solid and gradient, undo, pictures <prefix>-*.png, <prefix>-report.txt. */
+	static void runScopeTestIfAsked(class ScribusView* view, ScribusDoc* doc, SuneerTextColourWidget* widget);
 
 signals:
 	void changed();
@@ -209,7 +217,10 @@ signals:
 	void closeRequested();
 
 private:
-	enum Scope { WholeText = 0, EachLine = 1, SelectedWords = 2 };
+	//! How a gradient spreads over the text it is applied to (character style FillGradientMapping).
+	enum Scope { WholeText = 0, EachLine = 1 };
+	//! Which text the change goes to.
+	enum Target { TargetSelection = 0, TargetParagraph = 1, TargetWhole = 2 };
 
 	void buildUi();
 	void rebuildPresets();
@@ -218,6 +229,7 @@ private:
 	void setModeGradient(bool gradient, bool applyNow);
 	void directionClicked(int angle, bool radial);
 	void scopeClicked(int scope);
+	void targetClicked(int target);
 	void stopSelected(int index);
 	void stopColourPicked(const QString& colour);
 	void stopShadeChanged();
@@ -246,7 +258,16 @@ private:
 	bool gradientUsedElsewhere(const QString& name, const QList<PageItem*>& except) const;
 	QString uniqueGradientName() const;
 	QList<PageItem*> targetItems() const;
-	bool selectionScopePossible() const;
+	Selection* targetSelection() const;
+	//! The frame or table cell whose text is being edited; nullptr when frames or cells are the selection.
+	PageItem* editedTextItem() const;
+	Target defaultTarget() const;
+	QString targetSignature() const;
+	//! A changed selection (or \a force) puts "Apply to" back on defaultTarget().
+	void refreshTarget(bool force);
+	//! The characters of editedTextItem() that m_target means.
+	bool targetRange(int& start, int& length) const;
+	void updateTargetButtons();
 	QColor stopDisplayColour(const QString& name, int shade, double opacity) const;
 	VGradient currentGradient() const;
 	void writeGradient(const VGradient& g, const QString& undoName);
@@ -263,6 +284,8 @@ private:
 	int m_type { 0 };
 	double m_angle { 90.0 };
 	int m_scope { EachLine };
+	Target m_target { TargetWhole };
+	QString m_targetSignature;
 	QString m_solidColour;
 	double m_solidShade { 100.0 };
 
@@ -290,6 +313,8 @@ private:
 	QPushButton* m_cmykAdd { nullptr };
 	QList<QToolButton*> m_dirButtons;   //!< 8 arrows then radial
 	QList<QToolButton*> m_scopeButtons;
+	QList<QToolButton*> m_targetButtons;
+	QLabel* m_targetNote { nullptr };
 	QPushButton* m_moreBtn { nullptr };
 	QWidget* m_more { nullptr };
 	QSpinBox* m_angleSpin { nullptr };
