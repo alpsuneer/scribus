@@ -529,6 +529,30 @@ struct LineControl {
 	int      linesInCol { 0 };      // suneer: lines committed to this column
 	int      colLineCap { 0 };      // suneer: SuneerColumnLines for this column, 0 = greedy
 	QVector<int> colLineCaps;       // suneer: per column
+	// suneer 2026-11-01: one line grid for every column. pitch = the body line spacing, origin = the
+	// baseline of the first body line in column 1; every later line (a smaller dateline, a line after a
+	// paragraph gap, the first line of the next column) sits on origin + n * pitch, so all columns share
+	// the same baselines and a full column always holds the same number of lines.
+	bool     colGridOn { false };
+	double   colGridPitch { 0.0 };
+	double   colGridOrigin { -1.0 };
+	double   prevBaseline { -1.0 };  // last committed baseline in this column
+	void snapToColumnGrid(double need)
+	{
+		if (!colGridOn || colGridOrigin < 0.0 || colGridPitch <= 0.0)
+			return;
+		// the nearest grid line not more than half a pitch above the natural position
+		double y = colGridOrigin + ceil((yPos - colGridOrigin - 0.5 * colGridPitch - 0.001) / colGridPitch) * colGridPitch;
+		// never closer to the line above than half of what that line needs (a much taller line: the next
+		// grid line). Half, not all: a column's first line can be pushed below the grid by the frame's top
+		// region (a tall Malayalam sign; measured 1.7 pt in the box fixture) and the second line must still
+		// take its own grid position, or the column loses a line.
+		if (prevBaseline >= 0.0 && y < prevBaseline + 0.5 * need)
+			y += colGridPitch;
+		if (qEnvironmentVariableIsSet("SUNEER_GRID_DEBUG"))
+			fprintf(stderr, "GRID col %d line %d: natural %.2f -> %.2f (origin %.2f pitch %.2f prev %.2f need %.2f)\n", column, linesInCol, yPos, y, colGridOrigin, colGridPitch, prevBaseline, need);
+		yPos = y;
+	}
 	double   spanYBottom { -1.0 };
 	// True only for a column entered via nextColumn() below a spanning paragraph:
 	// such a column top must suppress gapBefore like a real column top, but the
@@ -597,6 +621,7 @@ struct LineControl {
 	{
 		startOfCol = true;
 		linesInCol = 0;
+		prevBaseline = -1.0;
 		colLineCap = column < colLineCaps.size() ? colLineCaps[column] : 0;
 		prevLineInkBottom = -1.0; // no line above in a fresh column
 		if (textLayout.story()->defaultStyle().direction() == ParagraphStyle::RTL)
@@ -1628,6 +1653,18 @@ void PageItem_TextFrame::layout()
 		if (m_columns > 1 && !m_suneerNoColumnCap)
 			current.colLineCaps = suneerColumnLineCaps();
 		suneerCapUsed = !current.colLineCaps.isEmpty();
+		if (m_columns > 1 && itemText.length() > 0 && balanceColumnsDefault())
+		{
+			// the body: the story's last paragraph (the heading and the dateline come first)
+			ParagraphStyle body = itemText.paragraphStyle(itemText.length() - 1);
+			if (body.lineSpacingMode() == ParagraphStyle::AutomaticLineSpacing)
+				body.setLineSpacing(calculateLineSpacing(body, this));
+			if (body.lineSpacingMode() != ParagraphStyle::BaselineGridLineSpacing && body.lineSpacing() > 0.5)
+			{
+				current.colGridOn = true;
+				current.colGridPitch = body.lineSpacing();
+			}
+		}
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();
@@ -2123,6 +2160,8 @@ if (HasMark)
 								current.yPos += style.lineSpacing();
 							else
 								current.yPos += asce;
+							if (!(m_columns > 1 && style.spanColumns() != 0))
+								current.snapToColumnGrid(0.0);
 						}
 					}
 					else
@@ -2138,7 +2177,11 @@ if (HasMark)
 							current.yPos = ceil(ol2 / 10000.0) * m_Doc->guidesPrefs().valueBaselineGrid + m_Doc->guidesPrefs().offsetBaselineGrid - by;
 						}
 						else
+						{
 							current.yPos += style.lineSpacing();
+							if (!(m_columns > 1 && style.spanColumns() != 0))
+								current.snapToColumnGrid(style.lineSpacing());
+						}
 					}
 					if (DropCmode)
 						current.yPos += DropCapDrop;
@@ -2294,6 +2337,8 @@ if (HasMark)
 							current.yPos += (current.startOfCol ? 1 : style.lineSpacing());
 						else
 							current.yPos += (current.startOfCol ? 1 : style.lineSpacing());
+						if (!current.startOfCol && !(m_columns > 1 && style.spanColumns() != 0))
+							current.snapToColumnGrid(style.lineSpacing());
 						lastLineY = maxYAsc;
 
 						if (current.startOfCol)
@@ -3036,7 +3081,12 @@ if (HasMark)
 						//if right margin is set we temporally save line, not append it
 						textLayout.appendLine(current.createLineBox());
 						if (!(m_columns > 1 && style.spanColumns() != 0))
+						{
 							current.linesInCol++;          // suneer: a spanning heading line is no column line
+							current.prevBaseline = current.yPos;
+							if (current.colGridOn && current.colGridOrigin < 0.0 && current.column == 0 && qAbs(style.lineSpacing() - current.colGridPitch) < 0.01)
+								current.colGridOrigin = current.yPos;      // the first body line of column 1
+						}
 						current.prevLineInkBottom = current.yPos + current.inkDescent;
 						setMaxY(maxYDesc);
 						current.restartIndex = current.lineData.lastCluster + 1;
@@ -7000,83 +7050,11 @@ bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflo
 	const bool balanced = m_columns > 1 && o.balanceColumns;
 	// the cap: every column its share of the lines (36 in 5 columns: 8/7/7/7/7, not 8/8/8/8/4). The greedy
 	// minimum height is the capped minimum too (a column never needs more than its greedy share).
+	// suneer 2026-11-01 (user decision): the columns are filled one after the other - column 1 to the frame
+	// bottom, then column 2 ... - at the smallest height where everything fits. Every column but the last
+	// is full (the same lines, the same baselines: the column grid in layout()); only the last is shorter.
+	// No line caps any more: a cap from an earlier fit is dropped here.
 	suneerSetColumnLineCaps(QVector<int>());
-	if (balanced)
-	{
-		// the frame fits the layout again when a column takes one more line than the greedy minimum gave it
-		auto growToFit = [&]() {
-			if (fitsAt(high, oldBottomDist))
-				return;
-			double lo = high, hi = maxH;
-			if (!fitsAt(hi, oldBottomDist))
-			{
-				high = maxH;
-				return;
-			}
-			while (hi - lo > 0.5)
-			{
-				const double mid = (lo + hi) / 2.0;
-				if (fitsAt(mid, oldBottomDist))
-					hi = mid;
-				else
-					lo = mid;
-			}
-			high = hi;
-			fitsAt(high, oldBottomDist);
-		};
-		fitsAt(high, oldBottomDist);
-		QVector<int> lines;
-		QVector<double> bottoms;
-		suneerColumnEnds(lines, bottoms);
-		int total = 0;
-		for (int n : lines)
-			total += n;
-		// the newspaper rule: column k never ends above column k+1; the extra lines go to the first columns
-		// (35 lines in 2 columns: 18/17; 36 in 5: 8/7/7/7/7)
-		QVector<int> caps(m_columns, total / m_columns);
-		for (int k = 0; k < total % m_columns; ++k)
-			caps[k]++;
-		QList<QVector<int>> seen;
-		for (int iter = 0; iter < 3 * m_columns + 2; ++iter)
-		{
-			seen << caps;
-			suneerSetColumnLineCaps(caps);
-			growToFit();
-			if (!capsHonoured())
-			{
-				// not even at maxH: the previous distribution
-				if (seen.size() > 1)
-				{
-					caps = seen[seen.size() - 2];
-					suneerSetColumnLineCaps(caps);
-					growToFit();
-				}
-				break;
-			}
-			suneerColumnEnds(lines, bottoms);
-			// lines differ in height (a small dateline, the space after a paragraph): a later column can end
-			// lower than the one before it with the same line count - that line moves forward
-			bool moved = false;
-			for (int k = 0; k + 1 < bottoms.size() && k + 1 < caps.size() && !moved; ++k)
-				if (bottoms[k + 1] > bottoms[k] + 0.5 && caps[k + 1] > 1)
-				{
-					caps[k]++;
-					caps[k + 1]--;
-					moved = true;
-				}
-			if (moved && seen.contains(caps))
-				moved = false;                        // two layouts flipping: keep this one
-			if (!qEnvironmentVariableIsEmpty("SUNEER_FIT_DEBUG"))
-			{
-				QStringList c, b;
-				for (int k = 0; k < lines.size(); ++k)
-					c << QString::number(lines[k]), b << QString::number(bottoms[k], 'f', 2);
-				qDebug().noquote() << QString("[FITINK]   %1 caps iter %2: lines %3 bottoms %4 h %5 moved %6").arg(itemName()).arg(iter).arg(c.join('/'), b.join('/')).arg(high, 0, 'f', 2).arg(moved);
-			}
-			if (!moved)
-				break;
-		}
-	}
 	const double roomy = balanced ? high : qMin(maxH, high + m_textDistanceMargins.top() + 20.0);
 	fitsAt(roomy, oldBottomDist);
 	const QVector<qint64> wanted = SuneerTextClean::layoutSignature(this);

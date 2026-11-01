@@ -46,9 +46,9 @@ for line in open(W + "/out/t-cases.txt"):
     if extra.startswith("cols=") and "/" in extra:
         counts = [int(c) for c in extra[5:].split()[0].split("/")]
         bal = " lines %s" % "/".join(map(str, counts))
-        # the newspaper rule (2026-11-01): a column never ends above the one after it; the columns are within
-        # two lines of each other (a dateline or a paragraph gap can cost a line)
-        if counts and (max(counts) - min(counts) > 2):
+        # the newspaper rule (2026-11-01, sequential fill): every column but the last holds the same lines
+        # (the column grid), only the last may be shorter
+        if counts and (max(counts[:-1] or counts) - min(counts[:-1] or counts) > 0 or counts[-1] > counts[0]):
             bal += " UNBALANCED"; ok = False
         if "bottoms=" in extra:
             bots = [float(b) for b in extra.split("bottoms=")[1].split()[0].split("/") if b not in ("-", "")]
