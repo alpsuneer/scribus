@@ -227,11 +227,16 @@ public:
 	bool suneerFitToInk(const SuneerFitOptions& o, bool* overflow = nullptr);
 	static bool balanceColumnsDefault();
 	//! suneer 2026-10-31: lines per column the layout fills before it moves to the next column (item attribute
-	//! "SuneerColumnLines", set by the balanced fit: ceil(lines / columns), so 36 lines in 5 columns lay out
-	//! 8/7/7/7/7 instead of the greedy 8/8/8/8/4); 0 = greedy. A capped layout that overflows (text edited,
-	//! columns changed) is laid out greedily again, so a stale cap never hides text.
-	int suneerColumnLineCap() const;
-	void suneerSetColumnLineCap(int cap);
+	//! "SuneerColumnLines", e.g. "8,7,7,7,7", set by the balanced fit so 36 lines in 5 columns lay out
+	//! 8/7/7/7/7 instead of the greedy 8/8/8/8/4; an old single number applies to every column); empty = greedy.
+	//! Lines of a paragraph spanning the columns (the heading) are not counted: they are laid out while the
+	//! engine is still "in column 1" and took column 1's share (2 heading lines + 17 body vs 19 body, measured
+	//! 2026-10-31 on the desk's back page). A capped layout that overflows (text edited, columns changed) is
+	//! laid out greedily again, so a stale cap never hides text.
+	QVector<int> suneerColumnLineCaps() const;
+	void suneerSetColumnLineCaps(const QVector<int>& caps);
+	//! per column: lines (spanning lines excluded) and the baseline of the last line, frame-top relative
+	void suneerColumnEnds(QVector<int>& lines, QVector<double>& bottoms) const;
 	bool m_suneerNoColumnCap { false };
 
 	/**

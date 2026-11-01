@@ -46,9 +46,14 @@ for line in open(W + "/out/t-cases.txt"):
     if extra.startswith("cols=") and "/" in extra:
         counts = [int(c) for c in extra[5:].split()[0].split("/")]
         bal = " lines %s" % "/".join(map(str, counts))
-        # all columns but the last within one line of the fullest; the last may be shorter (the text ran out)
-        if counts and (max(counts) - min(counts[:-1] or counts) > 1 or counts[-1] > counts[0] + 1):
+        # the newspaper rule (2026-11-01): a column never ends above the one after it; the columns are within
+        # two lines of each other (a dateline or a paragraph gap can cost a line)
+        if counts and (max(counts) - min(counts) > 2):
             bal += " UNBALANCED"; ok = False
+        if "bottoms=" in extra:
+            bots = [float(b) for b in extra.split("bottoms=")[1].split()[0].split("/") if b not in ("-", "")]
+            if any(bots[k + 1] > bots[k] + 1.0 for k in range(len(bots) - 1)):   # ink bottoms: descenders differ by < 1 mm, a line is ~3.5 mm
+                bal += " LATER-COLUMN-LOWER"; ok = False
     if "CHANGED" in extra:
         ok = False
     if "bottoms=" in extra:

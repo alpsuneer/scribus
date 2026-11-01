@@ -527,7 +527,8 @@ struct LineControl {
 	int      column { 0 };
 	bool     startOfCol { true };
 	int      linesInCol { 0 };      // suneer: lines committed to this column
-	int      colLineCap { 0 };      // suneer: SuneerColumnLines, 0 = greedy
+	int      colLineCap { 0 };      // suneer: SuneerColumnLines for this column, 0 = greedy
+	QVector<int> colLineCaps;       // suneer: per column
 	double   spanYBottom { -1.0 };
 	// True only for a column entered via nextColumn() below a spanning paragraph:
 	// such a column top must suppress gapBefore like a real column top, but the
@@ -596,6 +597,7 @@ struct LineControl {
 	{
 		startOfCol = true;
 		linesInCol = 0;
+		colLineCap = column < colLineCaps.size() ? colLineCaps[column] : 0;
 		prevLineInkBottom = -1.0; // no line above in a fresh column
 		if (textLayout.story()->defaultStyle().direction() == ParagraphStyle::RTL)
 			colLeft = textLayout.frame()->width() - insets.right() - ((colWidth * (column + 1)) + (colGap * column));
@@ -1434,7 +1436,7 @@ struct SuneerProfScopeT
 }
 void PageItem_TextFrame::layout()
 {
-	int suneerCapUsed = 0;   // the column line cap this layout ran with (NoRoom below)
+	bool suneerCapUsed = false;   // this layout ran with a column line cap (NoRoom below)
 	SuneerProfScopeT suneerProf("textLayout", (itemName() + QStringLiteral(" chars=%1 cols=%2 flowUnder=%3 hyph=%4").arg(itemText.length()).arg(m_columns).arg(m_Doc ? m_Doc->Items->count() : 0).arg((int) itemText.defaultStyle().hyphenationMode())).toUtf8());
 //	qDebug() << "==Layout==" << itemName() ;
 
@@ -1623,7 +1625,9 @@ void PageItem_TextFrame::layout()
 			current.preciseEnd = suneerNeedsInsetShape(this, textDist);
 		}
 		current.stockLineEnd = suneerItemUsesCharClusters(this);
-		suneerCapUsed = current.colLineCap = (m_columns > 1 && !m_suneerNoColumnCap) ? suneerColumnLineCap() : 0;
+		if (m_columns > 1 && !m_suneerNoColumnCap)
+			current.colLineCaps = suneerColumnLineCaps();
+		suneerCapUsed = !current.colLineCaps.isEmpty();
 		current.nextColumn(textLayout);
 
 		lastLineY = m_textDistanceMargins.top();
@@ -3031,7 +3035,8 @@ if (HasMark)
 						current.fillInTabLeaders();
 						//if right margin is set we temporally save line, not append it
 						textLayout.appendLine(current.createLineBox());
-					current.linesInCol++;
+						if (!(m_columns > 1 && style.spanColumns() != 0))
+							current.linesInCol++;          // suneer: a spanning heading line is no column line
 						current.prevLineInkBottom = current.yPos + current.inkDescent;
 						setMaxY(maxYDesc);
 						current.restartIndex = current.lineData.lastCluster + 1;
@@ -3368,7 +3373,7 @@ NoRoom:
 	invalid = false;
 	// suneer: a capped column layout that overflows (text edited, columns changed since the fit) is laid out
 	// greedily again - the cap must never hide text
-	if (suneerCapUsed > 0 && frameOverflows() && !m_suneerNoColumnCap)
+	if (suneerCapUsed && frameOverflows() && !m_suneerNoColumnCap)
 	{
 		m_suneerNoColumnCap = true;
 		invalidateLayout();
@@ -6826,26 +6831,66 @@ bool PageItem_TextFrame::suneerFitCaptionHeight(bool withUndo, bool ignoreTextWr
 	return suneerFitToInk(o);
 }
 
-int PageItem_TextFrame::suneerColumnLineCap() const
+QVector<int> PageItem_TextFrame::suneerColumnLineCaps() const
 {
+	QVector<int> caps;
 	for (const ObjectAttribute& a : pageItemAttributes)
 		if (a.name == QLatin1String("SuneerColumnLines"))
-			return a.value.toInt();
-	return 0;
+		{
+			const QStringList parts = a.value.split(',', Qt::SkipEmptyParts);
+			if (parts.size() == 1 && parts[0].toInt() > 0)
+				caps = QVector<int>(m_columns, parts[0].toInt());    // files of 2026-10-31: one number for every column
+			else
+				for (const QString& p : parts)
+					caps << p.toInt();
+			break;
+		}
+	for (int c : caps)
+		if (c <= 0)
+			return QVector<int>();
+	return caps;
 }
 
-void PageItem_TextFrame::suneerSetColumnLineCap(int cap)
+void PageItem_TextFrame::suneerSetColumnLineCaps(const QVector<int>& caps)
 {
 	for (int i = pageItemAttributes.size() - 1; i >= 0; --i)
 		if (pageItemAttributes[i].name == QLatin1String("SuneerColumnLines"))
 			pageItemAttributes.removeAt(i);
-	if (cap > 0)
+	if (caps.isEmpty())
+		return;
+	QStringList parts;
+	for (int c : caps)
+		parts << QString::number(c);
+	ObjectAttribute a;
+	a.name = QStringLiteral("SuneerColumnLines");
+	a.type = QStringLiteral("string");
+	a.value = parts.join(',');
+	pageItemAttributes.append(a);
+}
+
+void PageItem_TextFrame::suneerColumnEnds(QVector<int>& lines, QVector<double>& bottoms) const
+{
+	lines.clear();
+	bottoms.clear();
+	const Box* fb = textLayout.box();
+	if (!fb)
+		return;
+	for (const Box* column : fb->boxes())
 	{
-		ObjectAttribute a;
-		a.name = QStringLiteral("SuneerColumnLines");
-		a.type = QStringLiteral("integer");
-		a.value = QString::number(cap);
-		pageItemAttributes.append(a);
+		int n = 0;
+		double bottom = -1.0;
+		for (const Box* b : column->boxes())
+		{
+			const LineBox* l = dynamic_cast<const LineBox*>(b);
+			if (!l)
+				continue;
+			if (m_columns > 1 && itemText.paragraphStyle(l->firstChar()).spanColumns() != 0)
+				continue;
+			++n;
+			bottom = fb->y() + column->y() + l->y() + l->ascent();
+		}
+		lines << n;
+		bottoms << bottom;
 	}
 }
 
@@ -6894,10 +6939,26 @@ bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflo
 		invalidateLayout();
 		layout();
 	};
+	// with column line caps a height "fits" only when every column (but the last) got its cap lines: a
+	// capped layout that overflows is laid out greedily again (NoRoom), which would hide the overflow here
+	auto capsHonoured = [&]() {
+		const QVector<int> caps = suneerColumnLineCaps();
+		if (caps.isEmpty())
+			return true;
+		QVector<int> lines;
+		QVector<double> bottoms;
+		suneerColumnEnds(lines, bottoms);
+		if (lines.size() < caps.size())
+			return false;
+		for (int k = 0; k + 1 < caps.size(); ++k)
+			if (lines[k] < caps[k])
+				return false;
+		return true;
+	};
 	auto fitsAt = [&](double h, double bottomDist) {
 		m_textDistanceMargins.setBottom(bottomDist);
 		trialHeight(h);
-		return !frameOverflows();
+		return !frameOverflows() && capsHonoured();
 	};
 	auto restore = [&]() {
 		m_textDistanceMargins.setBottom(oldBottomDist);
@@ -6907,8 +6968,11 @@ bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflo
 
 	// 1. Lay the whole story out with room to spare, so every line exists and the last one is not the
 	//    one being clipped. Overflowing even at maxH: maxH (the caller decides).
+	suneerSetColumnLineCaps(QVector<int>());          // the search starts greedy; a cap from an earlier fit is stale
 	if (!fitsAt(maxH, oldBottomDist))
 	{
+		if (!qEnvironmentVariableIsEmpty("SUNEER_FIT_DEBUG"))
+			qDebug().noquote() << QString("[FITINK]   %1 overflows at maxH %2 (columns %3, lines %4)").arg(itemName()).arg(maxH, 0, 'f', 1).arg(m_columns).arg(textLayout.lines());
 		m_textDistanceMargins.setBottom(oldBottomDist);
 		UndoManager::instance()->setUndoEnabled(true);
 		if (overflow)
@@ -6936,14 +7000,82 @@ bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflo
 	const bool balanced = m_columns > 1 && o.balanceColumns;
 	// the cap: every column its share of the lines (36 in 5 columns: 8/7/7/7/7, not 8/8/8/8/4). The greedy
 	// minimum height is the capped minimum too (a column never needs more than its greedy share).
-	suneerSetColumnLineCap(0);
+	suneerSetColumnLineCaps(QVector<int>());
 	if (balanced)
 	{
+		// the frame fits the layout again when a column takes one more line than the greedy minimum gave it
+		auto growToFit = [&]() {
+			if (fitsAt(high, oldBottomDist))
+				return;
+			double lo = high, hi = maxH;
+			if (!fitsAt(hi, oldBottomDist))
+			{
+				high = maxH;
+				return;
+			}
+			while (hi - lo > 0.5)
+			{
+				const double mid = (lo + hi) / 2.0;
+				if (fitsAt(mid, oldBottomDist))
+					hi = mid;
+				else
+					lo = mid;
+			}
+			high = hi;
+			fitsAt(high, oldBottomDist);
+		};
 		fitsAt(high, oldBottomDist);
-		const int total = int(textLayout.lines());
-		suneerSetColumnLineCap((total + m_columns - 1) / m_columns);
-		for (int i = 0; i < 40 && !fitsAt(high, oldBottomDist); ++i)
-			high = qMin(maxH, high + 0.25);
+		QVector<int> lines;
+		QVector<double> bottoms;
+		suneerColumnEnds(lines, bottoms);
+		int total = 0;
+		for (int n : lines)
+			total += n;
+		// the newspaper rule: column k never ends above column k+1; the extra lines go to the first columns
+		// (35 lines in 2 columns: 18/17; 36 in 5: 8/7/7/7/7)
+		QVector<int> caps(m_columns, total / m_columns);
+		for (int k = 0; k < total % m_columns; ++k)
+			caps[k]++;
+		QList<QVector<int>> seen;
+		for (int iter = 0; iter < 3 * m_columns + 2; ++iter)
+		{
+			seen << caps;
+			suneerSetColumnLineCaps(caps);
+			growToFit();
+			if (!capsHonoured())
+			{
+				// not even at maxH: the previous distribution
+				if (seen.size() > 1)
+				{
+					caps = seen[seen.size() - 2];
+					suneerSetColumnLineCaps(caps);
+					growToFit();
+				}
+				break;
+			}
+			suneerColumnEnds(lines, bottoms);
+			// lines differ in height (a small dateline, the space after a paragraph): a later column can end
+			// lower than the one before it with the same line count - that line moves forward
+			bool moved = false;
+			for (int k = 0; k + 1 < bottoms.size() && k + 1 < caps.size() && !moved; ++k)
+				if (bottoms[k + 1] > bottoms[k] + 0.5 && caps[k + 1] > 1)
+				{
+					caps[k]++;
+					caps[k + 1]--;
+					moved = true;
+				}
+			if (moved && seen.contains(caps))
+				moved = false;                        // two layouts flipping: keep this one
+			if (!qEnvironmentVariableIsEmpty("SUNEER_FIT_DEBUG"))
+			{
+				QStringList c, b;
+				for (int k = 0; k < lines.size(); ++k)
+					c << QString::number(lines[k]), b << QString::number(bottoms[k], 'f', 2);
+				qDebug().noquote() << QString("[FITINK]   %1 caps iter %2: lines %3 bottoms %4 h %5 moved %6").arg(itemName()).arg(iter).arg(c.join('/'), b.join('/')).arg(high, 0, 'f', 2).arg(moved);
+			}
+			if (!moved)
+				break;
+		}
 	}
 	const double roomy = balanced ? high : qMin(maxH, high + m_textDistanceMargins.top() + 20.0);
 	fitsAt(roomy, oldBottomDist);
@@ -7128,8 +7260,11 @@ bool PageItem_TextFrame::suneerFitToInk(const SuneerFitOptions& o, bool* overflo
 				cols << QString::number(n);
 				bottoms << (last ? QString::number((fb->y() + column->y() + last->y() + last->textRect().bottom()) * PT2MM, 'f', 2) : QStringLiteral("-"));
 			}
-		fprintf(stderr, "FIT-TRACE %s | via=%s | balanced=%d cap=%d | h %.2f -> %.2f mm | columns %d gap %.2f mm width %.2f mm dist L%.2f R%.2f T%.2f B%.2f mm | lines/col %s | last-line ink bottom/col %s mm | frame bottom %.2f mm | overflow %d | %lld ms\n",
-		        qPrintable(itemName()), o.via, balanced ? 1 : 0, suneerColumnLineCap(), oldH * PT2MM, m_height * PT2MM, m_columns, m_columnGap * PT2MM, m_width * PT2MM,
+		QStringList capL;
+		for (int c : suneerColumnLineCaps())
+			capL << QString::number(c);
+		fprintf(stderr, "FIT-TRACE %s | via=%s | balanced=%d cap=%s | h %.2f -> %.2f mm | columns %d gap %.2f mm width %.2f mm dist L%.2f R%.2f T%.2f B%.2f mm | lines/col %s | last-line ink bottom/col %s mm | frame bottom %.2f mm | overflow %d | %lld ms\n",
+		        qPrintable(itemName()), o.via, balanced ? 1 : 0, qPrintable(capL.isEmpty() ? QStringLiteral("0") : capL.join(',')), oldH * PT2MM, m_height * PT2MM, m_columns, m_columnGap * PT2MM, m_width * PT2MM,
 		        m_textDistanceMargins.left() * PT2MM, m_textDistanceMargins.right() * PT2MM, m_textDistanceMargins.top() * PT2MM, m_textDistanceMargins.bottom() * PT2MM,
 		        qPrintable(cols.join('/')), qPrintable(bottoms.join('/')), m_height * PT2MM, frameOverflows() ? 1 : 0, (long long) fitTime.elapsed());
 	}

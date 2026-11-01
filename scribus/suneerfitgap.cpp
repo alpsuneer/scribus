@@ -152,6 +152,64 @@ void SuneerFitGap::runSelfTestIfAsked(ScribusView* view, ScribusDoc* doc)
 		runActionsMode(view, doc, prefix);
 		return;
 	}
+	if (qEnvironmentVariable("SUNEER_FITGAP_MODE") == QLatin1String("doc"))
+	{
+		// a real page: every multi-column text frame fitted by the menu command (SUNEER_FITGAP_COLS=N first
+		// sets N columns), the canvas grabbed before / after, the result saved as SUNEER_FITGAP_SAVEAS
+		doc->guidesPrefs().framesShown = true;
+		auto grab = [&](const QString& tag) {
+			if (mw->scrActions.contains("viewFitPage"))
+				mw->scrActions["viewFitPage"]->trigger();
+			view->DrawNew();
+			for (int i = 0; i < 10; ++i)
+				QCoreApplication::processEvents();
+			view->viewport()->grab().save(prefix + QStringLiteral("-doc-%1.png").arg(tag));
+		};
+		const int cols = qEnvironmentVariable("SUNEER_FITGAP_COLS").toInt();
+		grab(QStringLiteral("before"));
+		QStringList cases;
+		for (PageItem* it : *doc->Items)
+		{
+			if (!it->isTextFrame() || it->columns() < 2)
+				continue;
+			PageItem_TextFrame* tf = it->asTextFrame();
+			if (cols > 1)
+			{
+				tf->setColumns(cols);
+				tf->invalidateLayout();
+				tf->layout();
+			}
+			view->requestMode(modeNormal);
+			doc->m_Selection->clear();
+			doc->m_Selection->addItem(it);
+			for (int i = 0; i < 3; ++i)
+				QCoreApplication::processEvents();
+			mw->scrActions["itemAdjustFrameHeightToText"]->trigger();
+			for (int i = 0; i < 5; ++i)
+				QCoreApplication::processEvents();
+			QVector<int> lines;
+			QVector<double> bottoms;
+			tf->suneerColumnEnds(lines, bottoms);
+			QStringList l, b;
+			for (int k = 0; k < lines.size(); ++k)
+				l << QString::number(lines[k]), b << QString::number(bottoms[k] * 25.4 / 72.0, 'f', 2);
+			cases << QStringLiteral("doc %1 cols=%2 lines=%3 baselines=%4mm height=%5mm overflow=%6").arg(it->itemName()).arg(it->columns())
+			         .arg(l.join('/'), b.join('/')).arg(it->height() * 25.4 / 72.0, 0, 'f', 2).arg(tf->frameOverflows() ? 1 : 0);
+		}
+		doc->m_Selection->clear();
+		grab(QStringLiteral("after"));
+		QFile f(prefix + QStringLiteral("-cases.txt"));
+		if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+			f.write(cases.join('\n').toUtf8() + "\n");
+		f.close();
+		const QString saveAs = qEnvironmentVariable("SUNEER_FITGAP_SAVEAS");
+		if (!saveAs.isEmpty())
+			doc->save(saveAs);
+		doc->setModified(false);
+		fprintf(stderr, "FITGAP-SELFTEST done %lld cases (doc mode)\n", (long long) cases.size());
+		QTimer::singleShot(300, mw, [mw]() { mw->close(); });
+		return;
+	}
 	const QStringList paths { "menu", "toolbar", "placement", "caption", "box" };
 	QStringList cases;
 	auto mm = [](double pt) { return pt * 25.4 / 72.0; };
