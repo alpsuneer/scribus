@@ -524,6 +524,16 @@ QString Prefs_KeyboardShortcuts::noteShippedSetUpdate()
 	          "choose \"%1\" in Preferences > Keyboard Shortcuts to use it.").arg(newspaperDefaultSetName(), version, defaultSetName());
 }
 
+bool Prefs_KeyboardShortcuts::adoptShippedSetIfUnchosen()
+{
+	PrefsContext* ctx = shortcutSetPrefs();
+	if (ctx->contains("default_set"))
+		return false;
+	ctx->set("default_set", newspaperDefaultSetName());
+	PrefsManager::instance().prefsFile->write();
+	return true;
+}
+
 bool Prefs_KeyboardShortcuts::applyDefaultSet(QMap<QString, Keys>& keys)
 {
 	// Only a Default someone actually chose: a profile that never picked one

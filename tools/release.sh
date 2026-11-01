@@ -264,6 +264,26 @@ else
 	echo "   keyset unchanged since the committed one"
 fi
 
+# ------------------------------------------- 3c. office default settings ---
+say "Office default settings (design styles, paragraph-style shortcuts, text gradient presets)"
+# The laptop's current settings become the office defaults the package ships; every profile gets them
+# at start (replaced when untouched, asked when edited). The diff is shown here, before anything leaves.
+OFFICE_SUMMARY=$(mktemp)
+tools/update-office-defaults.sh --version "$VERSION" --summary "$OFFICE_SUMMARY" || die "office defaults not updated (see above)"
+OFFICE_CHANGELOG=$(head -1 "$OFFICE_SUMMARY"); rm -f "$OFFICE_SUMMARY"
+if [ -n "$(git -c core.fileMode=false status --porcelain --untracked-files=all -- resources/office-defaults)" ]; then
+	if [ $DRY_RUN -eq 1 ]; then
+		echo "   office defaults changed; left uncommitted (dry run)"
+	else
+		git add -A resources/office-defaults
+		git commit -q -m "suneer: office default settings as shipped with $VERSION
+
+$OFFICE_CHANGELOG" && echo "   office defaults committed: $(git rev-parse --short HEAD)"
+	fi
+else
+	echo "   office defaults unchanged since the committed ones"
+fi
+
 # ------------------------------------------- 3b2. office PDF presets ---
 say "Office PDF presets"
 # The presets ticked "Office preset" in Save as PDF on this laptop become the

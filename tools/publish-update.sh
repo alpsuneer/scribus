@@ -152,8 +152,8 @@ tools/release.sh --dry-run --allow-dirty "${CHANGELOG[@]}" || die "release.sh fa
 VERSION=$(ls -t "$BUILD/release" | grep -E '^1\.[0-9]+\.[0-9]+-[0-9]{8}-[0-9]+$' | head -1)
 valid_release "$VERSION" || die "release number '$VERSION' is not <upstream>-YYYYMMDD-N"
 [ "$(dpkg-deb -f "$BUILD/release/$VERSION/scribus_${VERSION}_amd64.deb" Version 2>/dev/null)" = "$VERSION" ] || die "the .deb in $BUILD/release/$VERSION is not version $VERSION"
-if [ $NO_TAG -eq 0 ] && [ -n "$(git -c core.fileMode=false status --porcelain -- resources/keysets resources/pdf-presets)" ]; then
-	git add -A resources/keysets resources/pdf-presets
+if [ $NO_TAG -eq 0 ] && [ -n "$(git -c core.fileMode=false status --porcelain --untracked-files=all -- resources/keysets resources/pdf-presets resources/office-defaults)" ]; then
+	git add -A resources/keysets resources/pdf-presets resources/office-defaults
 	git commit -q -m "suneer: keyset / office presets as shipped with $VERSION" && echo "   shipped keyset/presets committed: $(git rev-parse --short HEAD)"
 fi
 OUT="$BUILD/release/$VERSION"

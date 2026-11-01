@@ -3072,3 +3072,15 @@ Packer, Place selected's cursor/blockedBelow loops (obit cell, band, area news; 
 obitRepackPage's blocked loop and repackCore's scanFree (all via firstFree / lowestAt / best). Candidate-based (yMin +
 every obstacle bottom + gap), so a hole higher up is taken - the old scan loops jumped past it. Re-pack old vs new:
 0.00 mm (tests/suneer/repack_page.sh on a placed page); obit_parity.sh unchanged.
+
+## Office default settings with the update (2026-11-01, uncommitted)
+`scribus/suneerofficedefaults.{h,cpp}` (syncAtStartup, called in initScMW before applyLoadedShortCuts / initPalettes,
+so the panels read the synced files), `resources/office-defaults/` (+ CMake, GLOB of the four names), `tools/update-
+office-defaults.sh` (laptop profile -> resources, iconPath basename, manifest with "previous" hashes; hooked into
+release.sh 3c and publish-update.sh's commit step). Receipt `<prefs>/office-defaults-received.json`. User paths:
+QSettings("Scribus","SuneerDesignStyle").fileName() etc. Keyset: Prefs_KeyboardShortcuts::adoptShippedSetIfUnchosen
+(sets "default_set" only when the prefs context never had one). Env for tests: SUNEER_OFFICE_DEFAULTS_DIR,
+SUNEER_OFFICEDEF_ANSWER, SUNEER_OFFICEDEF_SELFTEST (report, then quit via a repeating exit(0) timer - a single
+singleShot before exec() is ignored). Merge identity for design styles = tooltip OR content signature (styles list,
+columns, photo position). Test: tests/suneer/office_defaults.sh. Trap: scribus/CMakeLists.txt lists sources twice -
+add new files to both lists or the link fails.

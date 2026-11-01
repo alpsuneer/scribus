@@ -1,0 +1,17 @@
+{
+ "_comment": "Office default settings shipped with Scribus; written by tools/update-office-defaults.sh - do not edit by hand.",
+ "version": "1.7.3-20261101-2",
+ "date": "2026-11-01",
+ "files": {
+  "SuneerDesignStyle.conf": {
+   "sha256": "c41a05062be53123d311bf863ade3bcb626597632d09b8a8bd2e2bac2889fda7",
+   "previous": [],
+   "size": 2508
+  },
+  "ParagraphStyleShortcuts.conf": {
+   "sha256": "ee4f6eedf66efbc8e36d895a2f9141c6d1b80243021c389775feb5ebc4b95c03",
+   "previous": [],
+   "size": 64
+  }
+ }
+}

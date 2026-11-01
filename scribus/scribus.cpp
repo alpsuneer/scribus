@@ -190,6 +190,7 @@ for which a new license (GPL+exception) is in place.
 #include "suneerphotobadges.h"
 #include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
+#include "suneerofficedefaults.h"
 #include "scribusdoc.h"
 #include "suneerclusterlevel.h"
 #include "suneerimageresample.h"
@@ -559,6 +560,26 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 	ScCore->pluginManager->setupPluginActions(this);
 	ScCore->pluginManager->enableOnlyStartupPluginActions(this);
 	ScCore->pluginManager->languageChange();
+	// suneer 2026-11-01: the office default settings shipped with the package (design styles, paragraph-style
+	// shortcuts, text gradient presets, the dbi keyset) reach this profile before the palettes read them
+	if (primaryMainWindow)
+	{
+		const QStringList officeLog = SuneerOfficeDefaults::syncAtStartup(nullptr);
+		for (const QString& l : officeLog)
+			qWarning().noquote() << "[Office defaults]" << l;
+		const QString officeReport = qEnvironmentVariable("SUNEER_OFFICEDEF_SELFTEST");
+		if (!officeReport.isEmpty())
+		{
+			QFile f(officeReport);
+			if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				f.write(officeLog.join(QLatin1Char('\n')).toUtf8() + "\n");
+			// exit() is ignored until the main loop runs: ask again every few seconds
+			auto* quitTimer = new QTimer(qApp);
+			quitTimer->setInterval(3000);
+			connect(quitTimer, &QTimer::timeout, qApp, []() { qApp->exit(0); });
+			quitTimer->start();
+		}
+	}
 	if (primaryMainWindow)
 		ScCore->setSplashStatus( tr("Applying User Shortcuts") );
 	m_prefsManager.applyLoadedShortCuts();

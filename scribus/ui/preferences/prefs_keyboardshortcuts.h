@@ -66,6 +66,8 @@ class SCRIBUS_API Prefs_KeyboardShortcuts : public Prefs_Pane, Ui::Prefs_Keyboar
 		// Fills keys with the Default set, if one was ever chosen. Called on
 		// every startup. True if keys were changed.
 		static bool applyDefaultSet(QMap<QString, Keys>& keys);
+		//! suneer 2026-11-01: a profile that never chose a Default set gets the shipped one (office defaults); true when set now
+		static bool adoptShippedSetIfUnchosen();
 		// Moves a pre-shortcut-sets my-default-shortcuts.xml into userSetsDir() once.
 		static void migrateOldMyDefault();
 		// Writes keys in the keyset XML format, without any dialog.
