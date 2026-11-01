@@ -159,6 +159,7 @@ fi
 OUT="$BUILD/release/$VERSION"
 DEB_NAME="scribus_${VERSION}_amd64.deb"
 [ -f "$OUT/$DEB_NAME" ] && [ -f "$OUT/latest.json" ] || die "release.sh left no $DEB_NAME / latest.json in $OUT"
+tools/changelog-english.py --check "$OUT/latest.json" || die "the changelog in latest.json is not English only"
 grep -q "\"url\": \"$UPDATE_BASE_URL/$DEB_NAME\"" "$OUT/latest.json" || die "latest.json was signed for another server URL (release.conf changed after the build?)"
 
 # ------------------------------------------- 2. detached sha256 and .sig ---

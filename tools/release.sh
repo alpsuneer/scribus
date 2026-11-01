@@ -338,6 +338,9 @@ fi
 [ -n "$CHANGELOG" ] || CHANGELOG="- Maintenance build."
 case "$KEYSET_CHANGELOG" in *" 0 key(s) added, 0 removed, 0 changed") ;; *) CHANGELOG="$CHANGELOG
 - $KEYSET_CHANGELOG" ;; esac
+# English only, one short line per change (the PCs show this text as it is)
+CHANGELOG=$(printf '%s\n' "$CHANGELOG" | "$ROOT/tools/changelog-english.py")
+[ -n "$CHANGELOG" ] || CHANGELOG="- Maintenance build."
 echo "$CHANGELOG" | sed 's/^/   /'
 
 # -------------------------------------------------------------- 5. build ---
