@@ -93,7 +93,7 @@
 #include <QSettings>
 #include <QResizeEvent>
 #include <QWidgetAction>
-#include "ui/suneertextgradient.h"
+#include "ui/suneertextcolour.h"
 #include <QPushButton>
 #include "colorcombo.h"
 #include <QToolButton>
@@ -440,25 +440,6 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	if (shadowBtn)
 		addR1(shadowBtn);
 
-	// Gradient text fill + frame soft shadow, the same panel as Properties > Text
-	{
-		m_textGradient = new SuneerTextGradientWidget(SuneerTextGradientWidget::ApplyToSelection);
-		m_textGradient->setSelectionProvider([this]() { return tsel(); });
-		m_textGradientBtn = new QToolButton(this);
-		m_textGradientBtn->setObjectName("suneerTextGradientBtn");
-		m_textGradientBtn->setText(tr("Grad"));
-		m_textGradientBtn->setToolTip(tr("Text fill: solid or gradient (linear / radial, per line / per frame), presets; the frame's soft shadow"));
-		m_textGradientBtn->setPopupMode(QToolButton::InstantPopup);
-		m_textGradientBtn->setStyleSheet("QToolButton { font-weight: bold; color: white; padding: 1px 4px;"
-		                                 " background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7a0000, stop:1 #e01010); border-radius: 3px; }"
-		                                 " QToolButton::menu-indicator { image: none; }");
-		QMenu* menu = new QMenu(m_textGradientBtn);
-		QWidgetAction* wa = new QWidgetAction(menu);
-		wa->setDefaultWidget(m_textGradient);
-		menu->addAction(wa);
-		m_textGradientBtn->setMenu(menu);
-		addR1(m_textGradientBtn);
-	}
 
 	addR1(makeSep());
 
@@ -498,8 +479,18 @@ SuneerControlBar::SuneerControlBar(ScribusMainWindow* parent)
 	m_textColorBtn->setFixedSize(26, 22);
 	m_textColorBtn->setToolTip("Text Color");
 	m_textColorBtn->setContext(Context::Text);
-	m_textColorBtn->setMenuContextType(ColorButton::Floating);
 	m_textColorBtn->setColor(CommonStrings::tr_NoneColor);
+	// The "Text colour" popup (Solid | Gradient, presets, colour bar, direction, soft shadow)
+	// replaces the floating colour picker on this button; the same panel is in Properties > Text.
+	m_textColour = new SuneerTextColourWidget();
+	m_textColour->setObjectName("suneerTextColourToolbar");
+	m_textColour->setSelectionProvider([this]() { return tsel(); });
+	m_textColourPopup = new SuneerTextColourPopup(m_textColour, this);
+	m_textColorBtn->setToolTip(tr("Text colour: solid or gradient (presets, colour stops, direction), the frame's soft shadow"));
+	connect(m_textColorBtn, &QToolButton::clicked, this, [this]() {
+		if (m_textColourPopup->isVisible()) { m_textColourPopup->hide(); return; }
+		m_textColourPopup->showBelow(m_textColorBtn);
+	});
 	addR1(m_textColorBtn);
 	m_textWidgets << m_textColorBtn;
 
@@ -2465,12 +2456,6 @@ void SuneerControlBar::updateFromSelection()
 			m_outlineOutwardChk->setChecked(cs.outlineOutward() != 0);
 			m_outlineOutwardChk->blockSignals(false);
 		}
-		if (m_textGradient)
-		{
-			m_textGradient->setDoc(m_doc);
-			m_textGradient->showStyle(cs);
-			m_textGradient->showItem(item);
-		}
 		if (m_styleSelect && m_styleSelect->OutlineVal && m_styleSelect->OutlineVal->Outward)
 		{
 			m_styleSelect->OutlineVal->Outward->blockSignals(true);
@@ -2485,10 +2470,24 @@ void SuneerControlBar::updateFromSelection()
 
 		// Colors
 		m_textColorBtn->setDoc(m_doc);
-		m_textColorBtn->setColor(cs.fillColor(), cs.fillShade());
-		m_textColorBtn->updateFloatingContext();
+		if (!cs.fillGradient().isEmpty() && m_doc->docGradients.contains(cs.fillGradient()))
+		{
+			m_textColorBtn->setType(cs.fillGradientType() == 1 ? Gradient_Radial : Gradient_Linear);
+			m_textColorBtn->setGradient(cs.fillGradient(), m_doc->docGradients[cs.fillGradient()]);
+		}
+		else
+		{
+			m_textColorBtn->setType(Gradient_None);
+			m_textColorBtn->setColor(cs.fillColor(), cs.fillShade());
+		}
 		m_textColorBtn->updatePreview();
 		m_textColorBtn->update();
+		if (m_textColour)
+		{
+			m_textColour->setDoc(m_doc);
+			m_textColour->showStyle(cs);
+			m_textColour->showItem(item);
+		}
 
 		m_bgColorBtn->setDoc(m_doc);
 		m_bgColorBtn->setColor(cs.backColor(), cs.backShade());
@@ -6648,7 +6647,7 @@ void SuneerControlBar::buildTextLayout()
 	auto xf = [&](QWidget* w) { if (!w) return; reg(w); m_groupFrame << w; m_extraFrame << w; };
 	xc(makeSep());
 	xc(suneerFieldLabel(tr("Effects"), tr("Underline word, strike out, subscript, outline (+ width, colour), shadow")));
-	xc(m_styleSelect); xc(m_outlineLeadW); xc(m_shadowBtn); xc(m_textGradientBtn);
+	xc(m_styleSelect); xc(m_outlineLeadW); xc(m_shadowBtn);
 	xc(makeSep());
 	xc(suneerFieldLabel(tr("Bg"), tr("Text background colour"))); xc(m_bgColorBtn);
 	xc(makeSep());

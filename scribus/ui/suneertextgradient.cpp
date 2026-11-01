@@ -34,6 +34,7 @@ to this file only.
 #include "selection.h"
 #include "styles/charstyle.h"
 #include "ui/scrspinbox.h"
+#include "ui/suneertextcolour.h"
 #include "undomanager.h"
 #include "units.h"
 #include "vgradient.h"
@@ -48,79 +49,6 @@ to this file only.
 namespace
 {
 	const char* kEtea = "SUNEER_TEXTGRADIENT";
-
-	struct PresetStop
-	{
-		double pos;
-		QString color;
-		int c, m, y, k;   //!< CMYK 0..255 (the colour is created as CMYK when missing)
-		int shade;
-		double opacity;
-	};
-	struct Preset
-	{
-		QString name;
-		QList<PresetStop> stops;
-	};
-
-	// Dark at the top, the colour itself at the bottom (the e-paper headline).
-	QList<Preset> builtInPresets()
-	{
-		return {
-			{ QStringLiteral("Red headline"), { { 0.0, QStringLiteral("Headline Dark Red"), 0, 255, 255, 115, 100, 1.0 },
-			                                    { 1.0, QStringLiteral("Headline Red"), 0, 255, 255, 0, 100, 1.0 } } },
-			{ QStringLiteral("Grey headline"), { { 0.0, QStringLiteral("Headline Dark Grey"), 0, 0, 0, 217, 100, 1.0 },
-			                                     { 1.0, QStringLiteral("Headline Grey"), 0, 0, 0, 128, 100, 1.0 } } },
-		};
-	}
-
-	PrefsContext* prefsContext()
-	{
-		PrefsFile* pf = PrefsManager::instance().prefsFile;
-		return pf ? pf->getContext("suneer_textgradient") : nullptr;
-	}
-
-	QList<Preset> savedPresets()
-	{
-		QList<Preset> out;
-		PrefsContext* ctx = prefsContext();
-		if (!ctx)
-			return out;
-		const QJsonArray arr = QJsonDocument::fromJson(ctx->get("presets", "[]").toUtf8()).array();
-		for (const QJsonValue& v : arr)
-		{
-			const QJsonObject o = v.toObject();
-			Preset p;
-			p.name = o.value("name").toString();
-			for (const QJsonValue& sv : o.value("stops").toArray())
-			{
-				const QJsonObject s = sv.toObject();
-				p.stops << PresetStop{ s.value("pos").toDouble(), s.value("color").toString(), s.value("c").toInt(), s.value("m").toInt(),
-				                       s.value("y").toInt(), s.value("k").toInt(), s.value("shade").toInt(100), s.value("opacity").toDouble(1.0) };
-			}
-			if (!p.name.isEmpty() && p.stops.count() >= 2)
-				out << p;
-		}
-		return out;
-	}
-
-	QList<Preset> allPresets()
-	{
-		QList<Preset> all = builtInPresets();
-		for (const Preset& p : savedPresets())
-		{
-			bool replaced = false;
-			for (Preset& q : all)
-				if (q.name == p.name)
-				{
-					q = p;
-					replaced = true;
-				}
-			if (!replaced)
-				all << p;
-		}
-		return all;
-	}
 
 	void refreshPalettes(ScribusDoc* doc)
 	{
@@ -279,9 +207,9 @@ void SuneerTextGradientWidget::fillGradientCombo(const QString& current)
 	}
 	for (const QString& n : docNames)
 		m_gradient->addItem(n, n);
-	for (const Preset& p : allPresets())
-		if (!docNames.contains(p.name))
-			m_gradient->addItem(tr("%1 (preset)").arg(p.name), p.name);
+	for (const QString& name : presetNames())
+		if (!docNames.contains(name))
+			m_gradient->addItem(tr("%1 (preset)").arg(name), name);
 	int idx = m_gradient->findData(current);
 	if (idx < 0 && !current.isEmpty())
 	{
@@ -463,73 +391,22 @@ void SuneerTextGradientWidget::savePresetClicked()
 QStringList SuneerTextGradientWidget::presetNames()
 {
 	QStringList out;
-	for (const Preset& p : allPresets())
+	for (const SuneerGradientPresets::Preset& p : SuneerGradientPresets::all())
 		out << p.name;
 	return out;
 }
 
 bool SuneerTextGradientWidget::ensureGradient(ScribusDoc* doc, const QString& name)
 {
-	if (!doc || name.isEmpty())
-		return false;
-	if (doc->docGradients.contains(name))
-		return true;
-	for (const Preset& p : allPresets())
-	{
-		if (p.name != name)
-			continue;
-		VGradient g(VGradient::linear);
-		g.clearStops();
-		for (const PresetStop& s : p.stops)
-		{
-			if (!doc->PageColors.contains(s.color))
-			{
-				ScColor c(s.c, s.m, s.y, s.k);
-				doc->PageColors.insert(s.color, c);
-			}
-			const QColor q = ScColorEngine::getShadeColorProof(doc->PageColors[s.color], doc, s.shade);
-			g.addStop(q, s.pos, 0.5, s.opacity, s.color, s.shade);
-		}
-		doc->docGradients.insert(name, g);
-		doc->changed();
-		refreshPalettes(doc);
-		return true;
-	}
-	return false;
+	// the presets live in SuneerGradientPresets (shared with the Text colour popup)
+	return SuneerGradientPresets::ensureGradient(doc, name);
 }
 
 bool SuneerTextGradientWidget::savePreset(ScribusDoc* doc, const QString& name)
 {
-	PrefsContext* ctx = prefsContext();
-	if (!doc || !ctx || !doc->docGradients.contains(name))
+	if (!doc || !doc->docGradients.contains(name))
 		return false;
-	const VGradient& g = doc->docGradients[name];
-	QJsonArray stops;
-	for (const VColorStop* s : g.colorStops())
-	{
-		int c = 0, m = 0, y = 0, k = 0;
-		if (doc->PageColors.contains(s->name))
-		{
-			const ScColor& col = doc->PageColors[s->name];
-			if (col.getColorModel() == colorModelCMYK)
-				col.getCMYK(&c, &m, &y, &k);
-			else
-			{
-				CMYKColor cmyk;
-				ScColorEngine::getCMYKValues(col, doc, cmyk);
-				cmyk.getValues(c, m, y, k);
-			}
-		}
-		stops << QJsonObject{ { "pos", s->rampPoint }, { "color", s->name }, { "c", c }, { "m", m }, { "y", y }, { "k", k },
-		                      { "shade", s->shade }, { "opacity", s->opacity } };
-	}
-	QJsonArray arr = QJsonDocument::fromJson(ctx->get("presets", "[]").toUtf8()).array();
-	for (int i = arr.count() - 1; i >= 0; --i)
-		if (arr.at(i).toObject().value("name").toString() == name)
-			arr.removeAt(i);
-	arr << QJsonObject{ { "name", name }, { "stops", stops } };
-	ctx->set("presets", QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
-	return true;
+	return SuneerGradientPresets::save(SuneerGradientPresets::fromDocument(doc, name, 0, 90.0));
 }
 
 void SuneerTextGradientWidget::runSelfTestIfAsked(ScribusView* view, ScribusDoc* doc)

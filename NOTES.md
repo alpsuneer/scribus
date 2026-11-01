@@ -2958,6 +2958,18 @@ Traps:
   applies via itemSelection_ApplyCharStyle with ETEA SUNEER_TEXTGRADIENT; StyleEditor: SMCStyleWidget group,
   SMCharacterStyle / SMParagraphStyle write it). Presets: built-in + prefs context suneer_textgradient (JSON);
   ensureGradient() creates the CMYK colours + doc gradient. Soft shadow = the frame's existing soft shadow.
+- UI since 2026-11-01 (#113): ui/suneertextcolour.{h,cpp} — the "Text colour" panel (Solid | Gradient, 12 preset
+  thumbnails, preview strip, SuneerGradientBar with 2–4 draggable stops, 8 direction arrows + radial, Apply to,
+  More… with angle / stop shade / opacity / soft shadow). SuneerTextColourPopup (Qt::Popup) hangs off the
+  top-bar ColorButton m_textColorBtn (no floating colour picker there any more); the same widget is the
+  Properties > Text "Text Colour" section. Presets: SuneerGradientPresets namespace, JSON file
+  <prefs>/suneer-text-gradients.json (built-ins can be hidden/overridden; old prefs-context presets imported
+  once). Stop edits never change a preset's document gradient: ownGradient() copies to "Text gradient N" when
+  the name is a preset or used elsewhere (text runs, item fills). SuneerGradientUndo records docGradients
+  old/new in the same transaction as the char-style apply (one Ctrl+Z). **Trap:** updateColorLists() re-enters
+  showStyle() through the palettes and resets the panel state - call it only after the apply. The old
+  SuneerTextGradientWidget stays for the Style Manager (StyleEditor) and the SUNEER_TEXTGRAD_SELFTEST.
+  Test: tests/suneer/text_colour_ui.sh (SUNEER_TEXTCOLOUR_SELFTEST).
 - Matrix: rects are in the painter's x/y space; PDF maps them through matrix() (GlyphBox m_matrix), screen
   through the cairo matrix — text on a path / flipped frames are not checked.
 - Test: tests/suneer/text_gradient.sh <dir> (fixture fixtures/text_gradient_make.py; SUNEER_TEXTGRAD_SELFTEST).

@@ -169,6 +169,7 @@ if(HAVE_OSG)
 		ui/suneer_news_repack.cpp
 		ui/suneer_obit_model.cpp
 		ui/suneertextgradient.cpp
+		ui/suneertextcolour.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp
@@ -305,6 +306,7 @@ else()
 		ui/suneer_news_repack.cpp
 		ui/suneer_obit_model.cpp
 		ui/suneertextgradient.cpp
+		ui/suneertextcolour.cpp
 		ui/suneerduplicatenewsdialog.cpp
 		suneerduplicatenews.cpp
 		suneerfilltextimage.cpp

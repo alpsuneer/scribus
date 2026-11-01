@@ -1664,3 +1664,15 @@ scribus
 - `scribus-housekeeping.timer` (systemd user, daily) crash log prune മാത്രം; update-മായി ബന്ധമില്ല.
 - പഴയ builds (≤ 20261031-2) ഈ build കിട്ടുന്നത് വരെ ദിവസം ഒരിക്കൽ ചോദിക്കും — ഒരിക്കൽ കൂടി.
 - Test: `tests/suneer/update_manual_only.sh <dir>` (local mock server, newer signed test manifest).
+
+### 113. Text colour popup — Solid | Gradient, presets, colour bar (Adobe Express പോലെ)
+- Toolbar-ലെ **text colour button**-ഉം Properties > Text > **Text Colour** section-ഉം ഒരേ panel: മുകളിൽ **Solid | Gradient** toggle.
+- **Gradient:** 12 preset thumbnails (Gradient — ചുവപ്പ് → pink → നീല diagonal; Red headline; Grey headline; Blue; Gold; Purple orange; Green; Teal; Sunset; Fire; Silver; Ocean) — ഒരു click-ൽ apply. **+** / **★ Save as preset** = ഇപ്പോഴത്തെ gradient preset ആയി (എല്ലാ document-നും; file `~/.config/scribus/suneer-text-gradients.json` — മറ്റ് PC-യിലേക്ക് copy ചെയ്യാം). Preset-ൽ right-click → Rename / Delete (built-in-ഉം).
+- **Preview strip:** select ചെയ്ത text (ഒന്നുമില്ലെങ്കിൽ "മിസ്റ്റർ ട്രംപ്") text-ന്റെ font-ൽ; page-ഉം ഉടനെ മാറും.
+- **Colour bar:** 2–4 വൃത്ത stops; stop click → താഴെ document colours list (+ New CMYK C/M/Y/K → Add); drag ചെയ്ത് നീക്കാം; bar-ൽ double-click = പുതിയ stop; [+ Add colour] [⇄ Swap] [− Remove].
+- **Direction:** 8 arrow buttons (→ ↘ ↓ ↙ ← ↖ ↑ ↗) + ◎ radial; angle box "More…"-ൽ മാത്രം.
+- **Apply to:** Whole text (frame-ലെ text മുഴുവൻ ഒരു gradient) / Each line (ഓരോ വരിക്കും മുഴുവൻ gradient — headline look) / Selected words (edit mode-ൽ select ചെയ്തത് മാത്രം).
+- **More…:** exact angle, stop shade, stop opacity, frame-ന്റെ soft shadow.
+- [Remove gradient] = solid colour-ലേക്ക് തിരികെ; [Apply] = ഒരിക്കൽ കൂടി apply ചെയ്ത് popup അടയ്ക്കും. ഓരോ മാറ്റവും ഒരു undo step (stop colour / position മാറ്റവും ഉൾപ്പെടെ). Text selection, frame(s), table cells — മറ്റ് text options പോലെ.
+- Stop / colour മാറ്റുമ്പോൾ preset-ന്റെ document gradient മാറില്ല: ആ text-ന് സ്വന്തം copy ("Text gradient 1", …) ഉണ്ടാകും — മറ്റ് text-ന്റെ gradient മാറാതിരിക്കാൻ.
+- Engine (render, PDF / PS, CMYK, SLA, styles, Style Manager box) അതേപടി; പഴയ "Grad" toolbar button നീക്കി. Test: `tests/suneer/text_colour_ui.sh <dir>`.

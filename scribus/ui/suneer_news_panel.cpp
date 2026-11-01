@@ -24,6 +24,7 @@
 #include "suneerimagelinks.h"
 #include "suneerphotobadges.h"
 #include "ui/suneertextgradient.h"
+#include "ui/suneertextcolour.h"
 #include "ui/faircodehelpviewer.h"
 #include "undomanager.h"
 #include "undogui.h"
@@ -1080,6 +1081,25 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 			wait->stop();
 			wait->deleteLater();
 			SuneerTextGradientWidget::runSelfTestIfAsked(m_mw->view, m_doc);
+		});
+		wait->start();
+	}
+	// SUNEER_TEXTCOLOUR_SELFTEST: the Text colour popup (presets, direction, stops, undo; tests/suneer/text_colour_ui.sh)
+	static bool textColourTestStarted = false;
+	if (doc && qEnvironmentVariableIsSet("SUNEER_TEXTCOLOUR_SELFTEST") && !textColourTestStarted)
+	{
+		textColourTestStarted = true;
+		auto* wait = new QTimer(this);
+		wait->setInterval(500);
+		connect(wait, &QTimer::timeout, this, [this, wait]() {
+			if (!m_doc || m_doc->isLoading() || !m_mw || !m_mw->HaveDoc || !m_mw->view)
+				return;
+			wait->stop();
+			wait->deleteLater();
+			SuneerTextColourWidget* w = m_mw->findChild<SuneerTextColourWidget*>("suneerTextColourToolbar");
+			if (!w)
+				w = m_mw->findChild<SuneerTextColourWidget*>();
+			SuneerTextColourWidget::runSelfTestIfAsked(m_mw->view, m_doc, w);
 		});
 		wait->start();
 	}

@@ -94,7 +94,7 @@ protected:
 	PropertyWidget_ParagraphStyle* styleWidgets;
 	PropertyWidget_ParEffect* parEffectWidgets;
 	PropertyWidget_PathText* pathTextWidgets;
-	class SuneerTextGradientWidget* textGradientWidget { nullptr };
+	class SuneerTextColourWidget* textGradientWidget { nullptr };
 	PropertyWidget_Text* textWidgets;
 
 	SectionContainer * scStyles= {nullptr};

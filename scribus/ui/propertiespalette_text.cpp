@@ -38,7 +38,7 @@ for which a new license (GPL+exception) is in place.
 #include "stylecombos.h"
 #include "undomanager.h"
 #include "widgets/section_container.h"
-#include "ui/suneertextgradient.h"
+#include "ui/suneertextcolour.h"
 
 //using namespace std;
 
@@ -99,8 +99,8 @@ PropertiesPalette_Text::PropertiesPalette_Text( QWidget* parent) : QWidget(paren
 	scFontFeatures->restorePreferences();
 
 	// Suneer: gradient fill for the text + the frame's soft shadow
-	textGradientWidget = new SuneerTextGradientWidget(SuneerTextGradientWidget::ApplyToSelection, this);
-	scTextGradient = new SectionContainer(tr("Text Gradient && Shadow"), "SectionTPTextGradient", true, false);
+	textGradientWidget = new SuneerTextColourWidget(this);
+	scTextGradient = new SectionContainer(tr("Text Colour"), "SectionTPTextGradient", true, false);
 	scTextGradient->setCanSaveState(true);
 	scTextGradient->setWidget(textGradientWidget);
 	scTextGradient->restorePreferences();
