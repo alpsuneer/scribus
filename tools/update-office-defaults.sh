@@ -83,7 +83,7 @@ PY
 cd "$ROOT"
 if ! git -c core.fileMode=false diff --quiet -- resources/office-defaults || [ -n "$(git status --porcelain --untracked-files=all -- resources/office-defaults)" ]; then
 	echo "   diff against the committed office defaults:"
-	git -c core.fileMode=false --no-pager diff --stat -- resources/office-defaults | sed 's/^/   /'
-	git -c core.fileMode=false --no-pager diff -- resources/office-defaults | grep -E '^[-+][^-+]' | grep -v 'sha256\|"date"\|"size"' | head -60 | sed 's/^/   /'
-	git status --porcelain --untracked-files=all -- resources/office-defaults | grep '^??' | sed 's/^/   new: /'
+	git -c core.fileMode=false --no-pager diff --stat -- resources/office-defaults | sed 's/^/   /' || true
+	git -c core.fileMode=false --no-pager diff -- resources/office-defaults | grep -E '^[-+][^-+]' | grep -v 'sha256\|"date"\|"size"' | head -60 | sed 's/^/   /' || true
+	git status --porcelain --untracked-files=all -- resources/office-defaults | grep '^??' | sed 's/^/   new: /' || true
 fi
