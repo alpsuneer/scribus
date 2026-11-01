@@ -27,10 +27,9 @@ class QTextBrowser;
  * installs (pkexec dpkg -i). "Settings..." opens UpdateSettingsDialog for the
  * server URL and API key; the check runs again when that closes.
  *
- * runStartupCheck() is the automatic check: at most once per calendar day,
- * fully asynchronous, silent unless a newer signed version exists. An
- * unreachable server, a wrong key or a bad manifest never shows anything and
- * never delays startup.
+ * There is no automatic check (removed 2026-11-01, user decision): nothing at
+ * startup, no timer, no notification. The server is contacted only while this
+ * dialog is open, and the package is installed only after Update is pressed.
  */
 class SCRIBUS_API UpdateCheckDialog : public QDialog
 {
@@ -43,8 +42,10 @@ public:
 	//! Present an update that a check has already found and verified.
 	void showUpdate(const ScUpdateInfo& info, const QString& apiKey);
 
-	//! Once-a-day background check. Returns immediately.
-	static void runStartupCheck(QWidget* parent);
+	//! SUNEER_UPDATE_SELFTEST=<prefix>: after 15 s writes <prefix>-startup.txt (the update dialogs that
+	//! exist: must be none), then opens this dialog through the Help menu action, writes <prefix>-manual.txt
+	//! (latest version, Update button state) and <prefix>-manual.png, closes with Later and quits.
+	static void runSelfTestIfAsked(QWidget* mainWindow);
 
 	//! The update server URL saved by UpdateSettingsDialog, or empty.
 	static QString savedServerUrl();

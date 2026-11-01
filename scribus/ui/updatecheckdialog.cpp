@@ -9,6 +9,11 @@ for which a new license (GPL+exception) is in place.
 #include "scupdatekeystore.h"
 #include "updateavailabledialog.h"
 #include "updatesettingsdialog.h"
+#include "scribus.h"
+#include "scraction.h"
+
+#include <QApplication>
+#include <QFile>
 
 #include <QDate>
 #include <QDebug>
@@ -27,7 +32,6 @@ namespace
 	const char* kOrg = "Faircode";
 	const char* kApp = "ScribusUpdater";
 	const char* kUrlKey = "serverUrl";
-	const char* kLastAutoCheckKey = "lastAutoCheck";
 }
 
 QString UpdateCheckDialog::savedServerUrl()
@@ -206,40 +210,51 @@ void UpdateCheckDialog::tryDefaultClicked()
 	startCheck();
 }
 
-void UpdateCheckDialog::runStartupCheck(QWidget* parent)
+void UpdateCheckDialog::runSelfTestIfAsked(QWidget* mainWindow)
 {
-	QSettings settings(kOrg, kApp);
-	const QString today = QDate::currentDate().toString(Qt::ISODate);
-	if (settings.value(kLastAutoCheckKey).toString() == today)
-		return;                      // already tried today
-	// The OS key store is read here too: a user who entered their own server
-	// in Update Settings keeps using their key. For the system-wide server
-	// (update.conf) the key comes from that file, empty for the LAN server.
-	const ScUpdateSettings s = ScUpdateClient::effectiveSettings(true);
-	if (s.url.isEmpty())
-		return;                      // updater not configured here
-	const QString apiKey = s.apiKey;
-	const QString url = s.url;
-	// The attempt counts, reachable server or not: at most one a day.
-	settings.setValue(kLastAutoCheckKey, today);
-
-	auto* client = new ScUpdateClient(parent);
-	QObject::connect(client, &ScUpdateClient::updateAvailable, parent, [parent, client, apiKey](const ScUpdateInfo& info) {
-		auto* dlg = new UpdateCheckDialog(parent, false);
-		dlg->setAttribute(Qt::WA_DeleteOnClose);
-		dlg->showUpdate(info, apiKey);
-		dlg->show();
-		client->deleteLater();
+	const QString prefix = qEnvironmentVariable("SUNEER_UPDATE_SELFTEST");
+	if (prefix.isEmpty())
+		return;
+	auto updateDialogs = []() {
+		QStringList names;
+		for (QWidget* w : QApplication::topLevelWidgets())
+			if (w->isVisible() && (qobject_cast<UpdateCheckDialog*>(w) || qobject_cast<UpdateAvailableDialog*>(w)))
+				names << w->metaObject()->className();
+		return names;
+	};
+	auto write = [](const QString& path, const QString& text) {
+		QFile f(path);
+		if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+			f.write(text.toUtf8());
+	};
+	// 1. 15 s after startup (the old automatic check fired at 10 s): no update dialog may exist
+	QTimer::singleShot(15000, mainWindow, [mainWindow, prefix, updateDialogs, write]() {
+		const QStringList dialogs = updateDialogs();
+		write(prefix + QStringLiteral("-startup.txt"), QStringLiteral("update dialogs after 15 s: %1\n").arg(dialogs.isEmpty() ? QStringLiteral("none") : dialogs.join(',')));
+		fprintf(stderr, "UPDATE-SELFTEST startup: %s\n", dialogs.isEmpty() ? "no dialog" : qPrintable(dialogs.join(',')));
+		// 2. the manual path: the Help menu action; the dialog is modal, so the result is read from a timer
+		QTimer::singleShot(8000, mainWindow, [mainWindow, prefix, updateDialogs, write]() {
+			UpdateCheckDialog* dlg = nullptr;
+			for (QWidget* w : QApplication::topLevelWidgets())
+				if (auto* d = qobject_cast<UpdateCheckDialog*>(w))
+					dlg = d;
+			QString text;
+			if (!dlg)
+				text = QStringLiteral("manual: no Check for Updates dialog\n");
+			else
+			{
+				text = QStringLiteral("manual: installed %1 | latest %2 | status %3 | Update button enabled %4 | dialogs %5\n")
+				       .arg(dlg->m_currentLabel->text(), dlg->m_latestLabel->text(), dlg->m_statusLabel->text())
+				       .arg(dlg->m_updateButton->isEnabled()).arg(updateDialogs().join(','));
+				dlg->grab().save(prefix + QStringLiteral("-manual.png"));
+				dlg->reject();                       // Later: nothing is installed
+			}
+			write(prefix + QStringLiteral("-manual.txt"), text);
+			fprintf(stderr, "UPDATE-SELFTEST %s", qPrintable(text));
+			QTimer::singleShot(500, mainWindow, [mainWindow]() { mainWindow->close(); });
+		});
+		if (auto* mw = qobject_cast<ScribusMainWindow*>(mainWindow))
+			if (mw->scrActions.contains("helpCheckUpdates"))
+				mw->scrActions["helpCheckUpdates"]->trigger();
 	});
-	// Everything else is silent: no dialog for "up to date", a server that
-	// is down, a wrong key or a manifest that fails verification.
-	QObject::connect(client, &ScUpdateClient::upToDate, client, &QObject::deleteLater);
-	QObject::connect(client, &ScUpdateClient::authError, client, &QObject::deleteLater);
-	QObject::connect(client, &ScUpdateClient::notFoundError, client, &QObject::deleteLater);
-	QObject::connect(client, &ScUpdateClient::networkError, client, [client](const QString& message) {
-		qDebug().noquote() << "Startup update check:" << message;
-		client->deleteLater();
-	});
-	// 5 s: a laptop that is switched off must cost nothing noticeable.
-	client->checkForUpdate(url, apiKey, 5000);
 }

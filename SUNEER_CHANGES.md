@@ -1650,3 +1650,17 @@ scribus
 - Test: `FITGAP_TEXT=columns tests/suneer/fit_gap.sh <dir>`.
 - Laptop test package ഇനി `<date>-<N>.local<M>` (N = അന്നത്തെ release): അന്നത്തെ release-ന് മുകളിൽ — updater `0.local1`-നെ release കൊണ്ട് മാറ്റിയിരുന്നു.
 - Styled Paste (frame select ചെയ്ത് paste): target frame-ന്റെ columns / gap നിലനിൽക്കും (മുമ്പ് source-ന്റേത് വന്നു).
+
+### 111. Multi-column fit — newspaper rule: മുമ്പത്തെ column പിന്നത്തേതിനേക്കാൾ മുകളിൽ അവസാനിക്കില്ല
+- Column k-യുടെ അവസാന വരി column k+1-ന്റേതിന് താഴെയോ ഒരേ നിരയിലോ (എല്ലാ k-യ്ക്കും); frame bottom = column 1-ന്റെ അവസാന വരി + ഇടം.
+- Span heading (columns-ന് മുകളിൽ നീളുന്ന തലക്കെട്ട്) വരികൾ column-ന്റെ എണ്ണത്തിൽ ഇല്ല (മുമ്പ് column 1-ന്റെ പങ്കിൽ കൂടി → column 1 ഒരു വരി ചെറുത്).
+- `SuneerColumnLines` ഇനി ഓരോ column-ന്റെയും എണ്ണം ("18,17"); ബാക്കി വരികൾ ആദ്യ columns-ന്. ചെറിയ dateline / paragraph gap കാരണം പിന്നത്തെ column താഴെ എത്തിയാൽ ഒരു വരി മുന്നോട്ട്.
+- Test: `SUNEER_FITGAP_MODE=doc SUNEER_FITGAP_COLS=N` (യഥാർത്ഥ page), `fit_gap.sh` rule `LATER-COLUMN-LOWER`.
+
+### 112. Updates — manual മാത്രം (automatic check ഇല്ല)
+- Scribus തുറക്കുമ്പോൾ update check ഇല്ല; timer ഇല്ല; background check ഇല്ല; "പുതിയ version" popup ഇല്ല.
+- Help → **Check for Updates…** തുറക്കുമ്പോൾ മാത്രം server-ൽ നോക്കും (installed / latest / what's new); **Update** അമർത്തിയാൽ മാത്രം install (pkexec, admin password).
+- "Check automatically" എന്ന option ഇല്ല (ഒരിക്കലും ഉണ്ടായിരുന്നില്ല) — manual only എന്നത് സ്ഥിരം; prefs-ൽ ഒന്നുമില്ല, install.sh-ൽ മാറ്റമില്ല.
+- `scribus-housekeeping.timer` (systemd user, daily) crash log prune മാത്രം; update-മായി ബന്ധമില്ല.
+- പഴയ builds (≤ 20261031-2) ഈ build കിട്ടുന്നത് വരെ ദിവസം ഒരിക്കൽ ചോദിക്കും — ഒരിക്കൽ കൂടി.
+- Test: `tests/suneer/update_manual_only.sh <dir>` (local mock server, newer signed test manifest).

@@ -658,9 +658,10 @@ int ScribusMainWindow::initScMW(bool primaryMainWindow)
 	// The same duplicates, shown once in a dialog (with "don't show again
 	// until something changes") instead of only in the log.
 	QTimer::singleShot(1500, this, [this] { ScShortcutRegistry::instance().maybeShowDuplicatesDialog(this, tr("at startup")); });
-	// Automatic update check: well after startup, asynchronous, at most once a
-	// day, and silent unless a newer signed build exists.
-	QTimer::singleShot(10000, this, [this] { UpdateCheckDialog::runStartupCheck(this); });
+	// suneer 2026-11-01: no automatic update check any more - no timer, no background request, no dialog.
+	// Updates happen only through Help > Check for Updates... and its Update button (user decision).
+	// SUNEER_UPDATE_SELFTEST=<prefix>: the test harness proves it (tests/suneer/update_manual_only.sh).
+	UpdateCheckDialog::runSelfTestIfAsked(this);
 
 	return retVal;
 }
