@@ -1,7 +1,8 @@
 # Design Style icons shipped with every package. SuneerDesignStyle.conf names
 # an icon by file name; the panel looks it up in the user's
 # ~/.local/share/scribus/design-icons/ first and then here.
-# Exactly these nine, listed by name: a stray PNG in this folder is not shipped.
+# Exactly these ten, listed by name: a stray PNG in this folder is not shipped.
+# double.png added 2026-11-01 (design style 10, "Style 10", Ctrl+F10).
 install(FILES
 	single.png
 	style-1.png
@@ -12,5 +13,6 @@ install(FILES
 	style-2photo.png
 	style-3photo.png
 	style-4photo.png
+	double.png
 	DESTINATION ${SHAREDIR}design-icons
 )
