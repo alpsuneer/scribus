@@ -107,6 +107,9 @@ public:
 	//! The verified manifest of the last successful check, newer or not.
 	const ScUpdateInfo& lastCheckedInfo() const { return m_lastInfo; }
 	void downloadUpdate(const ScUpdateInfo& info, const QString& apiKey, const QString& destinationPath);
+	//! Any file on the update server (same origin as serverUrl), no checksum: the caller verifies
+	//! (SuneerDebFetcher checks the detached Ed25519 .sig). Same signals as downloadUpdate().
+	void downloadFile(const QUrl& url, const QUrl& serverUrl, const QString& apiKey, const QString& destinationPath);
 	void cancelDownload();
 
 signals:
@@ -126,6 +129,7 @@ private slots:
 	void onDownloadFinished();
 
 private:
+	void startDownload(const QUrl& url, const QString& sha256, const QString& apiKey, const QString& destinationPath);
 	QNetworkAccessManager* m_networkManager;
 	QNetworkReply* m_checkReply {nullptr};
 	QNetworkReply* m_downloadReply {nullptr};

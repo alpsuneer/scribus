@@ -14,18 +14,15 @@ class QWidget;
 
 /*! suneer 2026-11-01: the office's default settings travel with the package.
     <share>/office-defaults/ holds SuneerDesignStyle.conf, ParagraphStyleShortcuts.conf,
-    suneer-text-gradients.json and office-defaults.json (version, sha256 of each file now and of
-    every earlier shipped copy). At every start, for each shipped file:
-      - the profile already received this version                -> nothing;
-      - the user's file is missing, or equals the version last received (or any earlier shipped
-        copy)                                                       -> replaced (old file kept as .bak-<date>);
-      - the user's file differs from every shipped copy             -> asked once per shipped version:
-        Use office version / Keep mine / Merge (new styles, shortcuts, presets added; theirs kept).
-    What a profile received is in <prefs>/office-defaults-received.json. The dbi shortcut set is
-    made the Default when the profile never chose a Default set.
-    Env: SUNEER_OFFICE_DEFAULTS_DIR (shipped folder for tests), SUNEER_OFFICEDEF_ANSWER=office|keep|merge
-    (the question answered without a dialog), SUNEER_OFFICEDEF_SELFTEST=<report file> (what happened,
-    then Scribus quits). */
+    suneer-text-gradients.json and office-defaults.json (version, sha256 of each file). At every
+    start, for each shipped file: the profile already received this version -> nothing; otherwise
+    the shipped file replaces the user's (old file kept as .bak-<date>) - no question (user
+    decision 2026-11-01; the former Use office / Keep / Merge dialog is gone). The dbi shortcut set
+    is made the Default once per shipped version. What a profile received is in
+    <prefs>/office-defaults-received.json. The settings as they were before an update are in the
+    restore point (SuneerRestorePoint) and come back with "Go back to previous version".
+    Env: SUNEER_OFFICE_DEFAULTS_DIR (shipped folder for tests), SUNEER_OFFICEDEF_SELFTEST=<report
+    file> (what happened, then Scribus quits). */
 namespace SuneerOfficeDefaults
 {
 	//! The shipped folder (env override, else <share>/office-defaults).

@@ -251,6 +251,7 @@ if(HAVE_OSG)
 		suneerlayoutmodel.cpp
 		suneerlayoutengine.cpp
 		suneerofficedefaults.cpp
+		suneerrestorepoint.cpp
 		suneerpagemodel.cpp
 		suneerboxfit.cpp
 		suneerfitgap.cpp
@@ -267,6 +268,7 @@ if(HAVE_OSG)
 		ui/updatesettingsdialog.cpp
 		ui/updateavailabledialog.cpp
 		ui/updatecheckdialog.cpp
+		ui/suneerrollbackdialog.cpp
 		scimpositionengine.cpp
 		ui/impositiondialog.cpp
 		ui/impositionpreviewwidget.cpp
@@ -389,6 +391,7 @@ else()
 		suneerlayoutmodel.cpp
 		suneerlayoutengine.cpp
 		suneerofficedefaults.cpp
+		suneerrestorepoint.cpp
 		suneerpagemodel.cpp
 		suneerboxfit.cpp
 		suneerfitgap.cpp
@@ -405,6 +408,7 @@ else()
 		ui/updatesettingsdialog.cpp
 		ui/updateavailabledialog.cpp
 		ui/updatecheckdialog.cpp
+		ui/suneerrollbackdialog.cpp
 		scimpositionengine.cpp
 		ui/impositiondialog.cpp
 		ui/impositionpreviewwidget.cpp

@@ -8,6 +8,11 @@ for which a new license (GPL+exception) is in place.
 
 #include "api/api_application.h"
 #include "scpaths.h"
+#include "suneerrestorepoint.h"
+
+#include <QApplication>
+#include <QDebug>
+#include <QTimer>
 
 #include <QCloseEvent>
 #include <QDialogButtonBox>
@@ -56,6 +61,8 @@ UpdateAvailableDialog::~UpdateAvailableDialog()
 {
 	if (m_client)
 		m_client->cancelDownload();
+	if (m_fetcher)
+		m_fetcher->cancel();
 	if (m_installProcess)
 	{
 		// Never kill it: interrupting dpkg -i as root can leave the package
@@ -155,7 +162,7 @@ void UpdateAvailableDialog::onDownloadFinished(const QString& path)
 		? tr("A system window will ask for YOUR password (your account is an administrator).")
 		: tr("A system window will ask for the ADMINISTRATOR (root) password of this PC, not your own login password. "
 		     "If you do not know it, click No and ask the person who set up this computer.");
-	const int ret = QMessageBox::question(this, tr("Install Update"),
+	const int ret = qEnvironmentVariableIsSet("SUNEER_UPDATE_AUTOYES") ? int(QMessageBox::Yes) : QMessageBox::question(this, tr("Install Update"),
 		tr("The update was downloaded and its signature and checksum were verified. Install it now?\n\n%1").arg(who),
 		QMessageBox::Yes | QMessageBox::No);
 	if (ret != QMessageBox::Yes)
@@ -163,7 +170,53 @@ void UpdateAvailableDialog::onDownloadFinished(const QString& path)
 		m_updateButton->setEnabled(true);
 		return;
 	}
-	installUpdate(path);
+	prepareRestorePoint(path);
+}
+
+void UpdateAvailableDialog::prepareRestorePoint(const QString& path)
+{
+	// suneer 2026-11-01: before a new version goes in, what is there now must be restorable:
+	// the settings (copied now) and the installed package (cached by the install step; when no
+	// cached copy exists yet it is fetched from the server, signature-checked; not fatal).
+	const QString current = ScUpdateClient::localVersion();
+	QString why;
+	const QString dir = SuneerRestorePoint::saveSettings(current, &why);
+	if (dir.isEmpty())
+	{
+		qWarning().noquote() << "[Restore point] settings not saved:" << why;
+		m_restoreNote = tr("The settings could not be saved for going back (%1).").arg(why);
+	}
+	else
+		m_restoreNote = tr("Restore point: settings of %1 saved in %2.").arg(current, dir);
+	m_alsoCache.clear();
+	if (!SuneerRestorePoint::cachedDeb(current).isEmpty() || !SuneerRestorePoint::isPackageVersion(current))
+	{
+		installUpdate(path);
+		return;
+	}
+	m_fetcher = new SuneerDebFetcher(this);
+	m_progressDialog = new QProgressDialog(tr("Fetching the installed version %1 from the update server, so that it can be restored…").arg(current), tr("Skip"), 0, 0, this);
+	m_progressDialog->setWindowModality(Qt::WindowModal);
+	m_progressDialog->setMinimumDuration(0);
+	connect(m_progressDialog, &QProgressDialog::canceled, this, [this]() { if (m_fetcher) m_fetcher->cancel(); });
+	connect(m_fetcher, &SuneerDebFetcher::progress, this, &UpdateAvailableDialog::onDownloadProgress);
+	auto finish = [this, path](const QString& debPath, const QString& error) {
+		if (m_progressDialog) { m_progressDialog->hide(); m_progressDialog->deleteLater(); m_progressDialog = nullptr; }
+		m_fetcher->deleteLater();
+		m_fetcher = nullptr;
+		if (!debPath.isEmpty())
+			m_alsoCache << debPath;
+		else
+		{
+			qWarning().noquote() << "[Restore point] installed package not fetched:" << error;
+			m_restoreNote += QLatin1Char('\n') + tr("The package of %1 is not saved (%2); going back to it will need the update server.").arg(ScUpdateClient::localVersion(), error);
+		}
+		installUpdate(path);
+	};
+	connect(m_fetcher, &SuneerDebFetcher::done, this, [finish](const QString& p) { finish(p, QString()); });
+	connect(m_fetcher, &SuneerDebFetcher::failed, this, [finish](const QString& m) { finish(QString(), m); });
+	m_progressDialog->show();
+	m_fetcher->fetch(current, m_info.serverUrl.toString(), m_apiKey);
 }
 
 void UpdateAvailableDialog::onDownloadFailed(const QString& message)
@@ -206,7 +259,10 @@ void UpdateAvailableDialog::installUpdate(const QString& path)
 	m_progressDialog->setMinimumDuration(0);
 	m_progressDialog->show();
 
-	m_installProcess->start(QStringLiteral("pkexec"), { QStringLiteral("dpkg"), QStringLiteral("-i"), path });
+	// pkexec runs one fixed shell script (SuneerRestorePoint::installArguments): dpkg-deb checks the
+	// package and version, the .deb (and the installed version's, when fetched) is kept in the
+	// package cache for "Go back", dpkg -i, cache pruned to the last 3.
+	m_installProcess->start(SuneerRestorePoint::program(), SuneerRestorePoint::installArguments(path, m_info.version, m_alsoCache));
 }
 
 void UpdateAvailableDialog::onInstallFinished(int exitCode, QProcess::ExitStatus exitStatus)
@@ -223,8 +279,18 @@ void UpdateAvailableDialog::onInstallFinished(int exitCode, QProcess::ExitStatus
 
 	if (exitStatus == QProcess::NormalExit && exitCode == 0)
 	{
+		SuneerRestorePoint::clearRollbackMarker();
+		fprintf(stderr, "UPDATE-INSTALLED %s; %s\n", qPrintable(m_info.version), qPrintable(m_restoreNote));
+		if (qEnvironmentVariableIsSet("SUNEER_UPDATE_AUTOYES"))
+		{
+			auto* t = new QTimer(qApp);
+			t->setInterval(1000);
+			connect(t, &QTimer::timeout, qApp, []() { qApp->exit(0); });
+			t->start();
+		}
+		else
 		QMessageBox::information(this, tr("Update Installed"),
-			tr("The update was installed successfully. Restart Scribus to use the new version."));
+			tr("The update was installed successfully. Restart Scribus to use the new version.\n\n%1\nHelp > Check for Updates... > Go back to previous version... brings the old version and its settings back.").arg(m_restoreNote));
 		accept();
 	}
 	else

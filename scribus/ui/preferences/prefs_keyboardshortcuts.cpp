@@ -11,6 +11,7 @@ for which a new license (GPL+exception) is in place.
 #include <QRegularExpression>
 #include <QHBoxLayout>
 #include <QGroupBox>
+#include <QDateTime>
 #include <QDir>
 #include <QComboBox>
 #include <QFile>
@@ -532,6 +533,39 @@ bool Prefs_KeyboardShortcuts::adoptShippedSetIfUnchosen()
 	ctx->set("default_set", newspaperDefaultSetName());
 	PrefsManager::instance().prefsFile->write();
 	return true;
+}
+
+bool Prefs_KeyboardShortcuts::adoptShippedSet()
+{
+	bool setAside = false;
+	const QString name = newspaperDefaultSetName();
+	const QString own = scanSetDir(userSetsDir()).value(name);
+	if (!own.isEmpty())
+	{
+		// same keys, not same bytes: the shipped file is a rewrite of the user's (comment, version attribute)
+		auto keyMap = [](const QString& path) {
+			QMap<QString, QString> m;
+			QFile f(path);
+			QDomDocument doc("keymapentries");
+			if (!f.open(QIODevice::ReadOnly) || !doc.setContent(&f))
+				return m;
+			for (QDomNode n = doc.documentElement().firstChild(); !n.isNull(); n = n.nextSibling())
+			{
+				const QDomElement e = n.toElement();
+				if (e.hasAttribute("name"))
+					m.insert(e.attribute("name"), QKeySequence(e.attribute("shortcut")).toString(QKeySequence::PortableText));
+			}
+			return m;
+		};
+		if (keyMap(own) != keyMap(shippedKeySetFile()))
+		{
+			const QString bak = own + QStringLiteral(".bak-") + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmm"));
+			QFile::remove(bak);
+			setAside = QFile::rename(own, bak);
+		}
+	}
+	setDefaultSetName(name);
+	return setAside;
 }
 
 bool Prefs_KeyboardShortcuts::applyDefaultSet(QMap<QString, Keys>& keys)

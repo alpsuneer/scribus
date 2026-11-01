@@ -9,6 +9,8 @@ for which a new license (GPL+exception) is in place.
 #include "scupdatekeystore.h"
 #include "updateavailabledialog.h"
 #include "updatesettingsdialog.h"
+#include "suneerrollbackdialog.h"
+#include "suneerrestorepoint.h"
 #include "scribus.h"
 #include "scraction.h"
 
@@ -16,6 +18,8 @@ for which a new license (GPL+exception) is in place.
 #include <QFile>
 
 #include <QDate>
+#include <QDateTime>
+#include <QLocale>
 #include <QDebug>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -71,6 +75,8 @@ UpdateCheckDialog::UpdateCheckDialog(QWidget* parent, bool checkNow)
 	m_tryDefaultButton = buttons->addButton(tr("Try the default server"), QDialogButtonBox::ActionRole);
 	m_tryDefaultButton->setToolTip(tr("Forget the address saved under Settings... and check the server named in %1").arg(ScUpdateClient::systemConfigPath()));
 	m_tryDefaultButton->hide();
+	m_goBackButton = buttons->addButton(tr("Go back to previous version..."), QDialogButtonBox::ActionRole);
+	m_goBackButton->setToolTip(tr("Install an earlier version again, with the settings saved before its update"));
 	m_updateButton = buttons->addButton(tr("Update"), QDialogButtonBox::AcceptRole);
 	m_laterButton = buttons->addButton(tr("Later"), QDialogButtonBox::RejectRole);
 	m_updateButton->setEnabled(false);
@@ -79,6 +85,7 @@ UpdateCheckDialog::UpdateCheckDialog(QWidget* parent, bool checkNow)
 	connect(m_updateButton, &QPushButton::clicked, this, &UpdateCheckDialog::updateClicked);
 	connect(m_settingsButton, &QPushButton::clicked, this, &UpdateCheckDialog::settingsClicked);
 	connect(m_tryDefaultButton, &QPushButton::clicked, this, &UpdateCheckDialog::tryDefaultClicked);
+	connect(m_goBackButton, &QPushButton::clicked, this, &UpdateCheckDialog::goBackClicked);
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
 	connect(m_client, &ScUpdateClient::updateAvailable, this, &UpdateCheckDialog::onUpdateAvailable);
@@ -143,8 +150,14 @@ void UpdateCheckDialog::showUpdate(const ScUpdateInfo& info, const QString& apiK
 void UpdateCheckDialog::onUpdateAvailable(const ScUpdateInfo& info)
 {
 	m_info = info;
-	setResult(info.version,
-		tr("<b>A newer version is available.</b>"),
+	// a version the user went back from is offered, never pushed: it goes in only when Update is pressed
+	QDateTime leftWhen;
+	const QString left = SuneerRestorePoint::rollbackLeftVersion(&leftWhen);
+	QString status = tr("<b>A newer version is available.</b>");
+	if (!left.isEmpty() && ScUpdateClient::compareVersions(info.version, left) <= 0)
+		status = tr("<b>A newer version is available.</b> You went back from %1 on %2; it is installed again only if you press Update.")
+		         .arg(left, QLocale().toString(leftWhen, QLocale::ShortFormat));
+	setResult(info.version, status,
 		info.changelog.isEmpty() ? tr("No changelog was provided.") : info.changelog,
 		true);
 }
@@ -204,6 +217,15 @@ void UpdateCheckDialog::settingsClicked()
 	m_settingsDialog->activateWindow();
 }
 
+void UpdateCheckDialog::goBackClicked()
+{
+	SuneerRollbackDialog dlg(this);
+	dlg.setMainWindow(parentWidget());
+	dlg.exec();
+	if (dlg.result() == QDialog::Accepted)
+		accept();
+}
+
 void UpdateCheckDialog::tryDefaultClicked()
 {
 	ScUpdateClient::clearSavedServerUrl();
@@ -247,11 +269,21 @@ void UpdateCheckDialog::runSelfTestIfAsked(QWidget* mainWindow)
 				       .arg(dlg->m_currentLabel->text(), dlg->m_latestLabel->text(), dlg->m_statusLabel->text())
 				       .arg(dlg->m_updateButton->isEnabled()).arg(updateDialogs().join(','));
 				dlg->grab().save(prefix + QStringLiteral("-manual.png"));
-				dlg->reject();                       // Later: nothing is installed
+				// SUNEER_UPDATE_SELFTEST_ACTION: later (default, nothing installed) | update (press Update;
+				// SUNEER_UPDATE_AUTOYES=1 answers the install question) | goback (Go back..., with
+				// SUNEER_ROLLBACK_SELFTEST=<version> choosing the row). The pkexec step really runs.
+				const QString action = qEnvironmentVariable("SUNEER_UPDATE_SELFTEST_ACTION", QStringLiteral("later"));
+				if (action == QLatin1String("update") && dlg->m_updateButton->isEnabled())
+					dlg->m_updateButton->click();
+				else if (action == QLatin1String("goback"))
+					dlg->m_goBackButton->click();
+				else
+					dlg->reject();                       // Later: nothing is installed
 			}
 			write(prefix + QStringLiteral("-manual.txt"), text);
 			fprintf(stderr, "UPDATE-SELFTEST %s", qPrintable(text));
-			QTimer::singleShot(500, mainWindow, [mainWindow]() { mainWindow->close(); });
+			if (qEnvironmentVariable("SUNEER_UPDATE_SELFTEST_ACTION", QStringLiteral("later")) == QLatin1String("later"))
+				QTimer::singleShot(500, mainWindow, [mainWindow]() { mainWindow->close(); });
 		});
 		if (auto* mw = qobject_cast<ScribusMainWindow*>(mainWindow))
 			if (mw->scrActions.contains("helpCheckUpdates"))

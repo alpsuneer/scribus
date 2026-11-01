@@ -27,6 +27,9 @@ class QTextBrowser;
  * installs (pkexec dpkg -i). "Settings..." opens UpdateSettingsDialog for the
  * server URL and API key; the check runs again when that closes.
  *
+ * "Go back to previous version..." (2026-11-01) opens SuneerRollbackDialog: the versions whose
+ * package / settings were saved as a restore point before an update.
+ *
  * There is no automatic check (removed 2026-11-01, user decision): nothing at
  * startup, no timer, no notification. The server is contacted only while this
  * dialog is open, and the package is installed only after Update is pressed.
@@ -60,6 +63,7 @@ private slots:
 	void updateClicked();
 	void settingsClicked();
 	void tryDefaultClicked();
+	void goBackClicked();
 
 private:
 	void setResult(const QString& latest, const QString& status, const QString& changelog, bool canUpdate);
@@ -76,6 +80,7 @@ private:
 	QPushButton* m_laterButton { nullptr };
 	QPushButton* m_settingsButton { nullptr };
 	QPushButton* m_tryDefaultButton { nullptr };
+	QPushButton* m_goBackButton { nullptr };
 	//! The one Update Settings dialog, parented and modal to this window.
 	QPointer<class UpdateSettingsDialog> m_settingsDialog;
 	QString m_source;       //!< "settings" or "conf" for the check in progress

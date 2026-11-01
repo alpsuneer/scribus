@@ -3084,3 +3084,22 @@ SUNEER_OFFICEDEF_ANSWER, SUNEER_OFFICEDEF_SELFTEST (report, then quit via a repe
 singleShot before exec() is ignored). Merge identity for design styles = tooltip OR content signature (styles list,
 columns, photo position). Test: tests/suneer/office_defaults.sh. Trap: scribus/CMakeLists.txt lists sources twice -
 add new files to both lists or the link fails.
+
+## Go back to previous version / office settings without a question (2026-11-01, uncommitted)
+`scribus/suneerrestorepoint.{h,cpp}`: cacheDir /var/cache/scribus-updates (env SUNEER_UPDATE_CACHE_DIR), backupRoot
+~/.config/Scribus/backup, saveSettings(), points() (cache ∪ backups, newest first), installArguments() = one fixed
+`pkexec /bin/sh -c <script> sh <deb> <version> <cache> [more .deb]` (dpkg-deb Package/Version check, copy into the
+cache, dpkg -i, prune to 3; env SUNEER_UPDATE_PKEXEC swaps the program), restoreAfterExit() = detached waiter that
+copies restore.list back after the pid is gone and execs scribus (test env vars stripped), rollback marker
+<prefs>/update-rollback.json. SuneerDebFetcher: <base>/scribus_<v>_amd64.deb + .sig (openssl pkeyutl raw Ed25519
+over the bytes, as publish-update.sh writes). ScUpdateClient::downloadFile() = same-origin download without sha.
+`scribus/ui/suneerrollbackdialog.{h,cpp}`; UpdateCheckDialog "Go back..." button + the went-back note;
+UpdateAvailableDialog::prepareRestorePoint() before installUpdate(). Office defaults: the dialog and the merge code
+are gone; a new manifest version applies every file (receipt "version" compared, not only the hashes); keyset via
+Prefs_KeyboardShortcuts::adoptShippedSet() (key-map comparison, the shipped file is a rewrite).
+Traps: ScUpdateInfo::serverUrl is the latest.json URL (fetcher strips it); the main window refuses close() while the
+New Document / Preferences dialog is open (rollback closes them first); qApp->exit() needs a repeating timer in the
+self-tests; a .localM test deb has the office manifest version the tree carries (git checkout as root leaves
+root-owned files -> release.sh as s1 fails on the manifest). Self-test env: SUNEER_UPDATE_SELFTEST_ACTION=
+later|update|goback, SUNEER_UPDATE_AUTOYES, SUNEER_ROLLBACK_SELFTEST=<version>. Test: tests/suneer/update_rollback.sh
+(root, real installs, local http.server + latest.json signed with the laptop key).

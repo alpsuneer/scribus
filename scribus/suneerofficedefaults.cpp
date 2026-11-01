@@ -10,11 +10,8 @@ to this file only.
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QMessageBox>
-#include <QPushButton>
 #include <QSettings>
 #include <QtGlobal>
 
@@ -92,115 +89,9 @@ static bool backupAndCopy(const QString& from, const QString& to)
 	return QFile::copy(from, to);
 }
 
-// ---- merge: what the office has and the user lacks is added, the user's own entries stay ----
-
-static int mergeDesignStyles(const QString& shipped, const QString& user)
-{
-	QSettings s(shipped, QSettings::IniFormat), u(user, QSettings::IniFormat);
-	// a style the user has already: the same tooltip, or the same content (styles list, columns, photo) under
-	// another name - a renamed style is not added a second time
-	auto signature = [](QSettings& q) {
-		return q.value("styles").toStringList().join(QLatin1Char('|')).simplified().toLower() + QLatin1Char('#') + q.value("columns").toString()
-		       + QLatin1Char('#') + q.value("imagePosition").toString().toLower();
-	};
-	QStringList have;
-	QSet<QString> usedKeys;
-	const int n = u.beginReadArray("styles");
-	for (int i = 0; i < n; ++i)
-	{
-		u.setArrayIndex(i);
-		have << u.value("tooltip").toString().trimmed().toLower() << signature(u);
-		const QString k = u.value("shortcut").toString().trimmed();
-		if (!k.isEmpty())
-			usedKeys.insert(k);
-	}
-	u.endArray();
-	QList<QVariantMap> add;
-	const int m = s.beginReadArray("styles");
-	for (int i = 0; i < m; ++i)
-	{
-		s.setArrayIndex(i);
-		const QString tip = s.value("tooltip").toString().trimmed().toLower();
-		if (tip.isEmpty() || have.contains(tip) || have.contains(signature(s)))
-			continue;
-		QVariantMap e;
-		for (const QString& k : s.childKeys())
-			e.insert(k, s.value(k));
-		if (usedKeys.contains(e.value("shortcut").toString().trimmed()))
-			e.insert("shortcut", QString());       // the user's key stays with the user's style
-		add << e;
-	}
-	s.endArray();
-	if (add.isEmpty())
-		return 0;
-	u.beginWriteArray("styles");
-	for (int i = 0; i < add.size(); ++i)
-	{
-		u.setArrayIndex(n + i);
-		for (auto it = add[i].constBegin(); it != add[i].constEnd(); ++it)
-			u.setValue(it.key(), it.value());
-	}
-	u.endArray();
-	if (!u.contains("General/clearManualFormatting") && s.contains("General/clearManualFormatting"))
-		u.setValue("General/clearManualFormatting", s.value("General/clearManualFormatting"));
-	u.sync();
-	return add.size();
-}
-
-static int mergeShortcuts(const QString& shipped, const QString& user)
-{
-	QSettings s(shipped, QSettings::IniFormat), u(user, QSettings::IniFormat);
-	QSet<QString> usedKeys;
-	for (const QString& k : u.allKeys())
-		usedKeys.insert(u.value(k).toString().trimmed());
-	int added = 0;
-	for (const QString& k : s.allKeys())
-	{
-		if (u.contains(k) || usedKeys.contains(s.value(k).toString().trimmed()))
-			continue;
-		u.setValue(k, s.value(k));
-		++added;
-	}
-	u.sync();
-	return added;
-}
-
-static int mergeGradients(const QString& shipped, const QString& user)
-{
-	QJsonObject s = readJson(shipped), u = readJson(user);
-	QSet<QString> have;
-	QJsonArray presets = u.value("presets").toArray();
-	for (const QJsonValue& v : presets)
-		have.insert(v.toObject().value("name").toString().trimmed().toLower());
-	int added = 0;
-	for (const QJsonValue& v : s.value("presets").toArray())
-	{
-		const QString name = v.toObject().value("name").toString().trimmed().toLower();
-		if (name.isEmpty() || have.contains(name))
-			continue;
-		presets << v;
-		++added;
-	}
-	if (added == 0)
-		return 0;
-	u.insert("presets", presets);
-	writeJson(user, u);
-	return added;
-}
-
-static int mergeFile(const QString& name, const QString& shipped, const QString& user)
-{
-	if (name == QLatin1String("SuneerDesignStyle.conf"))
-		return mergeDesignStyles(shipped, user);
-	if (name == QLatin1String("ParagraphStyleShortcuts.conf"))
-		return mergeShortcuts(shipped, user);
-	if (name == QLatin1String("suneer-text-gradients.json"))
-		return mergeGradients(shipped, user);
-	return 0;
-}
-
 QStringList syncAtStartup(QWidget* parent)
 {
+	Q_UNUSED(parent);
 	QStringList out;
 	const QString dir = shippedDir();
 	const QJsonObject manifest = readJson(dir + QLatin1Char('/') + QLatin1String(kManifest));
@@ -212,10 +103,8 @@ QStringList syncAtStartup(QWidget* parent)
 		return out;
 	}
 	QJsonObject receipt = readJson(receiptPath());
+	const bool newVersion = receipt.value(QStringLiteral("version")).toString() != version;
 	bool changed = false;
-
-	struct Pending { QString name, shipped, user, shippedHash; };
-	QList<Pending> ask;
 	for (auto it = files.constBegin(); it != files.constEnd(); ++it)
 	{
 		const QString name = it.key();
@@ -228,92 +117,49 @@ QStringList syncAtStartup(QWidget* parent)
 			out << QStringLiteral("%1: not handled (%2)").arg(name, user.isEmpty() ? QStringLiteral("unknown file") : QStringLiteral("not in the package"));
 			continue;
 		}
-		const QString received = receipt.value(name).toString();
-		if (received == shippedHash)
+		if (!newVersion && receipt.value(name).toString() == shippedHash)
 		{
 			out << QStringLiteral("%1: this version received already").arg(name);
 			continue;
 		}
+		// 2026-11-01 (user decision): no question. A new office version always replaces the user's
+		// file; the old one stays next to it as .bak-<date>, and the settings backup made before an
+		// update (SuneerRestorePoint) holds the whole set for "Go back to previous version".
 		const QString userHash = QFile::exists(user) ? sha256(user) : QString();
-		QStringList known { received };
-		for (const QJsonValue& v : info.value("previous").toArray())
-			known << v.toString();
-		const bool untouched = userHash.isEmpty() || userHash == shippedHash || known.contains(userHash);
-		if (untouched)
+		if (userHash == shippedHash)
+			out << QStringLiteral("%1: the user's file is the office version already").arg(name);
+		else if (backupAndCopy(shipped, user))
+			out << QStringLiteral("%1: %2 -> office version %3 (old file kept as .bak)").arg(name,
+				userHash.isEmpty() ? QStringLiteral("missing") : QStringLiteral("replaced"), version);
+		else
 		{
-			if (userHash == shippedHash)
-				out << QStringLiteral("%1: the user's file is the office version already").arg(name);
-			else if (backupAndCopy(shipped, user))
-				out << QStringLiteral("%1: %2 -> office version %3 (old file kept as .bak)").arg(name, userHash.isEmpty() ? QStringLiteral("missing") : QStringLiteral("unchanged since the last office version"), version);
-			else
-			{
-				out << QStringLiteral("%1: could not write %2").arg(name, user);
-				continue;
-			}
-			receipt.insert(name, shippedHash);
-			changed = true;
+			out << QStringLiteral("%1: could not write %2").arg(name, user);
 			continue;
 		}
-		ask << Pending { name, shipped, user, shippedHash };
+		receipt.insert(name, shippedHash);
+		changed = true;
 	}
-	if (!ask.isEmpty())
+	// the dbi shortcut set: the Default with every new office version (a profile's own copy of the
+	// shipped set, when it differs, is set aside as .bak so the shipped keys apply); the receipt
+	// remembers the version so that a user's later choice of another set is left alone until the
+	// next version
+	const QString keysetSeen = receipt.value(QStringLiteral("keyset-version")).toString();
+	if (!version.isEmpty() && keysetSeen != version)
 	{
-		QStringList names;
-		for (const Pending& p : ask)
-			names << p.name;
-		QString answer = qEnvironmentVariable("SUNEER_OFFICEDEF_ANSWER").toLower();
-		if (answer.isEmpty())
-		{
-			QMessageBox box(QMessageBox::Question, QObject::tr("Office settings updated"),
-			                QObject::tr("Scribus %1 brings new office settings for:\n    %2\n\nYou have changed these on this computer. "
-			                            "Use the office version (your file is kept as a .bak copy), keep yours, or merge "
-			                            "(the office's new styles / shortcuts / presets are added, yours stay)?")
-			                    .arg(version, names.join(QStringLiteral("\n    "))),
-			                QMessageBox::NoButton, parent);
-			QPushButton* office = box.addButton(QObject::tr("Use office version"), QMessageBox::AcceptRole);
-			QPushButton* keep = box.addButton(QObject::tr("Keep mine"), QMessageBox::RejectRole);
-			QPushButton* merge = box.addButton(QObject::tr("Merge"), QMessageBox::ActionRole);
-			box.setDefaultButton(merge);
-			box.exec();
-			answer = box.clickedButton() == office ? QStringLiteral("office") : box.clickedButton() == merge ? QStringLiteral("merge") : QStringLiteral("keep");
-			Q_UNUSED(keep);
-		}
-		for (const Pending& p : ask)
-		{
-			if (answer == QLatin1String("office"))
-			{
-				if (!backupAndCopy(p.shipped, p.user))
-				{
-					out << QStringLiteral("%1: could not write %2").arg(p.name, p.user);
-					continue;
-				}
-				out << QStringLiteral("%1: local changes -> office version %2 (old file kept as .bak)").arg(p.name, version);
-			}
-			else if (answer == QLatin1String("merge"))
-			{
-				const QString bak = p.user + QStringLiteral(".bak-") + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmm"));
-				QFile::remove(bak);
-				QFile::copy(p.user, bak);
-				const int n = mergeFile(p.name, p.shipped, p.user);
-				out << QStringLiteral("%1: local changes -> merged, %2 new entr%3 added (old file kept as .bak)").arg(p.name).arg(n).arg(n == 1 ? QStringLiteral("y") : QStringLiteral("ies"));
-			}
-			else
-				out << QStringLiteral("%1: local changes -> kept (not asked again for %2)").arg(p.name, version);
-			receipt.insert(p.name, p.shippedHash);
-			changed = true;
-		}
+		out << QStringLiteral("keyset: \"%1\" made the Default shortcut set for %2%3")
+		       .arg(Prefs_KeyboardShortcuts::newspaperDefaultSetName(), version,
+		            Prefs_KeyboardShortcuts::adoptShippedSet() ? QStringLiteral(" (own copy of the set kept as .bak)") : QString());
+		receipt.insert(QStringLiteral("keyset-version"), version);
+		changed = true;
 	}
+	else
+		out << QStringLiteral("keyset: Default set \"%1\" left as chosen").arg(Prefs_KeyboardShortcuts::defaultSetName());
 	if (changed)
 	{
 		receipt.insert(QStringLiteral("version"), version);
 		QDir().mkpath(QFileInfo(receiptPath()).absolutePath());
 		writeJson(receiptPath(), receipt);
 	}
-	// the dbi shortcut set: the Default when this profile never chose one
-	if (Prefs_KeyboardShortcuts::adoptShippedSetIfUnchosen())
-		out << QStringLiteral("keyset: \"%1\" made the Default shortcut set (none was chosen before)").arg(Prefs_KeyboardShortcuts::newspaperDefaultSetName());
-	else
-		out << QStringLiteral("keyset: Default set \"%1\" left as chosen").arg(Prefs_KeyboardShortcuts::defaultSetName());
 	return out;
 }
 

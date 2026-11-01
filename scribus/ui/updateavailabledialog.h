@@ -17,6 +17,7 @@ for which a new license (GPL+exception) is in place.
 class QCloseEvent;
 class QPushButton;
 class QProgressDialog;
+class SuneerDebFetcher;
 
 /**
  * Shown once ScUpdateClient::checkForUpdate() reports a newer version.
@@ -54,7 +55,13 @@ private slots:
 	void onInstallError(QProcess::ProcessError error);
 
 private:
+	//! Restore point first (SuneerRestorePoint: settings backup; the installed version's package fetched
+	//! from the server when it is not cached yet), then installUpdate().
+	void prepareRestorePoint(const QString& path);
 	void installUpdate(const QString& path);
+	QString m_restoreNote;              //!< what the restore point holds, for the final message
+	QStringList m_alsoCache;            //!< the installed version's .deb, cached by the install step
+	SuneerDebFetcher* m_fetcher { nullptr };
 
 	ScUpdateInfo m_info;
 	QString m_apiKey;

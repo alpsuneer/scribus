@@ -443,8 +443,23 @@ void ScUpdateClient::downloadUpdate(const ScUpdateInfo& info, const QString& api
 		emit downloadFailed(tr("The update download is not on the update server. The update was refused."));
 		return;
 	}
-	m_expectedSha256 = info.sha256;
-	const QUrl url = info.downloadUrl;
+	startDownload(info.downloadUrl, info.sha256, apiKey, destinationPath);
+}
+
+void ScUpdateClient::downloadFile(const QUrl& url, const QUrl& serverUrl, const QString& apiKey, const QString& destinationPath)
+{
+	cancelDownload();
+	if (!sameOrigin(url, serverUrl))
+	{
+		emit downloadFailed(tr("The download is not on the update server. It was refused."));
+		return;
+	}
+	startDownload(url, QString(), apiKey, destinationPath);
+}
+
+void ScUpdateClient::startDownload(const QUrl& url, const QString& sha256, const QString& apiKey, const QString& destinationPath)
+{
+	m_expectedSha256 = sha256;
 
 	m_downloadFile = new QFile(destinationPath, this);
 	if (!m_downloadFile->open(QIODevice::WriteOnly))
@@ -514,8 +529,8 @@ void ScUpdateClient::onDownloadFinished()
 	delete m_downloadFile;
 	m_downloadFile = nullptr;
 
-	const QString actual = fileSha256(m_downloadPath);
-	if (actual.isEmpty() || actual != m_expectedSha256)
+	const QString actual = m_expectedSha256.isEmpty() ? QString() : fileSha256(m_downloadPath);
+	if (!m_expectedSha256.isEmpty() && (actual.isEmpty() || actual != m_expectedSha256))
 	{
 		QFile::remove(m_downloadPath);
 		emit downloadFailed(tr("The downloaded update does not match its signed checksum and was deleted."));
