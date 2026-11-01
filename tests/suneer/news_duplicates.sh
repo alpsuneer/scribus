@@ -14,6 +14,7 @@
 #   NEWS_DUP_PLAIN=1             frames linked: no DUP
 #   NEWS_DUP_PLAIN=1 NEWS_DUP_UNLINK=1   news.* removed from the frames (a page before the sync): no DUP
 #   NEWS_DUP_PLAIN=1 NEWS_DUP_TWICE=1    one story's text frame copied, same id: DUP on that story only
+#   NEWS_DUP_PLAIN=1 NEWS_DUP_BADCHAR=1  a story with U+0019 / U+FFFE placed, paste, an inline object saved (out/badchar.sla)
 set -u
 SLA=${1:?page.sla}; W=${2:?work dir}; SCRIBUS=${3:-/usr/local/bin/scribus}
 mkdir -p "$W/out" "$W/home" "$W/run" "$W/page" "$W/fix"; W="$(cd "$W" && pwd)"; chmod 700 "$W/run"
@@ -73,6 +74,8 @@ if os.environ.get("NEWS_DUP_PLAIN"):
     if os.environ.get("NEWS_DUP_UNLINK"):
         s = re.sub(r'<ItemAttribute Name="news\.[^>]*/>\s*', '', s)
     open(sla, "w", encoding="utf-8").write(s)
+    if os.environ.get("NEWS_DUP_BADCHAR"):   # control characters in a story, as the workflow may send them
+        data.append(news("bad-1", "നിയന്ത്രണ\x19 അക്ഷരം പരീക്ഷ", ["തിരുവനന്തപുരം\x19\r പുതിയ വാർത്ത\ufffe ഇവിടെ തുടങ്ങുന്നു. ഇത് രണ്ടാം വാക്യമാണ്."], used=False))
     json.dump({"data": data}, open(fix + "/fixture.json", "w"), ensure_ascii=False)
     print("ORIG=")
     print("EXPECT=%s" % twice)
@@ -124,7 +127,7 @@ sleep 1
 rm -f "$W/page/.$base.sla.lock"
 HOME="$W/home" XDG_CONFIG_HOME="$W/home/.config" XDG_CACHE_HOME="$W/home/.cache" XDG_RUNTIME_DIR="$W/run" DISPLAY=:93 QT_IM_MODULE= \
 SCRIBUS_NEWS_FIXTURE="$W/fix/fixture.json" SUNEER_DUP_SELFTEST="$W/out/d" SUNEER_DUP_EXPECT="$EXPECT" SUNEER_DUP_ORIG="$ORIG" \
-SUNEER_DUP_COUNT_ONLY="${NEWS_DUP_PLAIN:-}" timeout "${NEWS_DUP_TIMEOUT:-600}" "$SCRIBUS" "$W/page/$base.sla" > "$W/out/scribus.log" 2>&1
+SUNEER_DUP_COUNT_ONLY="${NEWS_DUP_PLAIN:-}" SUNEER_DUP_BADCHAR_SAVE="${NEWS_DUP_BADCHAR:+$W/out/badchar.sla}" timeout "${NEWS_DUP_TIMEOUT:-600}" "$SCRIBUS" "$W/page/$base.sla" > "$W/out/scribus.log" 2>&1
 echo "scribus exit $?" | tee "$W/out/exit.txt"
 cat "$W/out/d-report.txt" 2>/dev/null || echo "FAIL no report"
 grep -ah "duplicates:" "$W"/home/.cache/scribus*/news/api.log 2>/dev/null | tail -2

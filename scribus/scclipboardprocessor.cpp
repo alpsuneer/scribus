@@ -1,4 +1,5 @@
 #include "scclipboardprocessor.h"
+#include "suneerxmlclean.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -37,7 +38,7 @@ ScClipboardProcessor::ScClipboardProcessor(ScribusDoc* doc, PageItem *pageItem)
 
 void ScClipboardProcessor::setContent(const QString &content, ContentType type)
 {
-	m_content = content;
+	m_content = SuneerXmlClean::stripInvalid(content);   // pasted text never carries control codes into a story
 	m_contentType = type;
 	processed = false;
 }

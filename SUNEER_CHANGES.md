@@ -1708,3 +1708,8 @@ scribus
 - "Apply to" ഇനി രണ്ട് പേജിലും (Solid, Gradient): **Selected text / This paragraph / Whole text**. Default selection-ന് അനുസരിച്ച്: selection → Selected text; cursor മാത്രം → This paragraph; frames / cells → Whole text. Popup തുറക്കുമ്പോഴും selection മാറുമ്പോഴും default-ലേക്ക് തിരിച്ചുപോകും. താഴെ ഒരു വരി എന്ത് മാറും എന്ന് പറയും.
 - Gradient പരക്കുന്ന രീതി വേറെ: **Gradient: Whole / Each line**.
 - Test: `tests/suneer/text_colour_scope.sh <dir>`.
+
+### 119. SLA-യിലെ XML-ൽ അനുവദനീയമല്ലാത്ത അക്ഷരങ്ങൾ (U+0019 മുതലായവ)
+- Workflow-ൽ നിന്ന് വന്ന page-ൽ ഒരു control character (U+0019) ഉണ്ടായിരുന്നതുകൊണ്ട് "error while parsing file at line 488" — page തുറന്നില്ല.
+- ഇപ്പോൾ: (1) ഏത് .sla തുറക്കുമ്പോഴും (gz-ഉം) U+0000–U+0008, U+000B, U+000C, U+000E–U+001F, U+FFFE/FFFF (raw ആയും `&#25;` പോലെയും) നീക്കി തുറക്കും; ഒറ്റ message "Removed 1 invalid character (story '…', line 488) – please save the page"; page modified ആയി കാണിക്കും. (2) "Open page from workflow": download ചെയ്ത file-ൽ നിന്ന് നീക്കും, അതേപടി വന്നത് `<page>.sla.original` ആയി സൂക്ഷിക്കും, message കാണിക്കും. (3) News Browser placement / paste-ൽ text-ൽ നിന്ന് നീക്കും. (4) Save-ൽ ഒരിക്കലും എഴുതില്ല (attribute, text, frame name; story-യിലെ ഒറ്റപ്പെട്ട U+0019 — inline object ഇല്ലാത്തത് — ഒഴിവാക്കും).
+- Test: `tests/suneer/sla_invalid_chars.sh <page.sla> <dir>`, `NEWS_OPEN_BADCHAR=1 news_open_page.sh`, `NEWS_DUP_PLAIN=1 NEWS_DUP_BADCHAR=1 news_duplicates.sh`.

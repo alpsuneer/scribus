@@ -191,6 +191,7 @@ for which a new license (GPL+exception) is in place.
 #include "ui/suneerlinkedimagesdialog.h"
 #include "scribuscore.h"
 #include "suneerofficedefaults.h"
+#include "suneerxmlclean.h"
 #include "scribusdoc.h"
 #include "suneerclusterlevel.h"
 #include "suneerimageresample.h"
@@ -4674,6 +4675,22 @@ bool ScribusMainWindow::loadDoc(const QString& fileName, AlreadyOpenAction onAlr
 		/*qDebug("Time elapsed: %d ms", t.elapsed());*/
 		doc->RePos = false;
 		doc->setModified(false);
+		// suneer: characters XML forbids were left out while reading: one message, and the page counts as changed
+		const QList<SuneerXmlClean::Hit> removedChars = SuneerXmlClean::takeReport(filename);
+		if (!removedChars.isEmpty())
+		{
+			const QString removedText = SuneerXmlClean::message(removedChars);
+			doc->setModified(true);
+			const QString reportFile = qEnvironmentVariable("SUNEER_XMLCLEAN_REPORT");
+			if (!reportFile.isEmpty())
+			{
+				QFile rf(reportFile);
+				if (rf.open(QIODevice::Append | QIODevice::Text))
+					rf.write(removedText.toUtf8() + "\n");
+			}
+			else if (ScCore->usingGUI())
+				QTimer::singleShot(0, this, [this, removedText]() { ScMessageBox::warning(this, tr("Invalid characters removed"), removedText); });
+		}
 		inlinePalette->setDoc(doc);
 		updateRecent(filename);
 		m_mainWindowStatusLabel->setText( tr("Ready"));

@@ -252,6 +252,7 @@ if(HAVE_OSG)
 		suneerlayoutengine.cpp
 		suneerofficedefaults.cpp
 		suneerrestorepoint.cpp
+		suneerxmlclean.cpp
 		suneerpagemodel.cpp
 		suneerboxfit.cpp
 		suneerfitgap.cpp
@@ -392,6 +393,7 @@ else()
 		suneerlayoutengine.cpp
 		suneerofficedefaults.cpp
 		suneerrestorepoint.cpp
+		suneerxmlclean.cpp
 		suneerpagemodel.cpp
 		suneerboxfit.cpp
 		suneerfitgap.cpp

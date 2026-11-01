@@ -298,6 +298,7 @@ private:
 	void ignoreRepeat(int index);
 	void deleteRepeat(int index, int which);
 	void runRepeatSelfTest(const QString& report);
+	QString m_wfCleanNote;                      // Open page from workflow: invalid characters taken out of the download
 	QString m_dupTestAnswer;                    // self-test: "place" / "skip" / "show"
 	QStringList m_dupTestLog;
 	void runDupSelfTest(const QString& report);

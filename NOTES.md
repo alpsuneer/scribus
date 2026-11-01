@@ -3122,3 +3122,15 @@ gets its selection lent to the core (select range, itemSelection_ApplyCharStyle,
 trick there, so a cell stays a cell. Clicking a target applies nothing. A whole gradient spans the union of all lines with
 a gradient in the frame (suneerFrameTextRect), so two separate "whole" gradients in one frame share that rect; a per-line
 gradient on a word spans its whole line. Test: tests/suneer/text_colour_scope.sh (SUNEER_TEXTCOLOUR_SCOPETEST).
+
+## Invalid XML characters in SLA files (2026-11-01, uncommitted)
+`scribus/suneerxmlclean.{h,cpp}`: isInvalid / stripInvalid / clean(QByteArray&) (raw UTF-8 bytes, U+FFFE/FFFF as EF BF BE/BF,
+numeric references) / cleanReader (the three loaders' slaReader() and paletteReader() return a QBuffer over the cleaned
+bytes; the hits are kept per file and taken by ScribusMainWindow::loadDoc -> one ScMessageBox, doc modified; env
+SUNEER_XMLCLEAN_REPORT=<file> appends the message instead). ScXmlStreamWriter::writeAttribute/writeCharacters strip
+(not virtual: only calls through ScXmlStreamWriter); writeITEXTs skips a stray < 32 / >= 0xFFFE character that is not a
+known special. Trap: SpecialChars::OBJECT is U+0019 - never strip a live StoryText; the 1.7.1 writer saves objects as
+<Content Unicode="25" Object=...> (COBJ in 1.5). Workflow download: writeWorkflowPage cleans, keeps <page>.sla.original,
+m_wfCleanNote shown after the open. SuneerTextClean::paragraphs and ScClipboardProcessor::setContent strip; the
+middle-click paste in canvasmode_edit too. Tests: sla_invalid_chars.sh (real page copied, gz, &#25; + U+FFFE, stray),
+news_open_page.sh NEWS_OPEN_BADCHAR, news_duplicates.sh NEWS_DUP_BADCHAR.

@@ -46,6 +46,7 @@
 #include "scribus.h"
 #include "scribusdoc.h"
 #include "scribusview.h"
+#include "suneerxmlclean.h"
 #include "ui/suneer_news_panel.h"
 #include "suneerboxfit.h"
 #include "selection.h"
@@ -973,7 +974,7 @@ void CanvasMode_Edit::mousePressEvent(QMouseEvent *m)
 					if (!cc.isNull())
 					{
 						// K.I.S.S.:
-						currItem->itemText.insertChars(0, cc, true);
+						currItem->itemText.insertChars(0, SuneerXmlClean::stripInvalid(cc), true);
 						if (m_doc->docHyphenator->autoCheck())
 							m_doc->docHyphenator->slotHyphenate(currItem);
 						m_ScMW->BookMarkTxT(currItem);

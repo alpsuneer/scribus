@@ -5,6 +5,7 @@ a copyright and/or license notice that predates the release of Scribus 1.3.2
 for which a new license (GPL+exception) is in place.
 */
 #include "suneertextclean.h"
+#include "suneerxmlclean.h"
 
 #include <functional>
 
@@ -330,7 +331,7 @@ StoryReport apply(StoryText& st, const std::function<void(int, int)>& removeRang
 QStringList paragraphs(const QString& raw)
 {
 	QStringList out;
-	const QString text = decode(raw);
+	const QString text = SuneerXmlClean::stripInvalid(decode(raw));
 	for (const QString& line : text.split(QChar('\n')))
 	{
 		const QString t = trimBlank(line);
@@ -376,6 +377,9 @@ QString describeJunk(const QString& raw)
 	}
 	if (runs > 0)
 		parts << QStringLiteral("%1 run(s) of 2+ empty lines inside").arg(runs);
+	const QString decoded = decode(raw);
+	if (const int bad = int(decoded.size() - SuneerXmlClean::stripInvalid(decoded).size()))
+		parts << QStringLiteral("%1 control character(s) removed").arg(bad);
 	return parts.join(QStringLiteral("; "));
 }
 

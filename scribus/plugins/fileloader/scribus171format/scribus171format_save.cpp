@@ -2034,6 +2034,13 @@ void Scribus171Format::writeITEXTs(ScribusDoc *doc, ScXmlStreamWriter &docu, Sto
 				 (0xd800 <= ch.unicode() && ch.unicode() < 0xe000) ||
 				 ch.unicode() == 0xfffe || ch.unicode() == 0xffff)
 		{
+			// suneer: a stray control code (U+0019 with no inline object or mark behind it...) is not saved: read
+			// back it would be in the story again. The known ones had their own branch above.
+			if (ch.unicode() < 32 || ch.unicode() >= 0xfffe)
+			{
+				lastPos = k + 1;
+				continue;
+			}
 			docu.writeEmptyElement("Content");
 			putCStyle(docu, lastStyle);
 			tmpnum.setNum(ch.unicode());

@@ -15,6 +15,14 @@ PORT=18742; DISP=:93; DATE=2026-11-02
 printf '[General]\napiHost=http://127.0.0.1:%s\nloginEmail=a@test.local\npagesFolder=%s\n' $PORT "$W/pages" > "$W/home/.config/Faircode/ScribusNews.conf"
 # fixtures: page.sla (Malayalam text frames, an image frame) and obit.zip (.sla + images/, stored, like fflate level 0)
 cp "$HERE/fixtures/news_open_page.sla" "$W/fix/page.sla"
+# NEWS_OPEN_BADCHAR=1: the workflow sends a raw U+0019 in the first text run: cleaned, the file as sent kept as .original
+[ -n "${NEWS_OPEN_BADCHAR:-}" ] && python3 - "$W/fix/page.sla" <<'BAD'
+import sys, re
+b = open(sys.argv[1], "rb").read()
+m = re.search(rb' (?:CH|Chars)="', b)
+if not m: sys.exit("no text run in the fixture")
+open(sys.argv[1], "wb").write(b[:m.end()] + b"\x19" + b[m.end():])
+BAD
 convert -size 300x400 gradient:'#d0a080'-'#503020' -fill white -draw "circle 150,150 150,90" "$W/fix/obit_photo.jpg"
 python3 - "$W/fix" "$DATE" <<'PY'
 import sys, zipfile, re
@@ -52,6 +60,11 @@ def check(what, ok):
 rep = open(W + "/out/t-report.txt").read() if os.path.isfile(W + "/out/t-report.txt") else ""
 check("self-test report: ALL PASS", rep.rstrip().endswith("ALL PASS"))
 files = sorted(os.path.relpath(os.path.join(r, f), W + "/pages") for r, _, fs in os.walk(W + "/pages") for f in fs)
+originals = [f for f in files if f.endswith(".original")]
+files = [f for f in files if not f.endswith(".original")]
+if os.environ.get("NEWS_OPEN_BADCHAR"):
+    check("the file as sent kept: %s" % originals, len(originals) >= 1 and all(b"\x19" in open(W + "/pages/" + f, "rb").read() for f in originals))
+    check("the opened pages hold no U+0019", not [f for f in files if f.endswith(".sla") and b"\x19" in open(W + "/pages/" + f, "rb").read()])
 print("  files: " + ", ".join(files))
 check("pages folder: KNR/%s/ Page_1, Page_1_2, Page_3 (+images), Page_5; no Page_4/6/7/8" % DATE,
       files == ["KNR/%s/%s" % (DATE, f) for f in ["Page_1.sla", "Page_1_2.sla", "Page_3.sla", "Page_3_images/0_obit_photo.jpg", "Page_5.sla"]])

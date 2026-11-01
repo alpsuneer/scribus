@@ -24,7 +24,23 @@ public:
 	explicit ScXmlStreamWriter(QIODevice* device) : QXmlStreamWriter(device) {}
 	explicit ScXmlStreamWriter(QString*   string) : QXmlStreamWriter(string) {}
 
-	void writeAttribute(const QString& name, const QString& value) { QXmlStreamWriter::writeAttribute(name, value); }
+	// suneer: nothing XML 1.0 forbids ever reaches a file (one such character made a page unreadable)
+	static bool xmlInvalid(ushort c) { return (c < 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) || c >= 0xFFFE; }
+	static QString xmlSafe(const QString& text)
+	{
+		for (int i = 0; i < text.size(); ++i)
+			if (xmlInvalid(text.at(i).unicode()))
+			{
+				QString out = text.left(i);
+				for (int k = i + 1; k < text.size(); ++k)
+					if (!xmlInvalid(text.at(k).unicode()))
+						out += text.at(k);
+				return out;
+			}
+		return text;
+	}
+	void writeAttribute(const QString& name, const QString& value) { QXmlStreamWriter::writeAttribute(name, xmlSafe(value)); }
+	void writeCharacters(const QString& text) { QXmlStreamWriter::writeCharacters(xmlSafe(text)); }
 	void writeAttribute(const QString& name, const PDFVersion& value) { QXmlStreamWriter::writeAttribute(name, QString::number(value)); }
 
 	template<typename T, std::enable_if_t<std::is_integral_v<T> || std::is_enum_v<T>, bool> = true>

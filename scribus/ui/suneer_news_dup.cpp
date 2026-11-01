@@ -16,6 +16,8 @@ for which a new license (GPL+exception) is in place.
  */
 #include "suneer_news_panel.h"
 #include "suneer_news_dup_p.h"
+#include "scclipboardprocessor.h"
+#include "suneerxmlclean.h"
 
 #include <QApplication>
 #include <QDialog>
@@ -587,6 +589,49 @@ void SuneerNewsPanel::runDupSelfTest(const QString& report)
 		{
 			check(QStringLiteral("DUP badges: %1, expected %2 (missed: %3; extra: %4)").arg(badged.size()).arg(expect.size())
 			      .arg(QStringList(missed.values()).join(','), QStringList(extra.values()).join(',')), missed.isEmpty() && extra.isEmpty());
+			// a story with U+0019 / U+FFFE placed for real, paste, an inline object through save (NEWS_DUP_BADCHAR)
+			const QString saveTo = qEnvironmentVariable("SUNEER_DUP_BADCHAR_SAVE");
+			if (!saveTo.isEmpty())
+			{
+				int bad = -1;
+				for (int i = 0; i < m_newsData.size(); ++i)
+					if (newsServerId(m_newsData[i].toObject()) == QLatin1String("bad-1"))
+						bad = i;
+				const double px = m_doc->Pages->at(0)->xOffset() + 500, py = m_doc->Pages->at(0)->yOffset() + 900;
+				PageItem* slot = m_doc->Items->at(m_doc->itemAdd(PageItem::TextFrame, PageItem::Unspecified, px, py, 300, 200, 1, CommonStrings::None, CommonStrings::None));
+				setAttr(slot, QStringLiteral("pagemodel.slot"), QStringLiteral("{\"n\":9,\"cols\":2,\"photoCols\":0}"));
+				check(QStringLiteral("story with control characters placed"), bad >= 0 && dropStoryOnItem(slot, bad));
+				int placed = 0, control = 0, malayalam = 0;
+				for (PageItem* it : *m_doc->Items)
+					if (attr(it, "news.serverId") == QLatin1String("bad-1") && it->isTextFrame())
+						for (int i = 0; i < it->itemText.length(); ++i)
+						{
+							const ushort c = it->itemText.text(i).unicode();
+							++placed;
+							control += (SuneerXmlClean::isInvalid(c) && c != 13) ? 1 : 0;
+							malayalam += (c >= 0x0D00 && c <= 0x0D7F) ? 1 : 0;
+						}
+				check(QStringLiteral("placed text clean: %1 chars, %2 Malayalam, %3 control").arg(placed).arg(malayalam).arg(control), placed > 20 && malayalam > 10 && control == 0);
+				PageItem* box = m_doc->Items->at(m_doc->itemAdd(PageItem::TextFrame, PageItem::Unspecified, px, py + 220, 300, 100, 1, CommonStrings::None, CommonStrings::None));
+				box->itemText.insertChars(0, QStringLiteral("ഒട്ടിക്കൽ"));
+				box->itemText.setCursorPosition(box->itemText.length());
+				ScClipboardProcessor paste(m_doc, box);
+				paste.setContent(QStringLiteral(" പേസ്റ്റ്") + QChar(0x19) + QStringLiteral("വാക്ക്") + QChar(0xFFFE), ScClipboardProcessor::ContentType::Text);
+				paste.process();
+				bool pastedClean = box->itemText.length() > 10;
+				for (int i = 0; i < box->itemText.length(); ++i)
+					pastedClean = pastedClean && !SuneerXmlClean::isInvalid(box->itemText.text(i).unicode());
+				check(QStringLiteral("pasted text: no control character (%1 chars)").arg(box->itemText.length()), pastedClean);
+				// a real inline object and a stray marker next to it: the object survives the save, the stray does not
+				PageItem* inner = m_doc->Items->at(m_doc->itemAdd(PageItem::Polygon, PageItem::Rectangle, px, py, 20, 20, 1, CommonStrings::None, CommonStrings::None));
+				m_doc->Items->removeOne(inner);
+				const int fid = m_doc->addToInlineFrames(inner);
+				box->itemText.insertObject(0, fid);
+				box->itemText.insertChars(1, QString(SpecialChars::OBJECT));
+				check(QStringLiteral("saved %1").arg(saveTo), m_doc->save(saveTo));
+				finish();
+				return;
+			}
 			finish();
 			return;
 		}

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include "suneer_news_panel.h"
+#include "suneerxmlclean.h"
 #include "suneer_obit_model.h"
 
 #include "commonstrings.h"
@@ -8627,6 +8628,9 @@ bool SuneerNewsPanel::writeWorkflowPage(const QByteArray& body, const QString& s
 	if (!xml.contains("<SCRIBUSUTF8NEW"))
 		return fail(tr("the workflow did not send a Scribus document (%1 bytes, starts with \"%2\")")
 		            .arg(body.size()).arg(QString::fromUtf8(body.left(40)).simplified()));
+	// Characters XML forbids (seen: U+0019 in a story) make the whole page unreadable: out, the file as sent kept
+	const QByteArray asSent = xml;
+	const QList<SuneerXmlClean::Hit> removedChars = SuneerXmlClean::clean(xml);
 	// The pictures go next to the .sla in <base>_images/ (a folder per page: two pages of one
 	// day would otherwise share images/0_*.jpg), so the references move with them.
 	if (!pictures.isEmpty())
@@ -8664,6 +8668,17 @@ bool SuneerNewsPanel::writeWorkflowPage(const QByteArray& body, const QString& s
 		}
 		if (images)
 			*images = pictures.size();
+	}
+	if (!removedChars.isEmpty())
+	{
+		const QString original = slaPath + QStringLiteral(".original");
+		QSaveFile copy(original);
+		if (!copy.open(QIODevice::WriteOnly) || copy.write(asSent) != asSent.size() || !copy.commit())
+			return fail(tr("cannot write %1 (%2)").arg(original, copy.errorString()));
+		const QString text = SuneerXmlClean::message(removedChars, false);
+		apiLog(QStringLiteral("open from workflow: %1; the file as sent is %2").arg(text, original));
+		m_wfTestLog << QStringLiteral("cleaned: ") + text;
+		m_wfCleanNote = tr("%1.\n\nThe page is clean. The file as the workflow sent it is kept as %2").arg(text, original);
 	}
 	QSaveFile f(slaPath);
 	if (!f.open(QIODevice::WriteOnly) || f.write(xml) != xml.size() || !f.commit())
@@ -8923,6 +8938,12 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 			finish(tr("Opened %1 (%2, %3) from the workflow%4").arg(pageName, edition, date,
 			       images ? tr(", %n picture(s)", nullptr, images) : QString()), false);
 			setStatusDetails(tr("Saved as %1").arg(QDir::toNativeSeparators(path)));
+			if (!m_wfCleanNote.isEmpty())
+			{
+				if (m_wfTestAnswer.isEmpty())
+					QMessageBox::warning(this, tr("Invalid characters removed"), m_wfCleanNote);
+				m_wfCleanNote.clear();
+			}
 			// the page's news list, then the sync: frames linked to their stories, used / unused checked;
 			// at its end an obituary page's unprocessed photos are offered (once per page)
 			QTimer::singleShot(0, this, [this]() { onFetchNews(); });

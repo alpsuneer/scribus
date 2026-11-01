@@ -45,6 +45,7 @@ for which a new license (GPL+exception) is in place.
 #include "scpattern.h"
 #include "scribuscore.h"
 #include "scribusdoc.h"
+#include "suneerxmlclean.h"
 #include "sctextstream.h"
 #include "scxmlstreamreader.h"
 #include "textnote.h"
@@ -215,7 +216,7 @@ QIODevice* Scribus170Format::slaReader(const QString & fileName)
 			return nullptr;
 		}
 	}
-	return ioDevice;
+	return SuneerXmlClean::cleanReader(ioDevice, fileName);
 }
 
 QIODevice* Scribus170Format::paletteReader(const QString & fileName)
@@ -245,7 +246,7 @@ QIODevice* Scribus170Format::paletteReader(const QString & fileName)
 			return nullptr;
 		}
 	}
-	return ioDevice;
+	return SuneerXmlClean::cleanReader(ioDevice, fileName);
 }
 
 void Scribus170Format::getReplacedFontData(bool & getNewReplacement, QMap<QString,QString> &getReplacedFonts, QList<ScFace> &getDummyScFaces)
