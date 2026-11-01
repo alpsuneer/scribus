@@ -30,6 +30,7 @@ for which a new license (GPL+exception) is in place.
 #include <functional>
 
 #include "suneer_obit_model.h"
+#include "suneerlayoutengine.h"
 #include "suneerspacing.h"
 #include "suneertextclean.h"
 #include "suneerweld.h"
@@ -502,21 +503,9 @@ SuneerNewsPanel::RepackResult SuneerNewsPanel::repackCore(const RepackScope& sco
 		}
 		return l;
 	};
-	// the first free y from y0 down for a w x h rect at x (pushed below whatever it meets)
+	// the first free y from y0 down for a w x h rect at x: the one packer (SuneerLayout::ColumnPacker)
 	auto scanFree = [&](double x, double w, double h, double y0, const QList<QRectF>& list) -> double {
-		double y = y0;
-		for (int guard = 0; guard < 500; ++guard)
-		{
-			const QRectF r(x, y, w, h);
-			double push = -1;
-			for (const QRectF& o : list)
-				if (hits(r, o))
-					push = qMax(push, o.bottom() + gap);
-			if (push < 0)
-				return y;
-			y = push;
-		}
-		return 1e9;
+		return SuneerLayout::ColumnPacker::firstFree(x, w, h, y0, 1e9, list, gap, kTol);
 	};
 	QList<QList<PageItem*>> toPark;
 	QSet<int> movedFirst;

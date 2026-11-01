@@ -165,8 +165,45 @@ bool isObitModel(const SuneerLayoutModel& model)
 	return false;
 }
 
+QString workflowPageType(ScribusDoc* doc)
+{
+	if (!doc)
+		return QString();
+	const QMap<QString, QString>& wf = doc->suneerWorkflow();
+	if (wf.value(QStringLiteral("pageId")).isEmpty())
+		return QString();
+	const QString type = wf.value(QStringLiteral("pageType")).trimmed();
+	return type.isEmpty() ? wf.value(QStringLiteral("pageName")).trimmed() : type;
+}
+
+bool workflowPageIsObituary(ScribusDoc* doc)
+{
+	if (!doc)
+		return false;
+	const QMap<QString, QString>& wf = doc->suneerWorkflow();
+	if (wf.value(QStringLiteral("pageId")).isEmpty())
+		return false;
+	const QStringList probes { wf.value(QStringLiteral("pageType")).trimmed(), wf.value(QStringLiteral("pageName")).trimmed() };
+	const bool haveModel = SuneerLayoutModels::exists(QStringLiteral("obituary"));
+	const SuneerLayoutModel ob = haveModel ? SuneerLayoutModels::savedById(QStringLiteral("obituary")) : SuneerLayoutModel();
+	for (const QString& p : probes)
+	{
+		if (p.isEmpty())
+			continue;
+		if (p.contains(QLatin1String("obit"), Qt::CaseInsensitive) || p.contains(QStringLiteral("\u0D1A\u0D30\u0D2E")))
+			return true;
+		if (haveModel && ob.appliesTo(p))
+			return true;
+	}
+	return false;
+}
+
 bool isObitPage(const PageIn& page)
 {
+	// suneer 2026-11-01: a page opened from the workflow is an obituary page when the workflow says so -
+	// the same as a page the Obituary model placed here, whatever its frames carry
+	if (page.doc && workflowPageIsObituary(page.doc))
+		return true;
 	int obits = 0, placed = 0;
 	for (const StoryIn& s : page.stories)
 	{
@@ -973,10 +1010,12 @@ void Job::prepare()
 		for (int i : arrange)
 		{
 			const StoryIn& s = pg.stories[i];
-			bool obit = !s.title.contains('\n') && s.title.split(' ', Qt::SkipEmptyParts).size() <= om.titleMaxWords
-			            && s.title.length() <= om.titleMaxChars && s.bodyChars <= om.bodyMaxChars;
+			// suneer 2026-11-01: the role comes from the workflow column count ONLY (user decision): 2 = the
+			// 2-column news of the band, 3 or more = news in the obit columns, anything else = an obit. The
+			// title / body length rule is gone - SuneerNewsPanel::obitRole (Place selected) says the same.
+			bool obit = true;
 			if (s.placed && s.kind == QLatin1String("obit"))
-				obit = true;                       // detected on the page as an obit module
+				obit = true;                       // tagged / detected on the page as an obit module
 			else if (s.placed && (s.kind == QLatin1String("story") || s.kind == QLatin1String("block")))
 				obit = false;
 			// suneer 2026-10-26: the reserved news columns take ONLY the stories whose workflow column count
@@ -986,7 +1025,7 @@ void Job::prepare()
 			const int placedSpan = !s.placed ? 0 : (s.placedCols > 0 ? s.placedCols
 			                       : qMax(1, (int) std::lround((s.placedRect.width() + m_gutter) / qMax(1.0, m_colW + m_gutter))));
 			const bool band = s.requestedCols > 0 ? s.requestedCols == SuneerObitModel::kBandCount
-			                                      : (s.placed && !obit && placedSpan == SuneerObitModel::kBandCount);
+			                                      : (s.placed && s.kind != QLatin1String("obit") && placedSpan == SuneerObitModel::kBandCount);
 			if (band || s.requestedCols > SuneerObitModel::kBandCount)
 				obit = false;
 			Todo t;
@@ -1040,6 +1079,10 @@ void Job::prepare()
 		std::stable_sort(m_todo.begin(), m_todo.end(), [&](const Todo& a, const Todo& b) {
 			const StoryIn& sa = m_page->stories[a.story];
 			const StoryIn& sb = m_page->stories[b.story];
+			// suneer 2026-11-01: both know their place in the workflow list -> that order (Place selected's),
+			// whether the module is on the page already or new; otherwise placed first, in reading order
+			if (sa.seq >= 0 && sb.seq >= 0)
+				return sa.seq < sb.seq;
 			if (sa.placed != sb.placed)
 				return sa.placed;
 			if (!sa.placed)
@@ -1191,55 +1234,84 @@ bool Job::step()
 	return false;
 }
 
-namespace {
-struct Packer
-{
-	QRectF content;
-	QList<double> colX;
-	double colW { 0 }, gutter { 0 }, gapV { 0 };
-	QList<QRectF> occupied;
+// ---------------------------------------------------------------------------
+// ColumnPacker: the one slot search (see the header)
+// ---------------------------------------------------------------------------
 
-	QRectF rectAt(int c0, int k, double y, double h) const
+double ColumnPacker::firstFree(double x, double w, double h, double yMin, double yMax, const QList<QRectF>& list, double gap, double tol)
+{
+	QList<double> cand { yMin };
+	for (const QRectF& o : list)
+		if (o.right() > x + tol && o.left() < x + w - tol && o.bottom() + gap >= yMin)
+			cand << o.bottom() + gap;
+	std::sort(cand.begin(), cand.end());
+	for (double y : cand)
 	{
-		return QRectF(colX[c0], y, k * colW + (k - 1) * gutter, h);
+		if (y + h > yMax + tol)
+			break;
+		const QRectF in = QRectF(x, y, w, h).adjusted(tol, tol, -tol, -tol);
+		bool ok = in.isValid();
+		for (const QRectF& o : list)
+			if (ok && in.intersects(o))
+				ok = false;
+		if (ok)
+			return y;
 	}
-	bool free(const QRectF& r) const
-	{
-		if (r.bottom() > content.bottom() + 0.5 || r.top() < content.top() - 0.5)
+	return 1e9;
+}
+
+bool ColumnPacker::free(const QRectF& r, const QList<QRectF>* extra) const
+{
+	if (r.bottom() > content.bottom() + tol || r.top() < content.top() - tol)
+		return false;
+	const QRectF in = r.adjusted(tol, tol, -tol, -tol);
+	if (!in.isValid())
+		return false;
+	for (const QRectF& o : occupied)
+		if (in.intersects(o))
 			return false;
-		const QRectF in = r.adjusted(0.5, 0.5, -0.5, -0.5);
-		for (const QRectF& o : occupied)
+	if (extra)
+		for (const QRectF& o : *extra)
 			if (in.intersects(o))
 				return false;
-		return true;
-	}
-	//! Lowest top in [yMin, yMax - h] where the module fits, -1 when nowhere.
-	double lowest(int c0, int k, double h, double yMin, double yMax) const
+	return true;
+}
+
+double ColumnPacker::lowestAt(double x, double w, double h, double yMin, double yMax, const QList<QRectF>* extra) const
+{
+	QList<QRectF> list = occupied;
+	if (extra)
+		list << *extra;
+	const double y = firstFree(x, w, h, qMax(yMin, content.top()), qMin(yMax, content.bottom()), list, gapV, tol);
+	return y >= 1e9 ? -1 : y;
+}
+
+int ColumnPacker::best(const QList<int>& allowed, int k, double h, double yMin, double yMax, double* yOut) const
+{
+	int bestC = -1;
+	double bestY = -1;
+	for (int j = 0; j + k - 1 < allowed.size(); ++j)
 	{
-		if (c0 < 0 || c0 + k > colX.size())
-			return -1;
-		QList<double> cand { yMin };
-		const QRectF span = rectAt(c0, k, yMin, 1);
-		for (const QRectF& o : occupied)
-			if (o.right() > span.left() + 0.5 && o.left() < span.right() - 0.5 && o.bottom() + gapV >= yMin)
-				cand << o.bottom() + gapV;
-		std::sort(cand.begin(), cand.end());
-		for (double y : cand)
+		const int c = allowed[j];
+		if (allowed[j + k - 1] != c + k - 1)
+			continue;                      // not neighbouring columns
+		const double y = lowest(c, k, h, yMin, yMax);
+		if (y >= 0 && (bestY < 0 || y < bestY - tol))
 		{
-			if (y + h > yMax + 0.5)
-				break;
-			if (free(rectAt(c0, k, y, h)))
-				return y;
+			bestY = y;
+			bestC = c;
 		}
-		return -1;
 	}
-};
-} // namespace
+	if (yOut)
+		*yOut = bestY;
+	return bestC;
+}
+
 
 void Job::pack()
 {
 	const SuneerSpacing::Values v = m_model.spacing();
-	Packer pk;
+	ColumnPacker pk;
 	pk.content = m_content;
 	pk.colX = m_plan.colX;
 	pk.colW = m_colW;
@@ -1370,7 +1442,7 @@ void Job::packObituary()
 	if (!m_model.obituary.isEmpty())
 		om.fromJson(m_model.obituary);
 	const SuneerSpacing::Values v = m_model.spacing();
-	Packer pk;
+	ColumnPacker pk;
 	pk.content = m_content;
 	pk.colX = m_plan.colX;
 	pk.colW = m_colW;
@@ -1407,20 +1479,8 @@ void Job::packObituary()
 			// a block moved as it is keeps its width: it takes every column it covers (it overlapped the next one)
 			k = qBound(1, (int) std::ceil((r.w - 1.0 + m_gutter) / (m_colW + m_gutter)), m_cols);
 		}
-		int bestC = -1;
 		double bestY = -1;
-		for (int j = 0; j + k - 1 < allowed.size(); ++j)
-		{
-			const int c = allowed[j];
-			if (allowed[j + k - 1] != c + k - 1)
-				continue;                      // not neighbouring columns
-			const double y = pk.lowest(c, k, r.h, m_content.top(), m_content.bottom());
-			if (y >= 0 && (bestY < 0 || y < bestY - 0.5))
-			{
-				bestY = y;
-				bestC = c;
-			}
-		}
+		const int bestC = pk.best(allowed, k, r.h, m_content.top(), m_content.bottom(), &bestY);
 		if (bestC < 0 || r.overflow)
 		{
 			m_plan.notFit << t.story;
@@ -2276,6 +2336,8 @@ PageIn collectPage(ScribusDoc* doc, int pageIndex, const QList<StoryIn>& newStor
 	p.doc = doc;
 	p.styles = styles;
 	p.pageKey = pageKey;
+	if (p.pageKey.trimmed().isEmpty())
+		p.pageKey = workflowPageType(doc);          // suneer 2026-11-01: a workflow page knows its type
 	if (!doc || pageIndex < 0 || pageIndex >= doc->Pages->count())
 	{
 		p = samplePage(nullptr);
@@ -2350,6 +2412,10 @@ PageIn collectPage(ScribusDoc* doc, int pageIndex, const QList<StoryIn>& newStor
 				s.manual = true;
 		s.placedCols = m.body ? itemAttr(m.body, QStringLiteral("news.cols")).toInt() : 0;
 		s.requestedCols = m.body ? itemAttr(m.body, QStringLiteral("news.columns")).toInt() : 0;   // the desk's width stays through Re-layout / Apply
+		s.seq = -1;
+		for (const QPointer<PageItem>& it : m.items)
+			if (it && !itemAttr(it, QStringLiteral("news.seq")).isEmpty())
+				s.seq = itemAttr(it, QStringLiteral("news.seq")).toInt();
 		if (m.body)
 		{
 			s.requestedHead = itemAttr(m.body, QStringLiteral("news.headStyle"));

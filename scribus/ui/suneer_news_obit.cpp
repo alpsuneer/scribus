@@ -79,6 +79,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QLabel>
+#include <QCheckBox>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -160,6 +161,9 @@ QString SuneerNewsPanel::layoutModelKey() const
 	if (!m_pageCombo)
 		return QString();
 	const QString pageId = m_pageCombo->currentData().toString();
+	// suneer 2026-11-01: a page opened from the workflow is what the workflow says it is, whatever page the list shows
+	if (m_doc && !m_doc->suneerWorkflow().value(QStringLiteral("pageId")).isEmpty() && m_doc->suneerWorkflow().value(QStringLiteral("pageId")) != pageId)
+		return SuneerLayout::workflowPageType(m_doc);
 	const QString type = m_pageTypes.value(pageId).trimmed();
 	return type.isEmpty() ? m_pageCombo->currentText().trimmed() : type;
 }
@@ -251,7 +255,9 @@ SuneerNewsPanel::ObitRole SuneerNewsPanel::obitRole(const QJsonObject& news, con
 			*cols = qMax(1, model.newsLastCol - model.newsFirstCol + 1);
 		return ObitRoleBand;
 	}
-	if (req < 2 && obitIsObituary(news, model))
+	// suneer 2026-11-01 (user decision): the role is the workflow column count ONLY - no count or 1 = an obit,
+	// whatever its title or body length (obitIsObituary is no longer asked); 3 or more = news in the obit columns
+	if (req < 2)
 	{
 		if (cols)
 			*cols = 1;
@@ -499,8 +505,17 @@ void SuneerNewsPanel::obitPlaceNow()
 	const double photoTextGap = sp.pt(SuneerSpacing::PhotoText);
 	const double inset = sp.pt(SuneerSpacing::Inset);
 
+	// suneer 2026-11-01: THE packer (SuneerLayout::ColumnPacker) - the same slot search as the Layout
+	// Gallery / Re-layout and Re-pack; its occupied list is this placement's obstacle list
+	SuneerLayout::ColumnPacker pk;
+	pk.content = QRectF(pageX + page->Margins.left(), top, page->width() - page->Margins.left() - page->Margins.right(), bottom - top);
+	for (int c = 1; c <= qMax(1, model.gridColumns); ++c)
+		pk.colX << colX(c);
+	pk.colW = colW;
+	pk.gutter = gap;
+	pk.gapV = moduleGap;
+	QList<QRectF>& obstacles = pk.occupied;
 	// -- what is already there: every item touching this page, master items too
-	QList<QRectF> obstacles;
 	const QRectF pageRect(pageX, pageY, page->width(), page->height());
 	for (int i = 0; i < m_doc->DocItems.count(); ++i)
 	{
@@ -712,6 +727,13 @@ void SuneerNewsPanel::obitPlaceNow()
 	// No room on the page: the finished module goes to the pasteboard right
 	// of the page, grouped and tagged (news.parked = 1), and is listed -
 	// never dropped silently. It stays out of the server marks.
+	// suneer 2026-11-01: the story's place in the list (news.seq) - the Gallery / Re-layout pack in this order too
+	auto listSeq = [this](const QString& sid) {
+		for (int i = 0; i < m_newsData.size() && !sid.isEmpty(); ++i)
+			if (newsServerId(m_newsData[i].toObject()) == sid)
+				return i;
+		return -1;
+	};
 	const double parkX = pageX + page->width() + 10.0 * kMm;
 	double parkY = pageY;
 	QStringList parkedTitles;
@@ -734,6 +756,8 @@ void SuneerNewsPanel::obitPlaceNow()
 		{
 			setAttr(it, "news.model", modelName);
 			setAttr(it, "news.parked", QStringLiteral("1"));
+			if (listSeq(newsServerId(n)) >= 0)
+				setAttr(it, "news.seq", QString::number(listSeq(newsServerId(n))));
 			if (!newsRefId(n).isEmpty())
 				setAttr(it, "news.refId", newsRefId(n));
 		}
@@ -849,31 +873,21 @@ void SuneerNewsPanel::obitPlaceNow()
 			items << text;
 			const double moduleH = (photo ? photoH + photoTextGap : 0.0) + text->height();
 
-			// Find a column and y where the module is free of other items.
+			// The slot: the obit column where the module starts highest (the one packer, as the Gallery)
 			bool fitted = false;
-			QList<int> order = obitCols;
-			std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return cursor[a] < cursor[b]; });
-			for (int c : order)
 			{
-				double cy = cursor[c];
-				const double cx = colX(c);
-				for (int guard = 0; guard < 50; ++guard)
+				QList<int> allowed;
+				for (int c : obitCols)
+					allowed << c - 1;
+				double slotY = -1;
+				const int c0 = pk.best(allowed, 1, moduleH, top, bottom, &slotY);
+				if (c0 >= 0)
 				{
-					if (cy + moduleH > bottom + tol)
-						break;
-					double pushTo = cy;
-					if (!blockedBelow(QRectF(cx, cy, colW, moduleH), &pushTo))
-					{
-						x = cx;
-						y = cy;
-						bestCol = c;
-						fitted = true;
-						break;
-					}
-					cy = pushTo;
+					x = colX(c0 + 1);
+					y = slotY;
+					bestCol = c0 + 1;
+					fitted = true;
 				}
-				if (fitted)
-					break;
 			}
 			if (!fitted)
 			{
@@ -919,6 +933,8 @@ void SuneerNewsPanel::obitPlaceNow()
 				setAttr(it, "news.model", "obituary");
 				if (!newsRefId(n).isEmpty())
 					setAttr(it, "news.refId", newsRefId(n));
+				if (listSeq(sid) >= 0)
+					setAttr(it, "news.seq", QString::number(listSeq(sid)));
 			}
 			placed << n;
 			++obitsPlaced;
@@ -1122,18 +1138,12 @@ void SuneerNewsPanel::obitPlaceNow()
 			int areaCol = 0;        // obit columns: the first grid column of the slot (1-based); 0 = the band
 			if (inBand)
 			{
-				// the reserved band only: a 2-column story never goes into the obit columns
-				for (int guard = 0; guard < 50; ++guard)
+				// the reserved band only: a 2-column story never goes into the obit columns (the one packer)
+				const double slotY = pk.lowestAt(x, w, h, top, bottom);
+				if (slotY >= 0)
 				{
-					if (cy + h > bottom + tol)
-						break;
-					double pushTo = cy;
-					if (!blockedBelow(QRectF(x, cy, w, h), &pushTo))
-					{
-						fitted = true;
-						break;
-					}
-					cy = pushTo;
+					cy = slotY;
+					fitted = true;
 				}
 			}
 			else
@@ -1143,29 +1153,12 @@ void SuneerNewsPanel::obitPlaceNow()
 				// the smallest
 				double bestY = 0.0;
 				int bestC = 0;
-				for (int ci = 0; ci + span - 1 < obitCols.size(); ++ci)
 				{
-					const int c1 = obitCols[ci];
-					if (obitCols[ci + span - 1] != c1 + span - 1)
-						continue;          // not neighbouring grid columns
-					const double ax = colX(c1);
-					double ay = top;
-					for (int guard = 0; guard < 80; ++guard)
-					{
-						if (ay + h > bottom + tol)
-							break;
-						double pushTo = ay;
-						if (!blockedBelow(QRectF(ax, ay, w, h), &pushTo))
-						{
-							if (!bestC || ay < bestY - tol)
-							{
-								bestY = ay;
-								bestC = c1;
-							}
-							break;
-						}
-						ay = pushTo;
-					}
+					QList<int> allowed;
+					for (int c : obitCols)
+						allowed << c - 1;
+					const int c0 = pk.best(allowed, span, h, top, bottom, &bestY);
+					bestC = c0 >= 0 ? c0 + 1 : 0;
 				}
 				if (bestC)
 				{
@@ -1226,6 +1219,8 @@ void SuneerNewsPanel::obitPlaceNow()
 				setAttr(it, "news.model", "obituary-news");
 				if (!newsRefId(n).isEmpty())
 					setAttr(it, "news.refId", newsRefId(n));
+				if (listSeq(sid) >= 0)
+					setAttr(it, "news.seq", QString::number(listSeq(sid)));
 			}
 			placed << n;
 			if (inBand)
@@ -1554,13 +1549,9 @@ QStringList SuneerNewsPanel::obitRepackPage(int* movedOut, bool* changedOut)
 		double y = top;
 		const double h = m.r.height();
 		const QList<QRectF> list = obstacles + settled;
-		for (int guard = 0; guard < 120; ++guard)
-		{
-			double pushTo = y;
-			if (!blocked(QRectF(m.r.left(), y, m.r.width(), h), list, &pushTo))
-				break;
-			y = pushTo;
-		}
+		y = SuneerLayout::ColumnPacker::firstFree(m.r.left(), m.r.width(), h, top, 1e9, list, moduleGap, tol);   // the one packer
+		if (y >= 1e9)
+			y = m.r.top();
 		if (y < m.r.top() - tol)
 		{
 			const double dy = y - m.r.top();
@@ -3307,7 +3298,7 @@ void SuneerNewsPanel::openLayoutModels()
 	updateLayoutModelInfo();
 }
 
-void SuneerNewsPanel::openLayoutGallery()
+SuneerLayoutGallery::Source SuneerNewsPanel::gallerySource()
 {
 	SuneerLayoutGallery::Source src;
 	src.doc = m_doc;
@@ -3359,7 +3350,12 @@ void SuneerNewsPanel::openLayoutGallery()
 	};
 	src.checkModules = [this]() { openPageModules(); };
 	src.openPageModels = [this]() { openPageModelGallery(); };
-	SuneerLayoutGallery dlg(src, this);
+	return src;
+}
+
+void SuneerNewsPanel::openLayoutGallery()
+{
+	SuneerLayoutGallery dlg(gallerySource(), this);
 	dlg.exec();
 }
 
@@ -3403,4 +3399,403 @@ QList<SuneerLayout::StoryIn> SuneerNewsPanel::galleryNewStories(QString* note)
 		out << storyInFromNews(jsons[i], QStringLiteral("new:") + (sid.isEmpty() ? QString::number(i) : sid));
 	}
 	return out;
+}
+
+// ---------------------------------------------------------------------------
+// suneer 2026-11-01: a page opened from the workflow, seen exactly like a page the Obituary model
+// placed here. "Open page from workflow" links the frames to their stories (news.story / serverId /
+// role) and nothing more, so the Layout Gallery took the page for a normal one (no obituary tag on
+// any frame), guessed each story's role from its text length, and the Obituary engine's modules
+// (news.model, news.cols, the loose news photo) were not there. This writes what Place selected
+// writes. Re-run safe: a story with news.model on every frame is left alone.
+// ---------------------------------------------------------------------------
+
+int SuneerNewsPanel::tagWorkflowObitPage(ScribusDoc* doc, QStringList* log)
+{
+	if (!doc || !SuneerLayout::workflowPageIsObituary(doc))
+		return 0;
+	const QString pageId = doc->suneerWorkflow().value(QStringLiteral("pageId"));
+	// the page's list: the role (workflow column count) and the order
+	QHash<QString, QJsonObject> bySid;
+	QHash<QString, int> seqOf;
+	for (int i = 0; i < m_newsData.size(); ++i)
+	{
+		const QJsonObject n = m_newsData[i].toObject();
+		const QString sid = newsServerId(n);
+		if (sid.isEmpty())
+			continue;
+		bySid.insert(sid, n);
+		seqOf.insert(sid, i);
+	}
+	struct Story { PageItem* text { nullptr }; QList<PageItem*> parts; QString sid; };
+	QMap<QString, Story> stories;
+	QList<PageItem*> freeImages, freeTexts;
+	for (int i = 0; i < doc->Items->count(); ++i)
+	{
+		PageItem* it = doc->Items->at(i);
+		if (it->isGroup() || it->OwnPage != 0)
+			continue;
+		const QString st = attr(it, "news.story");
+		if (st.isEmpty())
+		{
+			if (it->isImageFrame())
+				freeImages << it;
+			else if (it->isTextFrame())
+				freeTexts << it;
+			continue;
+		}
+		Story& s = stories[st];
+		s.parts << it;
+		if (!s.text && it->isTextFrame() && attr(it, "news.role") == QLatin1String("text"))
+			s.text = it;
+		if (s.sid.isEmpty())
+			s.sid = attr(it, "news.serverId");
+	}
+	const SuneerObitModel om = obitModel();
+	const ScPage* page = doc->Pages->isEmpty() ? nullptr : doc->Pages->at(0);
+	const double gutter = om.gridGapMm * kMm;
+	const double colW = (page && om.gridColumns > 0) ? (page->width() - page->Margins.left() - page->Margins.right() - gutter * (om.gridColumns - 1)) / om.gridColumns : 0.0;
+	int tagged = 0;
+	for (auto it = stories.begin(); it != stories.end(); ++it)
+	{
+		Story& s = it.value();
+		if (!s.text)
+			continue;
+		bool done = true;
+		for (PageItem* p : std::as_const(s.parts))
+			if (attr(p, "news.model").isEmpty())
+				done = false;
+		if (done)
+			continue;
+		const bool listed = bySid.contains(s.sid);
+		int req = 0;
+		if (listed)
+			req = requestedColumns(bySid.value(s.sid));
+		else
+		{
+			// not in the list: the frame says it - 2 text columns or 2 grid columns wide = the band news
+			const int span = colW > 0 ? qMax(1, (int) std::lround((s.text->width() + gutter) / (colW + gutter))) : 1;
+			req = (s.text->columns() == SuneerObitModel::kBandCount || span == SuneerObitModel::kBandCount) ? SuneerObitModel::kBandCount
+			    : (span > SuneerObitModel::kBandCount ? span : 0);
+		}
+		const bool band = req == SuneerObitModel::kBandCount;
+		const bool obit = !band && req < SuneerObitModel::kBandCount;       // obitRole(): the count only
+		const QRectF tr = s.text->getBoundingRect();
+		// the photo: welded to the text (an obit cell), or the loose image frame inside the text frame (the 2-column news)
+		PageItem* photo = nullptr;
+		for (PageItem* p : std::as_const(s.parts))
+			if (p->isImageFrame() && !photo)
+				photo = p;
+		if (!photo)
+			for (PageItem* im : std::as_const(freeImages))
+				if (tr.adjusted(-1.0 * kMm, -1.0 * kMm, 1.0 * kMm, 1.0 * kMm).contains(im->getBoundingRect()))
+				{
+					photo = im;
+					break;
+				}
+		if (photo && !s.parts.contains(photo))
+		{
+			freeImages.removeAll(photo);
+			s.parts << photo;
+		}
+		PageItem* caption = nullptr;
+		if (photo)
+		{
+			for (PageItem* p : std::as_const(s.parts))
+				if (p != s.text && p->isTextFrame() && attr(p, "news.role") == QLatin1String("caption"))
+					caption = p;
+			const QString uid = SuneerWeld::ensurePhotoUid(photo);
+			if (!caption)
+				for (PageItem* t : std::as_const(freeTexts))
+					if (attr(t, "news.captionOf") == uid || (t->itemName().startsWith(QLatin1String("caption_")) && tr.contains(t->getBoundingRect().center())))
+					{
+						caption = t;
+						break;
+					}
+			if (caption && !s.parts.contains(caption))
+			{
+				freeTexts.removeAll(caption);
+				s.parts << caption;
+			}
+		}
+		const QString pos = photo ? (obit ? QStringLiteral("top") : QStringLiteral("right")) : QStringLiteral("none");
+		const int cols = band ? SuneerObitModel::kBandCount : (obit ? 1 : qBound(1, req, qMax(1, om.obitLastCol - om.obitFirstCol + 1)));
+		for (PageItem* p : std::as_const(s.parts))
+		{
+			setAttr(p, "news.story", it.key());
+			if (!s.sid.isEmpty())
+				setAttr(p, "news.serverId", s.sid);
+			if (!pageId.isEmpty())
+				setAttr(p, "news.pageId", pageId);
+			if (p == photo)
+				setAttr(p, "news.role", "photo");
+			else if (p == caption)
+				setAttr(p, "news.role", "caption");
+			else if (p == s.text)
+				setAttr(p, "news.role", "text");
+			setAttr(p, "news.photoPos", pos);
+			setAttr(p, "news.photoCols", QStringLiteral("1"));
+			setAttr(p, "news.cols", QString::number(cols));
+			setAttr(p, "news.model", obit ? QStringLiteral("obituary") : QStringLiteral("obituary-news"));
+			if (listed)
+			{
+				if (!newsRefId(bySid.value(s.sid)).isEmpty())
+					setAttr(p, "news.refId", newsRefId(bySid.value(s.sid)));
+				setAttr(p, "news.seq", QString::number(seqOf.value(s.sid)));
+			}
+		}
+		if (req > 0)
+			setAttr(s.text, "news.columns", QString::number(req));   // the desk's count: the band rule in Re-layout / Apply
+		// the text as Place selected writes it: paragraph styles only (the export adds an explicit alignment
+		// and a 2.2 pt gap after the name - 0.42 mm per module) and no text flow around an obit photo
+		// (the export's photos flow the text around their contour, which pushed one story 32 mm down)
+		auto cleanParas = [](PageItem* t, std::function<QString(int, const QString&)> parentFor) {
+			StoryText& st = t->itemText;
+			ParagraphStyle d;
+			d.charStyle().setLanguage(st.defaultStyle().charStyle().language());
+			st.setDefaultStyle(d);                       // the frame's default: the document's (the export's: the name style)
+			int para = 0;
+			for (int i = 0; i < st.length(); ++i)
+				if (i == 0 || st.text(i - 1) == SpecialChars::PARSEP)
+				{
+					ParagraphStyle ps;
+					ps.setParent(parentFor(para++, st.paragraphStyle(i).parent()));
+					st.setStyle(i, ps);
+				}
+			t->invalidateLayout();
+		};
+		if (obit)
+		{
+			// an obit cell: name / place / body in the model's styles - the "no pic" set when it has no photo
+			// (the export uses the photo styles and no top inset for those)
+			const bool pic = photo != nullptr;
+			auto has = [doc](const QString& n) { return !n.isEmpty() && doc->paragraphStyles().contains(n); };
+			cleanParas(s.text, [&](int idx, const QString& old) {
+				QString want = old;
+				if (old.contains(QLatin1String("Name"), Qt::CaseInsensitive) || idx == 0)
+					want = pic ? om.styleName : om.styleNameNoPic;
+				else if (old.contains(QLatin1String("Place"), Qt::CaseInsensitive))
+					want = pic ? om.stylePlace : om.stylePlaceNoPic;
+				else if (old.contains(QLatin1String("Body"), Qt::CaseInsensitive))
+					want = pic ? om.styleBody : om.styleBodyNoPic;
+				return has(want) ? want : old;
+			});
+			const double inset = 0.0;
+			s.text->setTextToFrameDist(inset, inset, qMax(inset, om.textTopDistPt), inset);
+			s.text->setFirstLineOffset(FLOPFontAscent);
+			s.text->setColumns(1);
+		}
+		else
+			cleanParas(s.text, [](int, const QString& old) { return old; });
+		if (caption)
+			cleanParas(caption, [](int, const QString& old) { return old; });
+		if (photo && obit)
+			photo->setTextFlowMode(PageItem::TextFlowDisabled);
+		if (photo)
+		{
+			setAttr(photo, "news.index", "0");
+			// an obit cell's photo: the model's square frame (the export's frame was a few hundredths wider)
+			if (obit && colW > 0 && (qAbs(photo->width() - colW) > 0.01 || qAbs(photo->height() - om.photoMm * kMm) > 0.01))
+			{
+				photo->setWidthHeight(colW, om.photoMm * kMm);
+				photo->adjustPictScale();
+				photo->updateClip();
+			}
+		}
+		if (caption)
+		{
+			setAttr(caption, "news.index", "0");
+			SuneerWeld::linkCaption(photo, caption);
+			// the caption frame as placeNews() makes it: real glyph top, no insets, wraps with the caption -> text gap
+			const SuneerSpacing::Values sp = spacingValues();
+			caption->setFirstLineOffset(FLOPRealGlyphHeight);
+			caption->setTextToFrameDist(0.0, 0.0, 0.0, 0.0);
+			setAttr(caption, "news.captionGap", QString::number(sp.pt(SuneerSpacing::CaptionGap), 'f', 3));
+			setWrap(caption, true);
+			if (sp.pt(SuneerSpacing::CaptionText) > 0)
+				caption->setWrapOffsetBottom(sp.pt(SuneerSpacing::CaptionText));
+			if (!caption->asTextFrame()->suneerFitCaptionHeight(false))
+				fitFrame(caption);
+		}
+		// welded like a placed module (the export left the news photo loose); already-welded parts stay as they are
+		SuneerWeld::weldStory(doc, s.parts, obit ? nullptr : s.text);
+		indexAdd(s.parts);
+		++tagged;
+		const QString l = QStringLiteral("'%1' -> %2, %3 part(s)%4%5, columns %6%7")
+		                      .arg(it.key().left(20), obit ? QStringLiteral("obit") : QStringLiteral("news"))
+		                      .arg(s.parts.size()).arg(photo ? QStringLiteral(", photo") : QString(), caption ? QStringLiteral(", caption") : QString())
+		                      .arg(req).arg(listed ? QString() : QStringLiteral(" (not in the list: by the frame)"));
+		if (log)
+			*log << l;
+	}
+	if (tagged > 0)
+		doc->changed();
+	apiLog(QStringLiteral("workflow obituary page %1: %2 of %3 stories tagged like Place selected (%4)")
+	           .arg(doc->suneerWorkflow().value(QStringLiteral("pageName"))).arg(tagged).arg(stories.size()).arg(SuneerLayout::workflowPageType(doc)));
+	return tagged;
+}
+
+// tests/suneer/obit_parity.sh: the same stories placed here (Place selected on a blank page) and
+// opened from the workflow must give the Layout Gallery the same page. This runs on either document.
+void SuneerNewsPanel::runObitParitySelfTest(const QString& prefix)
+{
+	const QString mode = qEnvironmentVariable("SUNEER_OBITPAR_MODE", QStringLiteral("gallery"));
+	const QString modelId = qEnvironmentVariable("SUNEER_OBITPAR_MODEL", QStringLiteral("obituary"));   // obituary (news right) or obituary-left
+	auto lines = std::make_shared<QStringList>();
+	auto fails = std::make_shared<int>(0);
+	auto check = [lines, fails](const QString& what, bool ok) { *lines << (ok ? QStringLiteral("PASS ") : QStringLiteral("FAIL ")) + what; *fails += ok ? 0 : 1; };
+	auto note = [lines](const QString& l) { *lines << QStringLiteral("  ") + l; };
+	auto finish = [this, lines, fails, prefix]() {
+		*lines << (*fails ? QStringLiteral("FAILED: %1").arg(*fails) : QStringLiteral("ALL PASS"));
+		QFile f(prefix + QStringLiteral("-report.txt"));
+		if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+			f.write(lines->join('\n').toUtf8() + "\n");
+		fprintf(stderr, "OBITPAR-SELFTEST done\n");
+		QTimer::singleShot(300, this, [this]() { if (m_mw) m_mw->close(); else QApplication::exit(0); });
+	};
+	if (!m_doc || !m_mw)
+	{
+		check(QStringLiteral("a document"), false);
+		finish();
+		return;
+	}
+	for (UndoGui* g : m_mw->findChildren<UndoGui*>())
+		UndoManager::instance()->removeGui(g);
+	note(QStringLiteral("mode %1, document %2").arg(mode, m_doc->documentFileName()));
+	onFetchNews();
+	auto* wait = new QTimer(this);
+	auto t0 = std::make_shared<QElapsedTimer>();
+	t0->start();
+	wait->setInterval(200);
+	connect(wait, &QTimer::timeout, this, [this, wait, t0, mode, modelId, prefix, check, note, finish]() {
+		if (m_newsList->count() == 0 && t0->elapsed() < 20000)
+			return;
+		wait->stop();
+		wait->deleteLater();
+		check(QStringLiteral("news list loaded: %1 stories").arg(m_newsList->count()), m_newsList->count() > 0);
+		auto rest = std::make_shared<std::function<void()>>();
+		*rest = [this, mode, modelId, prefix, check, note, finish]() {
+			if (mode == QLatin1String("workflow"))
+			{
+				QStringList log;
+				const int n = tagWorkflowObitPage(m_doc, &log);
+				for (const QString& l : log)
+					note(l);
+				check(QStringLiteral("workflow page tagged like Place selected: %1 stories").arg(n), n > 0);
+			}
+			// what the Gallery sees
+			const int pageIdx = m_doc->currentPageNumber();
+			const SuneerLayout::PageIn pin = SuneerLayout::collectPage(m_doc, pageIdx, {}, SuneerLayout::StyleNames::fromSettings(panelTitleStyle()), layoutModelKey(), nullptr);
+			int obits = 0, news = 0, other = 0;
+			for (const SuneerLayout::StoryIn& s : pin.stories)
+				(s.kind == QLatin1String("obit") ? obits : s.kind == QLatin1String("story") ? news : other)++;
+			note(QStringLiteral("page key '%1'; modules: %2 obit, %3 news, %4 other (%5 detected by geometry, %6 placed); kept items %7")
+			         .arg(pin.pageKey).arg(obits).arg(news).arg(other).arg(pin.detected).arg(pin.stories.size()).arg(pin.always.size()));
+			check(QStringLiteral("recognised as an obituary page"), SuneerLayout::isObitPage(pin));
+			check(QStringLiteral("no module detected by geometry only (every story tagged)"), pin.detected == 0);
+			// the Obituary card (the Gallery's thumbnail code)
+			const SuneerLayoutGallery::Preview pv = previewArrange(modelId, 0, false, {}, 700);
+			check(QStringLiteral("obituary card: %1").arg(pv.fitLine.simplified()), pv.ok && pv.allFit);
+			note(QStringLiteral("card leaves the page as it is: %1").arg(pv.noChange ? QStringLiteral("yes") : QStringLiteral("no")));
+			pv.image.save(prefix + QStringLiteral("-card.png"));
+			QFile sig(prefix + QStringLiteral("-card-signature.txt"));
+			if (sig.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				sig.write(pv.signature.join('\n').toUtf8() + "\n");
+			// the Gallery dialog itself: which models, the checkbox, the fit lines (grabbed for the report)
+			auto* dlg = new SuneerLayoutGallery(gallerySource(), this);
+			dlg->setAttribute(Qt::WA_DeleteOnClose);
+			dlg->resize(1500, 900);
+			dlg->show();
+			QTimer::singleShot(qMax(5, qEnvironmentVariableIntValue("SUNEER_OBITPAR_GALLERY_S")) * 1000, this, [this, dlg, modelId, prefix, check, note, finish]() {
+				QStringList labels, boxes;
+				for (QLabel* l : dlg->findChildren<QLabel*>())
+				{
+					const QString t = l->text().simplified();
+					if (!t.isEmpty() && (t.contains(QLatin1String("obit")) || t.contains(QLatin1String(" fit")) || t.contains(QLatin1String("free")) || t.contains(QLatin1String("Obituary"))))
+						labels << t;
+				}
+				for (QCheckBox* c : dlg->findChildren<QCheckBox*>())
+					boxes << c->text() + (c->isVisible() ? QStringLiteral(" (shown)") : QStringLiteral(" (hidden)"));
+				dlg->grab().save(prefix + QStringLiteral("-gallery.png"));
+				note(QStringLiteral("gallery: ") + labels.join(QStringLiteral(" | ")));
+				note(QStringLiteral("gallery checkboxes: ") + boxes.join(QStringLiteral(" | ")));
+				check(QStringLiteral("gallery shows the obituary page checkbox"), boxes.join(' ').contains(QLatin1String("Show all models (shown)")));
+				dlg->close();
+				// Apply
+				const QString report = arrangePage(modelId, 0, true, false);
+				note(QStringLiteral("apply: ") + report.simplified().left(400));
+			QFile fr(prefix + QStringLiteral("-frames.txt"));
+			if (fr.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+				for (int i = 0; i < m_doc->Items->count(); ++i)
+				{
+					PageItem* t = m_doc->Items->at(i);
+					if (!t->isTextFrame() || attr(t, "news.story").isEmpty())
+						continue;
+					fr.write(QStringLiteral("%1\t%2\t%3 mm\t%4 lines\t%5\t%6 chars\n").arg(attr(t, "news.serverId"), attr(t, "news.role"))
+					             .arg(t->height() / kMm, 0, 'f', 2).arg(t->asTextFrame()->textLayout.lines()).arg(t->frameOverflows() ? QStringLiteral("OVERFLOW") : QStringLiteral("ok")).arg(t->itemText.length()).toUtf8());
+				}
+				const bool saved = m_mw->DoFileSave(prefix + QStringLiteral("-after.sla"));
+				check(QStringLiteral("saved %1-after.sla").arg(prefix), saved);
+				finish();
+			});
+		};
+		if (mode == QLatin1String("place"))
+		{
+			// Place selected on this (blank) page with the Obituary model: every row ticked; the report box answered
+			for (int i = 0; i < m_newsList->count(); ++i)
+				m_newsList->item(i)->setCheckState(Qt::Checked);
+			if (m_layoutModelCmb && m_layoutModelCmb->findData(QStringLiteral("obituary")) >= 0)
+				m_layoutModelCmb->setCurrentIndex(m_layoutModelCmb->findData(QStringLiteral("obituary")));
+			auto* ok = new QTimer(this);
+			ok->setInterval(300);
+			connect(ok, &QTimer::timeout, this, []() {
+				if (auto* mb = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+				{
+					if (mb->defaultButton())
+						mb->defaultButton()->click();
+					else if (!mb->buttons().isEmpty())
+						mb->buttons().first()->click();
+				}
+				else if (auto* d = qobject_cast<QDialog*>(QApplication::activeModalWidget()))
+					d->accept();
+			});
+			ok->start();
+			m_dupTestAnswer = QStringLiteral("place");
+			onPlaceSelected();
+			// the Obituary model places after its photos are processed (asynchronous): wait until the
+			// story frames are there and their count has not changed for 8 s (or 15 min)
+			auto countPlaced = [this]() {
+				int placed = 0;
+				for (int i = 0; m_doc && i < m_doc->Items->count(); ++i)
+					if (attr(m_doc->Items->at(i), "news.role") == QLatin1String("text") && !attr(m_doc->Items->at(i), "news.story").isEmpty())
+						++placed;
+				return placed;
+			};
+			auto* poll = new QTimer(this);
+			auto last = std::make_shared<QPair<int, qint64>>(0, 0);
+			auto started = std::make_shared<QElapsedTimer>();
+			started->start();
+			poll->setInterval(500);
+			connect(poll, &QTimer::timeout, this, [this, poll, ok, rest, countPlaced, last, started, prefix, check, note]() {
+				const int n = countPlaced();
+				if (n != last->first)
+					*last = qMakePair(n, started->elapsed());
+				const bool settled = n > 0 && started->elapsed() - last->second > 8000;
+				if (!settled && started->elapsed() < 900000)
+					return;
+				poll->stop();
+				poll->deleteLater();
+				ok->stop();
+				ok->deleteLater();
+				note(QStringLiteral("place selected (%1 s): ").arg(started->elapsed() / 1000) + statusText().simplified().left(300));
+				check(QStringLiteral("placed %1 stories on the blank page").arg(n), n > 0);
+				m_mw->DoFileSave(prefix + QStringLiteral("-placed.sla"));
+				(*rest)();
+			});
+			poll->start();
+			return;
+		}
+		(*rest)();
+	});
+	wait->start();
 }

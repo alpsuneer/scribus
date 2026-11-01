@@ -1000,6 +1000,14 @@ void SuneerNewsPanel::setDocument(ScribusDoc* doc)
 		selfTestStarted = true;
 		QTimer::singleShot(4000, this, [this, selfTest]() { runLayoutSelfTest(selfTest); });
 	}
+	// tests/suneer/obit_parity.sh: Place selected page against a workflow page in the Layout Gallery
+	static bool parityStarted = false;
+	const QString parity = qEnvironmentVariable("SUNEER_OBITPAR_SELFTEST");
+	if (doc && !parity.isEmpty() && !parityStarted)
+	{
+		parityStarted = true;
+		QTimer::singleShot(4000, this, [this, parity]() { runObitParitySelfTest(parity); });
+	}
 	// SUNEER_UNUSED_SELFTEST: delete-from-page scenarios (tests/suneer/mark_unused_on_delete.sh)
 	static bool unusedTestStarted = false;
 	const QString unusedTest = qEnvironmentVariable("SUNEER_UNUSED_SELFTEST");
@@ -8780,6 +8788,7 @@ void SuneerNewsPanel::onOpenPageFromWorkflow()
 	ids.insert("date", date);
 	ids.insert("pageName", pageName);
 	ids.insert("edition", edition);
+	ids.insert("pageType", m_pageTypes.value(pageId));     // suneer 2026-11-01: the Layout Gallery knows an obituary page by it
 
 	if (QFileInfo::exists(path))
 	{
@@ -9456,7 +9465,9 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 				const int n = linkWorkflowFrames(rows, pageId);
 				syncLog(QStringLiteral("sync: %1 layout rows for page ..%2, %3 frame(s) linked").arg(rows.size()).arg(pageId.right(6)).arg(n));
 				m_syncTestLog << QStringLiteral("linked by layout rows: %1 of %2").arg(n).arg(rows.size());
-				if (n > 0)
+				// an obituary page: its stories tagged like Place selected's, into the same save
+				const int tagged = tagWorkflowObitPage(doc);
+				if (n > 0 || tagged > 0)
 				{
 					doc->changed();
 					// a page just downloaded and untouched: the ids go into its file at once - without the
@@ -9479,6 +9490,9 @@ void SuneerNewsPanel::reconcilePage(const QString& trigger)
 		return;
 	}
 
+	// a workflow page linked earlier ("Open existing", an older save): its obituary tags, when missing
+	if (sp.workflow)
+		tagWorkflowObitPage(m_doc);
 	// what the document has
 	QHash<QString, QString> onDoc;                 // serverId -> story name
 	QStringList noId;

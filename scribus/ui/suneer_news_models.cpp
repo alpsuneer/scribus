@@ -13,6 +13,7 @@
                    Nothing is ever deleted.
 */
 #include "suneer_news_panel.h"
+#include "hyphenator.h"
 #include "suneertextclean.h"
 
 #include <QApplication>
@@ -168,6 +169,13 @@ SuneerLayout::StoryIn SuneerNewsPanel::storyInFromNews(const QJsonObject& news, 
 	for (const QString& p : paras)
 		s.bodyChars += p.length();
 	s.requestedCols = requestedColumns(news);
+	// suneer 2026-11-01: the story's place in the list - the Obituary model packs in list order (news.seq on placed modules)
+	for (int i = 0; i < m_newsData.size(); ++i)
+		if (newsServerId(m_newsData[i].toObject()) == newsServerId(news) && !newsServerId(news).isEmpty())
+		{
+			s.seq = i;
+			break;
+		}
 	s.requestedHead = requestedHeadStyle(news);
 	s.requestedPos = requestedPhotoPos(news);
 	const QJsonArray media = mediaList(news);
@@ -746,17 +754,25 @@ QString SuneerNewsPanel::arrangeCore(const SuneerLayoutModel& modelIn, int keepI
 				int changed = 0;
 				std::sort(texts.begin(), texts.end(), [](PageItem* a, PageItem* b) { return a->yPos() < b->yPos(); });
 				double nextTop = -1;
+				// suneer 2026-11-01: the first text frame sits under the photo with the model's photo -> text gap
+				// (Place selected's geometry); a workflow export puts it right under the photo
+				const double underPhoto = photoBottom >= 0 ? photoBottom + spacingValues().pt(SuneerSpacing::PhotoText) : -1;
 				for (int ti = 0; ti < texts.size(); ++ti)
 				{
 					PageItem* t = texts[ti];
 					const double oldY = t->yPos(), oldH = t->height();
-					if (nextTop >= 0 && qAbs(t->yPos() - nextTop) > 0.05)
+					const double wantTop = nextTop >= 0 ? nextTop : underPhoto;
+					if (wantTop >= 0 && qAbs(t->yPos() - wantTop) > 0.05)
 					{
 						// the undo state is written from old* by checkChanges(): make them current first
 						t->oldXpos = t->xPos(); t->oldYpos = t->yPos(); t->oldWidth = t->width(); t->oldHeight = t->height();
-						m_doc->moveItem(0, nextTop - t->yPos(), t);          // undoable
+						// this frame only: moveItem would drag its welded photo along (undo through checkChanges)
+						t->moveBy(0, wantTop - t->yPos(), true);
+						t->checkChanges(true);
 					}
 					tidyTextTop(t, nextTop >= 0 ? 0.0 : t->textToFrameDistTop(), true);
+					if (m_doc->docHyphenator && t->itemText.length() > 0)
+						m_doc->docHyphenator->slotHyphenate(t);      // the same hyphenation as Place selected's
 					if (qAbs(t->textToFrameDistBottom()) > 0.01)
 						t->setTextToFrameDistBottom(0.0);
 					// a name / caption frame with text under it: fitted to its ink, so the gap below is the frame edge;

@@ -3049,3 +3049,26 @@ Traps:
   "Fit box to text" (cancelled when nothing changed). Preview (popup) does not fit.
 - Test: tests/suneer/box_fit.sh <dir> [scribus] (fixture fixtures/box_fit_make.py, SUNEER_BOXFIT_SELFTEST /
   _SAVEAS / _DEBUG) — PDF 600 dpi, ink to the box's inner edge per side.
+
+## Obituary layout parity: workflow page = Place selected page (2026-11-01, uncommitted)
+Open page from workflow left frames with news.story/serverId/pageId/role only -> the Gallery saw a normal page (isObitPage
+counted news.model obits), guessed roles by text length (one obit became a 2-col news), detectModules had no modules
+tagged obit. Now: `SuneerLayout::workflowPageIsObituary(doc)` (SuneerWfPageType / SuneerWfPageName: obit, ചരമ, or the
+Obituary model's pageTypes) makes isObitPage true and gives collectPage its pageKey; `SuneerNewsPanel::tagWorkflowObitPage`
+(suneer_news_obit.cpp; called in reconcilePage after linkWorkflowFrames and on every sync of a workflow page; skips
+stories with news.model) writes Place selected's tags and normalises the export: obit photo colW x photoMm, no text
+flow (the export's photos flow text around their contour and sit above the text in z-order: one story +32 mm), text
+inset/FLO/no-pic styles, paragraph overrides removed (export writes GapAfter 2.2 on the name: +0.42 mm per module),
+caption frame like placeNews. Role rule everywhere = column count only (obitRole, Job::prepare). Order: StoryIn.seq
+(news.seq) sorts the Obituary packing. Tidy pass (arrangePage): first text under the photo + PhotoText gap, moved with
+`moveBy(..., true)` + checkChanges (moveItem drags the welded photo along - the gap never changed), hyphenate.
+**Traps:** the Obituary placement is asynchronous (photos first) - the self-test polls until the story count settles;
+fixture stories need page.dtpStatus UNUSED; the duplicate question defaults to Skip (m_dupTestAnswer = place);
+`news api` logs "no picture in the list reply" when fileUrl 404s. Test: `tests/suneer/obit_parity.sh <dir> [scribus]`
+(fixture built from the exported page's own text and linked pictures; compare_obit_pages.py per-story mm table).
+Residual: the 2-col news differs 0.42 mm because the workflow TEMPLATE's "22 M" style (GapBefore 5.67 / GapAfter 0)
+differs from the reference page's (0 / 4) - a template fix, not engine. **One packer (same day):** `SuneerLayout::ColumnPacker` (suneerlayoutengine.h) replaced the engine's private
+Packer, Place selected's cursor/blockedBelow loops (obit cell, band, area news; its obstacle list IS pk.occupied),
+obitRepackPage's blocked loop and repackCore's scanFree (all via firstFree / lowestAt / best). Candidate-based (yMin +
+every obstacle bottom + gap), so a hole higher up is taken - the old scan loops jumped past it. Re-pack old vs new:
+0.00 mm (tests/suneer/repack_page.sh on a placed page); obit_parity.sh unchanged.

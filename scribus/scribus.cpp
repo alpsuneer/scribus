@@ -378,7 +378,7 @@ static void suneerStripMdiCloseKey(QMdiSubWindow* sub)
 // The unattended regression tests (tests/suneer/*.sh): no question may stop them.
 static bool suneerUnattendedTest()
 {
-	return qEnvironmentVariableIsSet("SUNEER_LAYOUT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST")
+	return qEnvironmentVariableIsSet("SUNEER_LAYOUT_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_EMBED_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_OBITPAR_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_GAPS_SELFTEST") || qEnvironmentVariableIsSet("SUNEER_CLEAN_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_ANALYZE") || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_SELFTEST")
 	       || qEnvironmentVariableIsSet("SUNEER_PAGEMODEL_IMPORT_REPORT") || qEnvironmentVariableIsSet("SUNEER_UNUSED_SELFTEST")

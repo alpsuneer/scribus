@@ -73,6 +73,10 @@ namespace SuneerLayout
 		bool manual { false }; //!< pinned with "Pin position"
 		QRectF placedRect;     //!< placed: the module's bounding box on the page
 		int placedCols { 0 };
+		//! suneer 2026-11-01: the story's place in the workflow list (news.seq on a placed module, the list index of a
+		//! new one); the Obituary model packs in this order, so a page placed here and a page opened from the
+		//! workflow arrange the same. -1 = unknown (reading order)
+		int seq { -1 };
 		//! suneer: the desk's "Columns" (Workflow News.noOfColumns, the News Browser override, or the
 		//! news.columns attribute of a placed story): the module is exactly this wide; 0 = the model's rule
 		int requestedCols { 0 };
@@ -185,12 +189,43 @@ namespace SuneerLayout
 		double x(int col) const { return content.left() + col * (colW + gutter); }
 		double width(int span) const { return span * colW + (span - 1) * gutter; }
 	};
+	/*! suneer 2026-11-01: THE column packer - the one slot search of Place selected (obit cells, the band news,
+	    the news in the obit columns, its re-pack pass), the Layout Gallery / Re-layout job and Re-pack Page.
+	    A module goes to the first free y (>= yMin) where its rect meets nothing in \a occupied, with \a gapV
+	    under whatever it follows; the candidates are yMin and every obstacle bottom + gapV (so a hole higher
+	    up is taken when the module fits there). Touching within 0.5 pt is not overlapping. */
+	class SCRIBUS_API ColumnPacker
+	{
+	public:
+		QRectF content;                 //!< the content area (top / bottom limits of a slot)
+		QList<double> colX;             //!< left edge of every grid column (0-based index)
+		double colW { 0 }, gutter { 0 }, gapV { 0 };
+		QList<QRectF> occupied;         //!< everything placed or fixed, in the same coordinates as colX
+		double tol { 0.5 };
+
+		QRectF rectAt(int c0, int k, double y, double h) const { return QRectF(colX[c0], y, k * colW + (k - 1) * gutter, h); }
+		double width(int k) const { return k * colW + (k - 1) * gutter; }
+		//! the rect meets nothing in \a occupied (+ \a extra) and stays inside the content area's top / bottom
+		bool free(const QRectF& r, const QList<QRectF>* extra = nullptr) const;
+		//! first free y in [yMin, yMax - h] for a rect of \a w at \a x, -1 when nowhere
+		double lowestAt(double x, double w, double h, double yMin, double yMax, const QList<QRectF>* extra = nullptr) const;
+		//! first free y for \a k neighbouring columns from column \a c0 (0-based)
+		double lowest(int c0, int k, double h, double yMin, double yMax) const { return (c0 < 0 || c0 + k > colX.size()) ? -1 : lowestAt(colX[c0], width(k), h, yMin, yMax); }
+		//! the slot of \a k neighbouring columns among \a allowed (0-based, ascending) that starts highest: its first column, -1 when none; \a yOut its y
+		int best(const QList<int>& allowed, int k, double h, double yMin, double yMax, double* yOut) const;
+		//! the primitive without a packer: first free y from \a yMin for the rect against \a list with \a gap (1e9 when nowhere before yMax)
+		static double firstFree(double x, double w, double h, double yMin, double yMax, const QList<QRectF>& list, double gap, double tol = 0.5);
+	};
 	SCRIBUS_API Grid gridFor(const SuneerLayoutModel& model, double pageW, double pageH, double mTop, double mBottom, double mLeft, double mRight, int guideCols);
 	SCRIBUS_API Grid gridFor(const SuneerLayoutModel& model, const PageIn& page);
 
 	/*! An obituary page: the page type is the Obituary model's, or the modules on it are
 	    obituary modules (at least 6, and at least half of the placed stories). */
 	SCRIBUS_API bool isObitPage(const PageIn& page);
+	//! suneer 2026-11-01: the workflow page type of \a doc ("Open page from workflow": SuneerWfPageType, else the page name); empty = not a workflow page
+	SCRIBUS_API QString workflowPageType(ScribusDoc* doc);
+	//! \a doc is a workflow page whose type / name says obituary (obit, ചരമ, or a type the Obituary model applies to)
+	SCRIBUS_API bool workflowPageIsObituary(ScribusDoc* doc);
 	//! A model made for obituary pages: the Obituary engine, or one whose page types include the Obituary type.
 	SCRIBUS_API bool isObitModel(const SuneerLayoutModel& model);
 	/*! A "news" model on an obituary page: the same model with the Obituary model's grid

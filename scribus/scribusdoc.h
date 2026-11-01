@@ -2049,7 +2049,7 @@ public:
 	const QMap<QString, QString>& suneerWorkflow() const { return m_suneerWorkflow; }
 	void setSuneerWorkflow(const QMap<QString, QString>& ids) { m_suneerWorkflow = ids; }
 	//! The .sla attribute names of the workflow ids (DOCUMENT SuneerWfPageId, ...).
-	static QStringList suneerWorkflowKeys() { return { QStringLiteral("pageId"), QStringLiteral("date"), QStringLiteral("pageName"), QStringLiteral("edition"), QStringLiteral("templateId") }; }
+	static QStringList suneerWorkflowKeys() { return { QStringLiteral("pageId"), QStringLiteral("date"), QStringLiteral("pageName"), QStringLiteral("edition"), QStringLiteral("templateId"), QStringLiteral("pageType") }; }
 	static QString suneerWorkflowAttr(const QString& key) { return QStringLiteral("SuneerWf") + key.left(1).toUpper() + key.mid(1); }
 	void setDocumentFileName(const QString& documentFileName);
 };

@@ -176,6 +176,9 @@ public:
 	 (the page must be exactly as before). Writes one line per model and quits Scribus (exit 0 = all passed).
 	 */
 	void runLayoutSelfTest(const QString& outPath);
+	//! suneer 2026-11-01: SUNEER_OBITPAR_SELFTEST=<prefix> (tests/suneer/obit_parity.sh): the news list, [SUNEER_OBITPAR_MODE=workflow:
+	//! tagWorkflowObitPage], what the Gallery sees, the Obituary card, the Gallery dialog (grabbed), Apply, <prefix>-after.sla
+	void runObitParitySelfTest(const QString& prefix);
 	//! Every layout model (id, name), for the Re-layout menus.
 	QList<QPair<QString, QString>> pageModelChoices() const;
 	//! The active layout model (the dropdown, or the one being applied).
@@ -634,6 +637,14 @@ private:
 	int linkWorkflowFrames(const QJsonArray& rows, const QString& pageId);
 	void linkStoryFrames(PageItem* text, const QString& title, const QString& serverId, const QString& pageId);
 	QList<PageItem*> weldedStoryParts(PageItem* text) const;
+	/*! suneer 2026-11-01: a page opened from the workflow whose type / name says obituary: every story's frames get
+	    the tags Place selected writes (news.model obituary / obituary-news, news.cols, news.columns, news.photoPos,
+	    news.index, news.seq, the photo uid and caption link; the loose photo of a 2-column news joins its story), so
+	    the Layout Gallery, Re-layout and Re-pack see it exactly like a page the Obituary model placed. The role is the
+	    workflow column count only (obitRole). Stories not in the list: by the frame's columns. Skips tagged stories. */
+	int tagWorkflowObitPage(ScribusDoc* doc, QStringList* log = nullptr);
+	//! the Layout Gallery's source for the current page (openLayoutGallery, the parity self-test)
+	SuneerLayoutGallery::Source gallerySource();
 	static QString headlineKey(const QString& s);
 	static QString frameHeadline(PageItem* text);
 	static bool headlinesMatch(const QString& a, const QString& b);
