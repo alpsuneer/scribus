@@ -1205,6 +1205,8 @@ public:
 	//! size in the paragraph). Local paragraph attribute only; sets LeadingGuard.
 	//! Records undo states (call inside the caller's transaction) when
 	//! recordUndo is true and undo is enabled. No-op when the preference is off.
+	//! Fixed leading follows the largest size of the paragraphs the range [start, stop) covers COMPLETELY;
+	//! a paragraph only partly inside (one word, the cursor) is left alone (user rule, 2026-11-02).
 	void suneerAutoAdjustLeading(PageItem* item, int start, int stop, bool recordUndo = true);
 	//! The leading suneerAutoAdjustLeading() would give a paragraph with style
 	//! para whose largest font size is maxSizePt. 0 = leave the paragraph alone.

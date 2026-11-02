@@ -8358,6 +8358,11 @@ void ScribusDoc::suneerAutoAdjustLeading(PageItem* item, int start, int stop, bo
 		const ParagraphStyle& para = text.paragraphStyle(qMin(pStart, len));
 		if (para.lineSpacingMode() != ParagraphStyle::FixedLineSpacing)
 			continue;
+		// suneer 2026-11-02: only a paragraph whose WHOLE text the change covers (frame selected, the
+		// paragraph style, all its characters selected). One word made bigger keeps the line spacing
+		// (it may overlap the line above - the user's choice), with the size shortcuts as well.
+		if (start > pStart || stop < pEnd)
+			continue;
 		// Largest size in the paragraph. An empty paragraph takes the size its
 		// PARSEP carries: that is what the next typed character will get.
 		double maxSize = 0.0;

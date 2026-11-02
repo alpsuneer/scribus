@@ -3134,3 +3134,9 @@ known special. Trap: SpecialChars::OBJECT is U+0019 - never strip a live StoryTe
 m_wfCleanNote shown after the open. SuneerTextClean::paragraphs and ScClipboardProcessor::setContent strip; the
 middle-click paste in canvasmode_edit too. Tests: sla_invalid_chars.sh (real page copied, gz, &#25; + U+FFFE, stray),
 news_open_page.sh NEWS_OPEN_BADCHAR, news_duplicates.sh NEWS_DUP_BADCHAR.
+
+## Auto leading only for whole paragraphs (2026-11-02, uncommitted)
+ScribusDoc::suneerAutoAdjustLeading(item, start, stop) now skips a paragraph the range does not cover completely
+(start > pStart || stop < pEnd). Every caller (itemSelection_ApplyCharStyle / SetCharStyle, the size shortcuts in
+scribus.cpp, the fit tools, ParagraphStylesPanel) goes through it, so one gate. Scripter check: /home/s1/tmp-leading/t.py
+(selectText + setFontSize = the edit-mode selection path); old binary gave 14.0 / 20.0 for a word / a char, new 9.3.
